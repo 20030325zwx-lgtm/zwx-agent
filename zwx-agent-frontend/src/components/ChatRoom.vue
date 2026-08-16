@@ -1,10 +1,10 @@
 <template>
-  <div class="chat-container">
+  <div class="chat-container" :class="`chat-${aiType}`">
     <div class="chat-messages" ref="messagesContainer">
       <section v-if="!messages.length" class="empty-state">
         <div class="empty-brand">♡</div>
-        <h2>想从哪段关系开始分析？</h2>
-        <p>可以描述经历、粘贴聊天记录，或上传截图。</p>
+        <h2>{{ emptyTitle }}</h2>
+        <p>{{ emptyDescription }}</p>
         <div class="suggestion-list">
           <button v-for="prompt in quickPrompts" :key="prompt" type="button" @click="usePrompt(prompt)">{{ prompt }}</button>
         </div>
@@ -54,7 +54,7 @@
           </div>
         </div>
         <textarea v-model="inputMessage" class="input-box" :disabled="connectionStatus === 'connecting'"
-          placeholder="描述你的困扰，或上传聊天截图..." @keydown.enter.exact.prevent="sendMessage" @paste="pasteImages"></textarea>
+          :placeholder="inputPlaceholder" @keydown.enter.exact.prevent="sendMessage" @paste="pasteImages"></textarea>
         <div class="input-actions">
           <button v-if="attachmentsEnabled" class="image-button" type="button" title="添加图片" :disabled="connectionStatus === 'connecting'" @click="fileInput?.click()">＋</button>
           <span class="input-hint">Enter 发送</span>
@@ -66,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
@@ -78,7 +78,12 @@ const props = defineProps({
   attachmentsEnabled: { type: Boolean, default: false }
 })
 const emit = defineEmits(['send-message'])
-const quickPrompts = ['帮我分析这段关系是否健康', '聊天总是冷场，该怎么改善？', '他/她的这句话是什么意思？']
+const quickPrompts = computed(() => props.aiType === 'super'
+  ? ['帮我把这个目标拆成执行计划', '帮我梳理一个复杂问题', '给我一个高效的工作方案']
+  : ['帮我分析这段关系是否健康', '聊天总是冷场，该怎么改善？', '他/她的这句话是什么意思？'])
+const emptyTitle = computed(() => props.aiType === 'super' ? '从一个目标开始。' : '想从哪段关系开始分析？')
+const emptyDescription = computed(() => props.aiType === 'super' ? '描述目标、约束或卡点，我会帮你理清下一步。' : '可以描述经历、粘贴聊天记录，或上传截图。')
+const inputPlaceholder = computed(() => props.aiType === 'super' ? '描述你的目标、问题或需要协作的任务...' : '描述你的困扰，或上传聊天截图...')
 const inputMessage = ref('')
 const messagesContainer = ref(null)
 const fileInput = ref(null)
@@ -147,9 +152,10 @@ onMounted(scrollToBottom)
 .trace-popover { position: absolute; z-index: 4; bottom: 28px; left: 0; display: none; width: min(460px, calc(100vw - 88px)); padding: 12px; border: 1px solid #e2e2e2; border-radius: 8px; background: #fff; box-shadow: 0 12px 30px rgba(0,0,0,.12); color: #4a4a4a; font-size: 12px; line-height: 1.6; }
 .trace-popover strong, .trace-popover span { display: block; }.trace-entry:hover .trace-popover, .trace-entry:focus-within .trace-popover { display: block; }
 .chat-input-container { position: absolute; right: 0; bottom: 0; left: 0; padding: 14px max(24px, calc((100% - 880px) / 2)); background: linear-gradient(180deg, rgba(255,255,255,0), #fff 24%); }
-.chat-input { position: relative; border: 1px solid #e5e5e5; border-radius: 18px; background: #fff; box-shadow: 0 8px 30px rgba(0,0,0,.06); }
+.chat-input { position: relative; border: 1px solid #e5e7eb; border-radius: 16px; background: #fff; box-shadow: 0 8px 30px rgba(15,23,42,.07); }.chat-input:focus-within { border-color: var(--zwx-primary); box-shadow: 0 0 0 3px rgba(0,111,238,.12), 0 8px 30px rgba(15,23,42,.07); }
 .file-input { display: none; }.input-box { display: block; width: 100%; min-height: 78px; max-height: 132px; resize: none; border: 0; outline: 0; padding: 15px 17px 6px; color: #222; font: inherit; font-size: 15px; line-height: 1.55; }.input-box::placeholder { color: #aaa; }
-.input-actions { display: flex; height: 43px; align-items: center; gap: 12px; padding: 0 10px 9px 12px; }.image-button { width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #555; font-size: 22px; }.image-button:hover { background: #f2f2f2; }.input-hint { margin-right: auto; color: #aaa; font-size: 12px; }.send-button { height: 30px; border: 0; border-radius: 8px; padding: 0 12px; background: #222; color: #fff; font-size: 13px; }.send-button:disabled { background: #e9e9e9; color: #aaa; }
+.input-actions { display: flex; height: 43px; align-items: center; gap: 12px; padding: 0 10px 9px 12px; }.image-button { width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #555; font-size: 22px; }.image-button:hover { background: #f2f2f2; }.input-hint { margin-right: auto; color: #aaa; font-size: 12px; }.send-button { height: 32px; border: 0; border-radius: 8px; padding: 0 13px; background: var(--zwx-primary); color: #fff; font-size: 13px; font-weight: 650; }.send-button:hover:not(:disabled) { background: var(--zwx-primary-dark); }.send-button:disabled { background: #e9e9e9; color: #aaa; }
+.chat-love .empty-brand, .chat-love .typing-indicator { color: #d65070; }.chat-love .empty-brand { background: #fff1f4; }.chat-love .send-button { background: #d65070; }.chat-love .send-button:hover:not(:disabled) { background: #bd3d5a; }.chat-love .chat-input:focus-within { border-color: #d65070; box-shadow: 0 0 0 3px rgba(214,80,112,.12), 0 8px 30px rgba(15,23,42,.07); }
 .selected-images { position: absolute; z-index: 2; right: 10px; bottom: calc(100% + 8px); display: flex; gap: 7px; max-width: min(420px, 100%); padding: 6px; border: 1px solid #e9e9e9; border-radius: 8px; background: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.1); overflow-x: auto; }.selected-image { position: relative; width: 46px; height: 46px; flex: 0 0 46px; }.selected-image img { width: 100%; height: 100%; border-radius: 6px; object-fit: cover; }.selected-image button { position: absolute; top: -5px; right: -5px; display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid #fff; border-radius: 50%; background: #333; color: #fff; line-height: 1; }
 @keyframes blink { 50% { opacity: 0; } }
 @media (max-width: 720px) { .chat-messages { inset-bottom: 138px; padding: 25px 16px; }.chat-input-container { padding: 10px 12px; }.empty-state { padding-bottom: 40px; }.empty-state h2 { font-size: 23px; }.message-content { font-size: 15px; }.input-hint { display: none; } }

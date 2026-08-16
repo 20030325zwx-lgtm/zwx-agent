@@ -1,7 +1,17 @@
 :root {
   font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  color: #342e31;
-  background: #f8f7f7;
+  color: #1f2937;
+  background: #f7f8fa;
+  --zwx-primary: #006fee;
+  --zwx-primary-dark: #005bc4;
+  --zwx-foreground: #111827;
+  --zwx-muted: #6b7280;
+  --zwx-divider: #e5e7eb;
+  --zwx-surface: #ffffff;
+  --zwx-subtle: #f4f4f5;
+  --zwx-radius-sm: 8px;
+  --zwx-radius-md: 12px;
+  --zwx-shadow: 0 8px 24px rgba(15, 23, 42, .08);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -17,5 +27,8 @@ button, textarea { font: inherit; }
 button { cursor: pointer; }
 
 button:disabled { cursor: not-allowed; }
+
+button, input, textarea { transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease, color .18s ease, transform .18s ease; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--zwx-primary); outline-offset: 2px; }
 
 #app { width: 100%; min-height: 100vh; }

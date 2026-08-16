@@ -1,7 +1,7 @@
 <template>
   <aside class="conversation-sidebar" :class="{ open }">
     <div class="sidebar-top">
-      <div class="brand"><span class="brand-mark">AI</span><span>恋爱大师</span></div>
+      <div class="brand"><span class="brand-mark">AI</span><span>情感分析大师</span></div>
       <button class="close-button" type="button" aria-label="关闭历史会话" @click="$emit('close')">×</button>
     </div>
     <button class="new-conversation" type="button" @click="$emit('create')"><span aria-hidden="true">＋</span>新对话</button>

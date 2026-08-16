@@ -161,7 +161,8 @@ public class AiController {
         return Flux.concat(
                 loveApp.doChatByStream(message, chatId, imageKey == null ? List.<String>of() : imageKey)
                         .map(chunk -> ServerSentEvent.builder(chunk).build()),
-                Mono.just(ServerSentEvent.<String>builder().event("trace").data(traceJson).build()),
+                Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, referencesJson, traceJson))
+                        .thenReturn(ServerSentEvent.<String>builder().event("trace").data(traceJson).build()),
                 Mono.just(ServerSentEvent.<String>builder().event("references").data(referencesJson).build()));
     }
 

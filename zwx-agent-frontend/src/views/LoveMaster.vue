@@ -122,7 +122,9 @@ const selectConversation = async (conversation) => {
           content: message.content,
           imageUrls: (message.imageObjectKeys || []).map(key => getLoveImageUrl(conversation.id, key)),
           isUser: message.role === 'USER',
-          time: new Date(message.createdAt).getTime()
+          time: new Date(message.createdAt).getTime(),
+          references: message.knowledgeReferences || [],
+          trace: message.ragTrace || null
         }))
       : []
   } finally {

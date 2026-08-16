@@ -27,6 +27,9 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.util.List;
@@ -55,6 +58,9 @@ public class AiController {
 
     @Resource
     private LoveRagService loveRagService;
+
+    @Resource
+    private ObjectMapper objectMapper;
 
     @PostMapping("/love_app/conversations")
     public LoveConversationSummary createLoveConversation() {
@@ -120,9 +126,19 @@ public class AiController {
      * @return
      */
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> doChatWithLoveAppSSE(String message, String chatId,
-                                              @RequestParam(required = false) List<String> imageKey) {
-        return loveApp.doChatByStream(message, chatId, imageKey == null ? List.of() : imageKey);
+    public Flux<ServerSentEvent<String>> doChatWithLoveAppSSE(String message, String chatId,
+                                                               @RequestParam(required = false) List<String> imageKey) {
+        List<LoveKnowledgeReference> references = loveRagService.findReferences(message);
+        String referencesJson;
+        try {
+            referencesJson = objectMapper.writeValueAsString(references);
+        } catch (JsonProcessingException e) {
+            return Flux.error(new IllegalStateException("Unable to serialize knowledge references", e));
+        }
+        return Flux.concat(
+                loveApp.doChatByStream(message, chatId, imageKey == null ? List.<String>of() : imageKey)
+                        .map(chunk -> ServerSentEvent.builder(chunk).build()),
+                Mono.just(ServerSentEvent.<String>builder().event("references").data(referencesJson).build()));
     }
 
     /**

@@ -144,10 +144,17 @@ const removeConversation = async (conversation) => {
   }
 }
 
-const finishStream = async () => {
+const finishStream = async (message, aiMessageIndex) => {
   connectionStatus.value = 'disconnected'
   eventSource?.close()
   eventSource = null
+  if (message && aiMessageIndex !== undefined && messages.value[aiMessageIndex]) {
+    try {
+      messages.value[aiMessageIndex].references = await getLoveKnowledgeReferences(message)
+    } catch (error) {
+      console.error('Knowledge references unavailable:', error)
+    }
+  }
   await refreshConversations()
 }
 
@@ -169,24 +176,28 @@ const sendMessage = async ({ message, files }) => {
   connectionStatus.value = 'connecting'
   eventSource = chatWithLoveApp(message, chatId.value, imageKeys)
 
+  eventSource.addEventListener('references', event => {
+    try {
+      messages.value[aiMessageIndex].references = JSON.parse(event.data)
+      finishStream()
+    } catch (error) {
+      console.error('Knowledge references unavailable:', error)
+    }
+  })
+
   eventSource.onmessage = async (event) => {
     const data = event.data
     if (data && data !== '[DONE]' && aiMessageIndex < messages.value.length) {
       messages.value[aiMessageIndex].content += data
     }
     if (data === '[DONE]') {
-      try {
-        messages.value[aiMessageIndex].references = await getLoveKnowledgeReferences(message)
-      } catch (error) {
-        console.error('Knowledge references unavailable:', error)
-      }
-      finishStream()
+      finishStream(message, aiMessageIndex)
     }
   }
 
   eventSource.onerror = async (error) => {
     if (eventSource?.readyState === EventSource.CLOSED) {
-      await finishStream()
+      await finishStream(message, aiMessageIndex)
       return
     }
     console.error('SSE Error:', error)

@@ -15,6 +15,7 @@ import com.zwx.zwxagent.rag.LoveRagTrace;
 import com.zwx.zwxagent.rag.LoveKnowledgeAdminService;
 import com.zwx.zwxagent.rag.LoveKnowledgeDocumentDetail;
 import com.zwx.zwxagent.rag.LoveKnowledgeDocumentSummary;
+import com.zwx.zwxagent.app.LoveVisionChatResult;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
@@ -32,6 +33,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -148,6 +150,10 @@ public class AiController {
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> doChatWithLoveAppSSE(String message, String chatId,
                                                                @RequestParam(required = false) List<String> imageKey) {
+        List<String> imageObjectKeys = imageKey == null ? List.of() : imageKey;
+        if (!imageObjectKeys.isEmpty()) {
+            return doVisionChatWithLoveAppSSE(message, chatId, imageObjectKeys);
+        }
         LoveRagTrace trace = loveRagService.trace(message, chatModelName);
         List<LoveKnowledgeReference> references = trace.references();
         String referencesJson;
@@ -159,11 +165,51 @@ public class AiController {
             return Flux.error(new IllegalStateException("Unable to serialize knowledge references", e));
         }
         return Flux.concat(
-                loveApp.doChatByStream(message, chatId, imageKey == null ? List.<String>of() : imageKey)
+                loveApp.doChatByStream(message, chatId)
                         .map(chunk -> ServerSentEvent.builder(chunk).build()),
                 Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, referencesJson, traceJson))
                         .thenReturn(ServerSentEvent.<String>builder().event("trace").data(traceJson).build()),
                 Mono.just(ServerSentEvent.<String>builder().event("references").data(referencesJson).build()));
+    }
+
+    private Flux<ServerSentEvent<String>> doVisionChatWithLoveAppSSE(String message, String chatId, List<String> imageObjectKeys) {
+        return Flux.concat(
+                Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在理解图片内容...").build()),
+                Mono.fromCallable(() -> loveApp.prepareVisionChat(message, chatId, imageObjectKeys))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .flatMapMany(result -> Flux.concat(
+                                Mono.just(ServerSentEvent.<String>builder().event("vision")
+                                        .data(toJson(result.analysis())).build()),
+                                Mono.just(ServerSentEvent.<String>builder().event("thinking")
+                                        .data(result.analysis().available()
+                                                ? "已提取图片线索，正在检索相关资料..."
+                                                : "图片线索暂不可用，正在继续生成分析...").build()),
+                                loveApp.streamVisionChat(chatId, result)
+                                        .map(chunk -> ServerSentEvent.builder(chunk).build()),
+                                toVisionEvents(chatId, result))));
+    }
+
+    private Flux<ServerSentEvent<String>> toVisionEvents(String chatId, LoveVisionChatResult result) {
+        try {
+            String referencesJson = objectMapper.writeValueAsString(result.ragTrace().references());
+            String traceJson = objectMapper.writeValueAsString(result.ragTrace());
+            return Flux.concat(
+                    Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, referencesJson, traceJson))
+                            .thenReturn(ServerSentEvent.<String>builder().event("thinking").data("正在整理引用与会话记录...").build()),
+                    Mono.just(ServerSentEvent.<String>builder().event("trace").data(traceJson).build()),
+                    Mono.just(ServerSentEvent.<String>builder().event("references").data(referencesJson).build()),
+                    Mono.just(ServerSentEvent.<String>builder("[DONE]").build()));
+        } catch (JsonProcessingException exception) {
+            return Flux.error(new IllegalStateException("Unable to serialize vision RAG data", exception));
+        }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Unable to serialize SSE event", exception);
+        }
     }
 
     /**

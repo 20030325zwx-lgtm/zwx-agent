@@ -84,7 +84,8 @@ const addMessage = (content, isUser, imageKeys = []) => {
     imageUrls: imageKeys.map(key => getLoveImageUrl(chatId.value, key)),
     time: Date.now(),
     references: [],
-    trace: null
+    trace: null,
+    thinking: ''
   })
 }
 
@@ -124,7 +125,8 @@ const selectConversation = async (conversation) => {
           isUser: message.role === 'USER',
           time: new Date(message.createdAt).getTime(),
           references: message.knowledgeReferences || [],
-          trace: message.ragTrace || null
+          trace: message.ragTrace || null,
+          visionAnalysis: message.visionAnalysis || null
         }))
       : []
   } finally {
@@ -147,11 +149,11 @@ const removeConversation = async (conversation) => {
   }
 }
 
-const finishStream = async (message, aiMessageIndex) => {
+const finishStream = async (message, aiMessageIndex, refreshReferences = true) => {
   connectionStatus.value = 'disconnected'
   eventSource?.close()
   eventSource = null
-  if (message && aiMessageIndex !== undefined && messages.value[aiMessageIndex]) {
+  if (refreshReferences && message && aiMessageIndex !== undefined && messages.value[aiMessageIndex]) {
     try {
       messages.value[aiMessageIndex].references = await getLoveKnowledgeReferences(message)
     } catch (error) {
@@ -182,10 +184,13 @@ const sendMessage = async ({ message, files }) => {
   eventSource.addEventListener('references', event => {
     try {
       messages.value[aiMessageIndex].references = JSON.parse(event.data)
-      finishStream()
     } catch (error) {
       console.error('Knowledge references unavailable:', error)
     }
+  })
+
+  eventSource.addEventListener('thinking', event => {
+    if (messages.value[aiMessageIndex]) messages.value[aiMessageIndex].thinking = event.data || '正在思考...'
   })
 
   eventSource.addEventListener('trace', event => {
@@ -196,19 +201,28 @@ const sendMessage = async ({ message, files }) => {
     }
   })
 
+  eventSource.addEventListener('vision', event => {
+    try {
+      const userMessage = messages.value[aiMessageIndex - 1]
+      if (userMessage) userMessage.visionAnalysis = JSON.parse(event.data)
+    } catch (error) {
+      console.error('Vision analysis unavailable:', error)
+    }
+  })
+
   eventSource.onmessage = async (event) => {
     const data = event.data
     if (data && data !== '[DONE]' && aiMessageIndex < messages.value.length) {
       messages.value[aiMessageIndex].content += data
     }
     if (data === '[DONE]') {
-      finishStream(message, aiMessageIndex)
+      finishStream(message, aiMessageIndex, !imageKeys.length)
     }
   }
 
   eventSource.onerror = async (error) => {
     if (eventSource?.readyState === EventSource.CLOSED) {
-      await finishStream(message, aiMessageIndex)
+      await finishStream(message, aiMessageIndex, !imageKeys.length)
       return
     }
     console.error('SSE Error:', error)

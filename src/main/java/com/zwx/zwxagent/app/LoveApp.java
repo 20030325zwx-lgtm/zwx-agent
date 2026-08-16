@@ -6,6 +6,10 @@ import com.zwx.zwxagent.chatmemory.PostgresChatMemory;
 import com.zwx.zwxagent.conversation.LoveConversationService;
 import com.zwx.zwxagent.rag.LoveAppRagCustomAdvisorFactory;
 import com.zwx.zwxagent.rag.QueryRewriter;
+import com.zwx.zwxagent.rag.LoveRagResult;
+import com.zwx.zwxagent.rag.LoveRagService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -43,12 +47,19 @@ public class LoveApp {
      */
     private final LoveConversationService conversationService;
     private final LoveVisionChatService loveVisionChatService;
+    private final LoveRagService loveRagService;
+    private final ObjectMapper objectMapper;
+    private final String visionModel;
 
     public LoveApp(ChatModel dashscopeChatModel, PostgresChatMemory chatMemory,
                    LoveConversationService conversationService,
-                   LoveVisionChatService loveVisionChatService) {
+                   LoveVisionChatService loveVisionChatService, LoveRagService loveRagService,
+                   ObjectMapper objectMapper, @org.springframework.beans.factory.annotation.Value("${app.love.vision-model}") String visionModel) {
         this.conversationService = conversationService;
         this.loveVisionChatService = loveVisionChatService;
+        this.loveRagService = loveRagService;
+        this.objectMapper = objectMapper;
+        this.visionModel = visionModel;
         chatClient = ChatClient.builder(dashscopeChatModel)
                 .defaultSystem(SYSTEM_PROMPT)
                 .defaultAdvisors(
@@ -95,12 +106,9 @@ public class LoveApp {
     public Flux<String> doChatByStream(String message, String chatId, List<String> imageObjectKeys) {
         conversationService.ensureConversation(chatId, message);
         if (!imageObjectKeys.isEmpty()) {
-            conversationService.appendMessage(chatId, "USER", message, imageObjectKeys);
-            return Mono.fromCallable(() -> loveVisionChatService.chat(chatId,
-                            conversationService.getRecentMessages(chatId, 20), SYSTEM_PROMPT))
+            return Mono.fromCallable(() -> prepareVisionChat(message, chatId, imageObjectKeys))
                     .subscribeOn(Schedulers.boundedElastic())
-                    .flux()
-                    .doOnNext(content -> conversationService.appendMessage(chatId, "ASSISTANT", content));
+                    .flatMapMany(preparation -> streamVisionChat(chatId, preparation));
         }
         return chatClient
                 .prompt()
@@ -109,6 +117,36 @@ public class LoveApp {
                 .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
                 .stream()
                 .content();
+    }
+
+    public LoveVisionChatResult prepareVisionChat(String message, String chatId, List<String> imageObjectKeys) {
+        conversationService.ensureConversation(chatId, message);
+        conversationService.appendMessage(chatId, "USER", message, imageObjectKeys);
+        LoveVisionAnalysis analysis = loveVisionChatService.analyze(chatId, message, imageObjectKeys);
+        saveVisionAnalysis(chatId, analysis);
+
+        LoveRagResult ragResult = analysis.available()
+                ? loveRagService.retrieve(analysis.retrievalQuery(), visionModel)
+                : new LoveRagResult(new com.zwx.zwxagent.rag.LoveRagTrace(message, 3, 0.55, List.of(),
+                "视觉摘要不可用，未执行知识库检索，模型仅基于图片、系统提示词与会话上下文回答。",
+                List.of(), visionModel, true), "");
+        String prompt = SYSTEM_PROMPT + "\n\n" + ragResult.context() + "\n图片分析仅是待确认线索。回答时明确区分可观察内容与推测，不要把不确定项当作事实。";
+        return new LoveVisionChatResult(analysis, ragResult.trace(), prompt);
+    }
+
+    public Flux<String> streamVisionChat(String chatId, LoveVisionChatResult preparation) {
+        StringBuilder content = new StringBuilder();
+        return loveVisionChatService.streamChat(chatId, conversationService.getRecentMessages(chatId, 20), preparation.systemPrompt())
+                .doOnNext(content::append)
+                .doOnComplete(() -> conversationService.appendMessage(chatId, "ASSISTANT", content.toString()));
+    }
+
+    private void saveVisionAnalysis(String chatId, LoveVisionAnalysis analysis) {
+        try {
+            conversationService.saveLatestUserVisionAnalysis(chatId, objectMapper.writeValueAsString(analysis));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Unable to persist vision analysis", exception);
+        }
     }
 
     record LoveReport(String title, List<String> suggestions) {

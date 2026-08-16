@@ -16,6 +16,10 @@ public class LoveRagService {
     private VectorStore vectorStore;
 
     public LoveRagTrace trace(String message, String model) {
+        return retrieve(message, model).trace();
+    }
+
+    public LoveRagResult retrieve(String message, String model) {
         List<Document> documents = vectorStore.similaritySearch(SearchRequest.builder()
                         .query(message)
                         .topK(3)
@@ -33,7 +37,18 @@ public class LoveRagService {
         String decision = documents.isEmpty()
                 ? "没有文档达到相似度阈值，模型仅使用系统提示词与会话上下文回答。"
                 : "命中文档达到相似度阈值，已注入 RAG 上下文并用于生成回答。";
-        return new LoveRagTrace(message, 3, 0.55, candidates, decision, references, model, true);
+        LoveRagTrace trace = new LoveRagTrace(message, 3, 0.55, candidates, decision, references, model, true);
+        return new LoveRagResult(trace, toContext(documents));
+    }
+
+    private String toContext(List<Document> documents) {
+        if (documents.isEmpty()) return "";
+        StringBuilder context = new StringBuilder("以下资料来自内部情感知识库，仅在与用户问题相关时参考：\n");
+        for (Document document : documents) {
+            String text = document.getText().replaceAll("\\s+", " ").trim();
+            context.append("- ").append(text, 0, Math.min(text.length(), 1200)).append('\n');
+        }
+        return context.toString();
     }
 
     private LoveKnowledgeReference toReference(Document document) {

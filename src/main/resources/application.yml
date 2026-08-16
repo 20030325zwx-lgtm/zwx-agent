@@ -1,6 +1,6 @@
 spring:
   application:
-    name: yu-ai-agent
+    name: zwx-agent
   profiles:
     active: local
   sql:
@@ -71,7 +71,7 @@ springdoc:
   group-configs:
     - group: 'default'
       paths-to-match: '/**'
-      packages-to-scan: com.yupi.yuaiagent.controller
+      packages-to-scan: com.zwx.zwxagent.controller
 # knife4j config
 knife4j:
   enable: true

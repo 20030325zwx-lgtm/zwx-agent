@@ -16,8 +16,12 @@
           <div v-if="msg.imageUrls?.length" class="message-images">
             <img v-for="url in msg.imageUrls" :key="url" :src="url" alt="用户上传的图片" />
           </div>
-          <div class="message-content">
+          <div v-if="msg.isUser" class="message-content">
             {{ msg.content }}<span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="typing-indicator">▋</span>
+          </div>
+          <div v-else class="message-content markdown-content">
+            <div v-html="renderMarkdown(msg.content)"></div>
+            <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="typing-indicator">▋</span>
           </div>
           <div v-if="msg.references?.length" class="message-references">
             <span>参考资料</span>
@@ -63,6 +67,8 @@
 
 <script setup>
 import { ref, onMounted, nextTick, watch } from 'vue'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
 
 const props = defineProps({
@@ -77,6 +83,11 @@ const inputMessage = ref('')
 const messagesContainer = ref(null)
 const fileInput = ref(null)
 const selectedImages = ref([])
+
+const renderMarkdown = content => DOMPurify.sanitize(marked.parse(content || '', {
+  breaks: true,
+  gfm: true
+}))
 
 const sendMessage = () => {
   if (!inputMessage.value.trim() && !selectedImages.value.length) return
@@ -123,6 +134,7 @@ onMounted(scrollToBottom)
 .ai-message { padding: 3px 2px; }
 .user-message { border-radius: 14px 4px 14px 14px; padding: 12px 15px; background: #f3f4f5; }
 .message-content { white-space: pre-wrap; font-size: 16px; line-height: 1.75; }
+.markdown-content { white-space: normal; }.markdown-content :deep(p) { margin: 0 0 15px; }.markdown-content :deep(p:last-child) { margin-bottom: 0; }.markdown-content :deep(h1), .markdown-content :deep(h2), .markdown-content :deep(h3), .markdown-content :deep(h4) { margin: 22px 0 10px; color: #202020; font-weight: 650; line-height: 1.4; }.markdown-content :deep(h1) { font-size: 22px; }.markdown-content :deep(h2) { font-size: 19px; }.markdown-content :deep(h3), .markdown-content :deep(h4) { font-size: 17px; }.markdown-content :deep(ul), .markdown-content :deep(ol) { margin: 0 0 15px; padding-left: 1.45em; }.markdown-content :deep(li) { margin: 5px 0; }.markdown-content :deep(hr) { height: 1px; margin: 22px 0; border: 0; background: #e7e7e7; }.markdown-content :deep(strong) { color: #202020; font-weight: 700; }.markdown-content :deep(blockquote) { margin: 14px 0; border-left: 3px solid #e5b2bf; padding: 3px 0 3px 13px; color: #676767; }.markdown-content :deep(code) { border-radius: 4px; padding: 2px 4px; background: #f3f3f3; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; }.markdown-content :deep(pre) { overflow-x: auto; margin: 14px 0; border-radius: 8px; padding: 12px; background: #272727; color: #f5f5f5; }.markdown-content :deep(pre code) { padding: 0; background: transparent; color: inherit; }.markdown-content :deep(a) { color: #b74461; text-decoration: underline; text-underline-offset: 2px; }
 .message-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .message-images img { display: block; max-width: min(300px, 100%); max-height: 280px; border-radius: 8px; object-fit: cover; }
 .message-time { display: block; margin-top: 7px; color: #aaa; font-size: 11px; }

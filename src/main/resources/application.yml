@@ -49,6 +49,10 @@ spring.servlet.multipart:
 app:
   love:
     vision-model: qwen-vl-plus
+    rag:
+      top-k: 3
+      similarity-threshold: 0.55
+      timeout-ms: 800
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}

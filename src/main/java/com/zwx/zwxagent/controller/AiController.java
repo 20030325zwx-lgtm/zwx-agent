@@ -5,6 +5,9 @@ import com.zwx.zwxagent.app.LoveApp;
 import com.zwx.zwxagent.conversation.LoveConversationMessage;
 import com.zwx.zwxagent.conversation.LoveConversationService;
 import com.zwx.zwxagent.conversation.LoveConversationSummary;
+import com.zwx.zwxagent.conversation.AgentConversationMessage;
+import com.zwx.zwxagent.conversation.AgentConversationService;
+import com.zwx.zwxagent.conversation.AgentConversationSummary;
 import com.zwx.zwxagent.storage.LoveImageStorageService;
 import com.zwx.zwxagent.storage.LoveImageUpload;
 import com.zwx.zwxagent.storage.LoveKnowledgeDocumentStorageService;
@@ -15,6 +18,14 @@ import com.zwx.zwxagent.rag.LoveRagTrace;
 import com.zwx.zwxagent.rag.LoveKnowledgeAdminService;
 import com.zwx.zwxagent.rag.LoveKnowledgeDocumentDetail;
 import com.zwx.zwxagent.rag.LoveKnowledgeDocumentSummary;
+import com.zwx.zwxagent.rag.LoveKnowledgeIndexJob;
+import com.zwx.zwxagent.rag.LoveKnowledgeIndexService;
+import com.zwx.zwxagent.rag.LoveRagResult;
+import com.zwx.zwxagent.rag.AgentKnowledgeDocument;
+import com.zwx.zwxagent.rag.AgentKnowledgeDocumentService;
+import com.zwx.zwxagent.rag.AgentKnowledgeDocumentDetail;
+import com.zwx.zwxagent.app.TravelPlannerApp;
+import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
 import com.zwx.zwxagent.app.LoveVisionChatResult;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
@@ -29,6 +40,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
@@ -69,6 +81,21 @@ public class AiController {
     private LoveKnowledgeAdminService loveKnowledgeAdminService;
 
     @Resource
+    private LoveKnowledgeIndexService loveKnowledgeIndexService;
+
+    @Resource
+    private AgentKnowledgeDocumentService agentKnowledgeDocumentService;
+
+    @Resource
+    private AgentConversationService agentConversationService;
+
+    @Resource
+    private TravelPlannerApp travelPlannerApp;
+
+    @Resource
+    private AgentKnowledgeRagService agentKnowledgeRagService;
+
+    @Resource
     private ObjectMapper objectMapper;
 
     @org.springframework.beans.factory.annotation.Value("${spring.ai.dashscope.chat.options.model:qwen-plus}")
@@ -102,6 +129,38 @@ public class AiController {
     @PostMapping("/love_app/knowledge/documents/upload")
     public List<LoveKnowledgeDocumentUpload> uploadLoveKnowledgeDocuments() {
         return knowledgeDocumentStorageService.uploadBundledDocuments();
+    }
+
+    @PostMapping("/love_app/knowledge/index/built-in")
+    public LoveKnowledgeIndexJob indexBuiltInLoveKnowledge() {
+        LoveKnowledgeIndexJob job = loveKnowledgeIndexService.createBundledDocumentIndexJob();
+        loveKnowledgeIndexService.indexBundledDocuments(job.id());
+        return job;
+    }
+
+    @GetMapping("/love_app/knowledge/index/jobs/{jobId}")
+    public LoveKnowledgeIndexJob getLoveKnowledgeIndexJob(@PathVariable String jobId) {
+        return loveKnowledgeIndexService.getJob(jobId);
+    }
+
+    @PostMapping(value = "/agent-knowledge/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public AgentKnowledgeDocument uploadAgentKnowledgeDocument(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                               @RequestParam String agentKey, @RequestPart("file") MultipartFile file) {
+        AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(tenantId, agentKey, file);
+        agentKnowledgeDocumentService.indexDocument(document.id());
+        return document;
+    }
+
+    @GetMapping("/agent-knowledge/documents")
+    public List<AgentKnowledgeDocument> listAgentKnowledgeDocuments(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                                     @RequestParam String agentKey) {
+        return agentKnowledgeDocumentService.listDocuments(tenantId, agentKey);
+    }
+
+    @GetMapping("/agent-knowledge/documents/{documentId}")
+    public AgentKnowledgeDocumentDetail getAgentKnowledgeDocument(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                                   @PathVariable String documentId, @RequestParam String agentKey) {
+        return agentKnowledgeDocumentService.getDocument(tenantId, agentKey, documentId);
     }
 
     @GetMapping("/love_app/knowledge/references")
@@ -149,12 +208,15 @@ public class AiController {
      */
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> doChatWithLoveAppSSE(String message, String chatId,
-                                                               @RequestParam(required = false) List<String> imageKey) {
+                                                               @RequestParam(required = false) List<String> imageKey,
+                                                               @RequestParam(defaultValue = "default") String tenantId) {
+        validateTenantId(tenantId);
         List<String> imageObjectKeys = imageKey == null ? List.of() : imageKey;
         if (!imageObjectKeys.isEmpty()) {
-            return doVisionChatWithLoveAppSSE(message, chatId, imageObjectKeys);
+            return doVisionChatWithLoveAppSSE(message, chatId, imageObjectKeys, tenantId);
         }
-        LoveRagTrace trace = loveRagService.trace(message, chatModelName);
+        LoveRagResult ragResult = loveRagService.retrieve(message, chatModelName);
+        LoveRagTrace trace = ragResult.trace();
         List<LoveKnowledgeReference> references = trace.references();
         String referencesJson;
         String traceJson;
@@ -165,17 +227,17 @@ public class AiController {
             return Flux.error(new IllegalStateException("Unable to serialize knowledge references", e));
         }
         return Flux.concat(
-                loveApp.doChatByStream(message, chatId)
+                loveApp.doChatByStream(message, chatId, ragResult.context() + "\n" + agentKnowledgeRagService.context(tenantId, "love", message))
                         .map(chunk -> ServerSentEvent.builder(chunk).build()),
                 Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, referencesJson, traceJson))
                         .thenReturn(ServerSentEvent.<String>builder().event("trace").data(traceJson).build()),
                 Mono.just(ServerSentEvent.<String>builder().event("references").data(referencesJson).build()));
     }
 
-    private Flux<ServerSentEvent<String>> doVisionChatWithLoveAppSSE(String message, String chatId, List<String> imageObjectKeys) {
+    private Flux<ServerSentEvent<String>> doVisionChatWithLoveAppSSE(String message, String chatId, List<String> imageObjectKeys, String tenantId) {
         return Flux.concat(
                 Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在理解图片内容...").build()),
-                Mono.fromCallable(() -> loveApp.prepareVisionChat(message, chatId, imageObjectKeys))
+                Mono.fromCallable(() -> loveApp.prepareVisionChat(message, chatId, imageObjectKeys, tenantId))
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(result -> Flux.concat(
                                 Mono.just(ServerSentEvent.<String>builder().event("vision")
@@ -261,5 +323,43 @@ public class AiController {
     public SseEmitter doChatWithManus(String message) {
         ZwxManus zwxManus = new ZwxManus(allTools, dashscopeChatModel);
         return zwxManus.runStream(message);
+    }
+
+    @GetMapping(value = "/travel-planner/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> chatWithTravelPlanner(@RequestParam(defaultValue = "default") String tenantId,
+                                                                @RequestParam String conversationId, String message) {
+        validateTenantId(tenantId);
+        return Flux.concat(travelPlannerApp.chat(tenantId, conversationId, message).map(chunk -> ServerSentEvent.builder(chunk).build()),
+                Mono.just(ServerSentEvent.<String>builder("[DONE]").build()));
+    }
+
+    @PostMapping("/travel-planner/conversations")
+    public AgentConversationSummary createTravelConversation(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId) {
+        validateTenantId(tenantId);
+        return agentConversationService.createTravelConversation(tenantId);
+    }
+
+    @GetMapping("/travel-planner/conversations")
+    public List<AgentConversationSummary> listTravelConversations(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId) {
+        validateTenantId(tenantId);
+        return agentConversationService.listTravelConversations(tenantId);
+    }
+
+    @GetMapping("/travel-planner/conversations/{conversationId}/messages")
+    public List<AgentConversationMessage> getTravelConversationMessages(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                                          @PathVariable String conversationId) {
+        validateTenantId(tenantId);
+        return agentConversationService.getTravelMessages(tenantId, conversationId);
+    }
+
+    @DeleteMapping("/travel-planner/conversations/{conversationId}")
+    public void deleteTravelConversation(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                          @PathVariable String conversationId) {
+        validateTenantId(tenantId);
+        agentConversationService.deleteTravelConversation(tenantId, conversationId);
+    }
+
+    private void validateTenantId(String tenantId) {
+        if (tenantId == null || !tenantId.matches("[A-Za-z0-9_-]{1,64}")) throw new IllegalArgumentException("Invalid tenant scope");
     }
 }

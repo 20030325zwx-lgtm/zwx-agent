@@ -7,21 +7,17 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-
-/**
- * 恋爱大师向量数据库配置。
- */
 @Configuration
-public class LoveAppVectorStoreConfig {
+public class AgentKnowledgeVectorStoreConfig {
 
-    @Bean("loveAppVectorStore")
-    VectorStore loveAppVectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel dashscopeEmbeddingModel) {
+    @Bean("agentKnowledgeVectorStore")
+    VectorStore agentKnowledgeVectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel dashscopeEmbeddingModel) {
         PgVectorStore vectorStore = PgVectorStore.builder(jdbcTemplate, dashscopeEmbeddingModel)
                 .dimensions(dashscopeEmbeddingModel.dimensions())
                 .distanceType(PgVectorStore.PgDistanceType.COSINE_DISTANCE)
                 .indexType(PgVectorStore.PgIndexType.HNSW)
                 .initializeSchema(true)
-                .vectorTableName("love_knowledge_vector")
+                .vectorTableName("agent_knowledge_vector")
                 .build();
         vectorStore.afterPropertiesSet();
         return vectorStore;

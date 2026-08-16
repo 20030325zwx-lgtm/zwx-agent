@@ -2,30 +2,41 @@
   <main class="knowledge-admin">
     <header class="admin-header">
       <div>
-        <span class="eyebrow">情感分析大师</span>
+        <span class="eyebrow">{{ agentKey === 'love' ? '情感分析大师' : '旅游规划专家' }}</span>
         <h1>知识库管理</h1>
       </div>
-      <span class="read-only">只读视图 · 实际 pgvector 数据</span>
+      <div class="admin-actions">
+        <label>资料归属
+          <select v-model="agentKey" :disabled="uploading" @change="loadPrivateDocuments">
+            <option value="love">情感分析大师</option>
+            <option value="travel">旅游规划专家</option>
+          </select>
+        </label>
+        <input ref="knowledgeFileInput" class="knowledge-file-input" type="file" accept=".md,.txt,text/plain,text/markdown" @change="uploadPrivateDocument" />
+        <button type="button" class="upload-button" :disabled="uploading" @click="knowledgeFileInput?.click()">{{ uploading ? '上传中...' : '上传资料' }}</button>
+      </div>
     </header>
 
     <p v-if="error" class="error-state">{{ error }}</p>
     <section v-else class="knowledge-workspace" :style="{ '--chunk-panel-width': `${chunkPanelWidth}px` }">
       <aside class="document-panel">
-        <div class="panel-heading"><span>文档</span><small>{{ documents.length }} 个</small></div>
+        <div class="private-heading">
+          <div><span>私有资料</span><small>{{ privateDocuments.length }} 个 · 当前智能体</small></div>
+          <span class="scope-status">{{ agentKey === 'love' ? '情感' : '旅游' }}</span>
+        </div>
+        <div class="private-document-list">
+          <div v-if="loadingPrivateDocuments" class="private-state">正在读取资料...</div>
+          <button v-for="document in filteredDocuments" :key="document.id" type="button" class="private-document-row" :class="{ active: document.id === selectedDocumentId }" @click="selectDocument(document.id)">
+            <strong :title="document.filename">{{ document.filename }}</strong>
+            <span>{{ document.chunkCount }} 个切片</span>
+            <em :class="`status-${document.status.toLowerCase()}`">{{ document.status === 'READY' ? '已入库' : document.status === 'FAILED' ? '失败' : document.status === 'INDEXING' ? '切片中' : '等待中' }}</em>
+          </button>
+          <p v-if="!loadingPrivateDocuments && !filteredDocuments.length" class="private-state">上传 Markdown 或文本资料后，仅当前租户和智能体可检索。</p>
+        </div>
         <label class="document-search">
           <span aria-hidden="true">⌕</span>
           <input v-model.trim="documentQuery" type="search" placeholder="搜索文档名称" />
         </label>
-        <div class="document-list">
-          <div v-if="loadingDocuments" class="panel-state">正在读取向量库...</div>
-          <button v-for="document in filteredDocuments" :key="document.objectKey" type="button" class="document-row"
-            :class="{ active: document.objectKey === selectedObjectKey }" @click="selectDocument(document.objectKey)">
-            <strong>{{ document.filename }}</strong>
-            <span>{{ document.chunkCount }} 个切片 · {{ document.sectionCount }} 节</span>
-            <em :class="document.chunkCount ? 'indexed' : 'pending'">{{ document.chunkCount ? '已索引' : '未索引' }}</em>
-          </button>
-          <p v-if="!loadingDocuments && !filteredDocuments.length" class="panel-state">没有匹配的文档。</p>
-        </div>
       </aside>
 
       <aside class="chunk-panel">
@@ -61,33 +72,67 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useHead } from '@vueuse/head'
-import { getLoveKnowledgeDocument, listLoveKnowledgeDocuments } from '../api'
+import { getAgentKnowledgeDocument, listAgentKnowledgeDocuments, uploadAgentKnowledgeDocument } from '../api'
 
 useHead({ title: '知识库管理 - ZWX Agent' })
 
-const documents = ref([])
 const detail = ref(null)
-const selectedObjectKey = ref('')
+const selectedDocumentId = ref('')
 const selectedChunkId = ref('')
-const loadingDocuments = ref(true)
 const loadingDetail = ref(false)
 const error = ref('')
+const agentKey = ref('love')
+const privateDocuments = ref([])
+const loadingPrivateDocuments = ref(false)
+const uploading = ref(false)
+const knowledgeFileInput = ref(null)
 const documentQuery = ref('')
 const chunkPanelWidth = ref(380)
 let removeResizeListeners = () => {}
+let privateRefreshTimer = null
 
 const filteredDocuments = computed(() => {
   const keyword = documentQuery.value.toLocaleLowerCase('zh-CN')
-  return documents.value.filter(document => document.filename.toLocaleLowerCase('zh-CN').includes(keyword))
+  return privateDocuments.value.filter(document => document.filename.toLocaleLowerCase('zh-CN').includes(keyword))
 })
 
 const excerpt = content => content.replace(/\s+/g, ' ').slice(0, 88)
-const selectDocument = async objectKey => {
-  selectedObjectKey.value = objectKey
+const loadPrivateDocuments = async () => {
+  loadingPrivateDocuments.value = true
+  detail.value = null
+  selectedDocumentId.value = ''
+  try {
+    privateDocuments.value = await listAgentKnowledgeDocuments(agentKey.value)
+  } catch (requestError) {
+    error.value = '无法读取当前智能体的私有资料。'
+    console.error(requestError)
+  } finally {
+    loadingPrivateDocuments.value = false
+  }
+}
+const uploadPrivateDocument = async event => {
+  const [file] = event.target.files
+  event.target.value = ''
+  if (!file) return
+  if (!/\.(md|txt)$/i.test(file.name)) { error.value = '仅支持 .md 和 .txt 文件。'; return }
+  uploading.value = true
+  error.value = ''
+  try {
+    await uploadAgentKnowledgeDocument(agentKey.value, file)
+    await loadPrivateDocuments()
+  } catch (requestError) {
+    error.value = '上传失败，请确认文件、OSS 配置和后端服务。'
+    console.error(requestError)
+  } finally {
+    uploading.value = false
+  }
+}
+const selectDocument = async documentId => {
+  selectedDocumentId.value = documentId
   selectedChunkId.value = ''
   loadingDetail.value = true
   try {
-    detail.value = await getLoveKnowledgeDocument(objectKey)
+    detail.value = await getAgentKnowledgeDocument(agentKey.value, documentId)
   } catch (requestError) {
     error.value = '无法读取该文档的切片数据。'
     console.error(requestError)
@@ -116,19 +161,25 @@ const startResize = event => {
 
 onMounted(async () => {
   try {
-    documents.value = await listLoveKnowledgeDocuments()
-    if (documents.value.length) await selectDocument(documents.value[0].objectKey)
+    await loadPrivateDocuments()
+    if (privateDocuments.value.length) await selectDocument(privateDocuments.value[0].id)
   } catch (requestError) {
     error.value = '无法连接知识库管理接口，请确认后端和 pgvector 服务正在运行。'
     console.error(requestError)
   } finally {
-    loadingDocuments.value = false
   }
+  privateRefreshTimer = window.setInterval(() => {
+    if (privateDocuments.value.some(document => document.status === 'PENDING' || document.status === 'INDEXING')) loadPrivateDocuments()
+  }, 3000)
 })
 
-onBeforeUnmount(() => removeResizeListeners())
+onBeforeUnmount(() => {
+  removeResizeListeners()
+  if (privateRefreshTimer) window.clearInterval(privateRefreshTimer)
+})
 </script>
 
 <style scoped>
-.knowledge-admin { height: 100vh; overflow: hidden; background: #f7f7f7; color: #202020; }.admin-header { display: flex; height: 92px; box-sizing: border-box; align-items: center; justify-content: space-between; padding: 18px 32px; border-bottom: 1px solid #e5e5e5; background: #fff; }.eyebrow { color: #999; font-size: 12px; }.admin-header h1 { margin: 4px 0 0; font-size: 22px; font-weight: 650; }.read-only { border: 1px solid #e5e5e5; border-radius: 6px; padding: 6px 9px; color: #777; font-size: 12px; }.knowledge-workspace { display: grid; height: calc(100vh - 92px); min-height: 0; grid-template-columns: 278px var(--chunk-panel-width) 10px minmax(0, 1fr); }.document-panel, .chunk-panel, .preview-panel { min-height: 0; }.document-panel, .chunk-panel { display: flex; flex-direction: column; border-right: 1px solid #e4e4e4; background: #fff; }.document-panel { padding: 13px 10px 0; }.chunk-panel { padding: 13px 10px 0; background: #fbfbfb; }.panel-heading { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 4px 8px 12px; color: #4b4b4b; font-size: 13px; font-weight: 650; }.panel-heading small { color: #999; font-size: 12px; font-weight: 400; }.document-search { display: flex; height: 34px; flex: 0 0 auto; align-items: center; gap: 7px; margin: 0 4px 10px; border: 1px solid #e3e3e3; border-radius: 6px; padding: 0 9px; color: #9a9a9a; }.document-search span { font-size: 17px; line-height: 1; transform: rotate(-20deg); }.document-search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #333; font: inherit; font-size: 12px; }.document-list, .chunk-list { min-height: 0; overflow-y: auto; padding-bottom: 14px; }.document-row, .chunk-row { display: block; width: 100%; border: 0; border-radius: 7px; background: transparent; color: inherit; text-align: left; }.document-row { position: relative; padding: 11px 10px; }.document-row:hover, .document-row.active, .chunk-row:hover, .chunk-row.active { background: #f0f0f0; }.document-row strong { display: block; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.document-row span { display: block; margin-top: 5px; color: #929292; font-size: 11px; }.document-row em { display: inline-block; margin-top: 7px; border-radius: 4px; padding: 2px 5px; font-size: 10px; font-style: normal; }.indexed { background: #e8f4ec; color: #43865a; }.pending { background: #f4eeee; color: #a35757; }.chunk-row { padding: 10px; }.chunk-row > span { color: #555; font-size: 12px; font-weight: 600; }.chunk-row small { color: #999; font-weight: 400; }.chunk-row p { margin: 6px 0 0; color: #888; font-size: 12px; line-height: 1.5; }.panel-state { padding: 18px 10px; color: #999; font-size: 13px; }.chunk-resizer { position: relative; z-index: 2; width: 10px; margin-left: -5px; cursor: col-resize; touch-action: none; }.chunk-resizer::after { position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; content: ''; }.chunk-resizer:hover::after { background: #d65070; }.preview-panel { display: flex; min-width: 0; flex-direction: column; padding: 28px 34px 0; background: #fff; }.preview-heading { display: flex; min-height: 54px; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid #ececec; padding-bottom: 17px; }.preview-heading h2 { margin: 4px 0 0; font-size: 18px; font-weight: 650; }.preview-heading code { max-width: 48%; overflow: hidden; color: #999; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.preview-body { min-height: 0; flex: 1; overflow: auto; }.source-preview { margin: 21px 0 28px; white-space: pre-wrap; color: #303030; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.75; }.unavailable-preview { display: grid; height: 100%; place-items: center; color: #999; font-size: 14px; text-align: center; }.error-state { margin: 32px; color: #a34e4e; } @media (max-width: 900px) { .knowledge-admin { overflow-x: auto; }.knowledge-workspace { min-width: 890px; grid-template-columns: 240px var(--chunk-panel-width) 10px minmax(360px, 1fr); }.preview-panel { padding: 24px 24px 0; } }
+.knowledge-admin { height: 100vh; overflow: hidden; background: #f7f7f7; color: #202020; }.admin-header { display: flex; height: 92px; box-sizing: border-box; align-items: center; justify-content: space-between; padding: 18px 32px; border-bottom: 1px solid #e5e5e5; background: #fff; }.eyebrow { color: #999; font-size: 12px; }.admin-header h1 { margin: 4px 0 0; font-size: 22px; font-weight: 650; }.admin-actions { display:flex; align-items:center; gap:8px; }.admin-actions label { display:flex; align-items:center; gap:7px; color:#777; font-size:12px; }.admin-actions select { height:31px; border:1px solid #dedede; border-radius:6px; background:#fff; color:#444; padding:0 7px; }.upload-button { height:31px; border:0; border-radius:6px; padding:0 11px; background:#d65070; color:#fff; font-size:12px; }.upload-button:disabled { background:#d8d8d8; }.knowledge-file-input { display:none; }.knowledge-workspace { display: grid; height: calc(100vh - 92px); min-height: 0; grid-template-columns: 278px var(--chunk-panel-width) 10px minmax(0, 1fr); }.document-panel, .chunk-panel, .preview-panel { min-height: 0; }.document-panel, .chunk-panel { display: flex; flex-direction: column; border-right: 1px solid #e4e4e4; background: #fff; }.document-panel { padding: 13px 10px 0; }.private-heading { display:flex; align-items:center; justify-content:space-between; padding:4px 8px 8px; color:#4b4b4b; font-size:13px; font-weight:650; }.private-heading div { display:grid; gap:3px; }.private-heading small { color:#999; font-size:11px; font-weight:400; }.scope-status { border-radius:4px; background:#fceef1; color:#b3415d; padding:3px 5px; font-size:10px; }.private-document-list { max-height:144px; flex:0 0 auto; overflow:auto; border-bottom:1px solid #ededed; margin-bottom:12px; }.private-document-row { padding:8px 9px; }.private-document-row strong { display:block; overflow:hidden; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.private-document-row span { margin-right:6px; color:#999; font-size:10px; }.private-document-row em { display:inline-block; margin-top:4px; border-radius:4px; padding:2px 4px; font-size:10px; font-style:normal; }.status-ready { background:#e8f4ec; color:#43865a; }.status-pending,.status-indexing { background:#fff4dc; color:#9d731a; }.status-failed { background:#fbeaea; color:#a35757; }.private-state { padding:10px 9px; color:#999; font-size:11px; line-height:1.45; }.chunk-panel { padding: 13px 10px 0; background: #fbfbfb; }.panel-heading { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 4px 8px 12px; color: #4b4b4b; font-size: 13px; font-weight: 650; }.panel-heading small { color: #999; font-size: 12px; font-weight: 400; }.document-search { display: flex; height: 34px; flex: 0 0 auto; align-items: center; gap: 7px; margin: 0 4px 10px; border: 1px solid #e3e3e3; border-radius: 6px; padding: 0 9px; color: #9a9a9a; }.document-search span { font-size: 17px; line-height: 1; transform: rotate(-20deg); }.document-search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #333; font: inherit; font-size: 12px; }.document-list, .chunk-list { min-height: 0; overflow-y: auto; padding-bottom: 14px; }.document-row, .chunk-row { display: block; width: 100%; border: 0; border-radius: 7px; background: transparent; color: inherit; text-align: left; }.document-row { position: relative; padding: 11px 10px; }.document-row:hover, .document-row.active, .chunk-row:hover, .chunk-row.active { background: #f0f0f0; }.document-row strong { display: block; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.document-row span { display: block; margin-top: 5px; color: #929292; font-size: 11px; }.document-row em { display: inline-block; margin-top: 7px; border-radius: 4px; padding: 2px 5px; font-size: 10px; font-style: normal; }.indexed { background: #e8f4ec; color: #43865a; }.pending { background: #f4eeee; color: #a35757; }.chunk-row { padding: 10px; }.chunk-row > span { color: #555; font-size: 12px; font-weight: 600; }.chunk-row small { color: #999; font-weight: 400; }.chunk-row p { margin: 6px 0 0; color: #888; font-size: 12px; line-height: 1.5; }.panel-state { padding: 18px 10px; color: #999; font-size: 13px; }.chunk-resizer { position: relative; z-index: 2; width: 10px; margin-left: -5px; cursor: col-resize; touch-action: none; }.chunk-resizer::after { position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; content: ''; }.chunk-resizer:hover::after { background: #d65070; }.preview-panel { display: flex; min-width: 0; flex-direction: column; padding: 28px 34px 0; background: #fff; }.preview-heading { display: flex; min-height: 54px; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid #ececec; padding-bottom: 17px; }.preview-heading h2 { margin: 4px 0 0; font-size: 18px; font-weight: 650; }.preview-heading code { max-width: 48%; overflow: hidden; color: #999; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.preview-body { min-height: 0; flex: 1; overflow: auto; }.source-preview { margin: 21px 0 28px; white-space: pre-wrap; color: #303030; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.75; }.unavailable-preview { display: grid; height: 100%; place-items: center; color: #999; font-size: 14px; text-align: center; }.error-state { margin: 32px; color: #a34e4e; } @media (max-width: 900px) { .knowledge-admin { overflow-x: auto; }.knowledge-workspace { min-width: 890px; grid-template-columns: 240px var(--chunk-panel-width) 10px minmax(360px, 1fr); }.preview-panel { padding: 24px 24px 0; } } @media (max-width:640px) { .admin-header { height:auto; min-height:92px; align-items:flex-start; gap:12px; flex-direction:column; padding:14px 18px; }.admin-actions { width:100%; }.knowledge-workspace { height:calc(100vh - 137px); } }
+.private-document-list { max-height:calc(100vh - 202px); flex:1; }.private-document-row { display:block; width:100%; border:0; border-radius:7px; background:transparent; color:inherit; text-align:left; }.private-document-row:hover,.private-document-row.active { background:#f0f0f0; }
 </style>

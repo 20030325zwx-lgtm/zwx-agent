@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -45,7 +46,14 @@ public class LoveAppDocumentLoader {
                         .withAdditionalMetadata("status", status)
                         .build();
                 MarkdownDocumentReader markdownDocumentReader = new MarkdownDocumentReader(resource, config);
-                allDocuments.addAll(markdownDocumentReader.get());
+                List<Document> documents = markdownDocumentReader.get();
+                for (int index = 0; index < documents.size(); index++) {
+                    Document document = documents.get(index);
+                    HashMap<String, Object> metadata = new HashMap<>(document.getMetadata());
+                    metadata.put("objectKey", "knowledge/love/" + filename);
+                    metadata.put("section", index + 1);
+                    allDocuments.add(Document.builder().text(document.getText()).metadata(metadata).build());
+                }
             }
         } catch (IOException e) {
            log.error("Markdown 文档加载失败", e);

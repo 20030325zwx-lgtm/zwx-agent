@@ -20,6 +20,10 @@
               {{ msg.content }}
               <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="typing-indicator">▋</span>
             </div>
+            <div v-if="msg.references?.length" class="message-references">
+              <span>参考资料</span>
+              <span v-for="reference in msg.references" :key="reference.objectKey">{{ reference.filename }}{{ reference.section ? ` · 第${reference.section}节` : '' }}</span>
+            </div>
             <div class="message-time">{{ formatTime(msg.time) }}</div>
           </div>
         </div>
@@ -247,6 +251,8 @@ onMounted(() => {
 .ai-avatar {
   margin-right: 8px; /* AI头像在左侧，右边距 */
 }
+.message-references { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; color: #8a5b68; font-size: 12px; }
+.message-references span:not(:first-child) { padding: 3px 6px; border: 1px solid #ebd4da; border-radius: 4px; background: #fff8f9; }
 
 .avatar-placeholder {
   width: 100%;

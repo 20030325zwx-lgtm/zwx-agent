@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwx.zwxagent.rag.LoveKnowledgeReference;
 import com.zwx.zwxagent.rag.LoveRagTrace;
+import com.zwx.zwxagent.app.LoveVisionAnalysis;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -87,10 +88,23 @@ public class LoveConversationService {
                         """, referencesJson, traceJson, conversationId);
     }
 
+    public void saveLatestUserVisionAnalysis(String conversationId, String analysisJson) {
+        jdbcTemplate.update("""
+                        UPDATE love_chat_message
+                        SET vision_analysis = CAST(? AS jsonb)
+                        WHERE id = (
+                            SELECT id FROM love_chat_message
+                            WHERE conversation_id = ? AND role = 'USER'
+                            ORDER BY id DESC
+                            LIMIT 1
+                        )
+                        """, analysisJson, conversationId);
+    }
+
     public List<LoveConversationMessage> getMessages(String conversationId) {
         return jdbcTemplate.query("""
-                        SELECT role, content, image_object_keys, knowledge_references, rag_trace, created_at FROM (
-                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, created_at
+                        SELECT role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
+                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at
                             FROM love_chat_message
                             WHERE conversation_id = ?
                             ORDER BY id DESC
@@ -103,13 +117,14 @@ public class LoveConversationService {
                         toStringList(rs.getArray("image_object_keys")),
                         toReferences(rs.getString("knowledge_references")),
                         toTrace(rs.getString("rag_trace")),
+                        toVisionAnalysis(rs.getString("vision_analysis")),
                         rs.getTimestamp("created_at").toInstant()), conversationId);
     }
 
     public List<LoveConversationMessage> getRecentMessages(String conversationId, int limit) {
         return jdbcTemplate.query("""
-                        SELECT role, content, image_object_keys, knowledge_references, rag_trace, created_at FROM (
-                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, created_at
+                        SELECT role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
+                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at
                             FROM love_chat_message
                             WHERE conversation_id = ?
                             ORDER BY id DESC
@@ -122,6 +137,7 @@ public class LoveConversationService {
                         toStringList(rs.getArray("image_object_keys")),
                         toReferences(rs.getString("knowledge_references")),
                         toTrace(rs.getString("rag_trace")),
+                        toVisionAnalysis(rs.getString("vision_analysis")),
                         rs.getTimestamp("created_at").toInstant()), conversationId, limit);
     }
 
@@ -175,6 +191,15 @@ public class LoveConversationService {
             return objectMapper.readValue(traceJson, LoveRagTrace.class);
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to read persisted RAG trace", exception);
+        }
+    }
+
+    private LoveVisionAnalysis toVisionAnalysis(String analysisJson) {
+        if (analysisJson == null || analysisJson.isBlank()) return null;
+        try {
+            return objectMapper.readValue(analysisJson, LoveVisionAnalysis.class);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to read persisted vision analysis", exception);
         }
     }
 }

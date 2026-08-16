@@ -22,6 +22,9 @@ ALTER TABLE love_chat_message
 ALTER TABLE love_chat_message
     ADD COLUMN IF NOT EXISTS rag_trace JSONB;
 
+ALTER TABLE love_chat_message
+    ADD COLUMN IF NOT EXISTS vision_analysis JSONB;
+
 CREATE INDEX IF NOT EXISTS idx_love_conversation_updated_at
     ON love_conversation (updated_at DESC);
 

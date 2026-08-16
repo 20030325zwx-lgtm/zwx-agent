@@ -6,8 +6,8 @@ const routes = [
     name: 'Home',
     component: () => import('../views/Home.vue'),
     meta: {
-      title: '首页 - 鱼皮AI超级智能体应用平台',
-      description: '鱼皮AI超级智能体应用平台提供AI恋爱大师和AI超级智能体服务，满足您的各种AI对话需求'
+      title: 'ZWX Agent - 智能体目录',
+      description: 'ZWX Agent 提供情感分析大师和超级智能体服务。'
     }
   },
   {
@@ -15,8 +15,8 @@ const routes = [
     name: 'LoveMaster',
     component: () => import('../views/LoveMaster.vue'),
     meta: {
-      title: 'AI恋爱大师 - 鱼皮AI超级智能体应用平台',
-      description: 'AI恋爱大师是鱼皮AI超级智能体应用平台的专业情感顾问，帮你解答各种恋爱问题，提供情感建议'
+      title: '情感分析大师 - ZWX Agent',
+      description: '情感分析大师协助分析关系与沟通问题，提供可追溯的知识库引用。'
     }
   },
   {
@@ -24,8 +24,8 @@ const routes = [
     name: 'SuperAgent',
     component: () => import('../views/SuperAgent.vue'),
     meta: {
-      title: 'AI超级智能体 - 鱼皮AI超级智能体应用平台',
-      description: 'AI超级智能体是鱼皮AI超级智能体应用平台的全能助手，能解答各类专业问题，提供精准建议和解决方案'
+      title: '超级智能体 - ZWX Agent',
+      description: '超级智能体是 ZWX Agent 的通用任务协作助手。'
     }
   }
 ]
@@ -44,4 +44,4 @@ router.beforeEach((to, from, next) => {
   next()
 })
 
-export default router 
+export default router

@@ -1,12 +1,20 @@
 # ZWX Agent
 
-ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包含面向情感咨询场景的“恋爱大师”对话功能，以及可扩展的 RAG、工具调用、MCP 和自主规划智能体能力。
+ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包含面向情感咨询场景的“情感分析大师”对话功能，以及可扩展的 RAG、工具调用、MCP 和自主规划智能体能力。
+
+## 原项目与作者
+
+本项目基于 [程序员鱼皮（liyupi）的 yu-ai-agent](https://github.com/liyupi/yu-ai-agent) 二次开发。
+
+- 原作者：程序员鱼皮（liyupi）
+- 原项目仓库：[github.com/liyupi/yu-ai-agent](https://github.com/liyupi/yu-ai-agent)
+- 本仓库在保留原项目技术基础上进行了品牌、情感分析流程、图片多模态、会话持久化、PGVector RAG、引用与调用链可视化等改造。
 
 ## 当前能力
 
 - 多轮 AI 对话：默认使用阿里云 DashScope 的 `qwen-plus`。
-- 恋爱大师：提供针对情感问题的对话引导与建议。
-- 会话持久化：恋爱大师的会话和消息保存在 PostgreSQL；模型请求采用最近 20 条消息作为上下文窗口。
+- 情感分析大师：提供针对情感问题的对话引导、关系分析与建议。
+- 会话持久化：情感分析大师的会话和消息保存在 PostgreSQL；模型请求采用最近 20 条消息作为上下文窗口。
 - 图片多模态：支持选择文件和粘贴图片，使用 `qwen-vl-plus` 理解图片内容。
 - 私有图片存储：图片上传至阿里云 OSS，后端生成短时签名读取地址供视觉模型访问；聊天历史通过受控接口读取图片。
 - 扩展能力：项目保留了 RAG、PGVector、MCP、联网搜索、文件操作、网页抓取、资源下载、PDF 生成和 ReAct 智能体相关模块。
@@ -91,7 +99,7 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-恋爱大师页面：`http://127.0.0.1:3000/love-master`。
+情感分析大师页面：`http://127.0.0.1:3000/love-master`。
 
 ## 验证构建
 

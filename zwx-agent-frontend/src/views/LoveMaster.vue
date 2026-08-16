@@ -17,7 +17,7 @@
           <button class="history-toggle" type="button" aria-label="打开历史会话" @click="sidebarOpen = true">☰</button>
           <button class="back-button" type="button" @click="goBack">返回首页</button>
         </div>
-        <h1>AI恋爱大师</h1>
+        <h1>情感分析大师</h1>
         <span class="header-status" :class="connectionStatus">{{ statusText }}</span>
       </header>
 
@@ -54,10 +54,10 @@ import {
 } from '../api'
 
 useHead({
-  title: 'AI恋爱大师 - 鱼皮AI超级智能体应用平台',
+  title: '情感分析大师 - ZWX Agent',
   meta: [
-    { name: 'description', content: 'AI恋爱大师是专业情感顾问，帮你解答恋爱问题并保存会话历史' },
-    { name: 'keywords', content: 'AI恋爱大师,情感顾问,恋爱咨询,AI聊天,会话历史' }
+    { name: 'description', content: '情感分析大师通过对话、图片和知识库协助分析关系与沟通问题。' },
+    { name: 'keywords', content: '情感分析大师,情感顾问,关系分析,AI聊天,会话历史' }
   ]
 })
 

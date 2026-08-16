@@ -11,6 +11,7 @@ import com.zwx.zwxagent.storage.LoveKnowledgeDocumentStorageService;
 import com.zwx.zwxagent.storage.LoveKnowledgeDocumentUpload;
 import com.zwx.zwxagent.rag.LoveKnowledgeReference;
 import com.zwx.zwxagent.rag.LoveRagService;
+import com.zwx.zwxagent.rag.LoveRagTrace;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
@@ -62,6 +63,9 @@ public class AiController {
     @Resource
     private ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Value("${spring.ai.dashscope.chat.options.model:qwen-plus}")
+    private String chatModelName;
+
     @PostMapping("/love_app/conversations")
     public LoveConversationSummary createLoveConversation() {
         return conversationService.createConversation();
@@ -94,7 +98,7 @@ public class AiController {
 
     @GetMapping("/love_app/knowledge/references")
     public List<LoveKnowledgeReference> findLoveKnowledgeReferences(@RequestParam String message) {
-        return loveRagService.findReferences(message);
+        return loveRagService.trace(message, chatModelName).references();
     }
 
     @GetMapping("/love_app/images")
@@ -128,16 +132,20 @@ public class AiController {
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> doChatWithLoveAppSSE(String message, String chatId,
                                                                @RequestParam(required = false) List<String> imageKey) {
-        List<LoveKnowledgeReference> references = loveRagService.findReferences(message);
+        LoveRagTrace trace = loveRagService.trace(message, chatModelName);
+        List<LoveKnowledgeReference> references = trace.references();
         String referencesJson;
+        String traceJson;
         try {
             referencesJson = objectMapper.writeValueAsString(references);
+            traceJson = objectMapper.writeValueAsString(trace);
         } catch (JsonProcessingException e) {
             return Flux.error(new IllegalStateException("Unable to serialize knowledge references", e));
         }
         return Flux.concat(
                 loveApp.doChatByStream(message, chatId, imageKey == null ? List.<String>of() : imageKey)
                         .map(chunk -> ServerSentEvent.builder(chunk).build()),
+                Mono.just(ServerSentEvent.<String>builder().event("trace").data(traceJson).build()),
                 Mono.just(ServerSentEvent.<String>builder().event("references").data(referencesJson).build()));
     }
 

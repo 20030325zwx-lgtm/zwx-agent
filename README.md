@@ -26,6 +26,146 @@ ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包�
 - PostgreSQL、PGVector
 - Vue 3、Vite、Vue Router
 
+## 情感分析大师功能架构
+
+### 系统总览
+
+```mermaid
+flowchart LR
+    User[用户] --> Browser[Vue 3 前端]
+
+    subgraph Frontend[zwx-agent-frontend]
+        Home[Home.vue<br/>智能体目录]
+        LoveMaster[LoveMaster.vue<br/>会话编排与 SSE]
+        ChatRoom[ChatRoom.vue<br/>消息、Thinking、图片与引用]
+        Sidebar[ConversationSidebar.vue<br/>会话列表]
+        KnowledgeAdmin[KnowledgeAdmin.vue<br/>知识库只读管理]
+        Api[api/index.js<br/>HTTP / EventSource]
+        Home --> LoveMaster
+        LoveMaster --> ChatRoom
+        LoveMaster --> Sidebar
+        LoveMaster --> Api
+        KnowledgeAdmin --> Api
+    end
+
+    Api -->|REST / SSE| Controller
+
+    subgraph Backend[Spring Boot: com.zwx.zwxagent]
+        Controller[AiController<br/>会话、图片、知识库、SSE]
+        Conversation[LoveConversationService<br/>会话与消息 JSONB 持久化]
+        LoveApp[LoveApp<br/>文本 / 图片对话编排]
+        Vision[LoveVisionChatService<br/>视觉摘要与原生增量流]
+        Rag[LoveRagService<br/>检索、引用与调用链]
+        Storage[LoveImageStorageService<br/>图片校验与签名 URL]
+        Admin[LoveKnowledgeAdminService<br/>文档与切片查询]
+        Controller --> Conversation
+        Controller --> LoveApp
+        Controller --> Admin
+        LoveApp --> Vision
+        LoveApp --> Rag
+        LoveApp --> Conversation
+        Controller --> Storage
+    end
+
+    Storage <-->|私有对象| Oss[阿里云 OSS / MinIO]
+    Vision <-->|多模态请求| Vl[DashScope qwen-vl-plus]
+    LoveApp <-->|文本对话| Chat[DashScope qwen-plus]
+    Rag <-->|向量检索| Pg
+    Conversation <-->|会话与消息| Pg
+    Admin <-->|文档与切片| Pg
+
+    subgraph Data[PostgreSQL + pgvector]
+        Pg[(love_conversation<br/>love_chat_message<br/>love_knowledge_vector)]
+    end
+
+    classDef client fill:#eaf3ff,stroke:#006fee,color:#111827;
+    classDef service fill:#ffffff,stroke:#334155,color:#111827;
+    classDef focal fill:#fff1f4,stroke:#d65070,color:#111827;
+    classDef store fill:#f4f4f5,stroke:#6b7280,color:#111827;
+    class Home,LoveMaster,ChatRoom,Sidebar,KnowledgeAdmin,Api client;
+    class Controller,Conversation,LoveApp,Vision,Rag,Storage,Admin service;
+    class LoveApp,Vision focal;
+    class Pg,Oss,Vl,Chat store;
+```
+
+### 对话与图片 RAG 流程
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant FE as LoveMaster + ChatRoom
+    participant API as AiController
+    participant App as LoveApp
+    participant OSS as 私有 OSS
+    participant VL as qwen-vl-plus
+    participant RAG as LoveRagService + pgvector
+    participant DB as PostgreSQL
+
+    U->>FE: 输入文本，可选图片
+    opt 图片上传
+        FE->>API: POST /love_app/images
+        API->>OSS: 校验并保存图片
+        OSS-->>API: objectKey
+        API-->>FE: objectKey
+    end
+    FE->>API: GET /love_app/chat/sse: message, chatId, imageKey[]
+
+    alt 纯文本对话
+        API->>RAG: 使用用户文本检索 Top K
+        RAG-->>API: references + rag_trace
+        API->>App: 流式文本对话
+        App-->>API: 文本 token
+        API-->>FE: SSE message token
+    else 图片对话
+        API-->>FE: SSE thinking: 正在理解图片内容
+        API->>App: prepareVisionChat
+        App->>DB: 保存用户消息与 image_object_keys
+        App->>OSS: 生成短时签名读取 URL
+        App->>VL: 第一次调用：结构化视觉摘要
+        VL-->>App: vision_analysis: 摘要、信号、不确定项、retrievalQuery
+        App->>DB: 保存 vision_analysis JSONB
+        App->>RAG: 使用 retrievalQuery 检索知识库
+        RAG-->>App: 资料片段 + references + rag_trace
+        API-->>FE: SSE vision + thinking
+        App->>VL: 第二次调用：图片 + 历史 + RAG 片段
+        VL-->>App: 原生增量 token
+        App-->>API: 流式 token
+        API-->>FE: SSE message token
+        App->>DB: 流结束后保存完整助手回答
+    end
+
+    API->>DB: 保存 knowledge_references + rag_trace
+    API-->>FE: SSE trace, references, [DONE]
+    FE->>API: 刷新会话与历史消息
+    API-->>FE: 恢复图片、visionAnalysis、引用与调用链
+```
+
+### 模块职责与数据契约
+
+| 层级 | 组件 / 类 | 作用 | 关键数据或事件 |
+| --- | --- | --- | --- |
+| 页面 | `Home.vue` | 展示并筛选智能体目录 | 路由跳转 |
+| 页面 | `LoveMaster.vue` | 管理会话、上传图片、监听 EventSource | `thinking`、`vision`、`trace`、`references`、`[DONE]` |
+| 组件 | `ChatRoom.vue` | 安全 Markdown、thinking 状态、图片预览、视觉摘要和引用展示 | `messages[]`、`visionAnalysis`、`ragTrace` |
+| 组件 | `ConversationSidebar.vue` | 创建、切换和删除历史会话 | `love_conversation` |
+| 页面 | `KnowledgeAdmin.vue` | 搜索文档、查看 pgvector 切片和原文 | 知识库管理接口 |
+| API | `AiController` | REST/SSE 边界；按是否带图片选择文本或视觉分支 | `/love_app/chat/sse` |
+| 编排 | `LoveApp` | 组合系统提示词、会话历史、RAG 和模型调用 | 最近 20 条消息 |
+| 视觉 | `LoveVisionChatService` | 生成结构化视觉摘要，并使用 `streamCall` 流式回答 | `LoveVisionAnalysis` |
+| RAG | `LoveRagService` | 对 `love_knowledge_vector` 检索、生成引用和 trace、限制片段长度 | `LoveRagResult`、`LoveRagTrace` |
+| 存储 | `LoveImageStorageService` | 校验图片、保存私有对象、生成短时签名 URL | `image_object_keys` |
+| 会话 | `LoveConversationService` | 读写会话和消息；恢复历史展示所需元数据 | `vision_analysis`、`knowledge_references`、`rag_trace` JSONB |
+| 数据 | PostgreSQL + pgvector | 保存会话、消息、向量文档及切片 | `love_conversation`、`love_chat_message`、`love_knowledge_vector` |
+
+#### 图片消息持久化字段
+
+`love_chat_message` 通过以下字段支持历史恢复与可追溯性：
+
+- `image_object_keys`：私有对象存储键，不保存公开 URL。
+- `vision_analysis`：裁剪后的视觉摘要、关系信号、不确定项和检索 query；不保存完整 OCR 原文。
+- `knowledge_references`：实际命中的知识文档及章节。
+- `rag_trace`：检索 query、Top K、相似度阈值、候选片段和调用决策。
+
 ## 目录说明
 
 ```text

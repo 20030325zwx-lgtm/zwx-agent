@@ -30,3 +30,52 @@ CREATE INDEX IF NOT EXISTS idx_love_conversation_updated_at
 
 CREATE INDEX IF NOT EXISTS idx_love_chat_message_conversation_id
     ON love_chat_message (conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS love_knowledge_index_job (
+    id VARCHAR(64) PRIMARY KEY,
+    status VARCHAR(16) NOT NULL,
+    document_count INTEGER NOT NULL DEFAULT 0,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS agent_knowledge_document (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    agent_key VARCHAR(32) NOT NULL,
+    object_key TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_knowledge_document_scope
+    ON agent_knowledge_document (tenant_id, agent_key, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_conversation (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    agent_key VARCHAR(32) NOT NULL,
+    title VARCHAR(80) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS agent_chat_message (
+    id BIGSERIAL PRIMARY KEY,
+    conversation_id VARCHAR(64) NOT NULL REFERENCES agent_conversation(id) ON DELETE CASCADE,
+    role VARCHAR(16) NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_conversation_scope_updated
+    ON agent_conversation (tenant_id, agent_key, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_chat_message_conversation_id
+    ON agent_chat_message (conversation_id, id);

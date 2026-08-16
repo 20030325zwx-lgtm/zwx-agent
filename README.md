@@ -17,6 +17,8 @@ ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包�
 - 会话持久化：情感分析大师的会话和消息保存在 PostgreSQL；模型请求采用最近 20 条消息作为上下文窗口。
 - 图片多模态：支持选择文件和粘贴图片，使用 `qwen-vl-plus` 理解图片内容。
 - 私有图片存储：图片上传至阿里云 OSS，后端生成短时签名读取地址供视觉模型访问；聊天历史通过受控接口读取图片。
+- 多租户私有知识库：管理端可为情感分析大师或旅游规划专家上传 `.md`、`.txt`，异步切片并写入 PGVector；检索始终限定为当前租户和智能体。
+- 旅游规划专家：基于行程偏好、该智能体的私有资料和受限联网搜索工具生成方案；天气、交通、营业时间等实时信息优先检索，不配置额外地图或天气数据源。
 - 扩展能力：项目保留了 RAG、PGVector、MCP、联网搜索、文件操作、网页抓取、资源下载、PDF 生成和 ReAct 智能体相关模块。
 
 ## 技术栈
@@ -165,6 +167,29 @@ sequenceDiagram
 - `vision_analysis`：裁剪后的视觉摘要、关系信号、不确定项和检索 query；不保存完整 OCR 原文。
 - `knowledge_references`：实际命中的知识文档及章节。
 - `rag_trace`：检索 query、Top K、相似度阈值、候选片段和调用决策。
+
+### 大规模知识库运行方式
+
+向量表初始化与文档索引已解耦：应用启动时仅创建/校验 `love_knowledge_vector`，不会扫描、切片或重建全部文档。内置知识文档需要通过任务接口索引：
+
+```text
+POST /api/ai/love_app/knowledge/index/built-in
+GET  /api/ai/love_app/knowledge/index/jobs/{jobId}
+```
+
+任务按 100 个切片分批写入，单线程执行并将状态保存为 `PENDING`、`INDEXING`、`READY` 或 `FAILED`。检索默认预算为 800ms；超时或异常时返回空 RAG 上下文并继续模型回答，调用链会记录降级原因。生产环境面对百万级切片时，应继续按知识库/租户拆分向量表或数据库分区，并在摄取服务之外部署专用队列与 worker。
+
+### 租户私有资料与旅游规划专家
+
+管理端 `/knowledge-admin` 的“上传资料”入口只接受 `.md` 与 `.txt`。上传对象存入 `knowledge/{tenantId}/{agentKey}/...`，文档任务记录在 `agent_knowledge_document`，切片带有 `tenantId` 和 `agentKey` 元数据并写入 `agent_knowledge_vector`。问答检索使用二者的过滤条件，因此情感分析大师和旅游规划专家互不可见，两个租户之间也不会互相召回。
+
+```text
+POST /api/ai/agent-knowledge/documents   # multipart: agentKey=love|travel, file
+GET  /api/ai/agent-knowledge/documents?agentKey=love|travel
+GET  /api/ai/travel-planner/chat/sse?tenantId=...&message=...
+```
+
+本地前端可用 `VITE_TENANT_ID` 设定测试租户，常规 REST 请求使用 `X-Tenant-Id`。浏览器的 `EventSource` 无法加自定义请求头，因此 SSE 使用 `tenantId` 查询参数。这里的租户值仅用于本地逻辑隔离；生产环境必须由认证后的服务端身份确定，不能直接信任客户端提交的租户值。
 
 ## 目录说明
 

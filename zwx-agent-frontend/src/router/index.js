@@ -29,6 +29,12 @@ const routes = [
     }
   },
   {
+    path: '/travel-planner',
+    name: 'TravelPlanner',
+    component: () => import('../views/TravelPlanner.vue'),
+    meta: { title: '旅游规划专家 - ZWX Agent', description: '旅游规划专家提供行程建议并按需查询实时信息。' }
+  },
+  {
     path: '/knowledge-admin',
     name: 'KnowledgeAdmin',
     component: () => import('../views/KnowledgeAdmin.vue'),

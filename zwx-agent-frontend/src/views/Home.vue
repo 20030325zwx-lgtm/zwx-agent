@@ -64,7 +64,7 @@ useHead({
 const router = useRouter()
 const query = ref('')
 const activeCategory = ref('精选')
-const categories = ['精选', '情感关系', '效率协作']
+const categories = ['精选', '情感关系', '旅行规划', '效率协作']
 const agents = [
   {
     name: '情感分析大师',
@@ -81,6 +81,14 @@ const agents = [
     path: '/super-agent',
     icon: '✦',
     iconClass: 'super-icon'
+  },
+  {
+    name: '旅游规划专家',
+    description: '基于偏好、私有资料与联网搜索，生成可执行的旅行方案',
+    category: '旅行规划',
+    path: '/travel-planner',
+    icon: '⌖',
+    iconClass: 'travel-icon'
   }
 ]
 
@@ -109,7 +117,7 @@ const clearFilter = () => {
 .search-box input { width: 100%; border: 0; outline: 0; color: #171717; font: inherit; font-size: 17px; }
 .search-box input::placeholder { color: #aaa; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 30px; }.filters button { border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--zwx-muted); padding: 8px 14px; font-size: 14px; }.filters button:hover { background: #e9eef7; color: #254263; }.filters button.active { border-color: #cbdcf4; background: #eaf3ff; color: #005bc4; font-weight: 650; }.section-heading { display: flex; align-items: center; justify-content: space-between; margin: 0 0 16px; }.section-heading h2 { margin: 0; font-size: 17px; font-weight: 750; }.section-heading span { color: var(--zwx-muted); font-size: 12px; }.agent-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }.agent-item { display: flex; min-width: 0; min-height: 126px; align-items: center; gap: 16px; border: 1px solid var(--zwx-divider); border-radius: var(--zwx-radius-md); padding: 20px; background: var(--zwx-surface); color: inherit; box-shadow: 0 2px 5px rgba(15,23,42,.025); text-align: left; }.agent-item:hover { border-color: #adcef5; box-shadow: var(--zwx-shadow); transform: translateY(-2px); }.agent-icon { display: grid; width: 54px; height: 54px; flex: 0 0 54px; place-items: center; border-radius: 16px; color: #fff; font-size: 27px; font-weight: 500; }.emotion-icon { background: #e5486d; }.super-icon { background: var(--zwx-primary); }
-.agent-copy { display: grid; min-width: 0; gap: 5px; }
+.travel-icon { background: #0f9f6e; }.agent-copy { display: grid; min-width: 0; gap: 5px; }
 .agent-copy strong { font-size: 16px; font-weight: 750; }.agent-copy small { overflow: hidden; color: var(--zwx-muted); font-size: 13px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }.agent-copy em { width: max-content; margin-top: 2px; border: 1px solid #dce7f7; border-radius: 5px; color: #3973ad; font-size: 10px; font-style: normal; padding: 3px 6px; }.open-agent { display: grid; width: 32px; height: 32px; margin-left: auto; place-items: center; border-radius: 50%; background: #eef5ff; color: var(--zwx-primary); font-size: 26px; line-height: 1; }
 .empty-result { color: #888; font-size: 14px; }
 @media (max-width: 720px) { .topbar { height: 60px; padding: 0 18px; }.topbar-note { display: none; }.catalog-shell { padding: 36px 18px 48px; }.catalog-intro { display: block; margin-bottom: 28px; }.catalog-intro h1 { font-size: 30px; }.catalog-stat { display: none; }.search-box { min-height: 50px; }.agent-grid { grid-template-columns: 1fr; }.agent-copy small { white-space: normal; }.agent-item { min-height: 112px; padding: 17px; } }

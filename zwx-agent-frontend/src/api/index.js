@@ -4,12 +4,14 @@ import axios from 'axios'
 const API_BASE_URL = process.env.NODE_ENV === 'production' 
  ? '/api' // 生产环境使用相对路径，适用于前后端部署在同一域名下
  : 'http://localhost:8123/api' // 开发环境指向本地后端服务
+const TENANT_ID = import.meta.env.VITE_TENANT_ID || 'default'
 
 // 创建axios实例
 const request = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000
 })
+request.defaults.headers.common['X-Tenant-Id'] = TENANT_ID
 
 // 封装SSE连接
 export const connectSSE = (url, params, onMessage, onError) => {
@@ -48,7 +50,7 @@ export const connectSSE = (url, params, onMessage, onError) => {
 
 // AI恋爱大师聊天
 export const chatWithLoveApp = (message, chatId, imageKeys = []) => {
-  return connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys })
+  return connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, tenantId: TENANT_ID })
 }
 
 export const uploadLoveImage = async (chatId, file) => {
@@ -74,6 +76,20 @@ export const createLoveConversation = async () => (await request.post('/ai/love_
 export const listLoveConversations = async () => (await request.get('/ai/love_app/conversations')).data
 export const getLoveConversationMessages = async (conversationId) => (await request.get(`/ai/love_app/conversations/${conversationId}/messages`)).data
 export const deleteLoveConversation = (conversationId) => request.delete(`/ai/love_app/conversations/${conversationId}`)
+
+export const uploadAgentKnowledgeDocument = (agentKey, file) => {
+  const formData = new FormData()
+  formData.append('agentKey', agentKey)
+  formData.append('file', file)
+  return request.post('/ai/agent-knowledge/documents', formData).then(response => response.data)
+}
+export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
+export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)
+export const chatWithTravelPlanner = (conversationId, message) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, tenantId: TENANT_ID })
+export const createTravelConversation = () => request.post('/ai/travel-planner/conversations').then(response => response.data)
+export const listTravelConversations = () => request.get('/ai/travel-planner/conversations').then(response => response.data)
+export const getTravelConversationMessages = conversationId => request.get(`/ai/travel-planner/conversations/${conversationId}/messages`).then(response => response.data)
+export const deleteTravelConversation = conversationId => request.delete(`/ai/travel-planner/conversations/${conversationId}`)
 
 // AI超级智能体聊天
 export const chatWithManus = (message) => {

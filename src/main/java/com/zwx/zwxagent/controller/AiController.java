@@ -12,6 +12,9 @@ import com.zwx.zwxagent.storage.LoveKnowledgeDocumentUpload;
 import com.zwx.zwxagent.rag.LoveKnowledgeReference;
 import com.zwx.zwxagent.rag.LoveRagService;
 import com.zwx.zwxagent.rag.LoveRagTrace;
+import com.zwx.zwxagent.rag.LoveKnowledgeAdminService;
+import com.zwx.zwxagent.rag.LoveKnowledgeDocumentDetail;
+import com.zwx.zwxagent.rag.LoveKnowledgeDocumentSummary;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
@@ -61,6 +64,9 @@ public class AiController {
     private LoveRagService loveRagService;
 
     @Resource
+    private LoveKnowledgeAdminService loveKnowledgeAdminService;
+
+    @Resource
     private ObjectMapper objectMapper;
 
     @org.springframework.beans.factory.annotation.Value("${spring.ai.dashscope.chat.options.model:qwen-plus}")
@@ -99,6 +105,16 @@ public class AiController {
     @GetMapping("/love_app/knowledge/references")
     public List<LoveKnowledgeReference> findLoveKnowledgeReferences(@RequestParam String message) {
         return loveRagService.trace(message, chatModelName).references();
+    }
+
+    @GetMapping("/love_app/knowledge/documents")
+    public List<LoveKnowledgeDocumentSummary> listLoveKnowledgeDocuments() {
+        return loveKnowledgeAdminService.listDocuments();
+    }
+
+    @GetMapping("/love_app/knowledge/document")
+    public LoveKnowledgeDocumentDetail getLoveKnowledgeDocument(@RequestParam String objectKey) {
+        return loveKnowledgeAdminService.getDocument(objectKey);
     }
 
     @GetMapping("/love_app/images")

@@ -64,6 +64,12 @@ export const getLoveImageUrl = (chatId, objectKey) =>
 export const getLoveKnowledgeReferences = async message =>
   (await request.get('/ai/love_app/knowledge/references', { params: { message } })).data
 
+export const listLoveKnowledgeDocuments = async () =>
+  (await request.get('/ai/love_app/knowledge/documents')).data
+
+export const getLoveKnowledgeDocument = async objectKey =>
+  (await request.get('/ai/love_app/knowledge/document', { params: { objectKey } })).data
+
 export const createLoveConversation = async () => (await request.post('/ai/love_app/conversations')).data
 export const listLoveConversations = async () => (await request.get('/ai/love_app/conversations')).data
 export const getLoveConversationMessages = async (conversationId) => (await request.get(`/ai/love_app/conversations/${conversationId}/messages`)).data

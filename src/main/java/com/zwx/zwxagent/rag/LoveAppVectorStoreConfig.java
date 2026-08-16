@@ -10,7 +10,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -37,11 +39,19 @@ public class LoveAppVectorStoreConfig {
                 .build();
         vectorStore.afterPropertiesSet();
         List<Document> documentList = loveAppDocumentLoader.loadMarkdowns();
+        Map<String, Integer> chunkIndexes = new HashMap<>();
         List<Document> chunks = myTokenTextSplitter.splitCustomized(documentList).stream()
-                .map(document -> document.mutate()
-                        .id(UUID.nameUUIDFromBytes((document.getMetadata().get("objectKey") + "|" + document.getText())
-                                .getBytes(StandardCharsets.UTF_8)).toString())
-                        .build())
+                .map(document -> {
+                    Map<String, Object> metadata = new HashMap<>(document.getMetadata());
+                    String objectKey = String.valueOf(metadata.get("objectKey"));
+                    metadata.put("chunkIndex", chunkIndexes.merge(objectKey, 1, Integer::sum));
+                    return Document.builder()
+                            .id(UUID.nameUUIDFromBytes((objectKey + "|" + document.getText())
+                                    .getBytes(StandardCharsets.UTF_8)).toString())
+                            .text(document.getText())
+                            .metadata(metadata)
+                            .build();
+                })
                 .toList();
         vectorStore.delete(chunks.stream().map(Document::getId).toList());
         for (int start = 0; start < chunks.size(); start += 25) {

@@ -27,6 +27,15 @@ const routes = [
       title: '超级智能体 - ZWX Agent',
       description: '超级智能体是 ZWX Agent 的通用任务协作助手。'
     }
+  },
+  {
+    path: '/knowledge-admin',
+    name: 'KnowledgeAdmin',
+    component: () => import('../views/KnowledgeAdmin.vue'),
+    meta: {
+      title: '知识库管理 - ZWX Agent',
+      description: '查看情感分析大师的内置文档和实际向量切片。'
+    }
   }
 ]
 

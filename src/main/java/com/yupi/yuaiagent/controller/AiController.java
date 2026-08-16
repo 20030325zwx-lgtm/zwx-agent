@@ -2,18 +2,30 @@ package com.yupi.yuaiagent.controller;
 
 import com.yupi.yuaiagent.agent.YuManus;
 import com.yupi.yuaiagent.app.LoveApp;
+import com.yupi.yuaiagent.conversation.LoveConversationMessage;
+import com.yupi.yuaiagent.conversation.LoveConversationService;
+import com.yupi.yuaiagent.conversation.LoveConversationSummary;
+import com.yupi.yuaiagent.storage.LoveImageStorageService;
+import com.yupi.yuaiagent.storage.LoveImageUpload;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.util.List;
 
 @RestController
 @RequestMapping("/ai")
@@ -27,6 +39,46 @@ public class AiController {
 
     @Resource
     private ChatModel dashscopeChatModel;
+
+    @Resource
+    private LoveConversationService conversationService;
+
+    @Resource
+    private LoveImageStorageService imageStorageService;
+
+    @PostMapping("/love_app/conversations")
+    public LoveConversationSummary createLoveConversation() {
+        return conversationService.createConversation();
+    }
+
+    @GetMapping("/love_app/conversations")
+    public List<LoveConversationSummary> listLoveConversations() {
+        return conversationService.listConversations();
+    }
+
+    @GetMapping("/love_app/conversations/{conversationId}/messages")
+    public List<LoveConversationMessage> getLoveConversationMessages(@PathVariable String conversationId) {
+        return conversationService.getMessages(conversationId);
+    }
+
+    @DeleteMapping("/love_app/conversations/{conversationId}")
+    public void deleteLoveConversation(@PathVariable String conversationId) {
+        conversationService.deleteConversation(conversationId);
+    }
+
+    @PostMapping(value = "/love_app/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public LoveImageUpload uploadLoveImage(@RequestParam String chatId, @RequestPart("file") MultipartFile file) {
+        return imageStorageService.upload(chatId, file);
+    }
+
+    @GetMapping("/love_app/images")
+    public org.springframework.http.ResponseEntity<org.springframework.core.io.InputStreamResource> getLoveImage(
+            @RequestParam String chatId, @RequestParam String objectKey) {
+        var response = imageStorageService.getImage(chatId, objectKey);
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(response.contentType()))
+                .body(new org.springframework.core.io.InputStreamResource(response.inputStream()));
+    }
 
     /**
      * 同步调用 AI 恋爱大师应用
@@ -48,8 +100,9 @@ public class AiController {
      * @return
      */
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> doChatWithLoveAppSSE(String message, String chatId) {
-        return loveApp.doChatByStream(message, chatId);
+    public Flux<String> doChatWithLoveAppSSE(String message, String chatId,
+                                              @RequestParam(required = false) List<String> imageKey) {
+        return loveApp.doChatByStream(message, chatId, imageKey == null ? List.of() : imageKey);
     }
 
     /**

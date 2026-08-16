@@ -14,8 +14,10 @@ const request = axios.create({
 // 封装SSE连接
 export const connectSSE = (url, params, onMessage, onError) => {
   // 构建带参数的URL
-  const queryString = Object.keys(params)
-    .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+  const queryString = Object.entries(params)
+    .flatMap(([key, value]) => Array.isArray(value)
+      ? value.map(item => `${encodeURIComponent(key)}=${encodeURIComponent(item)}`)
+      : `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&')
   
   const fullUrl = `${API_BASE_URL}${url}?${queryString}`
@@ -45,9 +47,24 @@ export const connectSSE = (url, params, onMessage, onError) => {
 }
 
 // AI恋爱大师聊天
-export const chatWithLoveApp = (message, chatId) => {
-  return connectSSE('/ai/love_app/chat/sse', { message, chatId })
+export const chatWithLoveApp = (message, chatId, imageKeys = []) => {
+  return connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys })
 }
+
+export const uploadLoveImage = async (chatId, file) => {
+  const formData = new FormData()
+  formData.append('chatId', chatId)
+  formData.append('file', file)
+  return (await request.post('/ai/love_app/images', formData)).data
+}
+
+export const getLoveImageUrl = (chatId, objectKey) =>
+  `${API_BASE_URL}/ai/love_app/images?chatId=${encodeURIComponent(chatId)}&objectKey=${encodeURIComponent(objectKey)}`
+
+export const createLoveConversation = async () => (await request.post('/ai/love_app/conversations')).data
+export const listLoveConversations = async () => (await request.get('/ai/love_app/conversations')).data
+export const getLoveConversationMessages = async (conversationId) => (await request.get(`/ai/love_app/conversations/${conversationId}/messages`)).data
+export const deleteLoveConversation = (conversationId) => request.delete(`/ai/love_app/conversations/${conversationId}`)
 
 // AI超级智能体聊天
 export const chatWithManus = (message) => {
@@ -56,5 +73,11 @@ export const chatWithManus = (message) => {
 
 export default {
   chatWithLoveApp,
+  uploadLoveImage,
+  getLoveImageUrl,
+  createLoveConversation,
+  listLoveConversations,
+  getLoveConversationMessages,
+  deleteLoveConversation,
   chatWithManus
-} 
+}

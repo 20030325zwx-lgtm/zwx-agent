@@ -3,6 +3,9 @@ spring:
     name: yu-ai-agent
   profiles:
     active: local
+  sql:
+    init:
+      mode: always
 # 临时注释掉，便于大家开发调试和部署（实际填写 PgVector 数据库信息）
 #  datasource:
 #    url: xxx
@@ -39,6 +42,24 @@ server:
   port: 8123
   servlet:
     context-path: /api
+  max-http-request-header-size: 16KB
+spring.servlet.multipart:
+  max-file-size: 10MB
+  max-request-size: 10MB
+app:
+  love:
+    vision-model: qwen-vl-plus
+  storage:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}
+    access-key: ${MINIO_ROOT_USER:}
+    secret-key: ${MINIO_ROOT_PASSWORD:}
+    bucket: ${MINIO_BUCKET:love-chat-images}
+  oss:
+    endpoint: ${ALIYUN_OSS_ENDPOINT:https://oss-cn-hangzhou.aliyuncs.com}
+    bucket: ${ALIYUN_OSS_BUCKET:zwx-agent}
+    access-key-id: ${ALIYUN_OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${ALIYUN_OSS_ACCESS_KEY_SECRET:}
 # springdoc-openapi config
 springdoc:
   swagger-ui:

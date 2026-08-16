@@ -1,5 +1,9 @@
 ### CUSTOM ###
 application-local.yml
+application-local.yaml
+.env
+.env.*
+.DS_Store
 tmp
 
 HELP.md

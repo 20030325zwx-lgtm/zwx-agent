@@ -19,7 +19,7 @@
 
 ![](https://pic.yupi.icu/1/1745225631067-44a111e1-1032-4f1c-bd69-9f08a59a654b.png)
 
-此外，还会手把手带大家完成基于 ReAct 模式的 `自主规划智能体 YuManus` ，可以利用网页搜索、资源下载和 PDF 生成工具，帮用户制定完整的约会计划并生成文档：
+此外，还会手把手带大家完成基于 ReAct 模式的 `自主规划智能体 ZwxManus` ，可以利用网页搜索、资源下载和 PDF 生成工具，帮用户制定完整的约会计划并生成文档：
 
 ![](https://pic.yupi.icu/1/1745224663573-04af8f65-2da4-4ef9-8033-a179e703f9c4.png)
 
@@ -165,7 +165,7 @@ RAG 核心特性实战：
 
 利用 GitHub 搭建开源代码仓库，点 star 的都是精神股东
 
-代码仓库：https://github.com/liyupi/yu-ai-agent
+代码仓库：https://github.com/20030325zwx-lgtm/zwx-agent
 
 ### AI 学习资源
 
@@ -295,4 +295,3 @@ RAG 核心特性实战：
 - AI 智能体接口开发
 - AI 生成前端代码
 - AI 服务 Serverless 部
-

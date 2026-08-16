@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS love_chat_message (
 ALTER TABLE love_chat_message
     ADD COLUMN IF NOT EXISTS image_object_keys TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
 
+ALTER TABLE love_chat_message
+    ADD COLUMN IF NOT EXISTS knowledge_references JSONB NOT NULL DEFAULT '[]'::JSONB;
+
+ALTER TABLE love_chat_message
+    ADD COLUMN IF NOT EXISTS rag_trace JSONB;
+
 CREATE INDEX IF NOT EXISTS idx_love_conversation_updated_at
     ON love_conversation (updated_at DESC);
 

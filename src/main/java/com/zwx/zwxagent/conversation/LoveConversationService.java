@@ -1,5 +1,9 @@
 package com.zwx.zwxagent.conversation;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zwx.zwxagent.rag.LoveKnowledgeReference;
+import com.zwx.zwxagent.rag.LoveRagTrace;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -15,9 +19,11 @@ public class LoveConversationService {
     private static final String DEFAULT_TITLE = "新的恋爱对话";
 
     private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
 
-    public LoveConversationService(JdbcTemplate jdbcTemplate) {
+    public LoveConversationService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
     }
 
     public LoveConversationSummary createConversation() {
@@ -68,10 +74,23 @@ public class LoveConversationService {
                         rs.getTimestamp("updated_at").toInstant()));
     }
 
+    public void saveLatestAssistantRagData(String conversationId, String referencesJson, String traceJson) {
+        jdbcTemplate.update("""
+                        UPDATE love_chat_message
+                        SET knowledge_references = CAST(? AS jsonb), rag_trace = CAST(? AS jsonb)
+                        WHERE id = (
+                            SELECT id FROM love_chat_message
+                            WHERE conversation_id = ? AND role = 'ASSISTANT'
+                            ORDER BY id DESC
+                            LIMIT 1
+                        )
+                        """, referencesJson, traceJson, conversationId);
+    }
+
     public List<LoveConversationMessage> getMessages(String conversationId) {
         return jdbcTemplate.query("""
-                        SELECT role, content, image_object_keys, created_at FROM (
-                            SELECT id, role, content, image_object_keys, created_at
+                        SELECT role, content, image_object_keys, knowledge_references, rag_trace, created_at FROM (
+                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, created_at
                             FROM love_chat_message
                             WHERE conversation_id = ?
                             ORDER BY id DESC
@@ -82,13 +101,15 @@ public class LoveConversationService {
                         rs.getString("role"),
                         rs.getString("content"),
                         toStringList(rs.getArray("image_object_keys")),
+                        toReferences(rs.getString("knowledge_references")),
+                        toTrace(rs.getString("rag_trace")),
                         rs.getTimestamp("created_at").toInstant()), conversationId);
     }
 
     public List<LoveConversationMessage> getRecentMessages(String conversationId, int limit) {
         return jdbcTemplate.query("""
-                        SELECT role, content, image_object_keys, created_at FROM (
-                            SELECT id, role, content, image_object_keys, created_at
+                        SELECT role, content, image_object_keys, knowledge_references, rag_trace, created_at FROM (
+                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, created_at
                             FROM love_chat_message
                             WHERE conversation_id = ?
                             ORDER BY id DESC
@@ -99,6 +120,8 @@ public class LoveConversationService {
                         rs.getString("role"),
                         rs.getString("content"),
                         toStringList(rs.getArray("image_object_keys")),
+                        toReferences(rs.getString("knowledge_references")),
+                        toTrace(rs.getString("rag_trace")),
                         rs.getTimestamp("created_at").toInstant()), conversationId, limit);
     }
 
@@ -131,5 +154,27 @@ public class LoveConversationService {
             return List.of();
         }
         return Arrays.asList((String[]) sqlArray.getArray());
+    }
+
+    private List<LoveKnowledgeReference> toReferences(String referencesJson) {
+        if (referencesJson == null || referencesJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(referencesJson, new TypeReference<>() {});
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to read persisted knowledge references", exception);
+        }
+    }
+
+    private LoveRagTrace toTrace(String traceJson) {
+        if (traceJson == null || traceJson.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(traceJson, LoveRagTrace.class);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to read persisted RAG trace", exception);
+        }
     }
 }

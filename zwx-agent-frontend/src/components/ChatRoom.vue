@@ -24,6 +24,19 @@
               <span>参考资料</span>
               <span v-for="reference in msg.references" :key="reference.objectKey">{{ reference.filename }}{{ reference.section ? ` · 第${reference.section}节` : '' }}</span>
             </div>
+            <div v-if="msg.trace" class="trace-entry">
+              <button type="button" class="trace-button" aria-label="查看本次回答的调用流程">i</button>
+              <div class="trace-popover" role="tooltip">
+                <strong>本次调用流程</strong>
+                <span>1. 接收问题：{{ msg.trace.query }}</span>
+                <span>2. 向量检索：Top {{ msg.trace.topK }}，阈值 {{ msg.trace.similarityThreshold }}</span>
+                <span>3. {{ msg.trace.decision }}</span>
+                <span v-for="candidate in msg.trace.candidates" :key="candidate.objectKey">
+                  {{ candidate.filename }}{{ candidate.section ? ` · 第${candidate.section}节` : '' }}（相似度 {{ candidate.score?.toFixed(3) }}）
+                </span>
+                <span>4. {{ msg.trace.model }} 结合系统提示词、会话上下文与召回片段流式生成。</span>
+              </div>
+            </div>
             <div class="message-time">{{ formatTime(msg.time) }}</div>
           </div>
         </div>
@@ -253,6 +266,11 @@ onMounted(() => {
 }
 .message-references { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; color: #8a5b68; font-size: 12px; }
 .message-references span:not(:first-child) { padding: 3px 6px; border: 1px solid #ebd4da; border-radius: 4px; background: #fff8f9; }
+.trace-entry { position: relative; display: inline-flex; margin-top: 10px; }
+.trace-button { width: 20px; height: 20px; border: 1px solid #d8cbd0; border-radius: 50%; background: #fff; color: #7c6770; font-size: 12px; font-weight: 700; line-height: 1; }
+.trace-popover { position: absolute; z-index: 3; bottom: 28px; left: 0; display: none; width: min(460px, calc(100vw - 96px)); padding: 12px; border: 1px solid #e4d5da; border-radius: 6px; background: #fff; box-shadow: 0 8px 24px rgba(73, 48, 57, .14); color: #51474a; font-size: 12px; line-height: 1.55; }
+.trace-popover strong, .trace-popover span { display: block; }
+.trace-entry:hover .trace-popover, .trace-entry:focus-within .trace-popover { display: block; }
 
 .avatar-placeholder {
   width: 100%;

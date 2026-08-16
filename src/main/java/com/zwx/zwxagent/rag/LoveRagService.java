@@ -15,13 +15,14 @@ public class LoveRagService {
     @Resource(name = "loveAppVectorStore")
     private VectorStore vectorStore;
 
-    public List<LoveKnowledgeReference> findReferences(String message) {
-        return vectorStore.similaritySearch(SearchRequest.builder()
+    public LoveRagTrace trace(String message, String model) {
+        List<Document> documents = vectorStore.similaritySearch(SearchRequest.builder()
                         .query(message)
                         .topK(3)
                         .similarityThreshold(0.55)
-                        .build())
-                .stream()
+                        .build());
+        List<LoveRetrievalCandidate> candidates = documents.stream().map(this::toCandidate).toList();
+        List<LoveKnowledgeReference> references = documents.stream()
                 .map(this::toReference)
                 .collect(java.util.stream.Collectors.toMap(
                         LoveKnowledgeReference::objectKey,
@@ -29,6 +30,10 @@ public class LoveRagService {
                         (first, ignored) -> first,
                         LinkedHashMap::new))
                 .values().stream().toList();
+        String decision = documents.isEmpty()
+                ? "没有文档达到相似度阈值，模型仅使用系统提示词与会话上下文回答。"
+                : "命中文档达到相似度阈值，已注入 RAG 上下文并用于生成回答。";
+        return new LoveRagTrace(message, 3, 0.55, candidates, decision, references, model, true);
     }
 
     private LoveKnowledgeReference toReference(Document document) {
@@ -37,5 +42,10 @@ public class LoveRagService {
                 String.valueOf(document.getMetadata().get("filename")),
                 section instanceof Number number ? number.intValue() : null,
                 String.valueOf(document.getMetadata().get("objectKey")));
+    }
+
+    private LoveRetrievalCandidate toCandidate(Document document) {
+        LoveKnowledgeReference reference = toReference(document);
+        return new LoveRetrievalCandidate(reference.filename(), reference.section(), reference.objectKey(), document.getScore());
     }
 }

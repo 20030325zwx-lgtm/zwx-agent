@@ -83,7 +83,8 @@ const addMessage = (content, isUser, imageKeys = []) => {
     isUser,
     imageUrls: imageKeys.map(key => getLoveImageUrl(chatId.value, key)),
     time: Date.now(),
-    references: []
+    references: [],
+    trace: null
   })
 }
 
@@ -182,6 +183,14 @@ const sendMessage = async ({ message, files }) => {
       finishStream()
     } catch (error) {
       console.error('Knowledge references unavailable:', error)
+    }
+  })
+
+  eventSource.addEventListener('trace', event => {
+    try {
+      messages.value[aiMessageIndex].trace = JSON.parse(event.data)
+    } catch (error) {
+      console.error('RAG trace unavailable:', error)
     }
   })
 

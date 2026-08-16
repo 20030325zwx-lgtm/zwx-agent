@@ -106,6 +106,7 @@ public class LoveApp {
                 .prompt()
                 .user(message)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
                 .stream()
                 .content();
     }

@@ -48,8 +48,9 @@ import {
   deleteLoveConversation,
   getLoveImageUrl,
   getLoveConversationMessages,
-  listLoveConversations
-  ,uploadLoveImage
+  listLoveConversations,
+  uploadLoveImage,
+  getLoveKnowledgeReferences
 } from '../api'
 
 useHead({
@@ -81,7 +82,8 @@ const addMessage = (content, isUser, imageKeys = []) => {
     content,
     isUser,
     imageUrls: imageKeys.map(key => getLoveImageUrl(chatId.value, key)),
-    time: Date.now()
+    time: Date.now(),
+    references: []
   })
 }
 
@@ -167,12 +169,19 @@ const sendMessage = async ({ message, files }) => {
   connectionStatus.value = 'connecting'
   eventSource = chatWithLoveApp(message, chatId.value, imageKeys)
 
-  eventSource.onmessage = (event) => {
+  eventSource.onmessage = async (event) => {
     const data = event.data
     if (data && data !== '[DONE]' && aiMessageIndex < messages.value.length) {
       messages.value[aiMessageIndex].content += data
     }
-    if (data === '[DONE]') finishStream()
+    if (data === '[DONE]') {
+      try {
+        messages.value[aiMessageIndex].references = await getLoveKnowledgeReferences(message)
+      } catch (error) {
+        console.error('Knowledge references unavailable:', error)
+      }
+      finishStream()
+    }
   }
 
   eventSource.onerror = async (error) => {

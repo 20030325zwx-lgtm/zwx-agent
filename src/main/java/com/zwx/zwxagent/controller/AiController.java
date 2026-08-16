@@ -7,6 +7,10 @@ import com.zwx.zwxagent.conversation.LoveConversationService;
 import com.zwx.zwxagent.conversation.LoveConversationSummary;
 import com.zwx.zwxagent.storage.LoveImageStorageService;
 import com.zwx.zwxagent.storage.LoveImageUpload;
+import com.zwx.zwxagent.storage.LoveKnowledgeDocumentStorageService;
+import com.zwx.zwxagent.storage.LoveKnowledgeDocumentUpload;
+import com.zwx.zwxagent.rag.LoveKnowledgeReference;
+import com.zwx.zwxagent.rag.LoveRagService;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
@@ -46,6 +50,12 @@ public class AiController {
     @Resource
     private LoveImageStorageService imageStorageService;
 
+    @Resource
+    private LoveKnowledgeDocumentStorageService knowledgeDocumentStorageService;
+
+    @Resource
+    private LoveRagService loveRagService;
+
     @PostMapping("/love_app/conversations")
     public LoveConversationSummary createLoveConversation() {
         return conversationService.createConversation();
@@ -69,6 +79,16 @@ public class AiController {
     @PostMapping(value = "/love_app/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public LoveImageUpload uploadLoveImage(@RequestParam String chatId, @RequestPart("file") MultipartFile file) {
         return imageStorageService.upload(chatId, file);
+    }
+
+    @PostMapping("/love_app/knowledge/documents/upload")
+    public List<LoveKnowledgeDocumentUpload> uploadLoveKnowledgeDocuments() {
+        return knowledgeDocumentStorageService.uploadBundledDocuments();
+    }
+
+    @GetMapping("/love_app/knowledge/references")
+    public List<LoveKnowledgeReference> findLoveKnowledgeReferences(@RequestParam String message) {
+        return loveRagService.findReferences(message);
     }
 
     @GetMapping("/love_app/images")

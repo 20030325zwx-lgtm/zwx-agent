@@ -3,16 +3,18 @@ package com.zwx.zwxagent.rag;
 import jakarta.annotation.Resource;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.SimpleVectorStore;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.UUID;
 
 /**
- * 恋爱大师向量数据库配置（初始化基于内存的向量数据库 Bean）
+ * 恋爱大师向量数据库配置。
  */
 @Configuration
 public class LoveAppVectorStoreConfig {
@@ -24,18 +26,27 @@ public class LoveAppVectorStoreConfig {
     private MyTokenTextSplitter myTokenTextSplitter;
 
     @Resource
-    private MyKeywordEnricher myKeywordEnricher;
-
-    @Bean
-    VectorStore loveAppVectorStore(EmbeddingModel dashscopeEmbeddingModel) {
-        SimpleVectorStore simpleVectorStore = SimpleVectorStore.builder(dashscopeEmbeddingModel).build();
-        // 加载文档
+    @Bean("loveAppVectorStore")
+    VectorStore loveAppVectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel dashscopeEmbeddingModel) {
+        PgVectorStore vectorStore = PgVectorStore.builder(jdbcTemplate, dashscopeEmbeddingModel)
+                .dimensions(dashscopeEmbeddingModel.dimensions())
+                .distanceType(PgVectorStore.PgDistanceType.COSINE_DISTANCE)
+                .indexType(PgVectorStore.PgIndexType.HNSW)
+                .initializeSchema(true)
+                .vectorTableName("love_knowledge_vector")
+                .build();
+        vectorStore.afterPropertiesSet();
         List<Document> documentList = loveAppDocumentLoader.loadMarkdowns();
-        // 自主切分文档
-//        List<Document> splitDocuments = myTokenTextSplitter.splitCustomized(documentList);
-        // 自动补充关键词元信息
-        List<Document> enrichedDocuments = myKeywordEnricher.enrichDocuments(documentList);
-        simpleVectorStore.add(enrichedDocuments);
-        return simpleVectorStore;
+        List<Document> chunks = myTokenTextSplitter.splitCustomized(documentList).stream()
+                .map(document -> document.mutate()
+                        .id(UUID.nameUUIDFromBytes((document.getMetadata().get("objectKey") + "|" + document.getText())
+                                .getBytes(StandardCharsets.UTF_8)).toString())
+                        .build())
+                .toList();
+        vectorStore.delete(chunks.stream().map(Document::getId).toList());
+        for (int start = 0; start < chunks.size(); start += 25) {
+            vectorStore.add(chunks.subList(start, Math.min(start + 25, chunks.size())));
+        }
+        return vectorStore;
     }
 }

@@ -8,7 +8,7 @@
         <span :class="connectionStatus" class="status">{{ statusText }}</span>
       </header>
       <section class="travel-chat" :class="{ loading: messagesLoading }">
-        <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="travel" @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage" @view-execution="openExecution" />
+        <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="travel" attachments-enabled attachment-accept=".md,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" web-search-available @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage" @view-execution="openExecution" />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
     </main>
@@ -33,7 +33,7 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
-import { chatWithTravelPlanner, createTravelConversation, deleteTravelAssistantReply, deleteTravelConversation, getTravelConversationMessages, getTravelExecutionEvents, listTravelConversations } from '../api'
+import { chatWithTravelPlanner, createTravelConversation, deleteTravelAssistantReply, deleteTravelConversation, getTravelConversationMessages, getTravelExecutionEvents, listTravelConversations, uploadAgentKnowledgeDocument } from '../api'
 
 useHead({ title: '旅游规划专家 - ZWX Agent' })
 const router = useRouter()
@@ -79,8 +79,12 @@ const removeConversation = async conversation => {
   await refreshConversations()
   if (wasActive) conversations.value.length ? await selectConversation(conversations.value[0]) : await createConversation()
 }
-const sendMessage = (message, retryUserMessageId = null, retryIndex = -1) => {
+const sendMessage = async (payload, retryUserMessageId = null, retryIndex = -1) => {
+  const message = typeof payload === 'string' ? payload : payload.message
+  const webSearch = typeof payload === 'string' ? false : payload.webSearch
+  const files = typeof payload === 'string' ? [] : payload.files || []
   if (!chatId.value) return
+  if (files.length) await Promise.all(files.map(file => uploadAgentKnowledgeDocument('travel', file)))
   cancelActiveStream()
   activeTurnStart = retryUserMessageId ? retryIndex + 1 : messages.value.length
   activeRetry = Boolean(retryUserMessageId)
@@ -88,7 +92,7 @@ const sendMessage = (message, retryUserMessageId = null, retryIndex = -1) => {
   const answerIndex = retryUserMessageId ? retryIndex + 1 : messages.value.length
   messages.value.splice(answerIndex, 0, { content: '', isUser: false, time: Date.now(), activities: [] })
   connectionStatus.value = 'connecting'
-  eventSource = chatWithTravelPlanner(chatId.value, message, retryUserMessageId)
+  eventSource = chatWithTravelPlanner(chatId.value, message, webSearch, retryUserMessageId)
   eventSource.addEventListener('references', event => {
     try { messages.value[answerIndex].references = JSON.parse(event.data) }
     catch (error) { console.error('Knowledge references unavailable:', error) }

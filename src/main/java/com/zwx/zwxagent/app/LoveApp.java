@@ -22,6 +22,8 @@ import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
@@ -40,6 +42,7 @@ public class LoveApp {
 
     private final ChatClient chatClient;
     private final ChatClient streamingChatClient;
+    private final ToolCallback[] webSearchTools;
 
     /**
      * 初始化 ChatClient
@@ -58,7 +61,7 @@ public class LoveApp {
                    LoveConversationService conversationService,
                    LoveVisionChatService loveVisionChatService, LoveRagService loveRagService,
                    ObjectMapper objectMapper, @org.springframework.beans.factory.annotation.Value("${app.love.vision-model}") String visionModel,
-                   AgentKnowledgeRagService agentKnowledgeRagService, AgentRegistry agentRegistry) {
+                   AgentKnowledgeRagService agentKnowledgeRagService, AgentRegistry agentRegistry, @Qualifier("travelTools") ToolCallback[] webSearchTools) {
         this.conversationService = conversationService;
         this.loveVisionChatService = loveVisionChatService;
         this.loveRagService = loveRagService;
@@ -66,6 +69,7 @@ public class LoveApp {
         this.visionModel = visionModel;
         this.agentKnowledgeRagService = agentKnowledgeRagService;
         this.agentRegistry = agentRegistry;
+        this.webSearchTools = webSearchTools;
         String systemPrompt = agentRegistry.get("love").systemPrompt();
         chatClient = ChatClient.builder(dashscopeChatModel)
                 .defaultSystem(systemPrompt)
@@ -116,15 +120,20 @@ public class LoveApp {
     }
 
     public Flux<String> doChatByStream(String message, String chatId, String ragContext, Long retryUserMessageId) {
+        return doChatByStream(message, chatId, ragContext, false, retryUserMessageId);
+    }
+
+    public Flux<String> doChatByStream(String message, String chatId, String ragContext, boolean webSearch, Long retryUserMessageId) {
         String history = conversationService.getRecentMessages(chatId, 20).stream()
                 .map(item -> item.role() + ": " + item.content())
                 .collect(Collectors.joining("\n"));
         StringBuilder answer = new StringBuilder();
-        return streamingChatClient
+        var prompt = streamingChatClient
                 .prompt()
-                .system(agentRegistry.get("love").systemPrompt() + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
-                .user(message)
-                .stream()
+                .system(agentRegistry.get("love").systemPrompt() + (webSearch ? "" : "\n本轮未开启联网搜索，不得调用外部工具。") + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
+                .user(message);
+        if (webSearch) prompt.toolCallbacks(webSearchTools);
+        return prompt.stream()
                 .content()
                 .doOnNext(answer::append)
                 .doOnComplete(() -> {

@@ -28,6 +28,7 @@
           :connection-status="connectionStatus"
           ai-type="love"
           attachments-enabled
+          web-search-available
           @send-message="sendMessage"
           @edit-message="cancelActiveStream"
           @resend-message="resendMessage"
@@ -177,7 +178,7 @@ const finishStream = async (message, aiMessageIndex, refreshReferences = true) =
   messages.value.forEach((item, index) => { item.id = history[index]?.id })
 }
 
-const sendMessage = async ({ message, files }, retryUserMessageId = null, retryIndex = -1, retryImageKeys = []) => {
+const sendMessage = async ({ message, files, webSearch = false }, retryUserMessageId = null, retryIndex = -1, retryImageKeys = []) => {
   if (!chatId.value) return
   cancelActiveStream()
   let imageKeys = []
@@ -194,7 +195,7 @@ const sendMessage = async ({ message, files }, retryUserMessageId = null, retryI
   const aiMessageIndex = retryUserMessageId ? retryIndex + 1 : messages.value.length
   messages.value.splice(aiMessageIndex, 0, { content: '', isUser: false, time: Date.now(), activities: [] })
   connectionStatus.value = 'connecting'
-  eventSource = chatWithLoveApp(message, chatId.value, imageKeys, retryUserMessageId)
+  eventSource = chatWithLoveApp(message, chatId.value, imageKeys, webSearch, retryUserMessageId)
 
   eventSource.addEventListener('references', event => {
     try {

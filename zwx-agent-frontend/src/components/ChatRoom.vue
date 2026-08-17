@@ -74,17 +74,19 @@
 
     <footer class="chat-input-container">
       <div class="chat-input">
-        <input ref="fileInput" class="file-input" type="file" accept="image/jpeg,image/png,image/gif" @change="selectImages" />
+        <input ref="fileInput" class="file-input" type="file" :accept="attachmentAccept" multiple @change="selectImages" />
         <div v-if="selectedImages.length" class="selected-images">
           <div v-for="attachment in selectedImages" :key="attachment.preview" class="selected-image">
-            <img :src="attachment.preview" alt="待发送图片" />
+            <img v-if="attachment.preview" :src="attachment.preview" alt="待发送图片" />
+            <span v-else class="selected-file-name">{{ attachment.file.name }}</span>
             <button type="button" title="移除图片" @click="removeImage(attachment)">×</button>
           </div>
         </div>
         <textarea v-model="inputMessage" class="input-box"
           :placeholder="inputPlaceholder" @keydown.enter.exact.prevent="sendMessage" @paste="pasteImages"></textarea>
         <div class="input-actions">
-          <button v-if="attachmentsEnabled" class="image-button" type="button" title="添加图片" @click="fileInput?.click()">＋</button>
+          <button v-if="attachmentsEnabled" class="tool-button" type="button" title="上传图片" aria-label="上传图片" @click="fileInput?.click()"><Paperclip :size="18" /></button>
+          <button v-if="webSearchAvailable" class="tool-button web-search-toggle" :class="{ active: webSearch }" type="button" :aria-pressed="webSearch" :title="webSearch ? '本轮允许联网搜索' : '本轮不联网搜索'" aria-label="联网搜索" @click="webSearch = !webSearch"><Globe2 :size="18" /></button>
           <span class="input-hint">Enter 发送</span>
           <button class="send-button" type="button" :disabled="!inputMessage.trim() && !selectedImages.length" @click="sendMessage">发送 ↑</button>
         </div>
@@ -98,13 +100,16 @@ import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import { Globe2, Paperclip } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
   connectionStatus: { type: String, default: 'disconnected' },
   aiType: { type: String, default: 'default' },
-  attachmentsEnabled: { type: Boolean, default: false }
+  attachmentsEnabled: { type: Boolean, default: false },
+  attachmentAccept: { type: String, default: 'image/jpeg,image/png,image/gif' },
+  webSearchAvailable: { type: Boolean, default: false }
 })
 const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message'])
 const agent = computed(() => getAgent(props.aiType))
@@ -118,6 +123,7 @@ const fileInput = ref(null)
 const selectedImages = ref([])
 const editingIndex = ref(-1)
 const editingContent = ref('')
+const webSearch = ref(false)
 
 const renderMarkdown = content => DOMPurify.sanitize(marked.parse(content || '', {
   breaks: true,
@@ -127,7 +133,8 @@ const renderMarkdown = content => DOMPurify.sanitize(marked.parse(content || '',
 const sendMessage = () => {
   if (!inputMessage.value.trim() && !selectedImages.value.length) return
   const payload = { message: inputMessage.value.trim(), files: selectedImages.value.map(item => item.file) }
-  emit('send-message', props.attachmentsEnabled ? payload : payload.message)
+  if (props.webSearchAvailable) payload.webSearch = webSearch.value
+  emit('send-message', props.attachmentsEnabled ? payload : props.webSearchAvailable ? payload : payload.message)
   inputMessage.value = ''
   clearSelectedImages()
   if (fileInput.value) fileInput.value.value = ''
@@ -160,9 +167,9 @@ const pasteImages = event => {
   if (!files.length) return
   event.preventDefault(); addImages(files)
 }
-const addImages = files => selectedImages.value.push(...files.map(file => ({ file, preview: URL.createObjectURL(file) })))
-const removeImage = attachment => { URL.revokeObjectURL(attachment.preview); selectedImages.value = selectedImages.value.filter(item => item !== attachment) }
-const clearSelectedImages = () => { selectedImages.value.forEach(item => URL.revokeObjectURL(item.preview)); selectedImages.value = [] }
+const addImages = files => selectedImages.value.push(...files.map(file => ({ file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : '' })))
+const removeImage = attachment => { if (attachment.preview) URL.revokeObjectURL(attachment.preview); selectedImages.value = selectedImages.value.filter(item => item !== attachment) }
+const clearSelectedImages = () => { selectedImages.value.forEach(item => { if (item.preview) URL.revokeObjectURL(item.preview) }); selectedImages.value = [] }
 const formatTime = timestamp => new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 const scrollToBottom = async () => { await nextTick(); if (messagesContainer.value) messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight }
 watch(() => props.messages.length, scrollToBottom)
@@ -207,8 +214,8 @@ onMounted(scrollToBottom)
 .trace-popover strong, .trace-popover span { display: block; }.trace-entry:hover .trace-popover, .trace-entry:focus-within .trace-popover { display: block; }
 .chat-input-container { position: absolute; right: 0; bottom: 0; left: 0; padding: 14px max(24px, calc((100% - 880px) / 2)); background: linear-gradient(180deg, rgba(255,255,255,0), #fff 24%); }
 .chat-input { position: relative; border: 1px solid #e5e7eb; border-radius: 16px; background: #fff; box-shadow: 0 8px 30px rgba(15,23,42,.07); }.chat-input:focus-within { border-color: var(--zwx-primary); box-shadow: 0 0 0 3px rgba(0,111,238,.12), 0 8px 30px rgba(15,23,42,.07); }
-.file-input { display: none; }.input-box { display: block; width: 100%; min-height: 78px; max-height: 132px; resize: none; border: 0; outline: 0; padding: 15px 17px 6px; color: #222; font: inherit; font-size: 15px; line-height: 1.55; }.input-box::placeholder { color: #aaa; }
-.input-actions { display: flex; height: 43px; align-items: center; gap: 12px; padding: 0 10px 9px 12px; }.image-button { width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #555; font-size: 22px; }.image-button:hover { background: #f2f2f2; }.input-hint { margin-right: auto; color: #aaa; font-size: 12px; }.send-button { height: 32px; border: 0; border-radius: 8px; padding: 0 13px; background: var(--zwx-primary); color: #fff; font-size: 13px; font-weight: 650; }.send-button:hover:not(:disabled) { background: var(--zwx-primary-dark); }.send-button:disabled { background: #e9e9e9; color: #aaa; }
+.file-input { display: none; }.selected-file-name{display:block;max-width:132px;overflow:hidden;padding:7px 20px 7px 8px;color:#475467;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.input-box { display: block; box-sizing: border-box; width: 100%; min-height: 78px; max-height: 132px; resize: none; border: 0; outline: 0; padding: 15px 17px 6px; background: transparent; color: #222; font: inherit; font-size: 15px; line-height: 1.55; }.input-box::placeholder { color: #aaa; }
+.input-actions { display: flex; height: 43px; align-items: center; gap: 8px; padding: 0 10px 9px 12px; }.tool-button { display:grid;width:30px;height:30px;place-items:center;border:0;border-radius:6px;background:transparent;color:#667085;cursor:pointer }.tool-button:hover { background:#f0f2f4;color:#344054 }.web-search-toggle.active{background:#eaf8f1;color:#087f5b}.input-hint { margin-right: auto; color: #aaa; font-size: 12px; }.send-button { height: 32px; border: 0; border-radius: 8px; padding: 0 13px; background: var(--zwx-primary); color: #fff; font-size: 13px; font-weight: 650; }.send-button:hover:not(:disabled) { background: var(--zwx-primary-dark); }.send-button:disabled { background: #e9e9e9; color: #aaa; }
 .streaming-pulse { display:inline-flex; align-items:center; gap:3px; margin-left:7px; color:#13a37f; vertical-align:middle; }.streaming-pulse i { display:block; width:5px; height:5px; border-radius:50%; background:currentColor; animation:streaming-pulse 1.05s ease-in-out infinite; }.streaming-pulse i:nth-child(2) { animation-delay:.14s; }.streaming-pulse i:nth-child(3) { animation-delay:.28s; }.chat-love .empty-brand, .chat-love .streaming-pulse { color: #d65070; }.chat-love .empty-brand { background: #fff1f4; }.chat-love .send-button { background: #d65070; }.chat-love .send-button:hover:not(:disabled) { background: #bd3d5a; }.chat-love .chat-input:focus-within { border-color: #d65070; box-shadow: 0 0 0 3px rgba(214,80,112,.12), 0 8px 30px rgba(15,23,42,.07); }
 .selected-images { position: absolute; z-index: 2; right: 10px; bottom: calc(100% + 8px); display: flex; gap: 7px; max-width: min(420px, 100%); padding: 6px; border: 1px solid #e9e9e9; border-radius: 8px; background: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.1); overflow-x: auto; }.selected-image { position: relative; width: 46px; height: 46px; flex: 0 0 46px; }.selected-image img { width: 100%; height: 100%; border-radius: 6px; object-fit: cover; }.selected-image button { position: absolute; top: -5px; right: -5px; display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid #fff; border-radius: 50%; background: #333; color: #fff; line-height: 1; }
 @keyframes thinking-pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } } @keyframes streaming-pulse { 0%, 70%, 100% { opacity:.24; transform:translateY(0) scale(.82); } 35% { opacity:1; transform:translateY(-3px) scale(1); } }

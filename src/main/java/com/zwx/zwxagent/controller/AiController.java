@@ -235,6 +235,7 @@ public class AiController {
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> doChatWithLoveAppSSE(String message, String chatId,
                                                                @RequestParam(required = false) List<String> imageKey,
+                                                               @RequestParam(defaultValue = "false") boolean webSearch,
                                                                @RequestParam(required = false) Long retryUserMessageId,
                                                                @RequestParam(defaultValue = "default") String tenantId) {
         validateTenantId(tenantId);
@@ -249,7 +250,7 @@ public class AiController {
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(chat -> Flux.concat(
                                 Mono.just(ServerSentEvent.<String>builder().event("thinking").data("已完成资料检索，正在生成分析建议...").build()),
-                                loveApp.doChatByStream(message, chatId, chat.context(), retryUserMessageId).map(chunk -> ServerSentEvent.builder(chunk).build()),
+                                loveApp.doChatByStream(message, chatId, chat.context(), webSearch, retryUserMessageId).map(chunk -> ServerSentEvent.builder(chunk).build()),
                                 Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, chat.referencesJson(), chat.traceJson()))
                                         .thenReturn(ServerSentEvent.<String>builder().event("thinking").data("正在整理引用与会话记录...").build()),
                                 Mono.just(ServerSentEvent.<String>builder().event("trace").data(chat.traceJson()).build()),
@@ -371,7 +372,7 @@ public class AiController {
     @GetMapping(value = "/travel-planner/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> chatWithTravelPlanner(@RequestParam(defaultValue = "default") String tenantId,
                                                                 @RequestParam String conversationId, String message,
-                                                                @RequestParam(required = false) Long retryUserMessageId) {
+                                                                @RequestParam(defaultValue = "false") boolean webSearch, @RequestParam(required = false) Long retryUserMessageId) {
         validateTenantId(tenantId);
         String runId = UUID.randomUUID().toString();
         return Flux.create(sink -> {
@@ -381,7 +382,7 @@ public class AiController {
                 sink.next(ServerSentEvent.<String>builder(update.summary()).event("thinking").build());
             };
             progress.accept(new ExecutionUpdate("received", "正在接收并理解你的旅行需求...", Map.of("message", message)));
-            reactor.core.Disposable subscription = travelPlannerApp.chat(tenantId, conversationId, runId, message, retryUserMessageId, progress,
+            reactor.core.Disposable subscription = travelPlannerApp.chat(tenantId, conversationId, runId, message, retryUserMessageId, webSearch, progress,
                     references -> sink.next(ServerSentEvent.<String>builder(toJson(references)).event("references").build())).subscribe(
                     chunk -> sink.next(ServerSentEvent.builder(chunk).build()),
                     sink::error,
@@ -440,9 +441,9 @@ public class AiController {
 
     @GetMapping(value = "/test-agent/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> chatWithTestAgent(@RequestParam(defaultValue = "default") String tenantId, @RequestParam String conversationId,
-                                                            @RequestParam String message, @RequestParam(required = false) Long retryUserMessageId) {
+                                                            @RequestParam String message, @RequestParam(defaultValue = "false") boolean webSearch, @RequestParam(required = false) Long retryUserMessageId) {
         validateTenantId(tenantId);
-        return testAgentApp.chat(tenantId, conversationId, message, retryUserMessageId, references -> {})
+        return testAgentApp.chat(tenantId, conversationId, message, webSearch, retryUserMessageId, references -> {})
                 .map(ServerSentEvent::builder).map(ServerSentEvent.Builder::build)
                 .concatWithValues(ServerSentEvent.<String>builder("[DONE]").build());
     }

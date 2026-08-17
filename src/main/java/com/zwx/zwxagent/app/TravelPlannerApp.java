@@ -36,15 +36,15 @@ public class TravelPlannerApp {
     }
 
     public Flux<String> chat(String tenantId, String conversationId, String runId, String message, Consumer<ExecutionUpdate> progress) {
-        return chat(tenantId, conversationId, runId, message, null, progress, references -> {});
+        return chat(tenantId, conversationId, runId, message, null, false, progress, references -> {});
     }
 
     public Flux<String> chat(String tenantId, String conversationId, String runId, String message, Long retryUserMessageId, Consumer<ExecutionUpdate> progress) {
-        return chat(tenantId, conversationId, runId, message, retryUserMessageId, progress, references -> {});
+        return chat(tenantId, conversationId, runId, message, retryUserMessageId, false, progress, references -> {});
     }
 
     public Flux<String> chat(String tenantId, String conversationId, String runId, String message, Long retryUserMessageId,
-                             Consumer<ExecutionUpdate> progress, Consumer<List<LoveKnowledgeReference>> referenceConsumer) {
+                             boolean webSearch, Consumer<ExecutionUpdate> progress, Consumer<List<LoveKnowledgeReference>> referenceConsumer) {
         progress.accept(new ExecutionUpdate("analysis", "正在分析旅行需求与对话上下文...", java.util.Map.of("message", message)));
         progress.accept(new ExecutionUpdate("retrieval", "正在检索当前智能体的私有资料...", java.util.Map.of("query", message)));
         AgentKnowledgeRagResult retrieval = knowledgeRagService.retrieveWithContext(tenantId, "travel", message);
@@ -54,8 +54,10 @@ public class TravelPlannerApp {
         String history = conversationService.getRecentTravelMessages(tenantId, conversationId, 20).stream()
                 .map(item -> item.role() + ": " + item.content()).reduce("", (left, right) -> left + "\n" + right);
         StringBuilder answer = new StringBuilder();
-        return chatClient.prompt().system(agentRegistry.get("travel").systemPrompt() + "\n" + context + "\n最近对话：" + history)
-                .user(message).toolCallbacks(reportingTools(progress)).stream().content()
+        var prompt = chatClient.prompt().system(agentRegistry.get("travel").systemPrompt() + (webSearch ? "" : "\n本轮未开启联网搜索，不得调用外部工具。") + "\n" + context + "\n最近对话：" + history)
+                .user(message);
+        if (webSearch) prompt.toolCallbacks(reportingTools(progress));
+        return prompt.stream().content()
                 .doOnSubscribe(subscription -> progress.accept(new ExecutionUpdate("generation", "正在生成旅行方案...", java.util.Map.of("historyMessageCount", conversationService.getRecentTravelMessages(tenantId, conversationId, 20).size()))))
                 .doOnNext(answer::append)
                 .doOnComplete(() -> {

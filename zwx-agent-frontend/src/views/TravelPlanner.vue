@@ -89,6 +89,10 @@ const sendMessage = (message, retryUserMessageId = null, retryIndex = -1) => {
   messages.value.splice(answerIndex, 0, { content: '', isUser: false, time: Date.now(), activities: [] })
   connectionStatus.value = 'connecting'
   eventSource = chatWithTravelPlanner(chatId.value, message, retryUserMessageId)
+  eventSource.addEventListener('references', event => {
+    try { messages.value[answerIndex].references = JSON.parse(event.data) }
+    catch (error) { console.error('Knowledge references unavailable:', error) }
+  })
   eventSource.addEventListener('thinking', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return

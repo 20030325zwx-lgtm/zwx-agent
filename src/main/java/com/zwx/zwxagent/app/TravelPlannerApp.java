@@ -1,6 +1,8 @@
 package com.zwx.zwxagent.app;
 
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
+import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
+import com.zwx.zwxagent.rag.LoveKnowledgeReference;
 import com.zwx.zwxagent.agent.AgentRegistry;
 import com.zwx.zwxagent.conversation.AgentConversationService;
 import com.zwx.zwxagent.execution.ExecutionUpdate;
@@ -12,6 +14,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 @Component
@@ -33,13 +36,20 @@ public class TravelPlannerApp {
     }
 
     public Flux<String> chat(String tenantId, String conversationId, String runId, String message, Consumer<ExecutionUpdate> progress) {
-        return chat(tenantId, conversationId, runId, message, null, progress);
+        return chat(tenantId, conversationId, runId, message, null, progress, references -> {});
     }
 
     public Flux<String> chat(String tenantId, String conversationId, String runId, String message, Long retryUserMessageId, Consumer<ExecutionUpdate> progress) {
+        return chat(tenantId, conversationId, runId, message, retryUserMessageId, progress, references -> {});
+    }
+
+    public Flux<String> chat(String tenantId, String conversationId, String runId, String message, Long retryUserMessageId,
+                             Consumer<ExecutionUpdate> progress, Consumer<List<LoveKnowledgeReference>> referenceConsumer) {
         progress.accept(new ExecutionUpdate("analysis", "正在分析旅行需求与对话上下文...", java.util.Map.of("message", message)));
         progress.accept(new ExecutionUpdate("retrieval", "正在检索当前智能体的私有资料...", java.util.Map.of("query", message)));
-        String context = knowledgeRagService.context(tenantId, "travel", message);
+        AgentKnowledgeRagResult retrieval = knowledgeRagService.retrieveWithContext(tenantId, "travel", message);
+        String context = retrieval.context();
+        referenceConsumer.accept(retrieval.references());
         progress.accept(new ExecutionUpdate("retrieval", context.isBlank() ? "未命中私有资料，正在准备联网规划..." : "已召回私有资料，正在制定规划...", java.util.Map.of("contextAvailable", !context.isBlank())));
         String history = conversationService.getRecentTravelMessages(tenantId, conversationId, 20).stream()
                 .map(item -> item.role() + ": " + item.content()).reduce("", (left, right) -> left + "\n" + right);

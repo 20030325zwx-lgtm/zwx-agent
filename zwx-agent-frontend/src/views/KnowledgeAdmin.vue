@@ -11,7 +11,7 @@
             <option v-for="agent in KNOWLEDGE_AGENTS" :key="agent.key" :value="agent.key">{{ agent.name }}</option>
           </select>
         </label>
-        <input ref="knowledgeFileInput" class="knowledge-file-input" type="file" accept=".md,.txt,text/plain,text/markdown" @change="uploadPrivateDocument" />
+        <input ref="knowledgeFileInput" class="knowledge-file-input" type="file" accept=".md,.txt,.pdf,text/plain,text/markdown,application/pdf" @change="uploadPrivateDocument" />
         <button type="button" class="upload-button" :disabled="uploading" @click="knowledgeFileInput?.click()">{{ uploading ? '上传中...' : '上传资料' }}</button>
       </div>
     </header>
@@ -115,7 +115,7 @@ const uploadPrivateDocument = async event => {
   const [file] = event.target.files
   event.target.value = ''
   if (!file) return
-  if (!/\.(md|txt)$/i.test(file.name)) { error.value = '仅支持 .md 和 .txt 文件。'; return }
+  if (!/\.(md|txt|pdf)$/i.test(file.name)) { error.value = '仅支持 .md、.txt 和 .pdf 文件。'; return }
   uploading.value = true
   error.value = ''
   try {

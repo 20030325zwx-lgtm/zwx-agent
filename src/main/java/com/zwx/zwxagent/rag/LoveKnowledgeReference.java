@@ -1,4 +1,4 @@
 package com.zwx.zwxagent.rag;
 
-public record LoveKnowledgeReference(String filename, Integer section, String objectKey) {
+public record LoveKnowledgeReference(String filename, Integer section, Integer chunkIndex, String objectKey, String excerpt) {
 }

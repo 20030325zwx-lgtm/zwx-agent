@@ -29,6 +29,7 @@ import com.zwx.zwxagent.rag.AgentKnowledgeDocumentService;
 import com.zwx.zwxagent.rag.AgentKnowledgeDocumentDetail;
 import com.zwx.zwxagent.app.TravelPlannerApp;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
+import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.app.LoveVisionChatResult;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
@@ -246,13 +247,23 @@ public class AiController {
 
     private LoveTextChat prepareLoveTextChat(String message, String tenantId) {
         LoveRagResult ragResult = loveRagService.retrieve(message, chatModelName);
+        AgentKnowledgeRagResult privateKnowledge = agentKnowledgeRagService.retrieveWithContext(tenantId, "love", message);
+        LoveRagTrace trace = mergePrivateReferences(ragResult.trace(), privateKnowledge);
         try {
-            String referencesJson = objectMapper.writeValueAsString(ragResult.trace().references());
-            String traceJson = objectMapper.writeValueAsString(ragResult.trace());
-            return new LoveTextChat(ragResult.context() + "\n" + agentKnowledgeRagService.context(tenantId, "love", message), referencesJson, traceJson);
+            String referencesJson = objectMapper.writeValueAsString(trace.references());
+            String traceJson = objectMapper.writeValueAsString(trace);
+            return new LoveTextChat(ragResult.context() + "\n" + privateKnowledge.context(), referencesJson, traceJson);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Unable to serialize knowledge references", exception);
         }
+    }
+
+    private LoveRagTrace mergePrivateReferences(LoveRagTrace trace, AgentKnowledgeRagResult privateKnowledge) {
+        if (privateKnowledge.references().isEmpty()) return trace;
+        List<LoveKnowledgeReference> references = new java.util.ArrayList<>(trace.references());
+        references.addAll(privateKnowledge.references());
+        return new LoveRagTrace(trace.query(), trace.topK(), trace.similarityThreshold(), trace.candidates(), trace.decision(),
+                references, trace.model(), trace.streaming());
     }
 
     private Flux<ServerSentEvent<String>> doVisionChatWithLoveAppSSE(String message, String chatId, List<String> imageObjectKeys, String tenantId, Long retryUserMessageId) {
@@ -358,7 +369,8 @@ public class AiController {
                 sink.next(ServerSentEvent.<String>builder(update.summary()).event("thinking").build());
             };
             progress.accept(new ExecutionUpdate("received", "正在接收并理解你的旅行需求...", Map.of("message", message)));
-            reactor.core.Disposable subscription = travelPlannerApp.chat(tenantId, conversationId, runId, message, retryUserMessageId, progress).subscribe(
+            reactor.core.Disposable subscription = travelPlannerApp.chat(tenantId, conversationId, runId, message, retryUserMessageId, progress,
+                    references -> sink.next(ServerSentEvent.<String>builder(toJson(references)).event("references").build())).subscribe(
                     chunk -> sink.next(ServerSentEvent.builder(chunk).build()),
                     sink::error,
                     () -> {

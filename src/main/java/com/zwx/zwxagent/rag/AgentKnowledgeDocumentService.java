@@ -3,6 +3,9 @@ package com.zwx.zwxagent.rag;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.ObjectMetadata;
+import com.itextpdf.kernel.pdf.PdfDocument;
+import com.itextpdf.kernel.pdf.PdfReader;
+import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -13,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
@@ -46,13 +50,13 @@ public class AgentKnowledgeDocumentService {
     public AgentKnowledgeDocument upload(String tenantId, String agentKey, MultipartFile file) {
         validateScope(tenantId, agentKey);
         String filename = file.getOriginalFilename() == null ? "document.txt" : file.getOriginalFilename();
-        if (!filename.endsWith(".md") && !filename.endsWith(".txt")) throw new IllegalArgumentException("Only .md and .txt knowledge files are supported");
+        if (!filename.toLowerCase().matches(".*\\.(md|txt|pdf)$")) throw new IllegalArgumentException("Only .md, .txt and .pdf knowledge files are supported");
         String id = UUID.randomUUID().toString();
         String objectKey = "knowledge/" + tenantId + "/" + agentKey + "/" + id + "-" + filename;
         try (InputStream input = file.getInputStream()) {
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(file.getSize());
-            metadata.setContentType("text/plain; charset=UTF-8");
+            metadata.setContentType(filename.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain; charset=UTF-8");
             ossClient.putObject(bucket, objectKey, input, metadata);
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to store knowledge document", exception);
@@ -72,11 +76,13 @@ public class AgentKnowledgeDocumentService {
                     (rs, rowNum) -> new StoredDocument(rs.getString("tenant_id"), rs.getString("agent_key"), rs.getString("object_key"), rs.getString("filename")), documentId);
             String content;
             try (var object = ossClient.getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
-                content = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                content = extractContent(input.readAllBytes(), stored.filename());
             }
-            List<Document> chunks = textSplitter.splitCustomized(List.of(Document.builder().id(documentId).text(content)
-                    .metadata(Map.of("tenantId", stored.tenantId(), "agentKey", stored.agentKey(), "objectKey", stored.objectKey(), "filename", stored.filename())).build()))
-                    .stream().map(document -> toScopedChunk(document, documentId, stored)).toList();
+            if (content.isBlank()) throw new IllegalArgumentException("PDF does not contain extractable text; OCR is required for scanned documents");
+            List<Document> splitChunks = textSplitter.splitCustomized(List.of(Document.builder().id(documentId).text(content)
+                    .metadata(Map.of("tenantId", stored.tenantId(), "agentKey", stored.agentKey(), "objectKey", stored.objectKey(), "filename", stored.filename())).build()));
+            List<Document> chunks = java.util.stream.IntStream.range(0, splitChunks.size())
+                    .mapToObj(index -> toScopedChunk(splitChunks.get(index), documentId, stored, index + 1)).toList();
             vectorStore.delete(chunks.stream().map(Document::getId).toList());
             for (int start = 0; start < chunks.size(); start += BATCH_SIZE) vectorStore.add(chunks.subList(start, Math.min(start + BATCH_SIZE, chunks.size())));
             jdbcTemplate.update("UPDATE agent_knowledge_document SET status = 'READY', chunk_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?", chunks.size(), documentId);
@@ -103,7 +109,7 @@ public class AgentKnowledgeDocumentService {
                 rs.getString("object_key"), rs.getString("filename")), documentId, tenantId, agentKey);
         String content;
         try (var object = ossClient.getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
-            content = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            content = extractContent(input.readAllBytes(), stored.filename());
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to read knowledge document", exception);
         }
@@ -132,13 +138,25 @@ public class AgentKnowledgeDocumentService {
                 completedAt == null ? null : completedAt.toInstant());
     }
 
-    private Document toScopedChunk(Document document, String documentId, StoredDocument stored) {
+    private Document toScopedChunk(Document document, String documentId, StoredDocument stored, int chunkIndex) {
         Map<String, Object> metadata = new HashMap<>(document.getMetadata());
         metadata.put("documentId", documentId);
         metadata.put("tenantId", stored.tenantId());
         metadata.put("agentKey", stored.agentKey());
+        metadata.put("chunkIndex", chunkIndex);
         return Document.builder().id(UUID.nameUUIDFromBytes((documentId + "|" + document.getText()).getBytes(StandardCharsets.UTF_8)).toString())
                 .text(document.getText()).metadata(metadata).build();
+    }
+
+    private String extractContent(byte[] bytes, String filename) {
+        if (!filename.toLowerCase().endsWith(".pdf")) return new String(bytes, StandardCharsets.UTF_8);
+        StringBuilder text = new StringBuilder();
+        try (PdfDocument pdf = new PdfDocument(new PdfReader(new ByteArrayInputStream(bytes)))) {
+            for (int page = 1; page <= pdf.getNumberOfPages(); page++) {
+                text.append("\n[PDF 第 ").append(page).append(" 页]\n").append(PdfTextExtractor.getTextFromPage(pdf.getPage(page)));
+            }
+        } catch (Exception exception) { throw new IllegalArgumentException("Unable to extract PDF text", exception); }
+        return text.toString();
     }
 
     private void validateScope(String tenantId, String agentKey) {

@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 
 @Service
 public class AgentKnowledgeRagService {
@@ -24,13 +25,28 @@ public class AgentKnowledgeRagService {
     }
 
     public String context(String tenantId, String agentKey, String query) {
+        return retrieveWithContext(tenantId, agentKey, query).context();
+    }
+
+    public AgentKnowledgeRagResult retrieveWithContext(String tenantId, String agentKey, String query) {
         List<Document> documents = retrieve(tenantId, agentKey, query, 3, 0.55);
-        if (documents.isEmpty()) return "";
+        if (documents.isEmpty()) return new AgentKnowledgeRagResult("", List.of());
         StringBuilder context = new StringBuilder("以下内容来自当前租户为该智能体上传的私有知识库：\n");
         for (Document document : documents) {
             String text = document.getText().replaceAll("\\s+", " ").trim();
             context.append("- ").append(text, 0, Math.min(1200, text.length())).append('\n');
         }
-        return context.toString();
+        List<LoveKnowledgeReference> references = documents.stream().map(this::toReference)
+                .collect(java.util.stream.Collectors.toMap(reference -> reference.objectKey() + "|" + reference.chunkIndex(), reference -> reference,
+                        (first, ignored) -> first, LinkedHashMap::new)).values().stream().toList();
+        return new AgentKnowledgeRagResult(context.toString(), references);
+    }
+
+    private LoveKnowledgeReference toReference(Document document) {
+        Object chunk = document.getMetadata().get("chunkIndex");
+        Integer chunkIndex = chunk instanceof Number number ? number.intValue() : null;
+        String text = document.getText().replaceAll("\\s+", " ").trim();
+        return new LoveKnowledgeReference(String.valueOf(document.getMetadata().get("filename")), null, chunkIndex,
+                String.valueOf(document.getMetadata().get("objectKey")), text.length() <= 280 ? text : text.substring(0, 280) + "...");
     }
 }

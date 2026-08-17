@@ -8,7 +8,9 @@ import com.zwx.zwxagent.rag.LoveAppRagCustomAdvisorFactory;
 import com.zwx.zwxagent.rag.QueryRewriter;
 import com.zwx.zwxagent.rag.LoveRagResult;
 import com.zwx.zwxagent.rag.LoveRagService;
+import com.zwx.zwxagent.rag.LoveRagTrace;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
+import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.agent.AgentRegistry;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -139,9 +141,11 @@ public class LoveApp {
                 : new LoveRagResult(new com.zwx.zwxagent.rag.LoveRagTrace(message, 3, 0.55, List.of(),
                 "视觉摘要不可用，未执行知识库检索，模型仅基于图片、系统提示词与会话上下文回答。",
                 List.of(), visionModel, true), "");
-        String scopedContext = agentKnowledgeRagService.context(tenantId, "love", analysis.retrievalQuery());
+        AgentKnowledgeRagResult privateKnowledge = agentKnowledgeRagService.retrieveWithContext(tenantId, "love", analysis.retrievalQuery());
+        LoveRagTrace trace = mergePrivateReferences(ragResult.trace(), privateKnowledge);
+        String scopedContext = privateKnowledge.context();
         String prompt = agentRegistry.get("love").systemPrompt() + "\n\n" + ragResult.context() + "\n" + scopedContext + "\n图片分析仅是待确认线索。回答时明确区分可观察内容与推测，不要把不确定项当作事实。";
-        return new LoveVisionChatResult(analysis, ragResult.trace(), prompt);
+        return new LoveVisionChatResult(analysis, trace, prompt);
     }
 
     public Flux<String> streamVisionChat(String message, String chatId, List<String> imageObjectKeys, LoveVisionChatResult preparation, Long retryUserMessageId) {
@@ -162,6 +166,14 @@ public class LoveApp {
 
     record LoveReport(String title, List<String> suggestions) {
 
+    }
+
+    private LoveRagTrace mergePrivateReferences(LoveRagTrace trace, AgentKnowledgeRagResult privateKnowledge) {
+        if (privateKnowledge.references().isEmpty()) return trace;
+        List<com.zwx.zwxagent.rag.LoveKnowledgeReference> references = new java.util.ArrayList<>(trace.references());
+        references.addAll(privateKnowledge.references());
+        return new LoveRagTrace(trace.query(), trace.topK(), trace.similarityThreshold(), trace.candidates(), trace.decision(),
+                references, trace.model(), trace.streaming());
     }
 
     /**

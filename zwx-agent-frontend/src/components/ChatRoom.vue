@@ -45,7 +45,10 @@
           </div>
           <div v-if="msg.references?.length" class="message-references">
             <span>参考资料</span>
-            <span v-for="reference in msg.references" :key="reference.objectKey">{{ reference.filename }}{{ reference.section ? ` · 第${reference.section}节` : '' }}</span>
+            <details v-for="reference in msg.references" :key="`${reference.objectKey}-${reference.chunkIndex || reference.section || reference.filename}`" class="reference-card">
+              <summary>{{ reference.filename }}{{ reference.section ? ` · 第${reference.section}节` : reference.chunkIndex ? ` · 切片 ${reference.chunkIndex}` : '' }}</summary>
+              <p>{{ reference.excerpt || '该历史引用未保存切片摘录。' }}</p>
+            </details>
           </div>
           <div v-if="msg.trace" class="trace-entry">
             <button type="button" class="trace-button" aria-label="查看本次回答的调用流程">i</button>
@@ -197,8 +200,7 @@ onMounted(scrollToBottom)
 .message-actions { position:absolute; z-index:1; top:calc(100% + 10px); right:0; display:flex; align-items:center; gap:12px; height:30px; padding:0 2px; opacity:0; pointer-events:none; transform:translateY(-3px); transition:opacity .15s ease,transform .15s ease; }.message-wrapper.user:hover .message-actions,.message-actions:focus-within { opacity:1; pointer-events:auto; transform:translateY(0); }.message-actions button { display:grid; width:26px; height:30px; place-items:center; border:0; border-radius:4px; background:transparent; color:#7d8288; font-size:19px; line-height:1; }.message-actions button:hover { background:#edf0f2; color:#34383d; }
 .typing-indicator { display: inline-block; margin-left: 3px; color: #d65070; animation: blink 1s step-end infinite; }
 .thinking-state { display: flex; align-items: center; gap: 9px; min-height: 34px; color: #8d5663; font-size: 14px; }.thinking-dots { display: inline-flex; gap: 4px; }.thinking-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: thinking-pulse 1.1s ease-in-out infinite; }.thinking-dots i:nth-child(2) { animation-delay: .16s; }.thinking-dots i:nth-child(3) { animation-delay: .32s; }.activity-trace { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; color:#657080; font-size:12px; }.activity-trace > span:first-child { color:#8b95a1; }.activity-trace button { border:1px solid #dfe7e4; border-radius:5px; padding:3px 6px; background:#f8fbfa; color:inherit; font:inherit; text-align:left; }.activity-trace button:hover { border-color:#8fcdb6; background:#effbf5; color:#16794d; }.activity-trace button.active { border-color:#8fcdb6; background:#effbf5; color:#16794d; }
-.message-references { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; color: #8d5663; font-size: 12px; }
-.message-references span:not(:first-child) { border: 1px solid #efd9de; border-radius: 5px; padding: 3px 6px; background: #fff8f9; }
+.message-references { display: flex; flex-wrap: wrap; align-items:flex-start; gap: 6px; margin-top: 13px; color: #8d5663; font-size: 12px; }.message-references > span { padding:4px 0; }.reference-card { max-width:min(100%, 520px); border:1px solid #efd9de; border-radius:5px; background:#fff8f9; }.reference-card summary { cursor:pointer; padding:4px 7px; color:#934357; }.reference-card p { margin:0; border-top:1px solid #f2e1e5; padding:7px 8px; color:#6f5960; line-height:1.55; white-space:pre-wrap; }
 .trace-entry { position: relative; display: inline-flex; margin-top: 10px; }
 .trace-button { width: 20px; height: 20px; border: 1px solid #dedede; border-radius: 50%; background: #fff; color: #777; font-size: 12px; font-weight: 700; line-height: 1; }
 .trace-popover { position: absolute; z-index: 4; bottom: 28px; left: 0; display: none; width: min(460px, calc(100vw - 88px)); padding: 12px; border: 1px solid #e2e2e2; border-radius: 8px; background: #fff; box-shadow: 0 12px 30px rgba(0,0,0,.12); color: #4a4a4a; font-size: 12px; line-height: 1.6; }

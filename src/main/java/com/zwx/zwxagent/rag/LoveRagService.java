@@ -88,11 +88,23 @@ public class LoveRagService {
         return new LoveKnowledgeReference(
                 String.valueOf(document.getMetadata().get("filename")),
                 section instanceof Number number ? number.intValue() : null,
-                String.valueOf(document.getMetadata().get("objectKey")));
+                chunkIndex(document),
+                String.valueOf(document.getMetadata().get("objectKey")),
+                excerpt(document.getText()));
     }
 
     private LoveRetrievalCandidate toCandidate(Document document) {
         LoveKnowledgeReference reference = toReference(document);
         return new LoveRetrievalCandidate(reference.filename(), reference.section(), reference.objectKey(), document.getScore());
+    }
+
+    private Integer chunkIndex(Document document) {
+        Object value = document.getMetadata().get("chunkIndex");
+        return value instanceof Number number ? number.intValue() : null;
+    }
+
+    private String excerpt(String text) {
+        String normalized = text == null ? "" : text.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= 280 ? normalized : normalized.substring(0, 280) + "...";
     }
 }

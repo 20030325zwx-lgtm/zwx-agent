@@ -37,6 +37,10 @@
               <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ msg.thinking || '正在思考...' }}
             </div>
           </div>
+          <div v-if="msg.activities?.length" class="activity-trace" aria-label="AI 执行状态">
+            <span>执行过程</span>
+            <button v-for="(activity, activityIndex) in msg.activities" :key="`${activity.label || activity}-${activityIndex}`" type="button" :class="{ active: connectionStatus === 'connecting' && index === messages.length - 1 && activityIndex === msg.activities.length - 1 }" @click="openActivity(activity, msg)">{{ activity.label || activity }}</button>
+          </div>
           <div v-if="msg.references?.length" class="message-references">
             <span>参考资料</span>
             <span v-for="reference in msg.references" :key="reference.objectKey">{{ reference.filename }}{{ reference.section ? ` · 第${reference.section}节` : '' }}</span>
@@ -91,7 +95,7 @@ const props = defineProps({
   aiType: { type: String, default: 'default' },
   attachmentsEnabled: { type: Boolean, default: false }
 })
-const emit = defineEmits(['send-message'])
+const emit = defineEmits(['send-message', 'view-execution'])
 const quickPrompts = computed(() => {
   if (props.aiType === 'super') return ['帮我把这个目标拆成执行计划', '帮我梳理一个复杂问题', '给我一个高效的工作方案']
   if (props.aiType === 'travel') return ['帮我规划一个周末短途旅行', '按预算做一份三日行程', '帮我比较两个旅行目的地']
@@ -118,6 +122,9 @@ const sendMessage = () => {
   clearSelectedImages()
   if (fileInput.value) fileInput.value.value = ''
 }
+const openActivity = (activity, message) => {
+  if (activity?.runId) emit('view-execution', { runId: activity.runId, message })
+}
 const usePrompt = prompt => { inputMessage.value = prompt; nextTick(() => sendMessage()) }
 const selectImages = event => { addImages(Array.from(event.target.files || [])); if (fileInput.value) fileInput.value.value = '' }
 const pasteImages = event => {
@@ -133,6 +140,7 @@ const formatTime = timestamp => new Date(timestamp).toLocaleTimeString('zh-CN', 
 const scrollToBottom = async () => { await nextTick(); if (messagesContainer.value) messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight }
 watch(() => props.messages.length, scrollToBottom)
 watch(() => props.messages.map(message => message.content).join(''), scrollToBottom)
+watch(() => props.messages.map(message => (message.activities || []).join('|')).join(''), scrollToBottom)
 onMounted(scrollToBottom)
 </script>
 
@@ -162,7 +170,7 @@ onMounted(scrollToBottom)
 .message-time { display: block; margin-top: 7px; color: #aaa; font-size: 11px; }
 .user-message .message-time { text-align: right; }
 .typing-indicator { display: inline-block; margin-left: 3px; color: #d65070; animation: blink 1s step-end infinite; }
-.thinking-state { display: flex; align-items: center; gap: 9px; min-height: 34px; color: #8d5663; font-size: 14px; }.thinking-dots { display: inline-flex; gap: 4px; }.thinking-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: thinking-pulse 1.1s ease-in-out infinite; }.thinking-dots i:nth-child(2) { animation-delay: .16s; }.thinking-dots i:nth-child(3) { animation-delay: .32s; }
+.thinking-state { display: flex; align-items: center; gap: 9px; min-height: 34px; color: #8d5663; font-size: 14px; }.thinking-dots { display: inline-flex; gap: 4px; }.thinking-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: thinking-pulse 1.1s ease-in-out infinite; }.thinking-dots i:nth-child(2) { animation-delay: .16s; }.thinking-dots i:nth-child(3) { animation-delay: .32s; }.activity-trace { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; color:#657080; font-size:12px; }.activity-trace > span:first-child { color:#8b95a1; }.activity-trace button { border:1px solid #dfe7e4; border-radius:5px; padding:3px 6px; background:#f8fbfa; color:inherit; font:inherit; text-align:left; }.activity-trace button:hover { border-color:#8fcdb6; background:#effbf5; color:#16794d; }.activity-trace button.active { border-color:#8fcdb6; background:#effbf5; color:#16794d; }
 .message-references { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; color: #8d5663; font-size: 12px; }
 .message-references span:not(:first-child) { border: 1px solid #efd9de; border-radius: 5px; padding: 3px 6px; background: #fff8f9; }
 .trace-entry { position: relative; display: inline-flex; margin-top: 10px; }

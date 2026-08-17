@@ -34,10 +34,14 @@ public class AgentConversationService {
     }
 
     public void appendTravelMessage(String tenantId, String conversationId, String role, String content) {
+        appendTravelMessage(tenantId, conversationId, role, content, null);
+    }
+
+    public void appendTravelMessage(String tenantId, String conversationId, String role, String content, String executionRunId) {
         int inserted = jdbcTemplate.update("""
-                INSERT INTO agent_chat_message (conversation_id, role, content)
-                SELECT id, ?, ? FROM agent_conversation WHERE id = ? AND tenant_id = ? AND agent_key = ?
-                """, role, content == null ? "" : content, conversationId, tenantId, TRAVEL);
+                INSERT INTO agent_chat_message (conversation_id, role, content, execution_run_id)
+                SELECT id, ?, ?, ? FROM agent_conversation WHERE id = ? AND tenant_id = ? AND agent_key = ?
+                """, role, content == null ? "" : content, executionRunId, conversationId, tenantId, TRAVEL);
         if (inserted == 0) throw new IllegalArgumentException("Travel conversation was not found");
         jdbcTemplate.update("UPDATE agent_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND agent_key = ?", conversationId, tenantId, TRAVEL);
     }
@@ -52,21 +56,21 @@ public class AgentConversationService {
 
     public List<AgentConversationMessage> getTravelMessages(String tenantId, String conversationId) {
         return jdbcTemplate.query("""
-                SELECT m.role, m.content, m.created_at FROM agent_chat_message m
+                SELECT m.role, m.content, m.execution_run_id, m.created_at FROM agent_chat_message m
                 JOIN agent_conversation c ON c.id = m.conversation_id
                 WHERE c.id = ? AND c.tenant_id = ? AND c.agent_key = ? ORDER BY m.id ASC
-                """, (rs, rowNum) -> new AgentConversationMessage(rs.getString("role"), rs.getString("content"),
+                """, (rs, rowNum) -> new AgentConversationMessage(rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
                 rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, TRAVEL);
     }
 
     public List<AgentConversationMessage> getRecentTravelMessages(String tenantId, String conversationId, int limit) {
         return jdbcTemplate.query("""
-                SELECT role, content, created_at FROM (
-                    SELECT m.id, m.role, m.content, m.created_at FROM agent_chat_message m
+                SELECT role, content, execution_run_id, created_at FROM (
+                    SELECT m.id, m.role, m.content, m.execution_run_id, m.created_at FROM agent_chat_message m
                     JOIN agent_conversation c ON c.id = m.conversation_id
                     WHERE c.id = ? AND c.tenant_id = ? AND c.agent_key = ? ORDER BY m.id DESC LIMIT ?
                 ) recent_messages ORDER BY id ASC
-                """, (rs, rowNum) -> new AgentConversationMessage(rs.getString("role"), rs.getString("content"),
+                """, (rs, rowNum) -> new AgentConversationMessage(rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
                 rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, TRAVEL, limit);
     }
 

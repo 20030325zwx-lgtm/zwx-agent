@@ -29,25 +29,29 @@ public class WebSearchTool {
     @Tool(description = "Search for information from Baidu Search Engine")
     public String searchWeb(
             @ToolParam(description = "Search query keyword") String query) {
+        if (apiKey == null || apiKey.isBlank()) return "SEARCH_UNAVAILABLE: SearchAPI key is not configured.";
         Map<String, Object> paramMap = new HashMap<>();
         paramMap.put("q", query);
         paramMap.put("api_key", apiKey);
         paramMap.put("engine", "baidu");
         try {
             String response = HttpUtil.get(SEARCH_API_URL, paramMap);
-            // 取出返回结果的前 5 条
             JSONObject jsonObject = JSONUtil.parseObj(response);
-            // 提取 organic_results 部分
+            String error = jsonObject.getStr("error");
+            if (error == null || error.isBlank()) error = jsonObject.getStr("message");
+            if (error != null && !error.isBlank()) return "SEARCH_UNAVAILABLE: SearchAPI returned an error: " + error;
             JSONArray organicResults = jsonObject.getJSONArray("organic_results");
-            List<Object> objects = organicResults.subList(0, 5);
-            // 拼接搜索结果为字符串
+            if (organicResults == null || organicResults.isEmpty()) {
+                return "SEARCH_UNAVAILABLE: SearchAPI returned no organic results for this query.";
+            }
+            List<Object> objects = organicResults.subList(0, Math.min(organicResults.size(), 5));
             String result = objects.stream().map(obj -> {
                 JSONObject tmpJSONObject = (JSONObject) obj;
                 return tmpJSONObject.toString();
             }).collect(Collectors.joining(","));
-            return result;
+            return result.isBlank() ? "SEARCH_UNAVAILABLE: SearchAPI returned no usable result content." : result;
         } catch (Exception e) {
-            return "Error searching Baidu: " + e.getMessage();
+            return "SEARCH_UNAVAILABLE: Baidu search request failed: " + e.getMessage();
         }
     }
 }

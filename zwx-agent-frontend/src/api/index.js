@@ -50,8 +50,8 @@ export const connectSSE = (url, params, onMessage, onError) => {
 }
 
 // AI恋爱大师聊天
-export const chatWithLoveApp = (message, chatId, imageKeys = [], retryUserMessageId = null) => {
-  return connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, retryUserMessageId, tenantId: TENANT_ID })
+export const chatWithLoveApp = (message, chatId, imageKeys = [], webSearch = false, retryUserMessageId = null) => {
+  return connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, webSearch, retryUserMessageId, tenantId: TENANT_ID })
 }
 
 export const uploadLoveImage = async (chatId, file) => {
@@ -87,14 +87,14 @@ export const uploadAgentKnowledgeDocument = (agentKey, file) => {
 }
 export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)
-export const chatWithTravelPlanner = (conversationId, message, retryUserMessageId = null) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, retryUserMessageId, tenantId: TENANT_ID })
+export const chatWithTravelPlanner = (conversationId, message, webSearch = false, retryUserMessageId = null) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, webSearch, retryUserMessageId, tenantId: TENANT_ID })
 export const createTravelConversation = () => request.post('/ai/travel-planner/conversations').then(response => response.data)
 export const listTravelConversations = () => request.get('/ai/travel-planner/conversations').then(response => response.data)
 export const getTravelConversationMessages = conversationId => request.get(`/ai/travel-planner/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteTravelConversation = conversationId => request.delete(`/ai/travel-planner/conversations/${conversationId}`)
 export const deleteTravelAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/travel-planner/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 export const getTravelExecutionEvents = (conversationId, runId) => request.get(`/ai/travel-planner/conversations/${conversationId}/executions/${runId}`).then(response => response.data)
-export const chatWithTestAgent = (conversationId, message, retryUserMessageId = null) => connectSSE('/ai/test-agent/chat/sse', { conversationId, message, retryUserMessageId, tenantId: TENANT_ID })
+export const chatWithTestAgent = (conversationId, message, webSearch = false, retryUserMessageId = null) => connectSSE('/ai/test-agent/chat/sse', { conversationId, message, webSearch, retryUserMessageId, tenantId: TENANT_ID })
 export const createTestConversation = () => request.post('/ai/test-agent/conversations').then(response => response.data)
 export const listTestConversations = () => request.get('/ai/test-agent/conversations').then(response => response.data)
 export const getTestConversationMessages = conversationId => request.get(`/ai/test-agent/conversations/${conversationId}/messages`).then(response => response.data)

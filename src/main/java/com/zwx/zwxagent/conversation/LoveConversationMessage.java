@@ -7,7 +7,7 @@ import com.zwx.zwxagent.app.LoveVisionAnalysis;
 import java.time.Instant;
 import java.util.List;
 
-public record LoveConversationMessage(String role, String content, List<String> imageObjectKeys,
+public record LoveConversationMessage(long id, String role, String content, List<String> imageObjectKeys,
                                       List<LoveKnowledgeReference> knowledgeReferences,
                                       LoveRagTrace ragTrace, LoveVisionAnalysis visionAnalysis, Instant createdAt) {
 }

@@ -26,12 +26,14 @@
             <small v-else-if="msg.visionAnalysis.uncertainItems?.length">待确认：{{ msg.visionAnalysis.uncertainItems.join('；') }}</small>
           </details>
           <div v-if="msg.isUser" class="message-content">
-            {{ msg.content }}<span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="typing-indicator">▋</span>
+            <textarea v-if="editingIndex === index" v-model="editingContent" class="inline-edit-input" rows="1" aria-label="编辑消息"
+              @keydown.enter.exact.prevent="submitEdit(msg, index)" @keydown.esc.prevent="cancelEdit"></textarea>
+            <template v-else>{{ msg.content }}</template>
           </div>
           <div v-else class="message-content markdown-content">
             <template v-if="msg.content">
               <div v-html="renderMarkdown(msg.content)"></div>
-              <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="typing-indicator">▋</span>
+              <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="streaming-pulse" aria-label="正在生成"><i></i><i></i><i></i></span>
             </template>
             <div v-else-if="connectionStatus === 'connecting' && index === messages.length - 1" class="thinking-state">
               <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ msg.thinking || '正在思考...' }}
@@ -57,6 +59,11 @@
             </div>
           </div>
           <time class="message-time">{{ formatTime(msg.time) }}</time>
+          <div v-if="msg.isUser && editingIndex !== index" class="message-actions" aria-label="消息操作">
+            <button type="button" title="复制消息" aria-label="复制消息" @click="copyMessage(msg.content)">⧉</button>
+            <button type="button" title="编辑消息" aria-label="编辑消息" @click="editMessage(msg.content, index)">✎</button>
+            <button type="button" title="重新发送" aria-label="重新发送" @click="emit('resend-message', { content: msg.content, id: msg.id, index, imageKeys: msg.imageKeys || [] })">↻</button>
+          </div>
         </article>
         <div v-if="msg.isUser" class="avatar user-avatar">我</div>
       </div>
@@ -71,12 +78,12 @@
             <button type="button" title="移除图片" @click="removeImage(attachment)">×</button>
           </div>
         </div>
-        <textarea v-model="inputMessage" class="input-box" :disabled="connectionStatus === 'connecting'"
+        <textarea v-model="inputMessage" class="input-box"
           :placeholder="inputPlaceholder" @keydown.enter.exact.prevent="sendMessage" @paste="pasteImages"></textarea>
         <div class="input-actions">
-          <button v-if="attachmentsEnabled" class="image-button" type="button" title="添加图片" :disabled="connectionStatus === 'connecting'" @click="fileInput?.click()">＋</button>
+          <button v-if="attachmentsEnabled" class="image-button" type="button" title="添加图片" @click="fileInput?.click()">＋</button>
           <span class="input-hint">Enter 发送</span>
-          <button class="send-button" type="button" :disabled="connectionStatus === 'connecting' || (!inputMessage.trim() && !selectedImages.length)" @click="sendMessage">发送 ↑</button>
+          <button class="send-button" type="button" :disabled="!inputMessage.trim() && !selectedImages.length" @click="sendMessage">发送 ↑</button>
         </div>
       </div>
     </footer>
@@ -95,7 +102,7 @@ const props = defineProps({
   aiType: { type: String, default: 'default' },
   attachmentsEnabled: { type: Boolean, default: false }
 })
-const emit = defineEmits(['send-message', 'view-execution'])
+const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message'])
 const quickPrompts = computed(() => {
   if (props.aiType === 'super') return ['帮我把这个目标拆成执行计划', '帮我梳理一个复杂问题', '给我一个高效的工作方案']
   if (props.aiType === 'travel') return ['帮我规划一个周末短途旅行', '按预算做一份三日行程', '帮我比较两个旅行目的地']
@@ -108,6 +115,8 @@ const inputMessage = ref('')
 const messagesContainer = ref(null)
 const fileInput = ref(null)
 const selectedImages = ref([])
+const editingIndex = ref(-1)
+const editingContent = ref('')
 
 const renderMarkdown = content => DOMPurify.sanitize(marked.parse(content || '', {
   breaks: true,
@@ -125,6 +134,23 @@ const sendMessage = () => {
 const openActivity = (activity, message) => {
   if (activity?.runId) emit('view-execution', { runId: activity.runId, message })
 }
+const copyMessage = async content => {
+  try { await navigator.clipboard.writeText(content || '') }
+  catch (error) { console.error('Copy message failed:', error) }
+}
+const editMessage = (content, index) => {
+  editingContent.value = content || ''
+  editingIndex.value = index
+  emit('edit-message', { content: editingContent.value })
+  nextTick(() => document.querySelector('.inline-edit-input')?.focus())
+}
+const submitEdit = (message, index) => {
+  const content = editingContent.value.trim()
+  if (!content) return
+  editingIndex.value = -1
+  emit('resend-message', { content, id: message.id, index, imageKeys: message.imageKeys || [] })
+}
+const cancelEdit = () => { editingIndex.value = -1; editingContent.value = '' }
 const usePrompt = prompt => { inputMessage.value = prompt; nextTick(() => sendMessage()) }
 const selectImages = event => { addImages(Array.from(event.target.files || [])); if (fileInput.value) fileInput.value.value = '' }
 const pasteImages = event => {
@@ -155,20 +181,22 @@ onMounted(scrollToBottom)
 .suggestion-list button { border: 1px solid #e9e9e9; border-radius: 10px; padding: 13px 16px; background: #fff; color: #363636; font-size: 14px; text-align: left; }
 .suggestion-list button:hover { border-color: #e3b4c0; background: #fff8f9; }
 .message-wrapper { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 28px; }
-.message-wrapper.user { justify-content: flex-end; }
+.message-wrapper.user { justify-content: flex-end; margin-bottom: 54px; }
 .avatar { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 11px; overflow: hidden; }
 .ai-avatar { background: #fff0f4; color: #d65070; }
 .user-avatar { background: #252525; color: #fff; font-size: 13px; }
 .message { min-width: 0; max-width: min(690px, calc(100% - 50px)); color: #282828; }
 .ai-message { padding: 3px 2px; }
-.user-message { border-radius: 14px 4px 14px 14px; padding: 12px 15px; background: #f3f4f5; }
+.user-message { position:relative; border-radius: 14px 4px 14px 14px; padding: 12px 15px; background: #f3f4f5; }.user-message::after { position:absolute; z-index:0; top:100%; right:0; width:170px; height:50px; content:""; }
 .message-content { white-space: pre-wrap; font-size: 16px; line-height: 1.75; }
+.inline-edit-input { display:block; width:100%; min-width:260px; resize:none; overflow:hidden; border:0; border-bottom:1px solid var(--zwx-primary); outline:0; padding:0 0 4px; background:transparent; color:inherit; font:inherit; font-size:inherit; line-height:inherit; }
 .markdown-content { white-space: normal; }.markdown-content :deep(p) { margin: 0 0 15px; }.markdown-content :deep(p:last-child) { margin-bottom: 0; }.markdown-content :deep(h1), .markdown-content :deep(h2), .markdown-content :deep(h3), .markdown-content :deep(h4) { margin: 22px 0 10px; color: #202020; font-weight: 650; line-height: 1.4; }.markdown-content :deep(h1) { font-size: 22px; }.markdown-content :deep(h2) { font-size: 19px; }.markdown-content :deep(h3), .markdown-content :deep(h4) { font-size: 17px; }.markdown-content :deep(ul), .markdown-content :deep(ol) { margin: 0 0 15px; padding-left: 1.45em; }.markdown-content :deep(li) { margin: 5px 0; }.markdown-content :deep(hr) { height: 1px; margin: 22px 0; border: 0; background: #e7e7e7; }.markdown-content :deep(strong) { color: #202020; font-weight: 700; }.markdown-content :deep(blockquote) { margin: 14px 0; border-left: 3px solid #e5b2bf; padding: 3px 0 3px 13px; color: #676767; }.markdown-content :deep(code) { border-radius: 4px; padding: 2px 4px; background: #f3f3f3; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; }.markdown-content :deep(pre) { overflow-x: auto; margin: 14px 0; border-radius: 8px; padding: 12px; background: #272727; color: #f5f5f5; }.markdown-content :deep(pre code) { padding: 0; background: transparent; color: inherit; }.markdown-content :deep(a) { color: #b74461; text-decoration: underline; text-underline-offset: 2px; }
 .message-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .message-images img { display: block; max-width: min(300px, 100%); max-height: 280px; border-radius: 8px; object-fit: cover; }
 .vision-analysis { max-width: 500px; margin-top: 9px; border: 1px solid #dbe8f9; border-radius: 8px; padding: 8px 10px; background: #f8fbff; color: #4b6480; font-size: 12px; line-height: 1.55; }.vision-analysis summary { cursor: pointer; color: #246bb2; font-weight: 650; }.vision-analysis p { margin: 8px 0 5px; }.vision-analysis small { display: block; margin-top: 7px; color: #7b8794; }.vision-signals { display: flex; flex-wrap: wrap; gap: 5px; }.vision-signals span { border-radius: 4px; padding: 2px 5px; background: #eaf3ff; color: #3973ad; }
 .message-time { display: block; margin-top: 7px; color: #aaa; font-size: 11px; }
 .user-message .message-time { text-align: right; }
+.message-actions { position:absolute; z-index:1; top:calc(100% + 10px); right:0; display:flex; align-items:center; gap:12px; height:30px; padding:0 2px; opacity:0; pointer-events:none; transform:translateY(-3px); transition:opacity .15s ease,transform .15s ease; }.message-wrapper.user:hover .message-actions,.message-actions:focus-within { opacity:1; pointer-events:auto; transform:translateY(0); }.message-actions button { display:grid; width:26px; height:30px; place-items:center; border:0; border-radius:4px; background:transparent; color:#7d8288; font-size:19px; line-height:1; }.message-actions button:hover { background:#edf0f2; color:#34383d; }
 .typing-indicator { display: inline-block; margin-left: 3px; color: #d65070; animation: blink 1s step-end infinite; }
 .thinking-state { display: flex; align-items: center; gap: 9px; min-height: 34px; color: #8d5663; font-size: 14px; }.thinking-dots { display: inline-flex; gap: 4px; }.thinking-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: thinking-pulse 1.1s ease-in-out infinite; }.thinking-dots i:nth-child(2) { animation-delay: .16s; }.thinking-dots i:nth-child(3) { animation-delay: .32s; }.activity-trace { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; color:#657080; font-size:12px; }.activity-trace > span:first-child { color:#8b95a1; }.activity-trace button { border:1px solid #dfe7e4; border-radius:5px; padding:3px 6px; background:#f8fbfa; color:inherit; font:inherit; text-align:left; }.activity-trace button:hover { border-color:#8fcdb6; background:#effbf5; color:#16794d; }.activity-trace button.active { border-color:#8fcdb6; background:#effbf5; color:#16794d; }
 .message-references { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; color: #8d5663; font-size: 12px; }
@@ -181,8 +209,9 @@ onMounted(scrollToBottom)
 .chat-input { position: relative; border: 1px solid #e5e7eb; border-radius: 16px; background: #fff; box-shadow: 0 8px 30px rgba(15,23,42,.07); }.chat-input:focus-within { border-color: var(--zwx-primary); box-shadow: 0 0 0 3px rgba(0,111,238,.12), 0 8px 30px rgba(15,23,42,.07); }
 .file-input { display: none; }.input-box { display: block; width: 100%; min-height: 78px; max-height: 132px; resize: none; border: 0; outline: 0; padding: 15px 17px 6px; color: #222; font: inherit; font-size: 15px; line-height: 1.55; }.input-box::placeholder { color: #aaa; }
 .input-actions { display: flex; height: 43px; align-items: center; gap: 12px; padding: 0 10px 9px 12px; }.image-button { width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #555; font-size: 22px; }.image-button:hover { background: #f2f2f2; }.input-hint { margin-right: auto; color: #aaa; font-size: 12px; }.send-button { height: 32px; border: 0; border-radius: 8px; padding: 0 13px; background: var(--zwx-primary); color: #fff; font-size: 13px; font-weight: 650; }.send-button:hover:not(:disabled) { background: var(--zwx-primary-dark); }.send-button:disabled { background: #e9e9e9; color: #aaa; }
-.chat-love .empty-brand, .chat-love .typing-indicator { color: #d65070; }.chat-love .empty-brand { background: #fff1f4; }.chat-love .send-button { background: #d65070; }.chat-love .send-button:hover:not(:disabled) { background: #bd3d5a; }.chat-love .chat-input:focus-within { border-color: #d65070; box-shadow: 0 0 0 3px rgba(214,80,112,.12), 0 8px 30px rgba(15,23,42,.07); }
+.streaming-pulse { display:inline-flex; align-items:center; gap:3px; margin-left:7px; color:#13a37f; vertical-align:middle; }.streaming-pulse i { display:block; width:5px; height:5px; border-radius:50%; background:currentColor; animation:streaming-pulse 1.05s ease-in-out infinite; }.streaming-pulse i:nth-child(2) { animation-delay:.14s; }.streaming-pulse i:nth-child(3) { animation-delay:.28s; }.chat-love .empty-brand, .chat-love .streaming-pulse { color: #d65070; }.chat-love .empty-brand { background: #fff1f4; }.chat-love .send-button { background: #d65070; }.chat-love .send-button:hover:not(:disabled) { background: #bd3d5a; }.chat-love .chat-input:focus-within { border-color: #d65070; box-shadow: 0 0 0 3px rgba(214,80,112,.12), 0 8px 30px rgba(15,23,42,.07); }
 .selected-images { position: absolute; z-index: 2; right: 10px; bottom: calc(100% + 8px); display: flex; gap: 7px; max-width: min(420px, 100%); padding: 6px; border: 1px solid #e9e9e9; border-radius: 8px; background: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.1); overflow-x: auto; }.selected-image { position: relative; width: 46px; height: 46px; flex: 0 0 46px; }.selected-image img { width: 100%; height: 100%; border-radius: 6px; object-fit: cover; }.selected-image button { position: absolute; top: -5px; right: -5px; display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid #fff; border-radius: 50%; background: #333; color: #fff; line-height: 1; }
-@keyframes blink { 50% { opacity: 0; } } @keyframes thinking-pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
+@keyframes thinking-pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } } @keyframes streaming-pulse { 0%, 70%, 100% { opacity:.24; transform:translateY(0) scale(.82); } 35% { opacity:1; transform:translateY(-3px) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .streaming-pulse i,.thinking-dots i { animation:none; opacity:.75; } }
 @media (max-width: 720px) { .chat-messages { inset-bottom: 138px; padding: 25px 16px; }.chat-input-container { padding: 10px 12px; }.empty-state { padding-bottom: 40px; }.empty-state h2 { font-size: 23px; }.message-content { font-size: 15px; }.input-hint { display: none; } }
 </style>

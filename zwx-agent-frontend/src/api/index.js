@@ -17,6 +17,7 @@ request.defaults.headers.common['X-Tenant-Id'] = TENANT_ID
 export const connectSSE = (url, params, onMessage, onError) => {
   // 构建带参数的URL
   const queryString = Object.entries(params)
+    .filter(([, value]) => value !== null && value !== undefined)
     .flatMap(([key, value]) => Array.isArray(value)
       ? value.map(item => `${encodeURIComponent(key)}=${encodeURIComponent(item)}`)
       : `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
@@ -49,8 +50,8 @@ export const connectSSE = (url, params, onMessage, onError) => {
 }
 
 // AI恋爱大师聊天
-export const chatWithLoveApp = (message, chatId, imageKeys = []) => {
-  return connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, tenantId: TENANT_ID })
+export const chatWithLoveApp = (message, chatId, imageKeys = [], retryUserMessageId = null) => {
+  return connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, retryUserMessageId, tenantId: TENANT_ID })
 }
 
 export const uploadLoveImage = async (chatId, file) => {
@@ -76,6 +77,7 @@ export const createLoveConversation = async () => (await request.post('/ai/love_
 export const listLoveConversations = async () => (await request.get('/ai/love_app/conversations')).data
 export const getLoveConversationMessages = async (conversationId) => (await request.get(`/ai/love_app/conversations/${conversationId}/messages`)).data
 export const deleteLoveConversation = (conversationId) => request.delete(`/ai/love_app/conversations/${conversationId}`)
+export const deleteLoveAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/love_app/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 
 export const uploadAgentKnowledgeDocument = (agentKey, file) => {
   const formData = new FormData()
@@ -85,11 +87,12 @@ export const uploadAgentKnowledgeDocument = (agentKey, file) => {
 }
 export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)
-export const chatWithTravelPlanner = (conversationId, message) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, tenantId: TENANT_ID })
+export const chatWithTravelPlanner = (conversationId, message, retryUserMessageId = null) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, retryUserMessageId, tenantId: TENANT_ID })
 export const createTravelConversation = () => request.post('/ai/travel-planner/conversations').then(response => response.data)
 export const listTravelConversations = () => request.get('/ai/travel-planner/conversations').then(response => response.data)
 export const getTravelConversationMessages = conversationId => request.get(`/ai/travel-planner/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteTravelConversation = conversationId => request.delete(`/ai/travel-planner/conversations/${conversationId}`)
+export const deleteTravelAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/travel-planner/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 export const getTravelExecutionEvents = (conversationId, runId) => request.get(`/ai/travel-planner/conversations/${conversationId}/executions/${runId}`).then(response => response.data)
 
 // AI超级智能体聊天

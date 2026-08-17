@@ -8,7 +8,7 @@
         <span :class="connectionStatus" class="status">{{ statusText }}</span>
       </header>
       <section class="travel-chat" :class="{ loading: messagesLoading }">
-        <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="travel" @send-message="sendMessage" @view-execution="openExecution" />
+        <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="travel" @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage" @view-execution="openExecution" />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
     </main>
@@ -33,7 +33,7 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
-import { chatWithTravelPlanner, createTravelConversation, deleteTravelConversation, getTravelConversationMessages, getTravelExecutionEvents, listTravelConversations } from '../api'
+import { chatWithTravelPlanner, createTravelConversation, deleteTravelAssistantReply, deleteTravelConversation, getTravelConversationMessages, getTravelExecutionEvents, listTravelConversations } from '../api'
 
 useHead({ title: '旅游规划专家 - ZWX Agent' })
 const router = useRouter()
@@ -46,6 +46,8 @@ const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
 const executionPanel = ref({ open: false, loading: false, error: '', events: [] })
 let eventSource = null
+let activeTurnStart = -1
+let activeRetry = false
 const statusText = computed(() => connectionStatus.value === 'connecting' ? '正在规划' : connectionStatus.value === 'error' ? '连接异常' : '已保存')
 const addMessage = (content, isUser, time = Date.now()) => messages.value.push({ content, isUser, time, activities: [] })
 const refreshConversations = async () => {
@@ -67,7 +69,7 @@ const selectConversation = async conversation => {
   sidebarOpen.value = false
   try {
     const history = await getTravelConversationMessages(conversation.id)
-    messages.value = history.map(message => ({ content: message.content, isUser: message.role === 'USER', time: new Date(message.createdAt).getTime(), activities: message.executionRunId ? [{ label: '查看执行过程', runId: message.executionRunId }] : [] }))
+    messages.value = history.map(message => ({ id: message.id, content: message.content, isUser: message.role === 'USER', time: new Date(message.createdAt).getTime(), activities: message.executionRunId ? [{ label: '查看执行过程', runId: message.executionRunId }] : [] }))
   } finally { messagesLoading.value = false }
 }
 const removeConversation = async conversation => {
@@ -77,14 +79,16 @@ const removeConversation = async conversation => {
   await refreshConversations()
   if (wasActive) conversations.value.length ? await selectConversation(conversations.value[0]) : await createConversation()
 }
-const sendMessage = message => {
+const sendMessage = (message, retryUserMessageId = null, retryIndex = -1) => {
   if (!chatId.value) return
-  addMessage(message, true)
-  eventSource?.close()
-  const answerIndex = messages.value.length
-  addMessage('', false)
+  cancelActiveStream()
+  activeTurnStart = retryUserMessageId ? retryIndex + 1 : messages.value.length
+  activeRetry = Boolean(retryUserMessageId)
+  if (!retryUserMessageId) addMessage(message, true)
+  const answerIndex = retryUserMessageId ? retryIndex + 1 : messages.value.length
+  messages.value.splice(answerIndex, 0, { content: '', isUser: false, time: Date.now(), activities: [] })
   connectionStatus.value = 'connecting'
-  eventSource = chatWithTravelPlanner(chatId.value, message)
+  eventSource = chatWithTravelPlanner(chatId.value, message, retryUserMessageId)
   eventSource.addEventListener('thinking', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return
@@ -102,14 +106,29 @@ const sendMessage = message => {
   })
   eventSource.onmessage = async event => {
     if (event.data === '[DONE]') {
-      connectionStatus.value = 'disconnected'; eventSource?.close(); eventSource = null; await refreshConversations(); return
+      connectionStatus.value = 'disconnected'; eventSource?.close(); eventSource = null; activeTurnStart = -1; activeRetry = false; await refreshConversations(); return
     }
     if (messages.value[answerIndex]) messages.value[answerIndex].content += event.data
   }
-  eventSource.onerror = async () => {
-    connectionStatus.value = 'error'
-    if (!messages.value[answerIndex].content) messages.value[answerIndex].content = '暂时无法完成规划，请稍后重试。'
-    eventSource?.close(); eventSource = null; await refreshConversations()
+  eventSource.onerror = () => {
+    cancelActiveStream()
+  }
+}
+const cancelActiveStream = () => {
+  if (!eventSource && connectionStatus.value !== 'connecting') return
+  eventSource?.close()
+  eventSource = null
+  if (activeTurnStart >= 0) messages.value.splice(activeTurnStart, activeRetry ? 1 : messages.value.length - activeTurnStart)
+  activeTurnStart = -1
+  activeRetry = false
+  connectionStatus.value = 'disconnected'
+}
+const resendMessage = async ({ content, id, index }) => {
+  if (!id || !chatId.value) return
+  cancelActiveStream()
+  if (await deleteTravelAssistantReply(chatId.value, id)) {
+    if (messages.value[index + 1]?.isUser === false) messages.value.splice(index + 1, 1)
+    sendMessage(content, id, index)
   }
 }
 const openExecution = async ({ runId }) => {
@@ -128,7 +147,7 @@ onMounted(async () => {
   if (conversations.value.length) await selectConversation(conversations.value[0])
   else await createConversation()
 })
-onBeforeUnmount(() => eventSource?.close())
+onBeforeUnmount(cancelActiveStream)
 </script>
 
 <style scoped>

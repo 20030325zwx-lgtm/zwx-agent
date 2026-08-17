@@ -39,6 +39,10 @@ public class AgentExecutionTraceService {
                 readDetail(rs.getString("detail")), rs.getTimestamp("created_at").toInstant()), runId, tenantId, conversationId);
     }
 
+    public void deleteRun(String tenantId, String conversationId, String runId) {
+        jdbcTemplate.update("DELETE FROM agent_execution_event WHERE run_id = ? AND tenant_id = ? AND conversation_id = ?", runId, tenantId, conversationId);
+    }
+
     private Map<String, Object> readDetail(String detail) {
         try { return objectMapper.readValue(detail, new TypeReference<>() {}); }
         catch (Exception exception) { throw new IllegalStateException("Unable to read execution event", exception); }

@@ -29,6 +29,8 @@
           ai-type="love"
           attachments-enabled
           @send-message="sendMessage"
+          @edit-message="cancelActiveStream"
+          @resend-message="resendMessage"
         />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
@@ -45,6 +47,7 @@ import ConversationSidebar from '../components/ConversationSidebar.vue'
 import {
   chatWithLoveApp,
   createLoveConversation,
+  deleteLoveAssistantReply,
   deleteLoveConversation,
   getLoveImageUrl,
   getLoveConversationMessages,
@@ -70,6 +73,8 @@ const historyLoading = ref(false)
 const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
 let eventSource = null
+let activeTurnStart = -1
+let activeRetry = false
 
 const statusText = computed(() => {
   if (connectionStatus.value === 'connecting') return '正在回复'
@@ -82,6 +87,7 @@ const addMessage = (content, isUser, imageKeys = []) => {
     content,
     isUser,
     imageUrls: imageKeys.map(key => getLoveImageUrl(chatId.value, key)),
+    imageKeys,
     time: Date.now(),
     references: [],
     trace: null,
@@ -122,7 +128,9 @@ const selectConversation = async (conversation) => {
     messages.value = history.length
       ? history.map(message => ({
           content: message.content,
+          id: message.id,
           imageUrls: (message.imageObjectKeys || []).map(key => getLoveImageUrl(conversation.id, key)),
+          imageKeys: message.imageObjectKeys || [],
           isUser: message.role === 'USER',
           time: new Date(message.createdAt).getTime(),
           references: message.knowledgeReferences || [],
@@ -155,6 +163,8 @@ const finishStream = async (message, aiMessageIndex, refreshReferences = true) =
   connectionStatus.value = 'disconnected'
   eventSource?.close()
   eventSource = null
+  activeTurnStart = -1
+  activeRetry = false
   if (refreshReferences && message && aiMessageIndex !== undefined && messages.value[aiMessageIndex]) {
     try {
       messages.value[aiMessageIndex].references = await getLoveKnowledgeReferences(message)
@@ -163,25 +173,28 @@ const finishStream = async (message, aiMessageIndex, refreshReferences = true) =
     }
   }
   await refreshConversations()
+  const history = await getLoveConversationMessages(chatId.value)
+  messages.value.forEach((item, index) => { item.id = history[index]?.id })
 }
 
-const sendMessage = async ({ message, files }) => {
+const sendMessage = async ({ message, files }, retryUserMessageId = null, retryIndex = -1, retryImageKeys = []) => {
   if (!chatId.value) return
+  cancelActiveStream()
   let imageKeys = []
   try {
-    imageKeys = await Promise.all(files.map(async file => (await uploadLoveImage(chatId.value, file)).objectKey))
+    imageKeys = retryImageKeys.length ? retryImageKeys : await Promise.all(files.map(async file => (await uploadLoveImage(chatId.value, file)).objectKey))
   } catch (error) {
     connectionStatus.value = 'error'
     console.error('Image upload failed:', error)
     return
   }
-  addMessage(message, true, imageKeys)
-  eventSource?.close()
-
-  const aiMessageIndex = messages.value.length
-  addMessage('', false)
+  activeTurnStart = retryUserMessageId ? retryIndex + 1 : messages.value.length
+  activeRetry = Boolean(retryUserMessageId)
+  if (!retryUserMessageId) addMessage(message, true, imageKeys)
+  const aiMessageIndex = retryUserMessageId ? retryIndex + 1 : messages.value.length
+  messages.value.splice(aiMessageIndex, 0, { content: '', isUser: false, time: Date.now(), activities: [] })
   connectionStatus.value = 'connecting'
-  eventSource = chatWithLoveApp(message, chatId.value, imageKeys)
+  eventSource = chatWithLoveApp(message, chatId.value, imageKeys, retryUserMessageId)
 
   eventSource.addEventListener('references', event => {
     try {
@@ -226,20 +239,26 @@ const sendMessage = async ({ message, files }) => {
   }
 
   eventSource.onerror = async (error) => {
-    if (eventSource?.readyState === EventSource.CLOSED) {
-      await finishStream(message, aiMessageIndex, !imageKeys.length)
-      return
-    }
     console.error('SSE Error:', error)
-    if (aiMessageIndex < messages.value.length && !messages.value[aiMessageIndex].content) {
-      messages.value[aiMessageIndex].content = imageKeys.length
-        ? '图片暂时无法分析，请检查视觉模型和对象存储配置后重试。'
-        : '暂时无法获取回复，请稍后重试。'
-    }
-    connectionStatus.value = 'error'
-    eventSource?.close()
-    eventSource = null
-    await refreshConversations()
+    cancelActiveStream()
+  }
+}
+
+const cancelActiveStream = () => {
+  if (!eventSource && connectionStatus.value !== 'connecting') return
+  eventSource?.close()
+  eventSource = null
+  if (activeTurnStart >= 0) messages.value.splice(activeTurnStart, activeRetry ? 1 : messages.value.length - activeTurnStart)
+  activeTurnStart = -1
+  activeRetry = false
+  connectionStatus.value = 'disconnected'
+}
+const resendMessage = async ({ content, id, index, imageKeys }) => {
+  if (!id || !chatId.value) return
+  cancelActiveStream()
+  if (await deleteLoveAssistantReply(chatId.value, id)) {
+    if (messages.value[index + 1]?.isUser === false) messages.value.splice(index + 1, 1)
+    sendMessage({ message: content, files: [] }, id, index, imageKeys)
   }
 }
 
@@ -254,7 +273,7 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => eventSource?.close())
+onBeforeUnmount(cancelActiveStream)
 </script>
 
 <style scoped>

@@ -124,6 +124,11 @@ public class AiController {
         return conversationService.getMessages(conversationId);
     }
 
+    @DeleteMapping("/love_app/conversations/{conversationId}/messages/{userMessageId}/assistant")
+    public boolean deleteLoveAssistantReply(@PathVariable String conversationId, @PathVariable long userMessageId) {
+        return conversationService.deleteAssistantReply(conversationId, userMessageId);
+    }
+
     @DeleteMapping("/love_app/conversations/{conversationId}")
     public void deleteLoveConversation(@PathVariable String conversationId) {
         conversationService.deleteConversation(conversationId);
@@ -217,11 +222,12 @@ public class AiController {
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> doChatWithLoveAppSSE(String message, String chatId,
                                                                @RequestParam(required = false) List<String> imageKey,
+                                                               @RequestParam(required = false) Long retryUserMessageId,
                                                                @RequestParam(defaultValue = "default") String tenantId) {
         validateTenantId(tenantId);
         List<String> imageObjectKeys = imageKey == null ? List.of() : imageKey;
         if (!imageObjectKeys.isEmpty()) {
-            return doVisionChatWithLoveAppSSE(message, chatId, imageObjectKeys, tenantId);
+            return doVisionChatWithLoveAppSSE(message, chatId, imageObjectKeys, tenantId, retryUserMessageId);
         }
         return Flux.concat(
                 Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在分析你的问题与对话上下文...").build()),
@@ -230,7 +236,7 @@ public class AiController {
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(chat -> Flux.concat(
                                 Mono.just(ServerSentEvent.<String>builder().event("thinking").data("已完成资料检索，正在生成分析建议...").build()),
-                                loveApp.doChatByStream(message, chatId, chat.context()).map(chunk -> ServerSentEvent.builder(chunk).build()),
+                                loveApp.doChatByStream(message, chatId, chat.context(), retryUserMessageId).map(chunk -> ServerSentEvent.builder(chunk).build()),
                                 Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, chat.referencesJson(), chat.traceJson()))
                                         .thenReturn(ServerSentEvent.<String>builder().event("thinking").data("正在整理引用与会话记录...").build()),
                                 Mono.just(ServerSentEvent.<String>builder().event("trace").data(chat.traceJson()).build()),
@@ -249,7 +255,7 @@ public class AiController {
         }
     }
 
-    private Flux<ServerSentEvent<String>> doVisionChatWithLoveAppSSE(String message, String chatId, List<String> imageObjectKeys, String tenantId) {
+    private Flux<ServerSentEvent<String>> doVisionChatWithLoveAppSSE(String message, String chatId, List<String> imageObjectKeys, String tenantId, Long retryUserMessageId) {
         return Flux.concat(
                 Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在理解图片内容...").build()),
                 Mono.fromCallable(() -> loveApp.prepareVisionChat(message, chatId, imageObjectKeys, tenantId))
@@ -261,7 +267,7 @@ public class AiController {
                                         .data(result.analysis().available()
                                                 ? "已提取图片线索，正在检索相关资料..."
                                                 : "图片线索暂不可用，正在继续生成分析...").build()),
-                                loveApp.streamVisionChat(chatId, result)
+                                loveApp.streamVisionChat(message, chatId, imageObjectKeys, result, retryUserMessageId)
                                         .map(chunk -> ServerSentEvent.builder(chunk).build()),
                                 toVisionEvents(chatId, result))));
     }
@@ -271,8 +277,7 @@ public class AiController {
             String referencesJson = objectMapper.writeValueAsString(result.ragTrace().references());
             String traceJson = objectMapper.writeValueAsString(result.ragTrace());
             return Flux.concat(
-                    Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, referencesJson, traceJson))
-                            .thenReturn(ServerSentEvent.<String>builder().event("thinking").data("正在整理引用与会话记录...").build()),
+                    Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在整理引用与会话记录...").build()),
                     Mono.just(ServerSentEvent.<String>builder().event("trace").data(traceJson).build()),
                     Mono.just(ServerSentEvent.<String>builder().event("references").data(referencesJson).build()),
                     Mono.just(ServerSentEvent.<String>builder("[DONE]").build()));
@@ -342,7 +347,8 @@ public class AiController {
 
     @GetMapping(value = "/travel-planner/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> chatWithTravelPlanner(@RequestParam(defaultValue = "default") String tenantId,
-                                                                @RequestParam String conversationId, String message) {
+                                                                @RequestParam String conversationId, String message,
+                                                                @RequestParam(required = false) Long retryUserMessageId) {
         validateTenantId(tenantId);
         String runId = UUID.randomUUID().toString();
         return Flux.create(sink -> {
@@ -352,13 +358,17 @@ public class AiController {
                 sink.next(ServerSentEvent.<String>builder(update.summary()).event("thinking").build());
             };
             progress.accept(new ExecutionUpdate("received", "正在接收并理解你的旅行需求...", Map.of("message", message)));
-            travelPlannerApp.chat(tenantId, conversationId, runId, message, progress).subscribe(
+            reactor.core.Disposable subscription = travelPlannerApp.chat(tenantId, conversationId, runId, message, retryUserMessageId, progress).subscribe(
                     chunk -> sink.next(ServerSentEvent.builder(chunk).build()),
                     sink::error,
                     () -> {
                         sink.next(ServerSentEvent.<String>builder("[DONE]").build());
                         sink.complete();
                     });
+            sink.onCancel(() -> {
+                subscription.dispose();
+                agentExecutionTraceService.deleteRun(tenantId, conversationId, runId);
+            });
         });
     }
 
@@ -386,6 +396,15 @@ public class AiController {
                                                                           @PathVariable String conversationId) {
         validateTenantId(tenantId);
         return agentConversationService.getTravelMessages(tenantId, conversationId);
+    }
+
+    @DeleteMapping("/travel-planner/conversations/{conversationId}/messages/{userMessageId}/assistant")
+    public boolean deleteTravelAssistantReply(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                               @PathVariable String conversationId, @PathVariable long userMessageId) {
+        validateTenantId(tenantId);
+        String runId = agentConversationService.deleteTravelAssistantReply(tenantId, conversationId, userMessageId);
+        if (runId != null) agentExecutionTraceService.deleteRun(tenantId, conversationId, runId);
+        return runId != null;
     }
 
     @DeleteMapping("/travel-planner/conversations/{conversationId}")

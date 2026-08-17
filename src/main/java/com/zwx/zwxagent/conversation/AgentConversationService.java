@@ -2,6 +2,7 @@ package com.zwx.zwxagent.conversation;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
@@ -46,6 +47,13 @@ public class AgentConversationService {
         jdbcTemplate.update("UPDATE agent_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND agent_key = ?", conversationId, tenantId, TRAVEL);
     }
 
+    @Transactional
+    public void saveCompletedTravelTurn(String tenantId, String conversationId, String message, String answer, String executionRunId) {
+        ensureTravelConversation(tenantId, conversationId, message);
+        appendTravelMessage(tenantId, conversationId, "USER", message);
+        appendTravelMessage(tenantId, conversationId, "ASSISTANT", answer, executionRunId);
+    }
+
     public List<AgentConversationSummary> listTravelConversations(String tenantId) {
         return jdbcTemplate.query("""
                 SELECT id, title, created_at, updated_at FROM agent_conversation
@@ -56,26 +64,42 @@ public class AgentConversationService {
 
     public List<AgentConversationMessage> getTravelMessages(String tenantId, String conversationId) {
         return jdbcTemplate.query("""
-                SELECT m.role, m.content, m.execution_run_id, m.created_at FROM agent_chat_message m
+                SELECT m.id, m.role, m.content, m.execution_run_id, m.created_at FROM agent_chat_message m
                 JOIN agent_conversation c ON c.id = m.conversation_id
                 WHERE c.id = ? AND c.tenant_id = ? AND c.agent_key = ? ORDER BY m.id ASC
-                """, (rs, rowNum) -> new AgentConversationMessage(rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
+                """, (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
                 rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, TRAVEL);
     }
 
     public List<AgentConversationMessage> getRecentTravelMessages(String tenantId, String conversationId, int limit) {
         return jdbcTemplate.query("""
-                SELECT role, content, execution_run_id, created_at FROM (
+                SELECT id, role, content, execution_run_id, created_at FROM (
                     SELECT m.id, m.role, m.content, m.execution_run_id, m.created_at FROM agent_chat_message m
                     JOIN agent_conversation c ON c.id = m.conversation_id
                     WHERE c.id = ? AND c.tenant_id = ? AND c.agent_key = ? ORDER BY m.id DESC LIMIT ?
                 ) recent_messages ORDER BY id ASC
-                """, (rs, rowNum) -> new AgentConversationMessage(rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
+                """, (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
                 rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, TRAVEL, limit);
     }
 
     public void deleteTravelConversation(String tenantId, String conversationId) {
         jdbcTemplate.update("DELETE FROM agent_conversation WHERE id = ? AND tenant_id = ? AND agent_key = ?", conversationId, tenantId, TRAVEL);
+    }
+
+    public String deleteTravelAssistantReply(String tenantId, String conversationId, long userMessageId) {
+        List<TravelReply> replies = jdbcTemplate.query("""
+                SELECT reply.id, reply.execution_run_id FROM agent_chat_message reply
+                JOIN agent_conversation c ON c.id = reply.conversation_id
+                WHERE reply.conversation_id = ? AND c.tenant_id = ? AND c.agent_key = ? AND reply.role = 'ASSISTANT' AND reply.id > ?
+                  AND NOT EXISTS (SELECT 1 FROM agent_chat_message later_user
+                                  WHERE later_user.conversation_id = reply.conversation_id AND later_user.role = 'USER'
+                                    AND later_user.id > ? AND later_user.id < reply.id)
+                ORDER BY reply.id LIMIT 1
+                """, (rs, rowNum) -> new TravelReply(rs.getLong("id"), rs.getString("execution_run_id")), conversationId, tenantId, TRAVEL, userMessageId, userMessageId);
+        if (replies.isEmpty()) return null;
+        TravelReply reply = replies.getFirst();
+        jdbcTemplate.update("DELETE FROM agent_chat_message WHERE id = ?", reply.id());
+        return reply.executionRunId();
     }
 
     private AgentConversationSummary getTravelConversation(String tenantId, String id) {
@@ -89,4 +113,6 @@ public class AgentConversationService {
         String normalized = message == null ? "" : message.replaceAll("\\s+", " ").trim();
         return normalized.isEmpty() ? DEFAULT_TITLE : normalized.length() <= 32 ? normalized : normalized.substring(0, 32) + "...";
     }
+
+    private record TravelReply(long id, String executionRunId) {}
 }

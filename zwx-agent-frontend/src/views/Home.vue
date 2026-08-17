@@ -52,6 +52,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
+import { AGENT_LIST } from '../config/agents'
 
 useHead({
   title: 'ZWX Agent - 智能体目录',
@@ -65,32 +66,7 @@ const router = useRouter()
 const query = ref('')
 const activeCategory = ref('精选')
 const categories = ['精选', '情感关系', '旅行规划', '效率协作']
-const agents = [
-  {
-    name: '情感分析大师',
-    description: '基于对话、图片与知识库，梳理关系信号并给出建议',
-    category: '情感关系',
-    path: '/love-master',
-    icon: '♡',
-    iconClass: 'emotion-icon'
-  },
-  {
-    name: '超级智能体',
-    description: '面向多步骤任务的通用 AI 协作助手',
-    category: '效率协作',
-    path: '/super-agent',
-    icon: '✦',
-    iconClass: 'super-icon'
-  },
-  {
-    name: '旅游规划专家',
-    description: '基于偏好、私有资料与联网搜索，生成可执行的旅行方案',
-    category: '旅行规划',
-    path: '/travel-planner',
-    icon: '⌖',
-    iconClass: 'travel-icon'
-  }
-]
+const agents = AGENT_LIST
 
 const filteredAgents = computed(() => {
   const keyword = query.value.trim().toLowerCase()

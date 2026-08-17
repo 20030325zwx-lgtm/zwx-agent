@@ -1,9 +1,8 @@
 import axios from 'axios'
 
-// 根据环境变量设置 API 基础 URL
-const API_BASE_URL = process.env.NODE_ENV === 'production' 
- ? '/api' // 生产环境使用相对路径，适用于前后端部署在同一域名下
- : 'http://localhost:8123/api' // 开发环境指向本地后端服务
+const desktopApiBaseUrl = window.zwxDesktop?.apiBaseUrl
+const configuredApiBaseUrl = desktopApiBaseUrl || import.meta.env.VITE_API_BASE_URL
+const API_BASE_URL = (configuredApiBaseUrl || (import.meta.env.PROD ? '/api' : 'http://localhost:8123/api')).replace(/\/$/, '')
 const TENANT_ID = import.meta.env.VITE_TENANT_ID || 'default'
 
 // 创建axios实例

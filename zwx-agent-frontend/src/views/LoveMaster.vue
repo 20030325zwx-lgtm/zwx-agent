@@ -18,7 +18,7 @@
           <button class="back-button" type="button" @click="goBack">返回首页</button>
         </div>
         <h1>情感分析大师</h1>
-        <span class="header-status" :class="connectionStatus">{{ statusText }}</span>
+        <AgentSettingsMenu agent-key="love" default-theme="rose" />
       </header>
 
       <section class="chat-area" :class="{ loading: messagesLoading }">
@@ -44,6 +44,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
+import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import {
   chatWithLoveApp,
@@ -76,12 +77,6 @@ const sidebarOpen = ref(false)
 let eventSource = null
 let activeTurnStart = -1
 let activeRetry = false
-
-const statusText = computed(() => {
-  if (connectionStatus.value === 'connecting') return '正在回复'
-  if (connectionStatus.value === 'error') return '连接异常'
-  return '已保存'
-})
 
 const addMessage = (content, isUser, imageKeys = []) => {
   messages.value.push({

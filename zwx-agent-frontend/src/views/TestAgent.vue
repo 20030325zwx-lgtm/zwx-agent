@@ -1,13 +1,14 @@
 <template>
   <div class="test-layout">
     <ConversationSidebar title="功能测试助手" mark="✓" theme="test" :conversations="conversations" :active-id="chatId" :loading="loading" :open="sidebarOpen" @create="create" @select="select" @delete="remove" @close="sidebarOpen=false" />
-    <main><header><button @click="sidebarOpen=true">☰</button><strong>功能测试助手</strong><button @click="router.push('/')">智能体目录</button></header><ChatRoom :messages="messages" :connection-status="status" ai-type="test" attachments-enabled attachment-accept=".md,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" web-search-available @send-message="send" @edit-message="cancel" @resend-message="resend" /></main>
+    <main><header><button @click="sidebarOpen=true">☰</button><strong>功能测试助手</strong><AgentSettingsMenu agent-key="test" default-theme="blue" /></header><ChatRoom :messages="messages" :connection-status="status" ai-type="test" attachments-enabled attachment-accept=".md,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" web-search-available @send-message="send" @edit-message="cancel" @resend-message="resend" /></main>
   </div>
 </template>
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ChatRoom from '../components/ChatRoom.vue'
+import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import { chatWithTestAgent, createTestConversation, deleteTestAssistantReply, deleteTestConversation, getTestConversationMessages, listTestConversations, uploadAgentKnowledgeDocument } from '../api'
 const router = useRouter(); const messages = ref([]); const conversations = ref([]); const chatId = ref(''); const status = ref('disconnected'); const loading = ref(false); const sidebarOpen = ref(false)

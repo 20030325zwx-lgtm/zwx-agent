@@ -31,6 +31,12 @@ const registry = {
       quickPrompts: ['帮我规划一个周末短途旅行', '按预算做一份三日行程', '帮我比较两个旅行目的地']
     }
   },
+  test: {
+    key: 'test', name: '功能测试助手', category: '开发测试', path: '/test-agent', icon: '✓', iconClass: 'test-icon',
+    description: '隔离的对话、历史会话与私有知识库测试空间',
+    capabilities: { attachments: false, conversations: true, executionTrace: false, privateKnowledge: true },
+    chat: { emptyTitle: '开始验证一个功能。', emptyDescription: '此处的会话与资料均独立于其他智能体。', inputPlaceholder: '输入测试问题，验证流式回复、历史记录或知识库召回...', quickPrompts: ['验证流式输出是否正常', '测试私有知识库召回', '创建一条测试会话'] }
+  },
   super: {
     key: 'super',
     name: '超级智能体',

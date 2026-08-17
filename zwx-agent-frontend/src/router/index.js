@@ -34,6 +34,7 @@ const routes = [
     component: () => import('../views/TravelPlanner.vue'),
     meta: { title: '旅游规划专家 - ZWX Agent', description: '旅游规划专家提供行程建议并按需查询实时信息。' }
   },
+  { path: '/test-agent', name: 'TestAgent', component: () => import('../views/TestAgent.vue'), meta: { title: '功能测试助手 - ZWX Agent', description: '用于验证 ZWX Agent 对话与知识库功能的隔离测试空间。' } },
   {
     path: '/knowledge-admin',
     name: 'KnowledgeAdmin',

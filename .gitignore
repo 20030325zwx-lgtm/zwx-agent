@@ -5,6 +5,8 @@ application-local.yaml
 .env.*
 .DS_Store
 tmp
+temp/*
+!temp/.gitkeep
 
 HELP.md
 target/

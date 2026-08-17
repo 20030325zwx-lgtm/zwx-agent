@@ -1,0 +1,13 @@
+.git
+.idea
+.mvn
+release
+temp
+tmp
+application-local.yml
+application-local.yaml
+src/main/resources/application-local.yml
+src/main/resources/application-local.yaml
+zwx-agent-frontend/node_modules
+zwx-agent-frontend/.env
+zwx-agent-frontend/.env.*

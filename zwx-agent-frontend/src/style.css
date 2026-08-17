@@ -4,6 +4,8 @@
   background: #f7f8fa;
   --zwx-primary: #006fee;
   --zwx-primary-dark: #005bc4;
+  --zwx-primary-soft: #eaf3ff;
+  --zwx-primary-ring: rgba(0, 111, 238, .12);
   --zwx-foreground: #111827;
   --zwx-muted: #6b7280;
   --zwx-divider: #e5e7eb;

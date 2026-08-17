@@ -70,18 +70,21 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import { getAgentKnowledgeDocument, listAgentKnowledgeDocuments, uploadAgentKnowledgeDocument } from '../api'
 import { KNOWLEDGE_AGENTS, getAgent } from '../config/agents'
 
 useHead({ title: '知识库管理 - ZWX Agent' })
 
+const route = useRoute()
+const requestedAgentKey = typeof route.query.agentKey === 'string' && KNOWLEDGE_AGENTS.some(agent => agent.key === route.query.agentKey) ? route.query.agentKey : 'love'
 const detail = ref(null)
 const selectedDocumentId = ref('')
 const selectedChunkId = ref('')
 const loadingDetail = ref(false)
 const error = ref('')
-const agentKey = ref('love')
+const agentKey = ref(requestedAgentKey)
 const currentAgent = computed(() => getAgent(agentKey.value))
 const privateDocuments = ref([])
 const loadingPrivateDocuments = ref(false)

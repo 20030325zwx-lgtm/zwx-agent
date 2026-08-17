@@ -3,9 +3,6 @@ package com.zwx.zwxagent.rag;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.ObjectMetadata;
-import com.itextpdf.kernel.pdf.PdfDocument;
-import com.itextpdf.kernel.pdf.PdfReader;
-import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -16,7 +13,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
-import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
@@ -32,25 +28,28 @@ public class AgentKnowledgeDocumentService {
     private final JdbcTemplate jdbcTemplate;
     private final VectorStore vectorStore;
     private final MyTokenTextSplitter textSplitter;
+    private final DocumentParsingModule documentParsingModule;
 
     public AgentKnowledgeDocumentService(@Value("${app.oss.endpoint}") String endpoint,
                                          @Value("${app.oss.access-key-id}") String accessKeyId,
                                          @Value("${app.oss.access-key-secret}") String accessKeySecret,
                                          @Value("${app.oss.bucket}") String bucket, JdbcTemplate jdbcTemplate,
                                          @Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore,
-                                         MyTokenTextSplitter textSplitter) {
+                                         MyTokenTextSplitter textSplitter, DocumentParsingModule documentParsingModule) {
         if (accessKeyId.isBlank() || accessKeySecret.isBlank()) throw new IllegalStateException("OSS credentials are required");
         this.ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
         this.bucket = bucket;
         this.jdbcTemplate = jdbcTemplate;
         this.vectorStore = vectorStore;
         this.textSplitter = textSplitter;
+        this.documentParsingModule = documentParsingModule;
     }
 
     public AgentKnowledgeDocument upload(String tenantId, String agentKey, MultipartFile file) {
         validateScope(tenantId, agentKey);
         String filename = file.getOriginalFilename() == null ? "document.txt" : file.getOriginalFilename();
-        if (!filename.toLowerCase().matches(".*\\.(md|txt|pdf)$")) throw new IllegalArgumentException("Only .md, .txt and .pdf knowledge files are supported");
+        if (!filename.toLowerCase().matches(".*\\.(md|txt|pdf|doc|docx|xls|xlsx|ppt|pptx)$"))
+            throw new IllegalArgumentException("Supported knowledge files: md, txt, pdf, doc, docx, xls, xlsx, ppt, pptx");
         String id = UUID.randomUUID().toString();
         String objectKey = "knowledge/" + tenantId + "/" + agentKey + "/" + id + "-" + filename;
         try (InputStream input = file.getInputStream()) {
@@ -74,16 +73,28 @@ public class AgentKnowledgeDocumentService {
             jdbcTemplate.update("UPDATE agent_knowledge_document SET status = 'INDEXING' WHERE id = ?", documentId);
             StoredDocument stored = jdbcTemplate.queryForObject("SELECT tenant_id, agent_key, object_key, filename FROM agent_knowledge_document WHERE id = ?",
                     (rs, rowNum) -> new StoredDocument(rs.getString("tenant_id"), rs.getString("agent_key"), rs.getString("object_key"), rs.getString("filename")), documentId);
-            String content;
+            ParsedDocument parsed;
             try (var object = ossClient.getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
-                content = extractContent(input.readAllBytes(), stored.filename());
+                parsed = documentParsingModule.parse(input.readAllBytes(), stored.filename());
             }
+            String content = parsed.content();
             if (content.isBlank()) throw new IllegalArgumentException("PDF does not contain extractable text; OCR is required for scanned documents");
-            List<Document> splitChunks = textSplitter.splitCustomized(List.of(Document.builder().id(documentId).text(content)
-                    .metadata(Map.of("tenantId", stored.tenantId(), "agentKey", stored.agentKey(), "objectKey", stored.objectKey(), "filename", stored.filename())).build()));
+            Map<String, Object> sourceMetadata = new HashMap<>();
+            sourceMetadata.put("tenantId", stored.tenantId());
+            sourceMetadata.put("agentKey", stored.agentKey());
+            sourceMetadata.put("objectKey", stored.objectKey());
+            sourceMetadata.put("filename", stored.filename());
+            sourceMetadata.put("parser", parsed.parser());
+            sourceMetadata.putAll(parsed.metadata());
+            List<Document> splitChunks = textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(content)
+                    .metadata(sourceMetadata).build()));
             List<Document> chunks = java.util.stream.IntStream.range(0, splitChunks.size())
                     .mapToObj(index -> toScopedChunk(splitChunks.get(index), documentId, stored, index + 1)).toList();
-            vectorStore.delete(chunks.stream().map(Document::getId).toList());
+            List<String> existingChunkIds = jdbcTemplate.queryForList("""
+                    SELECT id::text FROM agent_knowledge_vector
+                    WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
+                    """, String.class, documentId, stored.tenantId(), stored.agentKey());
+            if (!existingChunkIds.isEmpty()) vectorStore.delete(existingChunkIds);
             for (int start = 0; start < chunks.size(); start += BATCH_SIZE) vectorStore.add(chunks.subList(start, Math.min(start + BATCH_SIZE, chunks.size())));
             jdbcTemplate.update("UPDATE agent_knowledge_document SET status = 'READY', chunk_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?", chunks.size(), documentId);
         } catch (Exception exception) {
@@ -107,21 +118,25 @@ public class AgentKnowledgeDocumentService {
                 WHERE id = ? AND tenant_id = ? AND agent_key = ?
                 """, (rs, rowNum) -> new StoredDocument(rs.getString("tenant_id"), rs.getString("agent_key"),
                 rs.getString("object_key"), rs.getString("filename")), documentId, tenantId, agentKey);
-        String content;
         try (var object = ossClient.getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
-            content = extractContent(input.readAllBytes(), stored.filename());
+            ParsedDocument parsed = documentParsingModule.parse(input.readAllBytes(), stored.filename());
+            List<AgentKnowledgeChunk> chunks = jdbcTemplate.query("""
+                    SELECT id::text, content, NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index
+                    FROM agent_knowledge_vector
+                    WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
+                    ORDER BY chunk_index NULLS LAST, id
+                    """, (rs, rowNum) -> new AgentKnowledgeChunk(rs.getString("id"),
+                    rs.getObject("chunk_index", Integer.class) == null ? rowNum + 1 : rs.getInt("chunk_index"), rs.getString("content")),
+                    documentId, tenantId, agentKey);
+            return new AgentKnowledgeDocumentDetail(documentId, stored.filename(), stored.objectKey(), parsed.content(), chunks);
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to read knowledge document", exception);
         }
-        List<AgentKnowledgeChunk> chunks = jdbcTemplate.query("""
-                SELECT id::text, content, NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index
-                FROM agent_knowledge_vector
-                WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                ORDER BY chunk_index NULLS LAST, id
-                """, (rs, rowNum) -> new AgentKnowledgeChunk(rs.getString("id"),
-                rs.getObject("chunk_index", Integer.class) == null ? rowNum + 1 : rs.getInt("chunk_index"), rs.getString("content")),
-                documentId, tenantId, agentKey);
-        return new AgentKnowledgeDocumentDetail(documentId, stored.filename(), stored.objectKey(), content, chunks);
+    }
+
+    public AgentKnowledgeDocument getDocumentRecordForScope(String tenantId, String agentKey, String documentId) {
+        validateScope(tenantId, agentKey);
+        return getDocumentRecord(tenantId, agentKey, documentId);
     }
 
     private AgentKnowledgeDocument getDocumentRecord(String tenantId, String agentKey, String id) {
@@ -146,17 +161,6 @@ public class AgentKnowledgeDocumentService {
         metadata.put("chunkIndex", chunkIndex);
         return Document.builder().id(UUID.nameUUIDFromBytes((documentId + "|" + document.getText()).getBytes(StandardCharsets.UTF_8)).toString())
                 .text(document.getText()).metadata(metadata).build();
-    }
-
-    private String extractContent(byte[] bytes, String filename) {
-        if (!filename.toLowerCase().endsWith(".pdf")) return new String(bytes, StandardCharsets.UTF_8);
-        StringBuilder text = new StringBuilder();
-        try (PdfDocument pdf = new PdfDocument(new PdfReader(new ByteArrayInputStream(bytes)))) {
-            for (int page = 1; page <= pdf.getNumberOfPages(); page++) {
-                text.append("\n[PDF 第 ").append(page).append(" 页]\n").append(PdfTextExtractor.getTextFromPage(pdf.getPage(page)));
-            }
-        } catch (Exception exception) { throw new IllegalArgumentException("Unable to extract PDF text", exception); }
-        return text.toString();
     }
 
     private void validateScope(String tenantId, String agentKey) {

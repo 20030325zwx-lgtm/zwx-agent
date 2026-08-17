@@ -64,6 +64,10 @@ app:
     bucket: ${ALIYUN_OSS_BUCKET:zwx-agent}
     access-key-id: ${ALIYUN_OSS_ACCESS_KEY_ID:}
     access-key-secret: ${ALIYUN_OSS_ACCESS_KEY_SECRET:}
+  document-parser:
+    tika:
+      # Optional Apache Tika Server endpoint, for example http://127.0.0.1:9998
+      base-url: ${APP_TIKA_BASE_URL:}
 # springdoc-openapi config
 springdoc:
   swagger-ui:

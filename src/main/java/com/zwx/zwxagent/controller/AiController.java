@@ -177,6 +177,14 @@ public class AiController {
         return agentKnowledgeDocumentService.getDocument(tenantId, agentKey, documentId);
     }
 
+    @PostMapping("/agent-knowledge/documents/{documentId}/reindex")
+    public AgentKnowledgeDocument reindexAgentKnowledgeDocument(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                                 @PathVariable String documentId, @RequestParam String agentKey) {
+        AgentKnowledgeDocument document = agentKnowledgeDocumentService.getDocumentRecordForScope(tenantId, agentKey, documentId);
+        agentKnowledgeDocumentService.indexDocument(documentId);
+        return document;
+    }
+
     @GetMapping("/love_app/knowledge/references")
     public List<LoveKnowledgeReference> findLoveKnowledgeReferences(@RequestParam String message) {
         return loveRagService.trace(message, chatModelName).references();

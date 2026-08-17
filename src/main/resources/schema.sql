@@ -79,3 +79,23 @@ CREATE INDEX IF NOT EXISTS idx_agent_conversation_scope_updated
 
 CREATE INDEX IF NOT EXISTS idx_agent_chat_message_conversation_id
     ON agent_chat_message (conversation_id, id);
+
+ALTER TABLE agent_chat_message
+    ADD COLUMN IF NOT EXISTS execution_run_id VARCHAR(64);
+
+CREATE TABLE IF NOT EXISTS agent_execution_event (
+    id BIGSERIAL PRIMARY KEY,
+    run_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL,
+    agent_key VARCHAR(32) NOT NULL,
+    conversation_id VARCHAR(64) NOT NULL REFERENCES agent_conversation(id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL,
+    phase VARCHAR(32) NOT NULL,
+    summary VARCHAR(255) NOT NULL,
+    detail JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (run_id, sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_execution_event_scope
+    ON agent_execution_event (tenant_id, agent_key, conversation_id, run_id, sequence);

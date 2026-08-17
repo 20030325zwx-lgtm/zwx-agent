@@ -85,7 +85,8 @@ const addMessage = (content, isUser, imageKeys = []) => {
     time: Date.now(),
     references: [],
     trace: null,
-    thinking: ''
+    thinking: '',
+    activities: []
   })
 }
 
@@ -126,6 +127,7 @@ const selectConversation = async (conversation) => {
           time: new Date(message.createdAt).getTime(),
           references: message.knowledgeReferences || [],
           trace: message.ragTrace || null,
+          activities: [],
           visionAnalysis: message.visionAnalysis || null
         }))
       : []
@@ -190,7 +192,10 @@ const sendMessage = async ({ message, files }) => {
   })
 
   eventSource.addEventListener('thinking', event => {
-    if (messages.value[aiMessageIndex]) messages.value[aiMessageIndex].thinking = event.data || '正在思考...'
+    const answer = messages.value[aiMessageIndex]
+    if (!answer) return
+    answer.thinking = event.data || '正在思考...'
+    if (event.data && !answer.activities.includes(event.data)) answer.activities.push(event.data)
   })
 
   eventSource.addEventListener('trace', event => {

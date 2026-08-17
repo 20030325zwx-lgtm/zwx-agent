@@ -90,6 +90,7 @@ export const createTravelConversation = () => request.post('/ai/travel-planner/c
 export const listTravelConversations = () => request.get('/ai/travel-planner/conversations').then(response => response.data)
 export const getTravelConversationMessages = conversationId => request.get(`/ai/travel-planner/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteTravelConversation = conversationId => request.delete(`/ai/travel-planner/conversations/${conversationId}`)
+export const getTravelExecutionEvents = (conversationId, runId) => request.get(`/ai/travel-planner/conversations/${conversationId}/executions/${runId}`).then(response => response.data)
 
 // AI超级智能体聊天
 export const chatWithManus = (message) => {

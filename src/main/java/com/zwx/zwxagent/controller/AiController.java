@@ -8,6 +8,9 @@ import com.zwx.zwxagent.conversation.LoveConversationSummary;
 import com.zwx.zwxagent.conversation.AgentConversationMessage;
 import com.zwx.zwxagent.conversation.AgentConversationService;
 import com.zwx.zwxagent.conversation.AgentConversationSummary;
+import com.zwx.zwxagent.execution.AgentExecutionEvent;
+import com.zwx.zwxagent.execution.AgentExecutionTraceService;
+import com.zwx.zwxagent.execution.ExecutionUpdate;
 import com.zwx.zwxagent.storage.LoveImageStorageService;
 import com.zwx.zwxagent.storage.LoveImageUpload;
 import com.zwx.zwxagent.storage.LoveKnowledgeDocumentStorageService;
@@ -51,6 +54,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/ai")
@@ -88,6 +93,9 @@ public class AiController {
 
     @Resource
     private AgentConversationService agentConversationService;
+
+    @Resource
+    private AgentExecutionTraceService agentExecutionTraceService;
 
     @Resource
     private TravelPlannerApp travelPlannerApp;
@@ -215,23 +223,30 @@ public class AiController {
         if (!imageObjectKeys.isEmpty()) {
             return doVisionChatWithLoveAppSSE(message, chatId, imageObjectKeys, tenantId);
         }
-        LoveRagResult ragResult = loveRagService.retrieve(message, chatModelName);
-        LoveRagTrace trace = ragResult.trace();
-        List<LoveKnowledgeReference> references = trace.references();
-        String referencesJson;
-        String traceJson;
-        try {
-            referencesJson = objectMapper.writeValueAsString(references);
-            traceJson = objectMapper.writeValueAsString(trace);
-        } catch (JsonProcessingException e) {
-            return Flux.error(new IllegalStateException("Unable to serialize knowledge references", e));
-        }
         return Flux.concat(
-                loveApp.doChatByStream(message, chatId, ragResult.context() + "\n" + agentKnowledgeRagService.context(tenantId, "love", message))
-                        .map(chunk -> ServerSentEvent.builder(chunk).build()),
-                Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, referencesJson, traceJson))
-                        .thenReturn(ServerSentEvent.<String>builder().event("trace").data(traceJson).build()),
-                Mono.just(ServerSentEvent.<String>builder().event("references").data(referencesJson).build()));
+                Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在分析你的问题与对话上下文...").build()),
+                Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在检索情感知识库与私有资料...").build()),
+                Mono.fromCallable(() -> prepareLoveTextChat(message, tenantId))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .flatMapMany(chat -> Flux.concat(
+                                Mono.just(ServerSentEvent.<String>builder().event("thinking").data("已完成资料检索，正在生成分析建议...").build()),
+                                loveApp.doChatByStream(message, chatId, chat.context()).map(chunk -> ServerSentEvent.builder(chunk).build()),
+                                Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, chat.referencesJson(), chat.traceJson()))
+                                        .thenReturn(ServerSentEvent.<String>builder().event("thinking").data("正在整理引用与会话记录...").build()),
+                                Mono.just(ServerSentEvent.<String>builder().event("trace").data(chat.traceJson()).build()),
+                                Mono.just(ServerSentEvent.<String>builder().event("references").data(chat.referencesJson()).build()),
+                                Mono.just(ServerSentEvent.<String>builder("[DONE]").build()))));
+    }
+
+    private LoveTextChat prepareLoveTextChat(String message, String tenantId) {
+        LoveRagResult ragResult = loveRagService.retrieve(message, chatModelName);
+        try {
+            String referencesJson = objectMapper.writeValueAsString(ragResult.trace().references());
+            String traceJson = objectMapper.writeValueAsString(ragResult.trace());
+            return new LoveTextChat(ragResult.context() + "\n" + agentKnowledgeRagService.context(tenantId, "love", message), referencesJson, traceJson);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Unable to serialize knowledge references", exception);
+        }
     }
 
     private Flux<ServerSentEvent<String>> doVisionChatWithLoveAppSSE(String message, String chatId, List<String> imageObjectKeys, String tenantId) {
@@ -329,8 +344,29 @@ public class AiController {
     public Flux<ServerSentEvent<String>> chatWithTravelPlanner(@RequestParam(defaultValue = "default") String tenantId,
                                                                 @RequestParam String conversationId, String message) {
         validateTenantId(tenantId);
-        return Flux.concat(travelPlannerApp.chat(tenantId, conversationId, message).map(chunk -> ServerSentEvent.builder(chunk).build()),
-                Mono.just(ServerSentEvent.<String>builder("[DONE]").build()));
+        String runId = UUID.randomUUID().toString();
+        return Flux.create(sink -> {
+            java.util.function.Consumer<ExecutionUpdate> progress = update -> {
+                int sequence = agentExecutionTraceService.record(runId, tenantId, "travel", conversationId, update.phase(), update.summary(), update.detail());
+                sink.next(ServerSentEvent.<String>builder(toJson(Map.of("runId", runId, "sequence", sequence, "phase", update.phase(), "summary", update.summary()))).event("activity").build());
+                sink.next(ServerSentEvent.<String>builder(update.summary()).event("thinking").build());
+            };
+            progress.accept(new ExecutionUpdate("received", "正在接收并理解你的旅行需求...", Map.of("message", message)));
+            travelPlannerApp.chat(tenantId, conversationId, runId, message, progress).subscribe(
+                    chunk -> sink.next(ServerSentEvent.builder(chunk).build()),
+                    sink::error,
+                    () -> {
+                        sink.next(ServerSentEvent.<String>builder("[DONE]").build());
+                        sink.complete();
+                    });
+        });
+    }
+
+    @GetMapping("/travel-planner/conversations/{conversationId}/executions/{runId}")
+    public List<AgentExecutionEvent> getTravelExecutionEvents(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                                @PathVariable String conversationId, @PathVariable String runId) {
+        validateTenantId(tenantId);
+        return agentExecutionTraceService.listTravelEvents(tenantId, conversationId, runId);
     }
 
     @PostMapping("/travel-planner/conversations")
@@ -361,5 +397,8 @@ public class AiController {
 
     private void validateTenantId(String tenantId) {
         if (tenantId == null || !tenantId.matches("[A-Za-z0-9_-]{1,64}")) throw new IllegalArgumentException("Invalid tenant scope");
+    }
+
+    private record LoveTextChat(String context, String referencesJson, String traceJson) {
     }
 }

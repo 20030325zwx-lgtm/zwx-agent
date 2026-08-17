@@ -307,6 +307,25 @@ sudo ./stop.sh
 
 应用临时目录由 `APP_TEMP_DIR` 控制，容器中固定为 `/app/temp`，映射到安装目录的 `temp/`。PDF 生成、下载和文件工具都使用该目录；应用未写入临时文件时目录保持为空。
 
+## macOS 桌面版
+
+桌面端位于 `zwx-agent-desktop/`，使用 Electron 封装同一份 Vue 前端，不复制后端逻辑。桌面版默认请求 `http://127.0.0.1:8123/api`；在任一智能体页面右上角设置菜单中可修改为部署服务器的完整 API 地址，例如 `https://agent.example.com/api`。地址保存在 macOS 应用数据目录，不会写入前端代码或安装包。
+
+构建 Apple Silicon（M 系列）安装包：
+
+```bash
+cd zwx-agent-desktop
+npm install
+npm run dist:mac
+```
+
+生成的安装包在 `zwx-agent-desktop/release/`：
+
+- `ZWX Agent-<版本>-arm64.dmg`：常规拖拽安装包。
+- `ZWX Agent-<版本>-arm64-mac.zip`：便携分发包。
+
+当前构建机未配置 Apple Developer ID，因此产物未公证。正式对外分发前，应配置 Developer ID Application 证书与 Apple notarization；否则首次打开时 macOS 可能需要在“隐私与安全性”中手动允许。
+
 ```bash
 cd zwx-agent-frontend
 npm install

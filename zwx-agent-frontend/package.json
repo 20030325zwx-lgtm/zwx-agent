@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:desktop": "VITE_DESKTOP=true vite build",
     "preview": "vite preview"
   },
   "dependencies": {

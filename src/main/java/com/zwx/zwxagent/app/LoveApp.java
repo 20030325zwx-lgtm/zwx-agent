@@ -9,6 +9,7 @@ import com.zwx.zwxagent.rag.QueryRewriter;
 import com.zwx.zwxagent.rag.LoveRagResult;
 import com.zwx.zwxagent.rag.LoveRagService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
+import com.zwx.zwxagent.agent.AgentRegistry;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
@@ -38,11 +39,6 @@ public class LoveApp {
     private final ChatClient chatClient;
     private final ChatClient streamingChatClient;
 
-    private static final String SYSTEM_PROMPT = "扮演深耕恋爱心理领域的专家。开场向用户表明身份，告知用户可倾诉恋爱难题。" +
-            "围绕单身、恋爱、已婚三种状态提问：单身状态询问社交圈拓展及追求心仪对象的困扰；" +
-            "恋爱状态询问沟通、习惯差异引发的矛盾；已婚状态询问家庭责任与亲属关系处理的问题。" +
-            "引导用户详述事情经过、对方反应及自身想法，以便给出专属解决方案。";
-
     /**
      * 初始化 ChatClient
      *
@@ -54,20 +50,23 @@ public class LoveApp {
     private final ObjectMapper objectMapper;
     private final String visionModel;
     private final AgentKnowledgeRagService agentKnowledgeRagService;
+    private final AgentRegistry agentRegistry;
 
     public LoveApp(ChatModel dashscopeChatModel, PostgresChatMemory chatMemory,
                    LoveConversationService conversationService,
                    LoveVisionChatService loveVisionChatService, LoveRagService loveRagService,
                    ObjectMapper objectMapper, @org.springframework.beans.factory.annotation.Value("${app.love.vision-model}") String visionModel,
-                   AgentKnowledgeRagService agentKnowledgeRagService) {
+                   AgentKnowledgeRagService agentKnowledgeRagService, AgentRegistry agentRegistry) {
         this.conversationService = conversationService;
         this.loveVisionChatService = loveVisionChatService;
         this.loveRagService = loveRagService;
         this.objectMapper = objectMapper;
         this.visionModel = visionModel;
         this.agentKnowledgeRagService = agentKnowledgeRagService;
+        this.agentRegistry = agentRegistry;
+        String systemPrompt = agentRegistry.get("love").systemPrompt();
         chatClient = ChatClient.builder(dashscopeChatModel)
-                .defaultSystem(SYSTEM_PROMPT)
+                .defaultSystem(systemPrompt)
                 .defaultAdvisors(
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         // 自定义日志 Advisor，可按需开启
@@ -121,7 +120,7 @@ public class LoveApp {
         StringBuilder answer = new StringBuilder();
         return streamingChatClient
                 .prompt()
-                .system(SYSTEM_PROMPT + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
+                .system(agentRegistry.get("love").systemPrompt() + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
                 .user(message)
                 .stream()
                 .content()
@@ -141,7 +140,7 @@ public class LoveApp {
                 "视觉摘要不可用，未执行知识库检索，模型仅基于图片、系统提示词与会话上下文回答。",
                 List.of(), visionModel, true), "");
         String scopedContext = agentKnowledgeRagService.context(tenantId, "love", analysis.retrievalQuery());
-        String prompt = SYSTEM_PROMPT + "\n\n" + ragResult.context() + "\n" + scopedContext + "\n图片分析仅是待确认线索。回答时明确区分可观察内容与推测，不要把不确定项当作事实。";
+        String prompt = agentRegistry.get("love").systemPrompt() + "\n\n" + ragResult.context() + "\n" + scopedContext + "\n图片分析仅是待确认线索。回答时明确区分可观察内容与推测，不要把不确定项当作事实。";
         return new LoveVisionChatResult(analysis, ragResult.trace(), prompt);
     }
 
@@ -175,7 +174,7 @@ public class LoveApp {
     public LoveReport doChatWithReport(String message, String chatId) {
         LoveReport loveReport = chatClient
                 .prompt()
-                .system(SYSTEM_PROMPT + "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
+                .system(agentRegistry.get("love").systemPrompt() + "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
                 .user(message)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 .call()

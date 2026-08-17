@@ -2,14 +2,13 @@
   <main class="knowledge-admin">
     <header class="admin-header">
       <div>
-        <span class="eyebrow">{{ agentKey === 'love' ? '情感分析大师' : '旅游规划专家' }}</span>
+        <span class="eyebrow">{{ currentAgent.name }}</span>
         <h1>知识库管理</h1>
       </div>
       <div class="admin-actions">
         <label>资料归属
           <select v-model="agentKey" :disabled="uploading" @change="loadPrivateDocuments">
-            <option value="love">情感分析大师</option>
-            <option value="travel">旅游规划专家</option>
+            <option v-for="agent in KNOWLEDGE_AGENTS" :key="agent.key" :value="agent.key">{{ agent.name }}</option>
           </select>
         </label>
         <input ref="knowledgeFileInput" class="knowledge-file-input" type="file" accept=".md,.txt,text/plain,text/markdown" @change="uploadPrivateDocument" />
@@ -22,7 +21,7 @@
       <aside class="document-panel">
         <div class="private-heading">
           <div><span>私有资料</span><small>{{ privateDocuments.length }} 个 · 当前智能体</small></div>
-          <span class="scope-status">{{ agentKey === 'love' ? '情感' : '旅游' }}</span>
+          <span class="scope-status">{{ currentAgent.category }}</span>
         </div>
         <div class="private-document-list">
           <div v-if="loadingPrivateDocuments" class="private-state">正在读取资料...</div>
@@ -73,6 +72,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useHead } from '@vueuse/head'
 import { getAgentKnowledgeDocument, listAgentKnowledgeDocuments, uploadAgentKnowledgeDocument } from '../api'
+import { KNOWLEDGE_AGENTS, getAgent } from '../config/agents'
 
 useHead({ title: '知识库管理 - ZWX Agent' })
 
@@ -82,6 +82,7 @@ const selectedChunkId = ref('')
 const loadingDetail = ref(false)
 const error = ref('')
 const agentKey = ref('love')
+const currentAgent = computed(() => getAgent(agentKey.value))
 const privateDocuments = ref([])
 const loadingPrivateDocuments = ref(false)
 const uploading = ref(false)

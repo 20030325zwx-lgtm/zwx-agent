@@ -95,6 +95,7 @@ import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import { getAgent } from '../config/agents'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -103,14 +104,11 @@ const props = defineProps({
   attachmentsEnabled: { type: Boolean, default: false }
 })
 const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message'])
-const quickPrompts = computed(() => {
-  if (props.aiType === 'super') return ['帮我把这个目标拆成执行计划', '帮我梳理一个复杂问题', '给我一个高效的工作方案']
-  if (props.aiType === 'travel') return ['帮我规划一个周末短途旅行', '按预算做一份三日行程', '帮我比较两个旅行目的地']
-  return ['帮我分析这段关系是否健康', '聊天总是冷场，该怎么改善？', '他/她的这句话是什么意思？']
-})
-const emptyTitle = computed(() => props.aiType === 'super' ? '从一个目标开始。' : props.aiType === 'travel' ? '从一段旅行开始规划。' : '想从哪段关系开始分析？')
-const emptyDescription = computed(() => props.aiType === 'super' ? '描述目标、约束或卡点，我会帮你理清下一步。' : props.aiType === 'travel' ? '告诉我出发地、目的地、日期、预算和偏好，我会结合你的资料与联网信息规划行程。' : '可以描述经历、粘贴聊天记录，或上传截图。')
-const inputPlaceholder = computed(() => props.aiType === 'super' ? '描述你的目标、问题或需要协作的任务...' : props.aiType === 'travel' ? '例如：上海出发，国庆去云南 5 天游，预算 6000 元...' : '描述你的困扰，或上传聊天截图...')
+const agent = computed(() => getAgent(props.aiType))
+const quickPrompts = computed(() => agent.value.chat.quickPrompts)
+const emptyTitle = computed(() => agent.value.chat.emptyTitle)
+const emptyDescription = computed(() => agent.value.chat.emptyDescription)
+const inputPlaceholder = computed(() => agent.value.chat.inputPlaceholder)
 const inputMessage = ref('')
 const messagesContainer = ref(null)
 const fileInput = ref(null)

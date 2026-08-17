@@ -5,7 +5,7 @@
       <div class="agent-title"><span class="agent-symbol" aria-hidden="true">✦</span><div><strong>超级智能体</strong><small>通用任务协作</small></div></div>
       <span class="status" :class="connectionStatus">{{ statusText }}</span>
     </header>
-    <section class="super-chat"><ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" @send-message="sendMessage" /></section>
+    <section class="super-chat"><ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage" /></section>
   </main>
 </template>
 
@@ -21,28 +21,37 @@ const router = useRouter()
 const messages = ref([])
 const connectionStatus = ref('disconnected')
 let eventSource = null
+let activeTurnStart = -1
 const statusText = computed(() => connectionStatus.value === 'connecting' ? '正在回复' : connectionStatus.value === 'error' ? '连接异常' : '在线')
 const addMessage = (content, isUser) => messages.value.push({ content, isUser, time: Date.now() })
 const sendMessage = message => {
+  cancelActiveStream()
+  activeTurnStart = messages.value.length
   addMessage(message, true)
-  eventSource?.close()
   addMessage('', false)
   const answerIndex = messages.value.length - 1
   connectionStatus.value = 'connecting'
   eventSource = chatWithManus(message)
   eventSource.onmessage = event => {
-    if (event.data === '[DONE]') { connectionStatus.value = 'disconnected'; eventSource?.close(); eventSource = null; return }
+    if (event.data === '[DONE]') { connectionStatus.value = 'disconnected'; eventSource?.close(); eventSource = null; activeTurnStart = -1; return }
     if (event.data && messages.value[answerIndex]) messages.value[answerIndex].content += event.data
   }
   eventSource.onerror = () => {
-    connectionStatus.value = 'error'
-    if (messages.value[answerIndex] && !messages.value[answerIndex].content) messages.value[answerIndex].content = '暂时无法获取回复，请稍后重试。'
-    eventSource?.close(); eventSource = null
+    cancelActiveStream()
   }
 }
+const cancelActiveStream = () => {
+  if (!eventSource && connectionStatus.value !== 'connecting') return
+  eventSource?.close()
+  eventSource = null
+  if (activeTurnStart >= 0) messages.value.splice(activeTurnStart)
+  activeTurnStart = -1
+  connectionStatus.value = 'disconnected'
+}
+const resendMessage = ({ content }) => sendMessage(content)
 const goBack = () => router.push('/')
 onMounted(() => addMessage('你好，我是超级智能体。告诉我你的目标，我会帮你把它拆解为清晰、可执行的下一步。', false))
-onBeforeUnmount(() => eventSource?.close())
+onBeforeUnmount(cancelActiveStream)
 </script>
 
 <style scoped>

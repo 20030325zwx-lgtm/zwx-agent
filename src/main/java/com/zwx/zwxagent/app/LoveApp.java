@@ -29,12 +29,14 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Component
 @Slf4j
 public class LoveApp {
 
     private final ChatClient chatClient;
+    private final ChatClient streamingChatClient;
 
     private static final String SYSTEM_PROMPT = "扮演深耕恋爱心理领域的专家。开场向用户表明身份，告知用户可倾诉恋爱难题。" +
             "围绕单身、恋爱、已婚三种状态提问：单身状态询问社交圈拓展及追求心仪对象的困扰；" +
@@ -74,6 +76,7 @@ public class LoveApp {
 //                       ,new ReReadingAdvisor()
                 )
                 .build();
+        streamingChatClient = ChatClient.builder(dashscopeChatModel).build();
     }
 
     /**
@@ -108,21 +111,29 @@ public class LoveApp {
     }
 
     public Flux<String> doChatByStream(String message, String chatId, String ragContext) {
-        conversationService.ensureConversation(chatId, message);
-        return chatClient
+        return doChatByStream(message, chatId, ragContext, null);
+    }
+
+    public Flux<String> doChatByStream(String message, String chatId, String ragContext, Long retryUserMessageId) {
+        String history = conversationService.getRecentMessages(chatId, 20).stream()
+                .map(item -> item.role() + ": " + item.content())
+                .collect(Collectors.joining("\n"));
+        StringBuilder answer = new StringBuilder();
+        return streamingChatClient
                 .prompt()
-                .system(SYSTEM_PROMPT + "\n\n" + ragContext)
+                .system(SYSTEM_PROMPT + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
                 .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 .stream()
-                .content();
+                .content()
+                .doOnNext(answer::append)
+                .doOnComplete(() -> {
+                    if (retryUserMessageId == null) conversationService.saveCompletedTurn(chatId, message, List.of(), answer.toString(), "[]", "{}", null);
+                    else conversationService.appendMessage(chatId, "ASSISTANT", answer.toString());
+                });
     }
 
     public LoveVisionChatResult prepareVisionChat(String message, String chatId, List<String> imageObjectKeys, String tenantId) {
-        conversationService.ensureConversation(chatId, message);
-        conversationService.appendMessage(chatId, "USER", message, imageObjectKeys);
         LoveVisionAnalysis analysis = loveVisionChatService.analyze(chatId, message, imageObjectKeys);
-        saveVisionAnalysis(chatId, analysis);
 
         LoveRagResult ragResult = analysis.available()
                 ? loveRagService.retrieve(analysis.retrievalQuery(), visionModel)
@@ -134,19 +145,20 @@ public class LoveApp {
         return new LoveVisionChatResult(analysis, ragResult.trace(), prompt);
     }
 
-    public Flux<String> streamVisionChat(String chatId, LoveVisionChatResult preparation) {
+    public Flux<String> streamVisionChat(String message, String chatId, List<String> imageObjectKeys, LoveVisionChatResult preparation, Long retryUserMessageId) {
         StringBuilder content = new StringBuilder();
-        return loveVisionChatService.streamChat(chatId, conversationService.getRecentMessages(chatId, 20), preparation.systemPrompt())
+        List<com.zwx.zwxagent.conversation.LoveConversationMessage> history = new java.util.ArrayList<>(conversationService.getRecentMessages(chatId, 20));
+        history.add(new com.zwx.zwxagent.conversation.LoveConversationMessage(0, "USER", message, imageObjectKeys, List.of(), null, preparation.analysis(), java.time.Instant.now()));
+        return loveVisionChatService.streamChat(chatId, history, preparation.systemPrompt())
                 .doOnNext(content::append)
-                .doOnComplete(() -> conversationService.appendMessage(chatId, "ASSISTANT", content.toString()));
-    }
-
-    private void saveVisionAnalysis(String chatId, LoveVisionAnalysis analysis) {
-        try {
-            conversationService.saveLatestUserVisionAnalysis(chatId, objectMapper.writeValueAsString(analysis));
-        } catch (JsonProcessingException exception) {
-            throw new IllegalStateException("Unable to persist vision analysis", exception);
-        }
+                .doOnComplete(() -> {
+                    try {
+                        String references = objectMapper.writeValueAsString(preparation.ragTrace().references());
+                        String trace = objectMapper.writeValueAsString(preparation.ragTrace());
+                        if (retryUserMessageId == null) conversationService.saveCompletedTurn(chatId, message, imageObjectKeys, content.toString(), references, trace, objectMapper.writeValueAsString(preparation.analysis()));
+                        else { conversationService.appendMessage(chatId, "ASSISTANT", content.toString()); conversationService.saveLatestAssistantRagData(chatId, references, trace); }
+                    } catch (JsonProcessingException exception) { throw new IllegalStateException("Unable to serialize vision conversation", exception); }
+                });
     }
 
     record LoveReport(String title, List<String> suggestions) {

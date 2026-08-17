@@ -7,6 +7,7 @@ import com.zwx.zwxagent.rag.LoveRagTrace;
 import com.zwx.zwxagent.app.LoveVisionAnalysis;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.sql.Array;
@@ -101,9 +102,19 @@ public class LoveConversationService {
                         """, analysisJson, conversationId);
     }
 
+    @Transactional
+    public void saveCompletedTurn(String conversationId, String message, List<String> imageObjectKeys, String answer,
+                                  String referencesJson, String traceJson, String visionAnalysisJson) {
+        ensureConversation(conversationId, message);
+        appendMessage(conversationId, "USER", message, imageObjectKeys);
+        if (visionAnalysisJson != null) saveLatestUserVisionAnalysis(conversationId, visionAnalysisJson);
+        appendMessage(conversationId, "ASSISTANT", answer);
+        saveLatestAssistantRagData(conversationId, referencesJson, traceJson);
+    }
+
     public List<LoveConversationMessage> getMessages(String conversationId) {
         return jdbcTemplate.query("""
-                        SELECT role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
+                        SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
                             SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at
                             FROM love_chat_message
                             WHERE conversation_id = ?
@@ -112,7 +123,7 @@ public class LoveConversationService {
                         ) recent_messages
                         ORDER BY id ASC
                         """, (rs, rowNum) -> new LoveConversationMessage(
-                        rs.getString("role"),
+                        rs.getLong("id"), rs.getString("role"),
                         rs.getString("content"),
                         toStringList(rs.getArray("image_object_keys")),
                         toReferences(rs.getString("knowledge_references")),
@@ -123,7 +134,7 @@ public class LoveConversationService {
 
     public List<LoveConversationMessage> getRecentMessages(String conversationId, int limit) {
         return jdbcTemplate.query("""
-                        SELECT role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
+                        SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
                             SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at
                             FROM love_chat_message
                             WHERE conversation_id = ?
@@ -132,7 +143,7 @@ public class LoveConversationService {
                         ) recent_messages
                         ORDER BY id ASC
                         """, (rs, rowNum) -> new LoveConversationMessage(
-                        rs.getString("role"),
+                        rs.getLong("id"), rs.getString("role"),
                         rs.getString("content"),
                         toStringList(rs.getArray("image_object_keys")),
                         toReferences(rs.getString("knowledge_references")),
@@ -143,6 +154,20 @@ public class LoveConversationService {
 
     public boolean deleteConversation(String conversationId) {
         return jdbcTemplate.update("DELETE FROM love_conversation WHERE id = ?", conversationId) > 0;
+    }
+
+    public boolean deleteAssistantReply(String conversationId, long userMessageId) {
+        return jdbcTemplate.update("""
+                DELETE FROM love_chat_message
+                WHERE id = (
+                    SELECT reply.id FROM love_chat_message reply
+                    WHERE reply.conversation_id = ? AND reply.role = 'ASSISTANT' AND reply.id > ?
+                      AND NOT EXISTS (SELECT 1 FROM love_chat_message later_user
+                                      WHERE later_user.conversation_id = ? AND later_user.role = 'USER'
+                                        AND later_user.id > ? AND later_user.id < reply.id)
+                    ORDER BY reply.id LIMIT 1
+                )
+                """, conversationId, userMessageId, conversationId, userMessageId) > 0;
     }
 
     private LoveConversationSummary getConversation(String conversationId) {

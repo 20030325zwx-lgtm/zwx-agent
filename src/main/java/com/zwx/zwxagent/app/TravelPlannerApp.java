@@ -36,9 +36,11 @@ public class TravelPlannerApp {
     }
 
     public Flux<String> chat(String tenantId, String conversationId, String runId, String message, Consumer<ExecutionUpdate> progress) {
+        return chat(tenantId, conversationId, runId, message, null, progress);
+    }
+
+    public Flux<String> chat(String tenantId, String conversationId, String runId, String message, Long retryUserMessageId, Consumer<ExecutionUpdate> progress) {
         progress.accept(new ExecutionUpdate("analysis", "正在分析旅行需求与对话上下文...", java.util.Map.of("message", message)));
-        conversationService.ensureTravelConversation(tenantId, conversationId, message);
-        conversationService.appendTravelMessage(tenantId, conversationId, "USER", message);
         progress.accept(new ExecutionUpdate("retrieval", "正在检索当前智能体的私有资料...", java.util.Map.of("query", message)));
         String context = knowledgeRagService.context(tenantId, "travel", message);
         progress.accept(new ExecutionUpdate("retrieval", context.isBlank() ? "未命中私有资料，正在准备联网规划..." : "已召回私有资料，正在制定规划...", java.util.Map.of("contextAvailable", !context.isBlank())));
@@ -50,7 +52,8 @@ public class TravelPlannerApp {
                 .doOnSubscribe(subscription -> progress.accept(new ExecutionUpdate("generation", "正在生成旅行方案...", java.util.Map.of("historyMessageCount", conversationService.getRecentTravelMessages(tenantId, conversationId, 20).size()))))
                 .doOnNext(answer::append)
                 .doOnComplete(() -> {
-                    conversationService.appendTravelMessage(tenantId, conversationId, "ASSISTANT", answer.toString(), runId);
+                    if (retryUserMessageId == null) conversationService.saveCompletedTravelTurn(tenantId, conversationId, message, answer.toString(), runId);
+                    else conversationService.appendTravelMessage(tenantId, conversationId, "ASSISTANT", answer.toString(), runId);
                     progress.accept(new ExecutionUpdate("persistence", "方案已生成并保存到历史会话。", java.util.Map.of("answerLength", answer.length())));
                 });
     }

@@ -164,7 +164,7 @@ public class AgentKnowledgeDocumentService {
     }
 
     private void validateScope(String tenantId, String agentKey) {
-        if (!tenantId.matches("[A-Za-z0-9_-]{1,64}") || !(agentKey.equals("love") || agentKey.equals("travel"))) throw new IllegalArgumentException("Invalid tenant or agent scope");
+        if (!tenantId.matches("[A-Za-z0-9_-]{1,64}") || !(agentKey.equals("love") || agentKey.equals("travel") || agentKey.equals("test"))) throw new IllegalArgumentException("Invalid tenant or agent scope");
     }
 
     private String truncate(String value) { return value == null ? "Indexing failed" : value.substring(0, Math.min(1000, value.length())); }

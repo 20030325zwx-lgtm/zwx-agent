@@ -94,6 +94,12 @@ export const getTravelConversationMessages = conversationId => request.get(`/ai/
 export const deleteTravelConversation = conversationId => request.delete(`/ai/travel-planner/conversations/${conversationId}`)
 export const deleteTravelAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/travel-planner/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 export const getTravelExecutionEvents = (conversationId, runId) => request.get(`/ai/travel-planner/conversations/${conversationId}/executions/${runId}`).then(response => response.data)
+export const chatWithTestAgent = (conversationId, message, retryUserMessageId = null) => connectSSE('/ai/test-agent/chat/sse', { conversationId, message, retryUserMessageId, tenantId: TENANT_ID })
+export const createTestConversation = () => request.post('/ai/test-agent/conversations').then(response => response.data)
+export const listTestConversations = () => request.get('/ai/test-agent/conversations').then(response => response.data)
+export const getTestConversationMessages = conversationId => request.get(`/ai/test-agent/conversations/${conversationId}/messages`).then(response => response.data)
+export const deleteTestConversation = conversationId => request.delete(`/ai/test-agent/conversations/${conversationId}`)
+export const deleteTestAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/test-agent/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 
 // AI超级智能体聊天
 export const chatWithManus = (message) => {

@@ -28,6 +28,7 @@ import com.zwx.zwxagent.rag.AgentKnowledgeDocument;
 import com.zwx.zwxagent.rag.AgentKnowledgeDocumentService;
 import com.zwx.zwxagent.rag.AgentKnowledgeDocumentDetail;
 import com.zwx.zwxagent.app.TravelPlannerApp;
+import com.zwx.zwxagent.app.TestAgentApp;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.app.LoveVisionChatResult;
@@ -100,6 +101,9 @@ public class AiController {
 
     @Resource
     private TravelPlannerApp travelPlannerApp;
+
+    @Resource
+    private TestAgentApp testAgentApp;
 
     @Resource
     private AgentKnowledgeRagService agentKnowledgeRagService;
@@ -432,6 +436,36 @@ public class AiController {
                                           @PathVariable String conversationId) {
         validateTenantId(tenantId);
         agentConversationService.deleteTravelConversation(tenantId, conversationId);
+    }
+
+    @GetMapping(value = "/test-agent/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> chatWithTestAgent(@RequestParam(defaultValue = "default") String tenantId, @RequestParam String conversationId,
+                                                            @RequestParam String message, @RequestParam(required = false) Long retryUserMessageId) {
+        validateTenantId(tenantId);
+        return testAgentApp.chat(tenantId, conversationId, message, retryUserMessageId, references -> {})
+                .map(ServerSentEvent::builder).map(ServerSentEvent.Builder::build)
+                .concatWithValues(ServerSentEvent.<String>builder("[DONE]").build());
+    }
+
+    @PostMapping("/test-agent/conversations")
+    public AgentConversationSummary createTestConversation(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId) {
+        validateTenantId(tenantId); return agentConversationService.createConversation(tenantId, "test", "新的功能测试");
+    }
+    @GetMapping("/test-agent/conversations")
+    public List<AgentConversationSummary> listTestConversations(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId) {
+        validateTenantId(tenantId); return agentConversationService.listConversations(tenantId, "test");
+    }
+    @GetMapping("/test-agent/conversations/{conversationId}/messages")
+    public List<AgentConversationMessage> getTestMessages(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId, @PathVariable String conversationId) {
+        validateTenantId(tenantId); return agentConversationService.getMessages(tenantId, "test", conversationId);
+    }
+    @DeleteMapping("/test-agent/conversations/{conversationId}")
+    public void deleteTestConversation(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId, @PathVariable String conversationId) {
+        validateTenantId(tenantId); agentConversationService.deleteConversation(tenantId, "test", conversationId);
+    }
+    @DeleteMapping("/test-agent/conversations/{conversationId}/messages/{userMessageId}/assistant")
+    public boolean deleteTestAssistantReply(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId, @PathVariable String conversationId, @PathVariable long userMessageId) {
+        validateTenantId(tenantId); return agentConversationService.deleteAssistantReply(tenantId, "test", conversationId, userMessageId) != null;
     }
 
     private void validateTenantId(String tenantId) {

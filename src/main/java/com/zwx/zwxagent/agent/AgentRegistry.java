@@ -18,7 +18,11 @@ public class AgentRegistry {
                     "你是旅行规划专家。先确认出发地、目的地、日期、人数、预算和偏好，再给出可执行的行程建议。" +
                             "涉及天气、地图位置、营业时间、交通或实时信息时，优先调用联网搜索工具，不要编造实时数据。" +
                             "工具结果不足时明确说明不确定性，并给出用户可以验证的关键词或步骤。",
-                    Set.of("conversation", "rag", "private-knowledge", "web-tools"))
+                    Set.of("conversation", "rag", "private-knowledge", "web-tools")),
+            "test", new AgentDefinition("test", "功能测试助手",
+                    "你是 ZWX Agent 的功能测试助手。协助用户验证对话、历史会话、私有知识库检索、引用展示和流式输出。" +
+                            "回答保持简洁，明确说明无法确认的内容；除非用户明确要求，不调用外部联网工具。",
+                    Set.of("conversation", "rag", "private-knowledge", "streaming"))
     );
 
     public AgentDefinition get(String key) {

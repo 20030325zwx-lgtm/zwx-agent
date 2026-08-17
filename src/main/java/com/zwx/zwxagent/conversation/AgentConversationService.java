@@ -102,6 +102,53 @@ public class AgentConversationService {
         return reply.executionRunId();
     }
 
+    public AgentConversationSummary createConversation(String tenantId, String agentKey, String defaultTitle) {
+        String id = UUID.randomUUID().toString();
+        jdbcTemplate.update("INSERT INTO agent_conversation (id, tenant_id, agent_key, title) VALUES (?, ?, ?, ?)", id, tenantId, agentKey, defaultTitle);
+        return jdbcTemplate.queryForObject("SELECT id, title, created_at, updated_at FROM agent_conversation WHERE id = ? AND tenant_id = ? AND agent_key = ?",
+                (rs, rowNum) -> new AgentConversationSummary(rs.getString("id"), rs.getString("title"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), id, tenantId, agentKey);
+    }
+
+    public void saveCompletedTurn(String tenantId, String agentKey, String conversationId, String defaultTitle, String message, String answer) {
+        jdbcTemplate.update("INSERT INTO agent_conversation (id, tenant_id, agent_key, title) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+                conversationId, tenantId, agentKey, title(message, defaultTitle));
+        appendMessage(tenantId, agentKey, conversationId, "USER", message);
+        appendMessage(tenantId, agentKey, conversationId, "ASSISTANT", answer);
+    }
+
+    public void appendMessage(String tenantId, String agentKey, String conversationId, String role, String content) {
+        int inserted = jdbcTemplate.update("INSERT INTO agent_chat_message (conversation_id, role, content) SELECT id, ?, ? FROM agent_conversation WHERE id = ? AND tenant_id = ? AND agent_key = ?",
+                role, content == null ? "" : content, conversationId, tenantId, agentKey);
+        if (inserted == 0) throw new IllegalArgumentException("Agent conversation was not found");
+        jdbcTemplate.update("UPDATE agent_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND agent_key = ?", conversationId, tenantId, agentKey);
+    }
+
+    public List<AgentConversationSummary> listConversations(String tenantId, String agentKey) {
+        return jdbcTemplate.query("SELECT id, title, created_at, updated_at FROM agent_conversation WHERE tenant_id = ? AND agent_key = ? ORDER BY updated_at DESC",
+                (rs, rowNum) -> new AgentConversationSummary(rs.getString("id"), rs.getString("title"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), tenantId, agentKey);
+    }
+
+    public List<AgentConversationMessage> getMessages(String tenantId, String agentKey, String conversationId) {
+        return jdbcTemplate.query("SELECT m.id, m.role, m.content, m.execution_run_id, m.created_at FROM agent_chat_message m JOIN agent_conversation c ON c.id = m.conversation_id WHERE c.id = ? AND c.tenant_id = ? AND c.agent_key = ? ORDER BY m.id ASC",
+                (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"), rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, agentKey);
+    }
+
+    public List<AgentConversationMessage> getRecentMessages(String tenantId, String agentKey, String conversationId, int limit) {
+        List<AgentConversationMessage> messages = getMessages(tenantId, agentKey, conversationId);
+        return messages.size() <= limit ? messages : messages.subList(messages.size() - limit, messages.size());
+    }
+
+    public void deleteConversation(String tenantId, String agentKey, String conversationId) {
+        jdbcTemplate.update("DELETE FROM agent_conversation WHERE id = ? AND tenant_id = ? AND agent_key = ?", conversationId, tenantId, agentKey);
+    }
+
+    public String deleteAssistantReply(String tenantId, String agentKey, String conversationId, long userMessageId) {
+        List<Long> replies = jdbcTemplate.query("SELECT reply.id FROM agent_chat_message reply JOIN agent_conversation c ON c.id = reply.conversation_id WHERE reply.conversation_id = ? AND c.tenant_id = ? AND c.agent_key = ? AND reply.role = 'ASSISTANT' AND reply.id > ? ORDER BY reply.id LIMIT 1", (rs, rowNum) -> rs.getLong("id"), conversationId, tenantId, agentKey, userMessageId);
+        if (replies.isEmpty()) return null;
+        jdbcTemplate.update("DELETE FROM agent_chat_message WHERE id = ?", replies.getFirst());
+        return "deleted";
+    }
+
     private AgentConversationSummary getTravelConversation(String tenantId, String id) {
         return jdbcTemplate.queryForObject("""
                 SELECT id, title, created_at, updated_at FROM agent_conversation WHERE id = ? AND tenant_id = ? AND agent_key = ?
@@ -112,6 +159,11 @@ public class AgentConversationService {
     private String toTitle(String message) {
         String normalized = message == null ? "" : message.replaceAll("\\s+", " ").trim();
         return normalized.isEmpty() ? DEFAULT_TITLE : normalized.length() <= 32 ? normalized : normalized.substring(0, 32) + "...";
+    }
+
+    private String title(String message, String defaultTitle) {
+        String normalized = message == null ? "" : message.replaceAll("\\s+", " ").trim();
+        return normalized.isEmpty() ? defaultTitle : normalized.length() <= 32 ? normalized : normalized.substring(0, 32) + "...";
     }
 
     private record TravelReply(long id, String executionRunId) {}

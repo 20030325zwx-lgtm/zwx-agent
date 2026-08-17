@@ -47,6 +47,7 @@ spring.servlet.multipart:
   max-file-size: 10MB
   max-request-size: 10MB
 app:
+  temp-dir: ${APP_TEMP_DIR:${user.dir}/temp}
   love:
     vision-model: qwen-vl-plus
     rag:

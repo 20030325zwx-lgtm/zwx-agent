@@ -258,6 +258,55 @@ GET http://127.0.0.1:8123/api/health
 
 ## 启动前端
 
+## Docker 部署与离线安装包
+
+发布脚本参考模块化打包方式，但针对本项目采用了更轻的三服务部署：前端 Nginx、Spring Boot 后端和 PostgreSQL + pgvector。镜像是运行时镜像，服务器不会重新下载 Maven 或 NPM 依赖。
+
+### 构建镜像与安装包
+
+构建机需要 Docker、JDK 21、Node.js 20+。默认构建 Linux x86_64 镜像，并将应用镜像和 pgvector 基础镜像一同导出，因此服务器可离线安装：
+
+```bash
+VERSION=0.0.1 TARGET_PLATFORM=linux/amd64 sh scripts/package.sh
+```
+
+产物为 `release/zwx-agent-<版本>-linux-amd64.tar.gz`，内容包括：
+
+- `images/`：后端、前端和 pgvector 离线镜像。
+- `docker-compose.yml`：前端、后端、PostgreSQL + pgvector 编排。
+- `.env.example`：全部服务器配置项的无密钥模板。
+- `install.sh`、`stop.sh`：安装、升级与停止脚本。
+
+ARM 服务器可通过 `TARGET_PLATFORM=linux/arm64` 构建对应安装包。构建机需要具备该平台的 Docker 构建能力。
+
+### 在服务器安装或升级
+
+服务器只需 Docker Engine 与 Docker Compose v2。解压安装包，复制并填写环境文件后执行脚本：
+
+```bash
+tar -xzf zwx-agent-0.0.1-linux-amd64.tar.gz
+cd zwx-agent-0.0.1-linux-amd64
+cp .env.example .env
+chmod 600 .env
+# 编辑 .env，至少填写 POSTGRES_PASSWORD 与 DASHSCOPE_API_KEY
+sudo ./install.sh
+```
+
+脚本默认部署到 `/opt/zwx-agent`；可以通过 `ZWX_AGENT_INSTALL_DIR=/srv/zwx-agent sudo -E ./install.sh` 改为其它固定目录。后续版本执行同一安装流程时会保留该目录已有的 `.env`、`temp/` 和 PostgreSQL 数据卷，只更新镜像与编排文件。
+
+服务默认访问地址为 `http://<服务器地址>:8080`，可以通过 `.env` 的 `ZWX_AGENT_PORT` 修改。停止服务：
+
+```bash
+cd /opt/zwx-agent
+sudo ./stop.sh
+```
+
+### 环境变量与持久化
+
+`DASHSCOPE_API_KEY` 和 `POSTGRES_PASSWORD` 是安装脚本校验的必填项。`SEARCH_API_API_KEY` 用于联网搜索；阿里云 OSS 四项用于图片与私有知识文档上传。它们只存在于服务器 `.env`，不会写进 Git、镜像或安装包。
+
+应用临时目录由 `APP_TEMP_DIR` 控制，容器中固定为 `/app/temp`，映射到安装目录的 `temp/`。PDF 生成、下载和文件工具都使用该目录；应用未写入临时文件时目录保持为空。
+
 ```bash
 cd zwx-agent-frontend
 npm install

@@ -31,6 +31,9 @@ import com.zwx.zwxagent.app.TravelPlannerApp;
 import com.zwx.zwxagent.app.TestAgentApp;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
+import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
+import com.zwx.zwxagent.skills.SkillConfigurationRequest;
+import com.zwx.zwxagent.skills.SkillCatalogItem;
 import com.zwx.zwxagent.app.LoveVisionChatResult;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
@@ -111,8 +114,27 @@ public class AiController {
     @Resource
     private ObjectMapper objectMapper;
 
+    @Resource
+    private BuiltInSkillRegistry builtInSkillRegistry;
+
     @org.springframework.beans.factory.annotation.Value("${spring.ai.dashscope.chat.options.model:qwen-plus}")
     private String chatModelName;
+
+    @GetMapping("/skills/catalog")
+    public List<SkillCatalogItem> listSkillCatalog(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                    @RequestParam String agentKey) {
+        validateTenantId(tenantId);
+        return builtInSkillRegistry.catalogWithConfiguration(tenantId, agentKey);
+    }
+
+    @PostMapping("/skills/config")
+    public List<SkillCatalogItem> saveSkillConfiguration(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                         @org.springframework.web.bind.annotation.RequestBody SkillConfigurationRequest request) {
+        validateTenantId(tenantId);
+        if (request == null || request.agentKey() == null || request.enabledSkillIds() == null) throw new IllegalArgumentException("Invalid Skill configuration");
+        builtInSkillRegistry.saveConfiguration(tenantId, request.agentKey(), request.enabledSkillIds());
+        return builtInSkillRegistry.catalogWithConfiguration(tenantId, request.agentKey());
+    }
 
     @PostMapping("/love_app/conversations")
     public LoveConversationSummary createLoveConversation() {
@@ -250,7 +272,7 @@ public class AiController {
                         .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(chat -> Flux.concat(
                                 Mono.just(ServerSentEvent.<String>builder().event("thinking").data("已完成资料检索，正在生成分析建议...").build()),
-                                loveApp.doChatByStream(message, chatId, chat.context(), webSearch, retryUserMessageId).map(chunk -> ServerSentEvent.builder(chunk).build()),
+                                loveApp.doChatByStream(tenantId, message, chatId, chat.context(), webSearch, retryUserMessageId).map(chunk -> ServerSentEvent.builder(chunk).build()),
                                 Mono.fromRunnable(() -> conversationService.saveLatestAssistantRagData(chatId, chat.referencesJson(), chat.traceJson()))
                                         .thenReturn(ServerSentEvent.<String>builder().event("thinking").data("正在整理引用与会话记录...").build()),
                                 Mono.just(ServerSentEvent.<String>builder().event("trace").data(chat.traceJson()).build()),

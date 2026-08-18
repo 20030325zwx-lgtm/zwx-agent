@@ -86,6 +86,8 @@ export const uploadAgentKnowledgeDocument = (agentKey, file) => {
 }
 export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)
+export const getSkillCatalog = agentKey => request.get('/ai/skills/catalog', { params: { agentKey } }).then(response => response.data)
+export const saveSkillConfiguration = (agentKey, enabledSkillIds) => request.post('/ai/skills/config', { agentKey, enabledSkillIds }).then(response => response.data)
 export const chatWithTravelPlanner = (conversationId, message, webSearch = false, retryUserMessageId = null) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, webSearch, retryUserMessageId, tenantId: TENANT_ID })
 export const createTravelConversation = () => request.post('/ai/travel-planner/conversations').then(response => response.data)
 export const listTravelConversations = () => request.get('/ai/travel-planner/conversations').then(response => response.data)

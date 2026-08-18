@@ -12,6 +12,8 @@ import com.zwx.zwxagent.rag.LoveRagTrace;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.agent.AgentRegistry;
+import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
+import com.zwx.zwxagent.skills.SkillPromptBuilder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
@@ -23,9 +25,7 @@ import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvi
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Component;
@@ -42,7 +42,8 @@ public class LoveApp {
 
     private final ChatClient chatClient;
     private final ChatClient streamingChatClient;
-    private final ToolCallback[] webSearchTools;
+    private final BuiltInSkillRegistry skillRegistry;
+    private final SkillPromptBuilder skillPromptBuilder;
 
     /**
      * 初始化 ChatClient
@@ -61,7 +62,8 @@ public class LoveApp {
                    LoveConversationService conversationService,
                    LoveVisionChatService loveVisionChatService, LoveRagService loveRagService,
                    ObjectMapper objectMapper, @org.springframework.beans.factory.annotation.Value("${app.love.vision-model}") String visionModel,
-                   AgentKnowledgeRagService agentKnowledgeRagService, AgentRegistry agentRegistry, @Qualifier("travelTools") ToolCallback[] webSearchTools) {
+                   AgentKnowledgeRagService agentKnowledgeRagService, AgentRegistry agentRegistry,
+                   BuiltInSkillRegistry skillRegistry, SkillPromptBuilder skillPromptBuilder) {
         this.conversationService = conversationService;
         this.loveVisionChatService = loveVisionChatService;
         this.loveRagService = loveRagService;
@@ -69,7 +71,8 @@ public class LoveApp {
         this.visionModel = visionModel;
         this.agentKnowledgeRagService = agentKnowledgeRagService;
         this.agentRegistry = agentRegistry;
-        this.webSearchTools = webSearchTools;
+        this.skillRegistry = skillRegistry;
+        this.skillPromptBuilder = skillPromptBuilder;
         String systemPrompt = agentRegistry.get("love").systemPrompt();
         chatClient = ChatClient.builder(dashscopeChatModel)
                 .defaultSystem(systemPrompt)
@@ -124,15 +127,20 @@ public class LoveApp {
     }
 
     public Flux<String> doChatByStream(String message, String chatId, String ragContext, boolean webSearch, Long retryUserMessageId) {
+        return doChatByStream("default", message, chatId, ragContext, webSearch, retryUserMessageId);
+    }
+
+    public Flux<String> doChatByStream(String tenantId, String message, String chatId, String ragContext, boolean webSearch, Long retryUserMessageId) {
         String history = conversationService.getRecentMessages(chatId, 20).stream()
                 .map(item -> item.role() + ": " + item.content())
                 .collect(Collectors.joining("\n"));
         StringBuilder answer = new StringBuilder();
         var prompt = streamingChatClient
                 .prompt()
-                .system(agentRegistry.get("love").systemPrompt() + (webSearch ? "" : "\n本轮未开启联网搜索，不得调用外部工具。") + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
+                .system(agentRegistry.get("love").systemPrompt() + skillPromptBuilder.build(tenantId, "love", webSearch) + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
                 .user(message);
-        if (webSearch) prompt.toolCallbacks(webSearchTools);
+        var skillTools = skillRegistry.toolCallbacksFor(tenantId, "love", webSearch);
+        if (skillTools.length > 0) prompt.toolCallbacks(skillTools);
         return prompt.stream()
                 .content()
                 .doOnNext(answer::append)

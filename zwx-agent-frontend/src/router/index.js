@@ -43,6 +43,12 @@ const routes = [
       title: '知识库管理 - ZWX Agent',
       description: '查看情感分析大师的内置文档和实际向量切片。'
     }
+  },
+  {
+    path: '/skill-settings',
+    name: 'SkillSettings',
+    component: () => import('../views/SkillSettings.vue'),
+    meta: { title: 'Skill 配置 - ZWX Agent', description: '配置各个智能体可使用的内置 Skill。' }
   }
 ]
 

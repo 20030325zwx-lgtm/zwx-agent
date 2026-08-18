@@ -6,11 +6,12 @@ import com.zwx.zwxagent.rag.LoveKnowledgeReference;
 import com.zwx.zwxagent.agent.AgentRegistry;
 import com.zwx.zwxagent.conversation.AgentConversationService;
 import com.zwx.zwxagent.execution.ExecutionUpdate;
+import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
+import com.zwx.zwxagent.skills.SkillPromptBuilder;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -21,15 +22,17 @@ import java.util.function.Consumer;
 public class TravelPlannerApp {
 
     private final ChatClient chatClient;
-    private final ToolCallback[] travelTools;
+    private final BuiltInSkillRegistry skillRegistry;
+    private final SkillPromptBuilder skillPromptBuilder;
     private final AgentKnowledgeRagService knowledgeRagService;
     private final AgentConversationService conversationService;
     private final AgentRegistry agentRegistry;
 
-    public TravelPlannerApp(ChatModel dashscopeChatModel, @Qualifier("travelTools") ToolCallback[] travelTools,
+    public TravelPlannerApp(ChatModel dashscopeChatModel, BuiltInSkillRegistry skillRegistry, SkillPromptBuilder skillPromptBuilder,
                             AgentKnowledgeRagService knowledgeRagService, AgentConversationService conversationService, AgentRegistry agentRegistry) {
         this.chatClient = ChatClient.builder(dashscopeChatModel).build();
-        this.travelTools = travelTools;
+        this.skillRegistry = skillRegistry;
+        this.skillPromptBuilder = skillPromptBuilder;
         this.knowledgeRagService = knowledgeRagService;
         this.conversationService = conversationService;
         this.agentRegistry = agentRegistry;
@@ -54,9 +57,10 @@ public class TravelPlannerApp {
         String history = conversationService.getRecentTravelMessages(tenantId, conversationId, 20).stream()
                 .map(item -> item.role() + ": " + item.content()).reduce("", (left, right) -> left + "\n" + right);
         StringBuilder answer = new StringBuilder();
-        var prompt = chatClient.prompt().system(agentRegistry.get("travel").systemPrompt() + (webSearch ? "" : "\n本轮未开启联网搜索，不得调用外部工具。") + "\n" + context + "\n最近对话：" + history)
+        var prompt = chatClient.prompt().system(agentRegistry.get("travel").systemPrompt() + skillPromptBuilder.build(tenantId, "travel", webSearch) + "\n" + context + "\n最近对话：" + history)
                 .user(message);
-        if (webSearch) prompt.toolCallbacks(reportingTools(progress));
+        var skillTools = skillRegistry.toolCallbacksFor(tenantId, "travel", webSearch);
+        if (skillTools.length > 0) prompt.toolCallbacks(reportingTools(skillTools, progress));
         return prompt.stream().content()
                 .doOnSubscribe(subscription -> progress.accept(new ExecutionUpdate("generation", "正在生成旅行方案...", java.util.Map.of("historyMessageCount", conversationService.getRecentTravelMessages(tenantId, conversationId, 20).size()))))
                 .doOnNext(answer::append)
@@ -67,8 +71,8 @@ public class TravelPlannerApp {
                 });
     }
 
-    private ToolCallback[] reportingTools(Consumer<ExecutionUpdate> progress) {
-        return java.util.Arrays.stream(travelTools).map(tool -> new ToolCallback() {
+    private ToolCallback[] reportingTools(ToolCallback[] tools, Consumer<ExecutionUpdate> progress) {
+        return java.util.Arrays.stream(tools).map(tool -> new ToolCallback() {
             @Override
             public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() {
                 return tool.getToolDefinition();

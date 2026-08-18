@@ -99,3 +99,12 @@ CREATE TABLE IF NOT EXISTS agent_execution_event (
 
 CREATE INDEX IF NOT EXISTS idx_agent_execution_event_scope
     ON agent_execution_event (tenant_id, agent_key, conversation_id, run_id, sequence);
+
+CREATE TABLE IF NOT EXISTS agent_skill_configuration (
+    tenant_id VARCHAR(64) NOT NULL,
+    agent_key VARCHAR(32) NOT NULL,
+    skill_id VARCHAR(64) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, agent_key, skill_id)
+);

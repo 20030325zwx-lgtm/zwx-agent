@@ -21,6 +21,12 @@ ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包�
 - 旅游规划专家：基于行程偏好、该智能体的私有资料和受限联网搜索工具生成方案；天气、交通、营业时间等实时信息优先检索，不配置额外地图或天气数据源。
 - 扩展能力：项目保留了 RAG、PGVector、MCP、联网搜索、文件操作、网页抓取、资源下载、PDF 生成和 ReAct 智能体相关模块。
 
+## 功能路线图
+
+每个模块的已完成能力、待办项、进度和近期优先级见 [docs/ROADMAP.md](docs/ROADMAP.md)。该清单以仓库实现为准：未实现的能力会明确标注为待做，不会按设想计入完成度。
+
+项目内置 Skill 的授权、提示词触发和工具执行链路见 [docs/skills.md](docs/skills.md)。
+
 ## 技术栈
 
 - Java 21、Spring Boot 3.4、Spring AI

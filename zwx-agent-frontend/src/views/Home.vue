@@ -2,7 +2,7 @@
   <main class="catalog-page">
     <header class="topbar">
       <button class="brand" type="button" aria-label="ZWX Agent 首页" @click="clearFilter"><span class="brand-mark">Z</span><span>ZWX Agent</span></button>
-      <span class="topbar-note">AI 工作空间</span>
+      <div class="topbar-actions"><span class="topbar-note">AI 工作空间</span><button class="skill-entry" type="button" @click="router.push({ name: 'SkillSettings' })"><Settings2 :size="16" />Skill 配置</button></div>
     </header>
 
     <section class="catalog-shell" aria-label="智能体目录">
@@ -52,6 +52,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
+import { Settings2 } from 'lucide-vue-next'
 import { AGENT_LIST } from '../config/agents'
 
 useHead({
@@ -88,7 +89,7 @@ const clearFilter = () => {
 .topbar { display: flex; height: 70px; align-items: center; justify-content: space-between; padding: 0 36px; border-bottom: 1px solid var(--zwx-divider); background: rgba(255,255,255,.94); font-size: 14px; }
 .brand { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: #111827; font-size: 15px; font-weight: 750; }
 .brand-mark { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 9px; background: var(--zwx-primary); color: #fff; font-size: 14px; font-weight: 800; box-shadow: 0 4px 10px rgba(0,111,238,.25); }
-.topbar-note { color: var(--zwx-muted); font-size: 13px; }.catalog-shell { max-width: 1240px; margin: 0 auto; padding: 56px 36px 76px; }.catalog-intro { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin-bottom: 36px; }.eyebrow { display: block; color: var(--zwx-primary); font-size: 11px; font-weight: 750; letter-spacing: .08em; }.catalog-intro h1 { max-width: 680px; margin: 9px 0 11px; font-size: 38px; line-height: 1.18; letter-spacing: 0; }.catalog-intro p { margin: 0; color: var(--zwx-muted); font-size: 15px; line-height: 1.7; }.catalog-stat { display: grid; min-width: 135px; gap: 2px; border-left: 1px solid var(--zwx-divider); padding-left: 24px; }.catalog-stat strong { color: var(--zwx-primary); font-size: 28px; }.catalog-stat span { color: var(--zwx-muted); font-size: 12px; }.catalog-tools { display: flex; gap: 12px; }.search-box { display: flex; min-height: 54px; flex: 1; align-items: center; gap: 14px; padding: 0 18px; border: 1px solid var(--zwx-divider); border-radius: var(--zwx-radius-md); background: var(--zwx-surface); color: #777; box-shadow: 0 2px 5px rgba(15,23,42,.02); }.search-box:focus-within { border-color: var(--zwx-primary); box-shadow: 0 0 0 3px rgba(0,111,238,.12); }
+.topbar-note { color: var(--zwx-muted); font-size: 13px; }.topbar-actions { display:flex; align-items:center; gap:16px; }.skill-entry { display:flex; align-items:center; gap:7px; height:33px; border:1px solid var(--zwx-divider); border-radius:7px; padding:0 11px; background:#fff; color:#475467; font-size:12px; }.skill-entry:hover { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); }.catalog-shell { max-width: 1240px; margin: 0 auto; padding: 56px 36px 76px; }.catalog-intro { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin-bottom: 36px; }.eyebrow { display: block; color: var(--zwx-primary); font-size: 11px; font-weight: 750; letter-spacing: .08em; }.catalog-intro h1 { max-width: 680px; margin: 9px 0 11px; font-size: 38px; line-height: 1.18; letter-spacing: 0; }.catalog-intro p { margin: 0; color: var(--zwx-muted); font-size: 15px; line-height: 1.7; }.catalog-stat { display: grid; min-width: 135px; gap: 2px; border-left: 1px solid var(--zwx-divider); padding-left: 24px; }.catalog-stat strong { color: var(--zwx-primary); font-size: 28px; }.catalog-stat span { color: var(--zwx-muted); font-size: 12px; }.catalog-tools { display: flex; gap: 12px; }.search-box { display: flex; min-height: 54px; flex: 1; align-items: center; gap: 14px; padding: 0 18px; border: 1px solid var(--zwx-divider); border-radius: var(--zwx-radius-md); background: var(--zwx-surface); color: #777; box-shadow: 0 2px 5px rgba(15,23,42,.02); }.search-box:focus-within { border-color: var(--zwx-primary); box-shadow: 0 0 0 3px rgba(0,111,238,.12); }
 .search-box span { font-size: 28px; line-height: 1; transform: rotate(-20deg); }
 .search-box input { width: 100%; border: 0; outline: 0; color: #171717; font: inherit; font-size: 17px; }
 .search-box input::placeholder { color: #aaa; }

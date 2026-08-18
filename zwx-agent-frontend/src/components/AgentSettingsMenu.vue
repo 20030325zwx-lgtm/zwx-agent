@@ -17,6 +17,11 @@
         <span>当前智能体知识库</span>
         <ChevronRight :size="15" />
       </button>
+      <button class="knowledge-link" type="button" role="menuitem" @click="openSkills">
+        <Sparkles :size="16" />
+        <span>内置 Skill 配置</span>
+        <ChevronRight :size="15" />
+      </button>
       <div v-if="desktopApi" class="desktop-api-settings">
         <strong>桌面端服务配置</strong>
         <label>运行模式<select v-model="desktopSettings.backendMode"><option value="remote">连接已有服务</option><option value="local">启动本机服务</option></select></label>
@@ -45,7 +50,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ChevronRight, Database, Settings2 } from 'lucide-vue-next'
+import { ChevronRight, Database, Settings2, Sparkles } from 'lucide-vue-next'
 
 const props = defineProps({ agentKey: { type: String, required: true }, defaultTheme: { type: String, default: 'blue' } })
 const router = useRouter()
@@ -72,6 +77,7 @@ const applyTheme = key => {
 }
 const selectTheme = key => { activeTheme.value = key; localStorage.setItem(storageKey, key); applyTheme(key) }
 const openKnowledge = () => router.push({ name: 'KnowledgeAdmin', query: { agentKey: props.agentKey } })
+const openSkills = () => router.push({ name: 'SkillSettings', query: { agentKey: props.agentKey } })
 const saveDesktopSettings = async () => {
   desktopSettingsError.value = ''
   try { await desktopApi.saveSettings(desktopSettings.value) }

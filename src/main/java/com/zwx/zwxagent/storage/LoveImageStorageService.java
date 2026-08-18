@@ -1,7 +1,6 @@
 package com.zwx.zwxagent.storage;
 
 import com.aliyun.oss.OSS;
-import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.ObjectMetadata;
@@ -22,17 +21,12 @@ public class LoveImageStorageService {
     private static final long MAX_IMAGE_SIZE = 10L * 1024 * 1024;
     private static final List<String> ALLOWED_TYPES = List.of("image/jpeg", "image/png", "image/gif");
 
-    private final OSS ossClient;
+    private final OssClientProvider ossClientProvider;
     private final String bucket;
 
-    public LoveImageStorageService(@Value("${app.oss.endpoint}") String endpoint,
-                                   @Value("${app.oss.access-key-id}") String accessKeyId,
-                                   @Value("${app.oss.access-key-secret}") String accessKeySecret,
+    public LoveImageStorageService(OssClientProvider ossClientProvider,
                                    @Value("${app.oss.bucket}") String bucket) {
-        if (accessKeyId.isBlank() || accessKeySecret.isBlank()) {
-            throw new IllegalStateException("OSS credentials are required in application-local.yml or environment variables");
-        }
-        this.ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+        this.ossClientProvider = ossClientProvider;
         this.bucket = bucket;
     }
 
@@ -45,7 +39,7 @@ public class LoveImageStorageService {
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(file.getSize());
             metadata.setContentType(contentType);
-            ossClient.putObject(bucket, objectKey, inputStream, metadata);
+            ossClientProvider.getClient().putObject(bucket, objectKey, inputStream, metadata);
             return new LoveImageUpload(objectKey);
         } catch (Exception e) {
             throw new IllegalStateException("Unable to store image", e);
@@ -57,7 +51,7 @@ public class LoveImageStorageService {
         try {
             GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(bucket, objectKey, HttpMethod.GET);
             request.setExpiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000));
-            return ossClient.generatePresignedUrl(request).toString();
+            return ossClientProvider.getClient().generatePresignedUrl(request).toString();
         } catch (Exception e) {
             throw new IllegalStateException("Unable to create image read URL", e);
         }
@@ -66,7 +60,7 @@ public class LoveImageStorageService {
     public LoveImageContent getImage(String conversationId, String objectKey) {
         validateObjectKey(conversationId, objectKey);
         try {
-            var object = ossClient.getObject(bucket, objectKey);
+            var object = ossClientProvider.getClient().getObject(bucket, objectKey);
             return new LoveImageContent(object.getObjectContent(), object.getObjectMetadata().getContentType());
         } catch (Exception e) {
             throw new IllegalArgumentException("Image not found", e);

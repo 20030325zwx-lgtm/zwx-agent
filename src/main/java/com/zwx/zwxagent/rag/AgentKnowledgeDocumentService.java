@@ -1,8 +1,7 @@
 package com.zwx.zwxagent.rag;
 
-import com.aliyun.oss.OSS;
-import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.ObjectMetadata;
+import com.zwx.zwxagent.storage.OssClientProvider;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -23,21 +22,18 @@ import java.util.UUID;
 public class AgentKnowledgeDocumentService {
 
     private static final int BATCH_SIZE = 100;
-    private final OSS ossClient;
+    private final OssClientProvider ossClientProvider;
     private final String bucket;
     private final JdbcTemplate jdbcTemplate;
     private final VectorStore vectorStore;
     private final MyTokenTextSplitter textSplitter;
     private final DocumentParsingModule documentParsingModule;
 
-    public AgentKnowledgeDocumentService(@Value("${app.oss.endpoint}") String endpoint,
-                                         @Value("${app.oss.access-key-id}") String accessKeyId,
-                                         @Value("${app.oss.access-key-secret}") String accessKeySecret,
+    public AgentKnowledgeDocumentService(OssClientProvider ossClientProvider,
                                          @Value("${app.oss.bucket}") String bucket, JdbcTemplate jdbcTemplate,
                                          @Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore,
                                          MyTokenTextSplitter textSplitter, DocumentParsingModule documentParsingModule) {
-        if (accessKeyId.isBlank() || accessKeySecret.isBlank()) throw new IllegalStateException("OSS credentials are required");
-        this.ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+        this.ossClientProvider = ossClientProvider;
         this.bucket = bucket;
         this.jdbcTemplate = jdbcTemplate;
         this.vectorStore = vectorStore;
@@ -56,7 +52,7 @@ public class AgentKnowledgeDocumentService {
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(file.getSize());
             metadata.setContentType(filename.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain; charset=UTF-8");
-            ossClient.putObject(bucket, objectKey, input, metadata);
+            ossClientProvider.getClient().putObject(bucket, objectKey, input, metadata);
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to store knowledge document", exception);
         }
@@ -74,7 +70,7 @@ public class AgentKnowledgeDocumentService {
             StoredDocument stored = jdbcTemplate.queryForObject("SELECT tenant_id, agent_key, object_key, filename FROM agent_knowledge_document WHERE id = ?",
                     (rs, rowNum) -> new StoredDocument(rs.getString("tenant_id"), rs.getString("agent_key"), rs.getString("object_key"), rs.getString("filename")), documentId);
             ParsedDocument parsed;
-            try (var object = ossClient.getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
+            try (var object = ossClientProvider.getClient().getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
                 parsed = documentParsingModule.parse(input.readAllBytes(), stored.filename());
             }
             String content = parsed.content();
@@ -118,7 +114,7 @@ public class AgentKnowledgeDocumentService {
                 WHERE id = ? AND tenant_id = ? AND agent_key = ?
                 """, (rs, rowNum) -> new StoredDocument(rs.getString("tenant_id"), rs.getString("agent_key"),
                 rs.getString("object_key"), rs.getString("filename")), documentId, tenantId, agentKey);
-        try (var object = ossClient.getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
+        try (var object = ossClientProvider.getClient().getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
             ParsedDocument parsed = documentParsingModule.parse(input.readAllBytes(), stored.filename());
             List<AgentKnowledgeChunk> chunks = jdbcTemplate.query("""
                     SELECT id::text, content, NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index

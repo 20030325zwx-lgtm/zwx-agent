@@ -2,3 +2,5 @@ node_modules
 app
 release
 assets/icon.icns
+server
+runtime

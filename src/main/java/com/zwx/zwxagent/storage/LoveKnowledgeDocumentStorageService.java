@@ -1,7 +1,5 @@
 package com.zwx.zwxagent.storage;
 
-import com.aliyun.oss.OSS;
-import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.ObjectMetadata;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -15,19 +13,14 @@ import java.util.List;
 @Service
 public class LoveKnowledgeDocumentStorageService {
 
-    private final OSS ossClient;
+    private final OssClientProvider ossClientProvider;
     private final String bucket;
     private final ResourcePatternResolver resourcePatternResolver;
 
-    public LoveKnowledgeDocumentStorageService(@Value("${app.oss.endpoint}") String endpoint,
-                                               @Value("${app.oss.access-key-id}") String accessKeyId,
-                                               @Value("${app.oss.access-key-secret}") String accessKeySecret,
+    public LoveKnowledgeDocumentStorageService(OssClientProvider ossClientProvider,
                                                @Value("${app.oss.bucket}") String bucket,
                                                ResourcePatternResolver resourcePatternResolver) {
-        if (accessKeyId.isBlank() || accessKeySecret.isBlank()) {
-            throw new IllegalStateException("OSS credentials are required in application-local.yml or environment variables");
-        }
-        this.ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+        this.ossClientProvider = ossClientProvider;
         this.bucket = bucket;
         this.resourcePatternResolver = resourcePatternResolver;
     }
@@ -46,7 +39,7 @@ public class LoveKnowledgeDocumentStorageService {
                 metadata.setContentLength(resource.contentLength());
                 metadata.setContentType("text/markdown; charset=UTF-8");
                 try (InputStream inputStream = resource.getInputStream()) {
-                    ossClient.putObject(bucket, objectKey, inputStream, metadata);
+                    ossClientProvider.getClient().putObject(bucket, objectKey, inputStream, metadata);
                 }
                 uploads.add(new LoveKnowledgeDocumentUpload(filename, objectKey));
             }

@@ -13,7 +13,8 @@ public class AgentKnowledgeVectorStoreConfig {
     @Bean("agentKnowledgeVectorStore")
     VectorStore agentKnowledgeVectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel dashscopeEmbeddingModel) {
         PgVectorStore vectorStore = PgVectorStore.builder(jdbcTemplate, dashscopeEmbeddingModel)
-                .dimensions(dashscopeEmbeddingModel.dimensions())
+                // Do not call the remote embedding API while the application is starting.
+                .dimensions(1536)
                 .distanceType(PgVectorStore.PgDistanceType.COSINE_DISTANCE)
                 .indexType(PgVectorStore.PgIndexType.HNSW)
                 .initializeSchema(true)

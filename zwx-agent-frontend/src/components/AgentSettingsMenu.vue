@@ -18,8 +18,25 @@
         <ChevronRight :size="15" />
       </button>
       <div v-if="desktopApi" class="desktop-api-settings">
-        <label for="desktop-api-url">桌面端服务地址</label>
-        <div><input id="desktop-api-url" v-model="desktopApiUrl" type="url" placeholder="https://example.com/api" @keydown.enter.prevent="saveDesktopApiUrl" /><button type="button" @click="saveDesktopApiUrl">保存</button></div>
+        <strong>桌面端服务配置</strong>
+        <label>运行模式<select v-model="desktopSettings.backendMode"><option value="remote">连接已有服务</option><option value="local">启动本机服务</option></select></label>
+        <label>API 服务地址<input v-model="desktopSettings.apiBaseUrl" type="url" placeholder="https://example.com/api" /></label>
+        <template v-if="desktopSettings.backendMode === 'local'">
+          <label>本机后端端口<input v-model.number="desktopSettings.backendPort" type="number" min="1024" max="65535" /></label>
+          <label>PostgreSQL JDBC 地址<input v-model="desktopSettings.postgresUrl" type="text" placeholder="jdbc:postgresql://127.0.0.1:5432/zwx_agent" /></label>
+          <label>PostgreSQL 用户名<input v-model="desktopSettings.postgresUsername" type="text" /></label>
+          <label>PostgreSQL 密码<input v-model="desktopSettings.secrets.postgresPassword" type="password" placeholder="*******" /></label>
+          <label>DashScope API Key<input v-model="desktopSettings.secrets.dashscopeApiKey" type="password" placeholder="*******" /></label>
+          <label>联网搜索 API Key<input v-model="desktopSettings.secrets.searchApiKey" type="password" placeholder="*******" /></label>
+          <label>OSS Endpoint<input v-model="desktopSettings.ossEndpoint" type="url" placeholder="https://oss-cn-hangzhou.aliyuncs.com" /></label>
+          <label>OSS Bucket<input v-model="desktopSettings.ossBucket" type="text" /></label>
+          <label>OSS Access Key ID<input v-model="desktopSettings.secrets.ossAccessKeyId" type="password" placeholder="*******" /></label>
+          <label>OSS Access Key Secret<input v-model="desktopSettings.secrets.ossAccessKeySecret" type="password" placeholder="*******" /></label>
+          <label>Tika 服务地址<input v-model="desktopSettings.tikaBaseUrl" type="url" placeholder="http://127.0.0.1:9998" /></label>
+        </template>
+        <p v-if="desktopSettings.backendMode === 'remote'">模型密钥由已连接服务的部署环境管理。</p>
+        <p v-if="desktopSettingsError" class="settings-error">{{ desktopSettingsError }}</p>
+        <button class="save-desktop-settings" type="button" @click="saveDesktopSettings">保存并重启</button>
       </div>
     </div>
   </div>
@@ -43,7 +60,8 @@ const themes = [
 const storageKey = `zwx-agent-theme:${props.agentKey}`
 const activeTheme = ref(localStorage.getItem(storageKey) || props.defaultTheme)
 const desktopApi = window.zwxDesktop
-const desktopApiUrl = ref(desktopApi?.apiBaseUrl || '')
+const desktopSettings = ref(desktopApi?.settings || null)
+const desktopSettingsError = ref('')
 const applyTheme = key => {
   const theme = themes.find(item => item.key === key) || themes[0]
   const style = document.documentElement.style
@@ -54,11 +72,10 @@ const applyTheme = key => {
 }
 const selectTheme = key => { activeTheme.value = key; localStorage.setItem(storageKey, key); applyTheme(key) }
 const openKnowledge = () => router.push({ name: 'KnowledgeAdmin', query: { agentKey: props.agentKey } })
-const saveDesktopApiUrl = async () => {
-  const value = desktopApiUrl.value.trim().replace(/\/$/, '')
-  if (!/^https?:\/\/[^\s]+\/api$/i.test(value)) return
-  await desktopApi.setApiBaseUrl(value)
-  window.location.reload()
+const saveDesktopSettings = async () => {
+  desktopSettingsError.value = ''
+  try { await desktopApi.saveSettings(desktopSettings.value) }
+  catch (error) { desktopSettingsError.value = error?.message || '保存配置失败。' }
 }
 const closeOnOutsideClick = event => { if (!menuRoot.value?.contains(event.target)) open.value = false }
 onMounted(() => { applyTheme(activeTheme.value); document.addEventListener('click', closeOnOutsideClick) })
@@ -66,5 +83,5 @@ onBeforeUnmount(() => document.removeEventListener('click', closeOnOutsideClick)
 </script>
 
 <style scoped>
-.agent-settings { position:relative; display:flex; width:190px; justify-content:flex-end; }.settings-trigger { display:grid; width:32px; height:32px; place-items:center; border:1px solid #e4e7ec; border-radius:7px; background:#fff; color:#667085; }.settings-trigger:hover,.settings-trigger[aria-expanded="true"] { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); }.settings-menu { position:absolute; z-index:20; top:40px; right:0; width:256px; border:1px solid #e5e7eb; border-radius:8px; padding:8px; background:#fff; box-shadow:0 14px 30px rgba(15,23,42,.13); }.menu-section { display:grid; gap:9px; padding:6px 7px 11px; border-bottom:1px solid #eef0f2; color:#667085; font-size:12px; }.theme-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }.theme-option { display:flex; min-width:0; height:31px; align-items:center; gap:7px; border:1px solid transparent; border-radius:5px; padding:0 7px; background:transparent; color:#667085; font-size:12px; text-align:left; }.theme-option i { display:block; width:14px; height:14px; flex:0 0 14px; border-radius:50%; }.theme-option.active { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); font-weight:650; }.theme-option.active i { box-shadow:0 0 0 2px #fff,0 0 0 3px currentColor; }.knowledge-link { display:flex; width:100%; align-items:center; gap:8px; margin-top:5px; border:0; border-radius:5px; padding:9px 7px; background:transparent; color:#475467; font-size:13px; text-align:left; }.knowledge-link span { flex:1; }.knowledge-link:hover { background:#f5f7fa; color:var(--zwx-primary); }.desktop-api-settings { display:grid; gap:6px; margin-top:5px; border-top:1px solid #eef0f2; padding:10px 7px 3px; color:#667085; font-size:12px; }.desktop-api-settings > div { display:flex; gap:5px; }.desktop-api-settings input { min-width:0; flex:1; height:29px; border:1px solid #d9dee5; border-radius:5px; padding:0 7px; outline:0; font:inherit; font-size:11px; }.desktop-api-settings input:focus { border-color:var(--zwx-primary); }.desktop-api-settings button { border:0; border-radius:5px; padding:0 8px; background:var(--zwx-primary); color:#fff; font-size:11px; }
+.agent-settings { position:relative; display:flex; width:190px; justify-content:flex-end; }.settings-trigger { display:grid; width:32px; height:32px; place-items:center; border:1px solid #e4e7ec; border-radius:7px; background:#fff; color:#667085; }.settings-trigger:hover,.settings-trigger[aria-expanded="true"] { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); }.settings-menu { position:absolute; z-index:20; top:40px; right:0; width:340px; max-height:min(680px,calc(100vh - 90px)); overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px; background:#fff; box-shadow:0 14px 30px rgba(15,23,42,.13); }.menu-section { display:grid; gap:9px; padding:6px 7px 11px; border-bottom:1px solid #eef0f2; color:#667085; font-size:12px; }.theme-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }.theme-option { display:flex; min-width:0; height:31px; align-items:center; gap:7px; border:1px solid transparent; border-radius:5px; padding:0 7px; background:transparent; color:#667085; font-size:12px; text-align:left; }.theme-option i { display:block; width:14px; height:14px; flex:0 0 14px; border-radius:50%; }.theme-option.active { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); font-weight:650; }.theme-option.active i { box-shadow:0 0 0 2px #fff,0 0 0 3px currentColor; }.knowledge-link { display:flex; width:100%; align-items:center; gap:8px; margin-top:5px; border:0; border-radius:5px; padding:9px 7px; background:transparent; color:#475467; font-size:13px; text-align:left; }.knowledge-link span { flex:1; }.knowledge-link:hover { background:#f5f7fa; color:var(--zwx-primary); }.desktop-api-settings { display:grid; gap:8px; margin-top:5px; border-top:1px solid #eef0f2; padding:11px 7px 3px; color:#667085; font-size:12px; }.desktop-api-settings strong { color:#344054; font-size:13px; }.desktop-api-settings label { display:grid; gap:4px; color:#667085; }.desktop-api-settings input,.desktop-api-settings select { min-width:0; width:100%; height:30px; border:1px solid #d9dee5; border-radius:5px; padding:0 7px; outline:0; background:#fff; color:#344054; font:inherit; font-size:12px; }.desktop-api-settings input:focus,.desktop-api-settings select:focus { border-color:var(--zwx-primary); }.desktop-api-settings p { margin:0; color:#98a2b3; font-size:11px; line-height:1.45; }.desktop-api-settings .settings-error { color:#b42318; }.save-desktop-settings { height:31px; border:0; border-radius:5px; background:var(--zwx-primary); color:#fff; font-size:12px; font-weight:650; }
 </style>

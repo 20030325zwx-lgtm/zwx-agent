@@ -35,10 +35,15 @@ import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
 import com.zwx.zwxagent.skills.SkillConfigurationRequest;
 import com.zwx.zwxagent.skills.SkillCatalogItem;
 import com.zwx.zwxagent.app.LoveVisionChatResult;
+import com.zwx.zwxagent.constant.FileConstant;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.http.MediaType;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -58,13 +63,24 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/ai")
 public class AiController {
+
+    private static final String SUPER_AGENT_KEY = "super";
+    private static final String SUPER_DEFAULT_TITLE = "新的超级智能体对话";
+    private static final Pattern GENERATED_FILE = Pattern.compile("(?:PDF generated successfully to:|File written successfully to:|Resource downloaded successfully to:)\\s*([^\"\\r\\n]+)");
 
     @Resource
     private LoveApp loveApp;
@@ -340,6 +356,23 @@ public class AiController {
         }
     }
 
+    private List<Map<String, String>> manusAttachments(List<String> activities) {
+        Path root = Path.of(FileConstant.FILE_SAVE_DIR).toAbsolutePath().normalize();
+        Map<String, Map<String, String>> attachments = new LinkedHashMap<>();
+        for (String activity : activities) {
+            Matcher matcher = GENERATED_FILE.matcher(activity);
+            if (!matcher.find()) continue;
+            Path file = Path.of(matcher.group(1).trim()).toAbsolutePath().normalize();
+            if (!file.startsWith(root) || !Files.isRegularFile(file)) continue;
+            String relativePath = root.relativize(file).toString();
+            attachments.putIfAbsent(relativePath, Map.of(
+                    "name", file.getFileName().toString(),
+                    "path", relativePath,
+                    "type", relativePath.toLowerCase().endsWith(".pdf") ? "pdf" : "file"));
+        }
+        return new ArrayList<>(attachments.values());
+    }
+
     /**
      * SSE 流式调用 AI 恋爱大师应用
      *
@@ -386,9 +419,56 @@ public class AiController {
      * @return
      */
     @GetMapping("/manus/chat")
-    public SseEmitter doChatWithManus(@RequestParam String message) {
+    public SseEmitter doChatWithManus(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                      @RequestParam String conversationId, @RequestParam String message) {
+        validateTenantId(tenantId);
+        agentConversationService.ensureConversation(tenantId, SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
         ZwxManus zwxManus = new ZwxManus(allTools, dashscopeChatModel);
-        return zwxManus.runStream(message);
+        zwxManus.restoreHistory(agentConversationService.getRecentMessages(tenantId, SUPER_AGENT_KEY, conversationId, 20));
+        return zwxManus.runStream(message, result -> agentConversationService.saveCompletedTurn(
+                tenantId, SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message, result.answer(), toJson(manusAttachments(result.activities()))));
+    }
+
+    @PostMapping("/manus/conversations")
+    public AgentConversationSummary createManusConversation(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId) {
+        validateTenantId(tenantId);
+        return agentConversationService.createConversation(tenantId, SUPER_AGENT_KEY, SUPER_DEFAULT_TITLE);
+    }
+
+    @GetMapping("/manus/conversations")
+    public List<AgentConversationSummary> listManusConversations(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId) {
+        validateTenantId(tenantId);
+        return agentConversationService.listConversations(tenantId, SUPER_AGENT_KEY);
+    }
+
+    @GetMapping("/manus/conversations/{conversationId}/messages")
+    public List<AgentConversationMessage> getManusMessages(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                            @PathVariable String conversationId) {
+        validateTenantId(tenantId);
+        return agentConversationService.getMessages(tenantId, SUPER_AGENT_KEY, conversationId);
+    }
+
+    @DeleteMapping("/manus/conversations/{conversationId}")
+    public void deleteManusConversation(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                        @PathVariable String conversationId) {
+        validateTenantId(tenantId);
+        agentConversationService.deleteConversation(tenantId, SUPER_AGENT_KEY, conversationId);
+    }
+
+    @GetMapping("/manus/files")
+    public ResponseEntity<FileSystemResource> getManusFile(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                            @RequestParam String conversationId, @RequestParam String path) throws IOException {
+        validateTenantId(tenantId);
+        if (!agentConversationService.hasConversation(tenantId, SUPER_AGENT_KEY, conversationId)) return ResponseEntity.notFound().build();
+        Path root = Path.of(FileConstant.FILE_SAVE_DIR).toAbsolutePath().normalize();
+        Path file = root.resolve(path).normalize();
+        if (!file.startsWith(root) || !Files.isRegularFile(file)) return ResponseEntity.notFound().build();
+        String detectedType = Files.probeContentType(file);
+        MediaType mediaType = detectedType == null ? MediaType.APPLICATION_OCTET_STREAM : MediaType.parseMediaType(detectedType);
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline().filename(file.getFileName().toString(), StandardCharsets.UTF_8).build().toString())
+                .body(new FileSystemResource(file));
     }
 
     @GetMapping(value = "/travel-planner/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

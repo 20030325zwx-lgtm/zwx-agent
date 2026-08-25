@@ -103,9 +103,12 @@ export const deleteTestConversation = conversationId => request.delete(`/ai/test
 export const deleteTestAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/test-agent/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 
 // AI超级智能体聊天
-export const chatWithManus = (message) => {
-  return connectSSE('/ai/manus/chat', { message })
-}
+export const chatWithManus = (conversationId, message) => connectSSE('/ai/manus/chat', { conversationId, message, tenantId: TENANT_ID })
+export const createManusConversation = () => request.post('/ai/manus/conversations').then(response => response.data)
+export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
+export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
+export const deleteManusConversation = conversationId => request.delete(`/ai/manus/conversations/${conversationId}`)
+export const getManusFileUrl = (conversationId, path) => `${API_BASE_URL}/ai/manus/files?conversationId=${encodeURIComponent(conversationId)}&path=${encodeURIComponent(path)}`
 
 export default {
   chatWithLoveApp,
@@ -115,5 +118,10 @@ export default {
   listLoveConversations,
   getLoveConversationMessages,
   deleteLoveConversation,
-  chatWithManus
+  chatWithManus,
+  createManusConversation,
+  listManusConversations,
+  getManusConversationMessages,
+  deleteManusConversation,
+  getManusFileUrl
 }

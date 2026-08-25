@@ -52,6 +52,13 @@
             <span>执行过程</span>
             <button v-for="(activity, activityIndex) in msg.activities" :key="`${activity.label || activity}-${activityIndex}`" type="button" :class="{ active: connectionStatus === 'connecting' && index === messages.length - 1 && activityIndex === msg.activities.length - 1 }" @click="openActivity(activity, msg)">{{ activity.label || activity }}</button>
           </div>
+          <div v-if="msg.files?.length" class="message-files" aria-label="生成的文件">
+            <a v-for="file in msg.files" :key="file.path" :href="file.url" target="_blank" rel="noopener noreferrer">
+              <FileText :size="16" />
+              <span>{{ file.name }}</span>
+              <small v-if="file.type === 'pdf'">PDF</small>
+            </a>
+          </div>
           <div v-if="msg.references?.length" class="message-references">
             <span>参考资料</span>
             <details v-for="reference in msg.references" :key="`${reference.objectKey}-${reference.chunkIndex || reference.section || reference.filename}`" class="reference-card">
@@ -109,7 +116,7 @@ import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
-import { Globe2, Paperclip } from 'lucide-vue-next'
+import { FileText, Globe2, Paperclip } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 
 const props = defineProps({
@@ -217,6 +224,7 @@ onMounted(scrollToBottom)
 .typing-indicator { display: inline-block; margin-left: 3px; color: var(--zwx-primary); animation: blink 1s step-end infinite; }
 .thinking-state { display: flex; align-items: center; gap: 9px; min-height: 34px; color: #8d5663; font-size: 14px; }.thinking-dots { display: inline-flex; gap: 4px; }.thinking-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: thinking-pulse 1.1s ease-in-out infinite; }.thinking-dots i:nth-child(2) { animation-delay: .16s; }.thinking-dots i:nth-child(3) { animation-delay: .32s; }.activity-trace { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; color:#657080; font-size:12px; }.activity-trace > span:first-child { color:#8b95a1; }.activity-trace button { border:1px solid #dfe7e4; border-radius:5px; padding:3px 6px; background:#f8fbfa; color:inherit; font:inherit; text-align:left; }.activity-trace button:hover { border-color:#8fcdb6; background:#effbf5; color:#16794d; }.activity-trace button.active { border-color:#8fcdb6; background:#effbf5; color:#16794d; }
 .activity-trace-collapsible { display:block; max-width:100%; border:0; color:#7d858f; }.activity-trace-collapsible > summary { cursor:pointer; width:max-content; max-width:100%; list-style:none; }.activity-trace-collapsible > summary::-webkit-details-marker { display:none; }.activity-trace-collapsible > summary::after { content:'⌄'; display:inline-block; margin-left:7px; color:#a0a6ad; transition:transform .15s ease; }.activity-trace-collapsible[open] > summary::after { transform:rotate(180deg); }.activity-details { display:grid; gap:7px; margin-top:10px; }.activity-details details { border-left:2px solid #e0e5e9; padding:2px 0 2px 9px; }.activity-details summary { cursor:pointer; color:#5f6873; }.activity-details pre { max-height:240px; overflow:auto; margin:7px 0 2px; padding:8px; border-radius:5px; background:#f6f8f9; color:#5b6570; font:11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space:pre-wrap; word-break:break-word; }
+.message-files { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }.message-files a { display:inline-flex; max-width:100%; align-items:center; gap:6px; border:1px solid #dce6f4; border-radius:6px; padding:6px 8px; background:#f7fbff; color:#2b659f; font-size:12px; text-decoration:none; }.message-files a:hover { border-color:#78a8d8; background:#eef7ff; }.message-files span { overflow:hidden; max-width:270px; text-overflow:ellipsis; white-space:nowrap; }.message-files small { border-radius:3px; padding:1px 4px; background:#dceeff; color:#3973ad; font-size:10px; }
 .message-references { display: flex; flex-wrap: wrap; align-items:flex-start; gap: 6px; margin-top: 13px; color: #8d5663; font-size: 12px; }.message-references > span { padding:4px 0; }.reference-card { max-width:min(100%, 520px); border:1px solid #efd9de; border-radius:5px; background:#fff8f9; }.reference-card summary { cursor:pointer; padding:4px 7px; color:#934357; }.reference-card p { margin:0; border-top:1px solid #f2e1e5; padding:7px 8px; color:#6f5960; line-height:1.55; white-space:pre-wrap; }
 .trace-entry { position: relative; display: inline-flex; margin-top: 10px; }
 .trace-button { width: 20px; height: 20px; border: 1px solid #dedede; border-radius: 50%; background: #fff; color: #777; font-size: 12px; font-weight: 700; line-height: 1; }

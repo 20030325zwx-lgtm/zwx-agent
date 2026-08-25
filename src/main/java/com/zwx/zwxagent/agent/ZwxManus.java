@@ -3,8 +3,12 @@ package com.zwx.zwxagent.agent;
 import com.zwx.zwxagent.advisor.MyLoggerAdvisor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 /**
  * 鱼皮的 AI 超级智能体（拥有自主规划能力，可以直接使用）
@@ -33,5 +37,12 @@ public class ZwxManus extends ToolCallAgent {
                 .defaultAdvisors(new MyLoggerAdvisor())
                 .build();
         this.setChatClient(chatClient);
+    }
+
+    public void restoreHistory(List<com.zwx.zwxagent.conversation.AgentConversationMessage> history) {
+        history.forEach(message -> {
+            if ("USER".equals(message.role())) getMessageList().add(new UserMessage(message.content()));
+            else if ("ASSISTANT".equals(message.role())) getMessageList().add(new AssistantMessage(message.content()));
+        });
     }
 }

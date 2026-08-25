@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 /**
  * 抽象基础代理类，用于管理代理状态和执行流程。
@@ -98,6 +99,10 @@ public abstract class BaseAgent {
      * @return 执行结果
      */
     public SseEmitter runStream(String userPrompt) {
+        return runStream(userPrompt, result -> {});
+    }
+
+    public SseEmitter runStream(String userPrompt, Consumer<RunResult> completionHandler) {
         // 创建一个超时时间较长的 SseEmitter
         SseEmitter sseEmitter = new SseEmitter(300000L); // 5 分钟超时
         // 使用线程异步处理，避免阻塞主线程
@@ -123,6 +128,8 @@ public abstract class BaseAgent {
             messageList.add(new UserMessage(userPrompt));
             // 保存结果列表
             List<String> results = new ArrayList<>();
+            List<String> activities = new ArrayList<>();
+            StringBuilder answer = new StringBuilder();
             boolean hasUserVisibleResponse = false;
             try {
                 // 执行循环
@@ -135,9 +142,11 @@ public abstract class BaseAgent {
                     String result = "Step " + stepNumber + ": " + stepResult;
                     results.add(result);
                     if (streamStepAsActivity()) {
+                        activities.add(result);
                         sseEmitter.send(SseEmitter.event().name("activity").data(result));
                     } else {
-                        sseEmitter.send(result);
+                        sseEmitter.send(stepResult);
+                        answer.append(stepResult);
                         hasUserVisibleResponse = true;
                     }
                 }
@@ -145,11 +154,16 @@ public abstract class BaseAgent {
                 if (currentStep >= maxSteps) {
                     state = AgentState.FINISHED;
                     results.add("Terminated: Reached max steps (" + maxSteps + ")");
-                    sseEmitter.send(SseEmitter.event().name("activity").data("执行结束：达到最大步骤（" + maxSteps + "）"));
+                    String limitMessage = "执行结束：达到最大步骤（" + maxSteps + "）";
+                    activities.add(limitMessage);
+                    sseEmitter.send(SseEmitter.event().name("activity").data(limitMessage));
                 }
                 if (!hasUserVisibleResponse && !results.isEmpty()) {
-                    sseEmitter.send("任务已完成。展开执行过程可查看搜索结果和文件输出位置。");
+                    String fallbackAnswer = "任务已完成。展开执行过程可查看搜索结果和文件输出位置。";
+                    sseEmitter.send(fallbackAnswer);
+                    answer.append(fallbackAnswer);
                 }
+                completionHandler.accept(new RunResult(answer.toString(), List.copyOf(activities)));
                 // 正常完成
                 sseEmitter.send("[DONE]");
                 sseEmitter.complete();
@@ -194,6 +208,9 @@ public abstract class BaseAgent {
 
     protected boolean streamStepAsActivity() {
         return false;
+    }
+
+    public record RunResult(String answer, List<String> activities) {
     }
 
     /**

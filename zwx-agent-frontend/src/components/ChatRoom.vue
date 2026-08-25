@@ -2,7 +2,7 @@
   <div class="chat-container" :class="`chat-${aiType}`">
     <div class="chat-messages" ref="messagesContainer">
       <section v-if="!messages.length" class="empty-state">
-        <div class="empty-brand">♡</div>
+        <div class="empty-brand">{{ agent.icon }}</div>
         <h2>{{ emptyTitle }}</h2>
         <p>{{ emptyDescription }}</p>
         <div class="suggestion-list">

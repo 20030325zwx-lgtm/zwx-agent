@@ -2,7 +2,7 @@
   <main class="catalog-page">
     <header class="topbar">
       <button class="brand" type="button" aria-label="ZWX Agent 首页" @click="clearFilter"><span class="brand-mark">Z</span><span>ZWX Agent</span></button>
-      <div class="topbar-actions"><span class="topbar-note">AI 工作空间</span><button class="skill-entry" type="button" @click="router.push({ name: 'SkillSettings' })"><Settings2 :size="16" />Skill 配置</button></div>
+      <div class="topbar-actions"><span class="topbar-note">AI 工作空间</span><button class="skill-entry" type="button" @click="router.push({ name: 'SkillSettings' })"><Settings2 :size="16" />Skill 配置</button><AgentSettingsMenu agent-key="love" default-theme="rose" trigger-label="本机服务设置" show-trigger-label /></div>
     </header>
 
     <section class="catalog-shell" aria-label="智能体目录">
@@ -10,7 +10,7 @@
         <div>
           <span class="eyebrow">YOUR AI WORKSPACE</span>
           <h1>让每次对话，都有可靠的下一步。</h1>
-          <p>选择一个专注的智能体，将想法、资料和任务转化为清晰行动。</p>
+          <p>真正的智能体能自主规划并调用工具；对话问答提供专注的深度沟通与资料检索。</p>
         </div>
         <div class="catalog-stat"><strong>{{ agents.length }}</strong><span>已就绪智能体</span></div>
       </div>
@@ -21,28 +21,44 @@
         </label>
       </div>
 
-      <nav class="filters" aria-label="智能体分类">
-        <button v-for="category in categories" :key="category" type="button"
-          :class="{ active: activeCategory === category }" @click="activeCategory = category">
-          {{ category }}
-        </button>
-      </nav>
-
-      <section class="agent-section">
-        <div class="section-heading"><h2>探索智能体</h2><span>{{ filteredAgents.length }} 个结果</span></div>
-        <div class="agent-grid">
-          <button v-for="agent in filteredAgents" :key="agent.name" type="button" class="agent-item"
+      <section class="agent-section" aria-labelledby="agent-heading">
+        <div class="section-heading">
+          <div class="heading-copy"><span class="group-badge agent-badge">Agent</span><h2 id="agent-heading">自主智能体</h2></div>
+          <span class="group-note">可自主规划任务、调用工具并多步执行 · {{ agentAgents.length }}</span>
+        </div>
+        <div v-if="agentAgents.length" class="agent-grid">
+          <button v-for="agent in agentAgents" :key="agent.name" type="button" class="agent-item agent-kind"
             @click="navigateTo(agent.path)">
             <span class="agent-icon" :class="agent.iconClass" aria-hidden="true">{{ agent.icon }}</span>
             <span class="agent-copy">
               <strong>{{ agent.name }}</strong>
               <small>{{ agent.description }}</small>
-              <em>{{ agent.category }}</em>
+              <em class="kind-tag kind-tag-agent">Agent</em>
             </span>
             <span class="open-agent" aria-hidden="true">›</span>
           </button>
-          <p v-if="!filteredAgents.length" class="empty-result">没有匹配的智能体</p>
         </div>
+        <p v-else-if="query" class="empty-result">没有匹配的自主智能体</p>
+      </section>
+
+      <section class="agent-section qa-section" aria-labelledby="qa-heading">
+        <div class="section-heading">
+          <div class="heading-copy"><span class="group-badge qa-badge">Chat</span><h2 id="qa-heading">对话问答</h2></div>
+          <span class="group-note">专注单轮对话、资料检索与方案生成 · {{ qaAgents.length }}</span>
+        </div>
+        <div v-if="qaAgents.length" class="agent-grid">
+          <button v-for="agent in qaAgents" :key="agent.name" type="button" class="agent-item"
+            @click="navigateTo(agent.path)">
+            <span class="agent-icon" :class="agent.iconClass" aria-hidden="true">{{ agent.icon }}</span>
+            <span class="agent-copy">
+              <strong>{{ agent.name }}</strong>
+              <small>{{ agent.description }}</small>
+              <em class="kind-tag kind-tag-qa">问答</em>
+            </span>
+            <span class="open-agent" aria-hidden="true">›</span>
+          </button>
+        </div>
+        <p v-else-if="query" class="empty-result">没有匹配的对话问答</p>
       </section>
     </section>
   </main>
@@ -53,29 +69,30 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import { Settings2 } from 'lucide-vue-next'
+import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 import { AGENT_LIST } from '../config/agents'
 
 useHead({
   title: 'ZWX Agent - 智能体目录',
   meta: [
-    { name: 'description', content: 'ZWX Agent 智能体目录，提供情感分析与通用任务协作能力。' },
-    { name: 'keywords', content: 'ZWX Agent,情感分析大师,超级智能体,AI 智能体' }
+    { name: 'description', content: 'ZWX Agent 智能体目录，区分自主智能体与对话问答能力。' },
+    { name: 'keywords', content: 'ZWX Agent,情感分析大师,超级智能体,旅游规划专家,AI 智能体' }
   ]
 })
 
 const router = useRouter()
 const query = ref('')
-const activeCategory = ref('精选')
-const categories = ['精选', '情感关系', '旅行规划', '效率协作']
 const agents = AGENT_LIST
 
 const filteredAgents = computed(() => {
   const keyword = query.value.trim().toLowerCase()
+  if (!keyword) return agents
   return agents.filter(agent =>
-    (activeCategory.value === '精选' || agent.category === activeCategory.value) &&
-    (!keyword || `${agent.name}${agent.description}${agent.category}`.toLowerCase().includes(keyword))
+    `${agent.name}${agent.description}${agent.category}`.toLowerCase().includes(keyword)
   )
 })
+const agentAgents = computed(() => filteredAgents.value.filter(agent => agent.kind === 'agent'))
+const qaAgents = computed(() => filteredAgents.value.filter(agent => agent.kind !== 'agent'))
 
 const navigateTo = path => router.push(path)
 const clearFilter = () => {
@@ -93,9 +110,9 @@ const clearFilter = () => {
 .search-box span { font-size: 28px; line-height: 1; transform: rotate(-20deg); }
 .search-box input { width: 100%; border: 0; outline: 0; color: #171717; font: inherit; font-size: 17px; }
 .search-box input::placeholder { color: #aaa; }
-.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 30px; }.filters button { border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--zwx-muted); padding: 8px 14px; font-size: 14px; }.filters button:hover { background: #e9eef7; color: #254263; }.filters button.active { border-color: #cbdcf4; background: #eaf3ff; color: #005bc4; font-weight: 650; }.section-heading { display: flex; align-items: center; justify-content: space-between; margin: 0 0 16px; }.section-heading h2 { margin: 0; font-size: 17px; font-weight: 750; }.section-heading span { color: var(--zwx-muted); font-size: 12px; }.agent-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }.agent-item { display: flex; min-width: 0; min-height: 126px; align-items: center; gap: 16px; border: 1px solid var(--zwx-divider); border-radius: var(--zwx-radius-md); padding: 20px; background: var(--zwx-surface); color: inherit; box-shadow: 0 2px 5px rgba(15,23,42,.025); text-align: left; }.agent-item:hover { border-color: #adcef5; box-shadow: var(--zwx-shadow); transform: translateY(-2px); }.agent-icon { display: grid; width: 54px; height: 54px; flex: 0 0 54px; place-items: center; border-radius: 16px; color: #fff; font-size: 27px; font-weight: 500; }.emotion-icon { background: #e5486d; }.super-icon { background: var(--zwx-primary); }
-.travel-icon { background: #0f9f6e; }.agent-copy { display: grid; min-width: 0; gap: 5px; }
-.agent-copy strong { font-size: 16px; font-weight: 750; }.agent-copy small { overflow: hidden; color: var(--zwx-muted); font-size: 13px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }.agent-copy em { width: max-content; margin-top: 2px; border: 1px solid #dce7f7; border-radius: 5px; color: #3973ad; font-size: 10px; font-style: normal; padding: 3px 6px; }.open-agent { display: grid; width: 32px; height: 32px; margin-left: auto; place-items: center; border-radius: 50%; background: #eef5ff; color: var(--zwx-primary); font-size: 26px; line-height: 1; }
-.empty-result { color: #888; font-size: 14px; }
-@media (max-width: 720px) { .topbar { height: 60px; padding: 0 18px; }.topbar-note { display: none; }.catalog-shell { padding: 36px 18px 48px; }.catalog-intro { display: block; margin-bottom: 28px; }.catalog-intro h1 { font-size: 30px; }.catalog-stat { display: none; }.search-box { min-height: 50px; }.agent-grid { grid-template-columns: 1fr; }.agent-copy small { white-space: normal; }.agent-item { min-height: 112px; padding: 17px; } }
+.section-heading { display: flex; align-items: center; justify-content: space-between; margin: 0 0 16px; }.heading-copy { display: flex; align-items: center; gap: 10px; }.section-heading h2 { margin: 0; font-size: 17px; font-weight: 750; }.group-badge { display: grid; min-width: 46px; height: 22px; place-items: center; border-radius: 999px; padding: 0 8px; font-size: 10px; font-weight: 750; letter-spacing: .03em; }.group-badge.agent-badge { background: #eaf3ff; color: #006fee; }.group-badge.qa-badge { background: #f0f4f3; color: #0f9f6e; }.group-note { color: var(--zwx-muted); font-size: 12px; }.qa-section { margin-top: 40px; }.agent-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }.agent-item { display: flex; min-width: 0; min-height: 126px; align-items: center; gap: 16px; border: 1px solid var(--zwx-divider); border-radius: var(--zwx-radius-md); padding: 20px; background: var(--zwx-surface); color: inherit; box-shadow: 0 2px 5px rgba(15,23,42,.025); text-align: left; }.agent-item:hover { border-color: #adcef5; box-shadow: var(--zwx-shadow); transform: translateY(-2px); }.agent-item.agent-kind { border-color: #d7e4fb; background: linear-gradient(180deg, #fbfdff, #fff); }.agent-item.agent-kind:hover { border-color: #8fb8f2; }.agent-icon { display: grid; width: 54px; height: 54px; flex: 0 0 54px; place-items: center; border-radius: 16px; color: #fff; font-size: 27px; font-weight: 500; }.emotion-icon { background: #e5486d; }.super-icon { background: var(--zwx-primary); }
+.travel-icon { background: #0f9f6e; }.test-icon { background: #6b7280; }.agent-copy { display: grid; min-width: 0; gap: 5px; }
+.agent-copy strong { font-size: 16px; font-weight: 750; }.agent-copy small { overflow: hidden; color: var(--zwx-muted); font-size: 13px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }.kind-tag { width: max-content; margin-top: 2px; border: 1px solid; border-radius: 5px; font-size: 10px; font-style: normal; padding: 3px 7px; }.kind-tag-agent { border-color: #cfe0fa; background: #eaf3ff; color: #246bb2; }.kind-tag-qa { border-color: #d8e6e1; background: #f0f7f4; color: #2c7a5c; }.open-agent { display: grid; width: 32px; height: 32px; margin-left: auto; place-items: center; border-radius: 50%; background: #eef5ff; color: var(--zwx-primary); font-size: 26px; line-height: 1; }
+.empty-result { margin: 0; color: #888; font-size: 14px; }
+@media (max-width: 720px) { .topbar { height: 60px; padding: 0 18px; }.topbar-note { display: none; }.catalog-shell { padding: 36px 18px 48px; }.catalog-intro { display: block; margin-bottom: 28px; }.catalog-intro h1 { font-size: 30px; }.catalog-stat { display: none; }.search-box { min-height: 50px; }.agent-grid { grid-template-columns: 1fr; }.agent-copy small { white-space: normal; }.agent-item { min-height: 112px; padding: 17px; }.section-heading { align-items: flex-start; gap: 8px; }.group-note { font-size: 11px; } }
 </style>

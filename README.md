@@ -23,9 +23,9 @@ ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包�
 
 ## 功能路线图
 
-每个模块的已完成能力、待办项、进度和近期优先级见 [docs/ROADMAP.md](docs/ROADMAP.md)。该清单以仓库实现为准：未实现的能力会明确标注为待做，不会按设想计入完成度。
+每个模块的已完成能力、待办项、进度和近期优先级见 [doc/ROADMAP.md](doc/ROADMAP.md)。该清单以仓库实现为准：未实现的能力会明确标注为待做，不会按设想计入完成度。
 
-项目内置 Skill 的授权、提示词触发和工具执行链路见 [docs/skills.md](docs/skills.md)。
+项目内置 Skill 的授权、提示词触发和工具执行链路见 [doc/skills.md](doc/skills.md)。
 
 ## 技术栈
 

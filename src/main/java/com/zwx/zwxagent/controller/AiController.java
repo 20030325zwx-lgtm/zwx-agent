@@ -386,7 +386,7 @@ public class AiController {
      * @return
      */
     @GetMapping("/manus/chat")
-    public SseEmitter doChatWithManus(String message) {
+    public SseEmitter doChatWithManus(@RequestParam String message) {
         ZwxManus zwxManus = new ZwxManus(allTools, dashscopeChatModel);
         return zwxManus.runStream(message);
     }

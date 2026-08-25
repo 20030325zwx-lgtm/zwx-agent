@@ -39,7 +39,16 @@
               <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ msg.thinking || '正在思考...' }}
             </div>
           </div>
-          <div v-if="msg.activities?.length" class="activity-trace" aria-label="AI 执行状态">
+          <details v-if="msg.collapsibleActivities && msg.activities?.length" class="activity-trace activity-trace-collapsible" aria-label="AI 执行过程">
+            <summary>已执行 {{ msg.activities.length }} 项操作</summary>
+            <div class="activity-details">
+              <details v-for="(activity, activityIndex) in msg.activities" :key="`${activity.label || activity}-${activityIndex}`">
+                <summary>{{ activity.label || `步骤 ${activityIndex + 1}` }}</summary>
+                <pre>{{ activity.detail || activity }}</pre>
+              </details>
+            </div>
+          </details>
+          <div v-else-if="msg.activities?.length" class="activity-trace" aria-label="AI 执行状态">
             <span>执行过程</span>
             <button v-for="(activity, activityIndex) in msg.activities" :key="`${activity.label || activity}-${activityIndex}`" type="button" :class="{ active: connectionStatus === 'connecting' && index === messages.length - 1 && activityIndex === msg.activities.length - 1 }" @click="openActivity(activity, msg)">{{ activity.label || activity }}</button>
           </div>
@@ -207,6 +216,7 @@ onMounted(scrollToBottom)
 .message-actions { position:absolute; z-index:1; top:calc(100% + 10px); right:0; display:flex; align-items:center; gap:12px; height:30px; padding:0 2px; opacity:0; pointer-events:none; transform:translateY(-3px); transition:opacity .15s ease,transform .15s ease; }.message-wrapper.user:hover .message-actions,.message-actions:focus-within { opacity:1; pointer-events:auto; transform:translateY(0); }.message-actions button { display:grid; width:26px; height:30px; place-items:center; border:0; border-radius:4px; background:transparent; color:#7d8288; font-size:19px; line-height:1; }.message-actions button:hover { background:#edf0f2; color:#34383d; }
 .typing-indicator { display: inline-block; margin-left: 3px; color: var(--zwx-primary); animation: blink 1s step-end infinite; }
 .thinking-state { display: flex; align-items: center; gap: 9px; min-height: 34px; color: #8d5663; font-size: 14px; }.thinking-dots { display: inline-flex; gap: 4px; }.thinking-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: thinking-pulse 1.1s ease-in-out infinite; }.thinking-dots i:nth-child(2) { animation-delay: .16s; }.thinking-dots i:nth-child(3) { animation-delay: .32s; }.activity-trace { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; color:#657080; font-size:12px; }.activity-trace > span:first-child { color:#8b95a1; }.activity-trace button { border:1px solid #dfe7e4; border-radius:5px; padding:3px 6px; background:#f8fbfa; color:inherit; font:inherit; text-align:left; }.activity-trace button:hover { border-color:#8fcdb6; background:#effbf5; color:#16794d; }.activity-trace button.active { border-color:#8fcdb6; background:#effbf5; color:#16794d; }
+.activity-trace-collapsible { display:block; max-width:100%; border:0; color:#7d858f; }.activity-trace-collapsible > summary { cursor:pointer; width:max-content; max-width:100%; list-style:none; }.activity-trace-collapsible > summary::-webkit-details-marker { display:none; }.activity-trace-collapsible > summary::after { content:'⌄'; display:inline-block; margin-left:7px; color:#a0a6ad; transition:transform .15s ease; }.activity-trace-collapsible[open] > summary::after { transform:rotate(180deg); }.activity-details { display:grid; gap:7px; margin-top:10px; }.activity-details details { border-left:2px solid #e0e5e9; padding:2px 0 2px 9px; }.activity-details summary { cursor:pointer; color:#5f6873; }.activity-details pre { max-height:240px; overflow:auto; margin:7px 0 2px; padding:8px; border-radius:5px; background:#f6f8f9; color:#5b6570; font:11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space:pre-wrap; word-break:break-word; }
 .message-references { display: flex; flex-wrap: wrap; align-items:flex-start; gap: 6px; margin-top: 13px; color: #8d5663; font-size: 12px; }.message-references > span { padding:4px 0; }.reference-card { max-width:min(100%, 520px); border:1px solid #efd9de; border-radius:5px; background:#fff8f9; }.reference-card summary { cursor:pointer; padding:4px 7px; color:#934357; }.reference-card p { margin:0; border-top:1px solid #f2e1e5; padding:7px 8px; color:#6f5960; line-height:1.55; white-space:pre-wrap; }
 .trace-entry { position: relative; display: inline-flex; margin-top: 10px; }
 .trace-button { width: 20px; height: 20px; border: 1px solid #dedede; border-radius: 50%; background: #fff; color: #777; font-size: 12px; font-weight: 700; line-height: 1; }

@@ -41,6 +41,8 @@ public class ToolCallAgent extends ReActAgent {
     // 禁用 Spring AI 内置的工具调用机制，自己维护选项和消息上下文
     private final ChatOptions chatOptions;
 
+    private boolean lastStepUsedTool;
+
     public ToolCallAgent(ToolCallback[] availableTools) {
         super();
         this.availableTools = availableTools;
@@ -51,6 +53,22 @@ public class ToolCallAgent extends ReActAgent {
                 .build();
     }
 
+    @Override
+    public String step() {
+        if (!think()) {
+            setState(AgentState.FINISHED);
+            return toolCallChatResponse == null
+                    ? "未能生成回答"
+                    : toolCallChatResponse.getResult().getOutput().getText();
+        }
+        return act();
+    }
+
+    @Override
+    protected boolean streamStepAsActivity() {
+        return lastStepUsedTool;
+    }
+
     /**
      * 处理当前状态并决定下一步行动
      *
@@ -58,6 +76,7 @@ public class ToolCallAgent extends ReActAgent {
      */
     @Override
     public boolean think() {
+        lastStepUsedTool = false;
         // 1、校验提示词，拼接用户提示词
         if (StrUtil.isNotBlank(getNextStepPrompt())) {
             UserMessage userMessage = new UserMessage(getNextStepPrompt());
@@ -69,7 +88,7 @@ public class ToolCallAgent extends ReActAgent {
         try {
             ChatResponse chatResponse = getChatClient().prompt(prompt)
                     .system(getSystemPrompt())
-                    .tools(availableTools)
+                    .toolCallbacks(availableTools)
                     .call()
                     .chatResponse();
             // 记录响应，用于等下 Act
@@ -93,6 +112,7 @@ public class ToolCallAgent extends ReActAgent {
                 getMessageList().add(assistantMessage);
                 return false;
             } else {
+                lastStepUsedTool = true;
                 // 需要调用工具时，无需记录助手消息，因为调用工具时会自动记录
                 return true;
             }

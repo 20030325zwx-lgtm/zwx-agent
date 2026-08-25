@@ -10,7 +10,8 @@ import org.springframework.context.annotation.Configuration;
 public class TravelToolConfig {
 
     @Bean("travelTools")
-    ToolCallback[] travelTools(@Value("${search-api.api-key}") String searchApiKey) {
-        return ToolCallbacks.from(new WebSearchTool(searchApiKey));
+    ToolCallback[] travelTools(@Value("${search-api.provider:searchapi}") String searchProvider,
+                               @Value("${search-api.api-key}") String searchApiKey) {
+        return ToolCallbacks.from(new WebSearchTool(searchProvider, searchApiKey));
     }
 }

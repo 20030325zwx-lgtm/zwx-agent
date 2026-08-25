@@ -1,7 +1,7 @@
 <template>
   <div ref="menuRoot" class="agent-settings">
-    <button class="settings-trigger" type="button" aria-label="智能体设置" :aria-expanded="open" @click="open = !open">
-      <Settings2 :size="18" />
+    <button class="settings-trigger" type="button" :aria-label="triggerLabel" :aria-expanded="open" @click="open = !open">
+      <Settings2 :size="18" /><span v-if="showTriggerLabel">{{ triggerLabel }}</span>
     </button>
     <div v-if="open" class="settings-menu" role="menu">
       <div class="menu-section">
@@ -26,19 +26,18 @@
         <strong>桌面端服务配置</strong>
         <label>运行模式<select v-model="desktopSettings.backendMode"><option value="remote">连接已有服务</option><option value="local">启动本机服务</option></select></label>
         <label>API 服务地址<input v-model="desktopSettings.apiBaseUrl" type="url" placeholder="https://example.com/api" /></label>
-        <template v-if="desktopSettings.backendMode === 'local'">
-          <label>本机后端端口<input v-model.number="desktopSettings.backendPort" type="number" min="1024" max="65535" /></label>
-          <label>PostgreSQL JDBC 地址<input v-model="desktopSettings.postgresUrl" type="text" placeholder="jdbc:postgresql://127.0.0.1:5432/zwx_agent" /></label>
-          <label>PostgreSQL 用户名<input v-model="desktopSettings.postgresUsername" type="text" /></label>
-          <label>PostgreSQL 密码<input v-model="desktopSettings.secrets.postgresPassword" type="password" placeholder="*******" /></label>
-          <label>DashScope API Key<input v-model="desktopSettings.secrets.dashscopeApiKey" type="password" placeholder="*******" /></label>
-          <label>联网搜索 API Key<input v-model="desktopSettings.secrets.searchApiKey" type="password" placeholder="*******" /></label>
-          <label>OSS Endpoint<input v-model="desktopSettings.ossEndpoint" type="url" placeholder="https://oss-cn-hangzhou.aliyuncs.com" /></label>
-          <label>OSS Bucket<input v-model="desktopSettings.ossBucket" type="text" /></label>
-          <label>OSS Access Key ID<input v-model="desktopSettings.secrets.ossAccessKeyId" type="password" placeholder="*******" /></label>
-          <label>OSS Access Key Secret<input v-model="desktopSettings.secrets.ossAccessKeySecret" type="password" placeholder="*******" /></label>
-          <label>Tika 服务地址<input v-model="desktopSettings.tikaBaseUrl" type="url" placeholder="http://127.0.0.1:9998" /></label>
-        </template>
+        <label>本机后端端口<input v-model.number="desktopSettings.backendPort" type="number" min="1024" max="65535" /></label>
+        <label>PostgreSQL JDBC 地址<input v-model="desktopSettings.postgresUrl" type="text" placeholder="jdbc:postgresql://127.0.0.1:5432/zwx_agent" /></label>
+        <label>PostgreSQL 用户名<input v-model="desktopSettings.postgresUsername" type="text" /></label>
+        <label>PostgreSQL 密码<input v-model="desktopSettings.secrets.postgresPassword" type="password" placeholder="*******" /></label>
+        <label>DashScope API Key<input v-model="desktopSettings.secrets.dashscopeApiKey" type="password" placeholder="*******" /></label>
+        <label>联网搜索 API Key<input v-model="desktopSettings.secrets.searchApiKey" type="password" placeholder="*******" /></label>
+        <label>OSS Endpoint<input v-model="desktopSettings.ossEndpoint" type="url" placeholder="https://oss-cn-hangzhou.aliyuncs.com" /></label>
+        <label>OSS Bucket<input v-model="desktopSettings.ossBucket" type="text" /></label>
+        <label>OSS Access Key ID<input v-model="desktopSettings.secrets.ossAccessKeyId" type="password" placeholder="*******" /></label>
+        <label>OSS Access Key Secret<input v-model="desktopSettings.secrets.ossAccessKeySecret" type="password" placeholder="*******" /></label>
+        <label>Tika 服务地址<input v-model="desktopSettings.tikaBaseUrl" type="url" placeholder="http://127.0.0.1:9998" /></label>
+        <p>切换为“启动本机服务”后，保存的本机配置才会用于启动后端。Bucket 与非密钥配置保存在本机；密钥保持加密且不会回显或因空输入被清除。</p>
         <p v-if="desktopSettings.backendMode === 'remote'">模型密钥由已连接服务的部署环境管理。</p>
         <p v-if="desktopSettingsError" class="settings-error">{{ desktopSettingsError }}</p>
         <button class="save-desktop-settings" type="button" @click="saveDesktopSettings">保存并重启</button>
@@ -52,7 +51,12 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ChevronRight, Database, Settings2, Sparkles } from 'lucide-vue-next'
 
-const props = defineProps({ agentKey: { type: String, required: true }, defaultTheme: { type: String, default: 'blue' } })
+const props = defineProps({
+  agentKey: { type: String, required: true },
+  defaultTheme: { type: String, default: 'blue' },
+  triggerLabel: { type: String, default: '智能体设置' },
+  showTriggerLabel: { type: Boolean, default: false }
+})
 const router = useRouter()
 const open = ref(false)
 const menuRoot = ref(null)
@@ -89,5 +93,5 @@ onBeforeUnmount(() => document.removeEventListener('click', closeOnOutsideClick)
 </script>
 
 <style scoped>
-.agent-settings { position:relative; display:flex; width:190px; justify-content:flex-end; }.settings-trigger { display:grid; width:32px; height:32px; place-items:center; border:1px solid #e4e7ec; border-radius:7px; background:#fff; color:#667085; }.settings-trigger:hover,.settings-trigger[aria-expanded="true"] { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); }.settings-menu { position:absolute; z-index:20; top:40px; right:0; width:340px; max-height:min(680px,calc(100vh - 90px)); overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px; background:#fff; box-shadow:0 14px 30px rgba(15,23,42,.13); }.menu-section { display:grid; gap:9px; padding:6px 7px 11px; border-bottom:1px solid #eef0f2; color:#667085; font-size:12px; }.theme-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }.theme-option { display:flex; min-width:0; height:31px; align-items:center; gap:7px; border:1px solid transparent; border-radius:5px; padding:0 7px; background:transparent; color:#667085; font-size:12px; text-align:left; }.theme-option i { display:block; width:14px; height:14px; flex:0 0 14px; border-radius:50%; }.theme-option.active { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); font-weight:650; }.theme-option.active i { box-shadow:0 0 0 2px #fff,0 0 0 3px currentColor; }.knowledge-link { display:flex; width:100%; align-items:center; gap:8px; margin-top:5px; border:0; border-radius:5px; padding:9px 7px; background:transparent; color:#475467; font-size:13px; text-align:left; }.knowledge-link span { flex:1; }.knowledge-link:hover { background:#f5f7fa; color:var(--zwx-primary); }.desktop-api-settings { display:grid; gap:8px; margin-top:5px; border-top:1px solid #eef0f2; padding:11px 7px 3px; color:#667085; font-size:12px; }.desktop-api-settings strong { color:#344054; font-size:13px; }.desktop-api-settings label { display:grid; gap:4px; color:#667085; }.desktop-api-settings input,.desktop-api-settings select { min-width:0; width:100%; height:30px; border:1px solid #d9dee5; border-radius:5px; padding:0 7px; outline:0; background:#fff; color:#344054; font:inherit; font-size:12px; }.desktop-api-settings input:focus,.desktop-api-settings select:focus { border-color:var(--zwx-primary); }.desktop-api-settings p { margin:0; color:#98a2b3; font-size:11px; line-height:1.45; }.desktop-api-settings .settings-error { color:#b42318; }.save-desktop-settings { height:31px; border:0; border-radius:5px; background:var(--zwx-primary); color:#fff; font-size:12px; font-weight:650; }
+.agent-settings { position:relative; display:flex; width:190px; justify-content:flex-end; }.settings-trigger { display:grid; width:32px; height:32px; place-items:center; border:1px solid #e4e7ec; border-radius:7px; background:#fff; color:#667085; }.settings-trigger:has(span) { display:flex; width:auto; gap:7px; padding:0 10px; font-size:12px; }.settings-trigger:hover,.settings-trigger[aria-expanded="true"] { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); }.settings-menu { position:absolute; z-index:20; top:40px; right:0; width:340px; max-height:min(680px,calc(100vh - 90px)); overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px; background:#fff; box-shadow:0 14px 30px rgba(15,23,42,.13); }.menu-section { display:grid; gap:9px; padding:6px 7px 11px; border-bottom:1px solid #eef0f2; color:#667085; font-size:12px; }.theme-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }.theme-option { display:flex; min-width:0; height:31px; align-items:center; gap:7px; border:1px solid transparent; border-radius:5px; padding:0 7px; background:transparent; color:#667085; font-size:12px; text-align:left; }.theme-option i { display:block; width:14px; height:14px; flex:0 0 14px; border-radius:50%; }.theme-option.active { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); font-weight:650; }.theme-option.active i { box-shadow:0 0 0 2px #fff,0 0 0 3px currentColor; }.knowledge-link { display:flex; width:100%; align-items:center; gap:8px; margin-top:5px; border:0; border-radius:5px; padding:9px 7px; background:transparent; color:#475467; font-size:13px; text-align:left; }.knowledge-link span { flex:1; }.knowledge-link:hover { background:#f5f7fa; color:var(--zwx-primary); }.desktop-api-settings { display:grid; gap:8px; margin-top:5px; border-top:1px solid #eef0f2; padding:11px 7px 3px; color:#667085; font-size:12px; }.desktop-api-settings strong { color:#344054; font-size:13px; }.desktop-api-settings label { display:grid; gap:4px; color:#667085; }.desktop-api-settings input,.desktop-api-settings select { min-width:0; width:100%; height:30px; border:1px solid #d9dee5; border-radius:5px; padding:0 7px; outline:0; background:#fff; color:#344054; font:inherit; font-size:12px; }.desktop-api-settings input:focus,.desktop-api-settings select:focus { border-color:var(--zwx-primary); }.desktop-api-settings p { margin:0; color:#98a2b3; font-size:11px; line-height:1.45; }.desktop-api-settings .settings-error { color:#b42318; }.save-desktop-settings { height:31px; border:0; border-radius:5px; background:var(--zwx-primary); color:#fff; font-size:12px; font-weight:650; }
 </style>

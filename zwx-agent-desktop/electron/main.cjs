@@ -5,6 +5,8 @@ const path = require('path')
 const fs = require('fs')
 
 const defaultApiBaseUrl = 'http://127.0.0.1:8123/api'
+const defaultOssEndpoint = 'https://oss-cn-hangzhou.aliyuncs.com'
+const defaultOssBucket = 'zwx-agent'
 const staticRoot = path.join(__dirname, '..', 'app')
 const secretKeys = ['dashscopeApiKey', 'searchApiKey', 'postgresPassword', 'ossAccessKeyId', 'ossAccessKeySecret']
 let staticServer
@@ -36,8 +38,8 @@ const settingsView = config => ({
   backendPort: backendPort(config),
   postgresUrl: config.postgresUrl || '',
   postgresUsername: config.postgresUsername || '',
-  ossEndpoint: config.ossEndpoint || '',
-  ossBucket: config.ossBucket || '',
+  ossEndpoint: config.ossEndpoint || defaultOssEndpoint,
+  ossBucket: config.ossBucket || defaultOssBucket,
   tikaBaseUrl: config.tikaBaseUrl || '',
   secrets: Object.fromEntries(secretKeys.map(key => [key, readSecret(config, key) ? '*******' : '']))
 })
@@ -79,9 +81,11 @@ const startLocalBackend = () => {
     SERVER_PORT: String(backendPort(config)),
     SPRING_PROFILES_ACTIVE: 'prod', SPRING_SQL_INIT_MODE: 'always',
     SPRING_DATASOURCE_URL: config.postgresUrl || '', SPRING_DATASOURCE_USERNAME: config.postgresUsername || '',
-    ALIYUN_OSS_ENDPOINT: config.ossEndpoint || '', ALIYUN_OSS_BUCKET: config.ossBucket || '',
     APP_TIKA_BASE_URL: config.tikaBaseUrl || '', APP_TEMP_DIR: path.join(app.getPath('userData'), 'temp')
   }
+  // Leave unset values to Spring's local defaults instead of overriding them with empty strings.
+  if (config.ossEndpoint) env.ALIYUN_OSS_ENDPOINT = config.ossEndpoint
+  if (config.ossBucket) env.ALIYUN_OSS_BUCKET = config.ossBucket
   // Empty credentials must not override Spring defaults and block application startup.
   if (postgresPassword) env.SPRING_DATASOURCE_PASSWORD = postgresPassword
   if (dashscopeApiKey) env.SPRING_AI_DASHSCOPE_API_KEY = dashscopeApiKey

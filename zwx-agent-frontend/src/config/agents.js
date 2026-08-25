@@ -1,7 +1,9 @@
+// kind 区分能力形态：qa = 单轮对话问答（专注对话/检索/生成）；agent = 真正的自主智能体（自主规划、调用工具、多步执行）
 const registry = {
   love: {
     key: 'love',
     name: '情感分析大师',
+    kind: 'qa',
     category: '情感关系',
     path: '/love-master',
     icon: '♡',
@@ -18,6 +20,7 @@ const registry = {
   travel: {
     key: 'travel',
     name: '旅游规划专家',
+    kind: 'qa',
     category: '旅行规划',
     path: '/travel-planner',
     icon: '⌖',
@@ -32,7 +35,7 @@ const registry = {
     }
   },
   test: {
-    key: 'test', name: '功能测试助手', category: '开发测试', path: '/test-agent', icon: '✓', iconClass: 'test-icon',
+    key: 'test', name: '功能测试助手', kind: 'qa', category: '开发测试', path: '/test-agent', icon: '✓', iconClass: 'test-icon',
     description: '隔离的对话、历史会话与私有知识库测试空间',
     capabilities: { attachments: false, conversations: true, executionTrace: false, privateKnowledge: true },
     chat: { emptyTitle: '开始验证一个功能。', emptyDescription: '此处的会话与资料均独立于其他智能体。', inputPlaceholder: '输入测试问题，验证流式回复、历史记录或知识库召回...', quickPrompts: ['验证流式输出是否正常', '测试私有知识库召回', '创建一条测试会话'] }
@@ -40,11 +43,12 @@ const registry = {
   super: {
     key: 'super',
     name: '超级智能体',
+    kind: 'agent',
     category: '效率协作',
     path: '/super-agent',
     icon: '✦',
     iconClass: 'super-icon',
-    description: '面向多步骤任务的通用 AI 协作助手',
+    description: '真正的自主智能体：可规划任务、调用工具并多步执行',
     capabilities: { attachments: false, conversations: false, executionTrace: false, privateKnowledge: false },
     chat: {
       emptyTitle: '从一个目标开始。',

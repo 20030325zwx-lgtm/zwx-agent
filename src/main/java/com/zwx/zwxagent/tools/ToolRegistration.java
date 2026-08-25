@@ -15,10 +15,13 @@ public class ToolRegistration {
     @Value("${search-api.api-key}")
     private String searchApiKey;
 
+    @Value("${search-api.provider:searchapi}")
+    private String searchProvider;
+
     @Bean
     public ToolCallback[] allTools() {
         FileOperationTool fileOperationTool = new FileOperationTool();
-        WebSearchTool webSearchTool = new WebSearchTool(searchApiKey);
+        WebSearchTool webSearchTool = new WebSearchTool(searchProvider, searchApiKey);
         WebScrapingTool webScrapingTool = new WebScrapingTool();
         ResourceDownloadTool resourceDownloadTool = new ResourceDownloadTool();
         TerminalOperationTool terminalOperationTool = new TerminalOperationTool();

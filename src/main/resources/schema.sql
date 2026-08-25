@@ -83,6 +83,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_chat_message_conversation_id
 ALTER TABLE agent_chat_message
     ADD COLUMN IF NOT EXISTS execution_run_id VARCHAR(64);
 
+ALTER TABLE agent_chat_message
+    ADD COLUMN IF NOT EXISTS file_attachments JSONB NOT NULL DEFAULT '[]'::jsonb;
+
 CREATE TABLE IF NOT EXISTS agent_execution_event (
     id BIGSERIAL PRIMARY KEY,
     run_id VARCHAR(64) NOT NULL,

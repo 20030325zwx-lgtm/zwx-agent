@@ -38,19 +38,39 @@ let eventSource = null
 let activeTurnStart = -1
 const statusText = computed(() => connectionStatus.value === 'connecting' ? '正在执行' : connectionStatus.value === 'error' ? '连接异常' : '就绪')
 const addMessage = (content, isUser) => messages.value.push({ content, isUser, time: Date.now() })
+const toolLabels = { searchWeb: '搜索网页', generatePDF: '生成 PDF', writeFile: '写入文件', readFile: '读取文件', downloadResource: '下载资源', doTerminate: '结束任务' }
+const activityLabel = detail => {
+  const step = detail.match(/^Step (\d+):/)?.[1]
+  const tool = detail.match(/工具\s+([A-Za-z0-9_]+)\s+返回/)?.[1]
+  const label = toolLabels[tool] || (tool ? `执行 ${tool}` : detail.startsWith('执行结束') ? '达到步骤上限' : '处理任务')
+  return `${step ? `步骤 ${step}` : '执行状态'} · ${label}`
+}
 const sendMessage = message => {
   cancelActiveStream()
   activeTurnStart = messages.value.length
   addMessage(message, true)
-  addMessage('', false)
+  messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], collapsibleActivities: true })
   const answerIndex = messages.value.length - 1
   connectionStatus.value = 'connecting'
   eventSource = chatWithManus(message)
+  eventSource.addEventListener('activity', event => {
+    const answer = messages.value[answerIndex]
+    if (!answer) return
+    const detail = event.data || ''
+    answer.activities.push({ label: activityLabel(detail), detail })
+  })
   eventSource.onmessage = event => {
     if (event.data === '[DONE]') { finishStream(); return }
     if (event.data && messages.value[answerIndex]) messages.value[answerIndex].content += event.data
   }
-  eventSource.onerror = () => { cancelActiveStream() }
+  eventSource.onerror = () => {
+    eventSource?.close()
+    eventSource = null
+    const answer = messages.value[answerIndex]
+    if (answer && !answer.content) answer.content = '连接异常，暂时无法完成请求，请稍后重试。'
+    activeTurnStart = -1
+    connectionStatus.value = 'error'
+  }
 }
 const finishStream = () => {
   connectionStatus.value = 'disconnected'

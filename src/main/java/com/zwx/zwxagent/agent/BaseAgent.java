@@ -123,6 +123,7 @@ public abstract class BaseAgent {
             messageList.add(new UserMessage(userPrompt));
             // 保存结果列表
             List<String> results = new ArrayList<>();
+            boolean hasUserVisibleResponse = false;
             try {
                 // 执行循环
                 for (int i = 0; i < maxSteps && state != AgentState.FINISHED; i++) {
@@ -133,16 +134,24 @@ public abstract class BaseAgent {
                     String stepResult = step();
                     String result = "Step " + stepNumber + ": " + stepResult;
                     results.add(result);
-                    // 输出当前每一步的结果到 SSE
-                    sseEmitter.send(result);
+                    if (streamStepAsActivity()) {
+                        sseEmitter.send(SseEmitter.event().name("activity").data(result));
+                    } else {
+                        sseEmitter.send(result);
+                        hasUserVisibleResponse = true;
+                    }
                 }
                 // 检查是否超出步骤限制
                 if (currentStep >= maxSteps) {
                     state = AgentState.FINISHED;
                     results.add("Terminated: Reached max steps (" + maxSteps + ")");
-                    sseEmitter.send("执行结束：达到最大步骤（" + maxSteps + "）");
+                    sseEmitter.send(SseEmitter.event().name("activity").data("执行结束：达到最大步骤（" + maxSteps + "）"));
+                }
+                if (!hasUserVisibleResponse && !results.isEmpty()) {
+                    sseEmitter.send("任务已完成。展开执行过程可查看搜索结果和文件输出位置。");
                 }
                 // 正常完成
+                sseEmitter.send("[DONE]");
                 sseEmitter.complete();
             } catch (Exception e) {
                 state = AgentState.ERROR;
@@ -182,6 +191,10 @@ public abstract class BaseAgent {
      * @return
      */
     public abstract String step();
+
+    protected boolean streamStepAsActivity() {
+        return false;
+    }
 
     /**
      * 清理资源

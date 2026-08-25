@@ -11,6 +11,7 @@ import com.zwx.zwxagent.constant.FileConstant;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
+import java.io.File;
 import java.io.IOException;
 
 /**
@@ -25,27 +26,26 @@ public class PDFGenerationTool {
         String fileDir = FileConstant.FILE_SAVE_DIR + "/pdf";
         String filePath = fileDir + "/" + fileName;
         try {
-            // 创建目录
+            String fontPath = System.getenv("APP_PDF_FONT_PATH");
+            if (fontPath == null || fontPath.isBlank()) {
+                String macOsFontPath = "/Library/Fonts/Arial Unicode.ttf";
+                fontPath = new File(macOsFontPath).isFile() ? macOsFontPath : null;
+            }
+            if (fontPath == null || fontPath.isBlank() || !new File(fontPath).isFile()) {
+                return "Error generating PDF: no usable Chinese font. Set APP_PDF_FONT_PATH to a .ttf, .otf, or .ttc font file.";
+            }
+            PdfFont font = PdfFontFactory.createFont(fontPath, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
             FileUtil.mkdir(fileDir);
-            // 创建 PdfWriter 和 PdfDocument 对象
             try (PdfWriter writer = new PdfWriter(filePath);
                  PdfDocument pdf = new PdfDocument(writer);
                  Document document = new Document(pdf)) {
-                // 自定义字体（需要人工下载字体文件到特定目录）
-//                String fontPath = Paths.get("src/main/resources/static/fonts/simsun.ttf")
-//                        .toAbsolutePath().toString();
-//                PdfFont font = PdfFontFactory.createFont(fontPath,
-//                        PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
-                // 使用内置中文字体
-                PdfFont font = PdfFontFactory.createFont("STSongStd-Light", "UniGB-UCS2-H");
                 document.setFont(font);
-                // 创建段落
                 Paragraph paragraph = new Paragraph(content);
-                // 添加段落并关闭文档
                 document.add(paragraph);
             }
             return "PDF generated successfully to: " + filePath;
         } catch (IOException e) {
+            FileUtil.del(filePath);
             return "Error generating PDF: " + e.getMessage();
         }
     }

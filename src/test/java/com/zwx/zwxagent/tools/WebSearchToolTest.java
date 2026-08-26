@@ -13,9 +13,12 @@ class WebSearchToolTest {
     @Value("${search-api.api-key}")
     private String searchApiKey;
 
+    @Value("${search-api.provider:searchapi}")
+    private String searchProvider;
+
     @Test
     void searchWeb() {
-        WebSearchTool webSearchTool = new WebSearchTool(searchApiKey);
+        WebSearchTool webSearchTool = new WebSearchTool(searchProvider, searchApiKey);
         String query = "程序员鱼皮编程导航 codefather.cn";
         String result = webSearchTool.searchWeb(query);
         Assertions.assertNotNull(result);

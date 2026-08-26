@@ -43,6 +43,8 @@ public class ToolCallAgent extends ReActAgent {
 
     private boolean lastStepUsedTool;
 
+    private List<ToolExecution> lastToolExecutions = List.of();
+
     public ToolCallAgent(ToolCallback[] availableTools) {
         super();
         this.availableTools = availableTools;
@@ -69,6 +71,11 @@ public class ToolCallAgent extends ReActAgent {
         return lastStepUsedTool;
     }
 
+    @Override
+    protected List<ToolExecution> lastToolExecutions() {
+        return lastToolExecutions;
+    }
+
     /**
      * 处理当前状态并决定下一步行动
      *
@@ -77,6 +84,7 @@ public class ToolCallAgent extends ReActAgent {
     @Override
     public boolean think() {
         lastStepUsedTool = false;
+        lastToolExecutions = List.of();
         // 1、校验提示词，拼接用户提示词
         if (StrUtil.isNotBlank(getNextStepPrompt())) {
             UserMessage userMessage = new UserMessage(getNextStepPrompt());
@@ -139,17 +147,21 @@ public class ToolCallAgent extends ReActAgent {
         // 记录消息上下文，conversationHistory 已经包含了助手消息和工具调用返回的结果
         setMessageList(toolExecutionResult.conversationHistory());
         ToolResponseMessage toolResponseMessage = (ToolResponseMessage) CollUtil.getLast(toolExecutionResult.conversationHistory());
-        // 判断是否调用了终止工具
-        boolean terminateToolCalled = toolResponseMessage.getResponses().stream()
-                .anyMatch(response -> response.name().equals("doTerminate"));
-        if (terminateToolCalled) {
-            // 任务结束，更改状态
-            setState(AgentState.FINISHED);
-        }
+        lastToolExecutions = toolResponseMessage.getResponses().stream()
+                .map(response -> new ToolExecution(response.name(), toolArguments(response.name()), response.responseData()))
+                .toList();
         String results = toolResponseMessage.getResponses().stream()
                 .map(response -> "工具 " + response.name() + " 返回的结果：" + response.responseData())
                 .collect(Collectors.joining("\n"));
         log.info(results);
         return results;
+    }
+
+    private String toolArguments(String toolName) {
+        return toolCallChatResponse.getResult().getOutput().getToolCalls().stream()
+                .filter(toolCall -> toolCall.name().equals(toolName))
+                .map(AssistantMessage.ToolCall::arguments)
+                .findFirst()
+                .orElse("");
     }
 }

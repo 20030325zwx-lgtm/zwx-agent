@@ -47,7 +47,7 @@ let eventSource = null
 let activeTurnStart = -1
 const statusText = computed(() => connectionStatus.value === 'connecting' ? '正在执行' : connectionStatus.value === 'error' ? '连接异常' : '就绪')
 const addMessage = (content, isUser) => messages.value.push({ content, isUser, time: Date.now() })
-const toolLabels = { searchWeb: '搜索网页', generatePDF: '生成 PDF', writeFile: '写入文件', readFile: '读取文件', downloadResource: '下载资源', doTerminate: '结束任务' }
+const toolLabels = { searchWeb: '搜索网页', generatePDF: '生成 PDF', writeFile: '写入文件', readFile: '读取文件', downloadResource: '下载资源' }
 const activityLabel = detail => {
   const step = detail.match(/^Step (\d+):/)?.[1]
   const tool = detail.match(/工具\s+([A-Za-z0-9_]+)\s+返回/)?.[1]

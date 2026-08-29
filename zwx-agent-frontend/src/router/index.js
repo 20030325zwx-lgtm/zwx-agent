@@ -49,6 +49,12 @@ const routes = [
     name: 'SkillSettings',
     component: () => import('../views/SkillSettings.vue'),
     meta: { title: 'Skill 配置 - ZWX Agent', description: '配置各个智能体可使用的内置 Skill。' }
+  },
+  {
+    path: '/mcp-settings',
+    name: 'McpSettings',
+    component: () => import('../views/McpSettings.vue'),
+    meta: { title: 'MCP 管理 - ZWX Agent', description: '管理超级智能体可用的远程 MCP SSE 服务。' }
   }
 ]
 

@@ -42,6 +42,7 @@ public class ToolCallAgent extends ReActAgent {
     private final ChatOptions chatOptions;
 
     private boolean lastStepUsedTool;
+    private boolean nextStepPromptAdded;
 
     private List<ToolExecution> lastToolExecutions = List.of();
 
@@ -86,9 +87,10 @@ public class ToolCallAgent extends ReActAgent {
         lastStepUsedTool = false;
         lastToolExecutions = List.of();
         // 1、校验提示词，拼接用户提示词
-        if (StrUtil.isNotBlank(getNextStepPrompt())) {
+        if (!nextStepPromptAdded && StrUtil.isNotBlank(getNextStepPrompt())) {
             UserMessage userMessage = new UserMessage(getNextStepPrompt());
             getMessageList().add(userMessage);
+            nextStepPromptAdded = true;
         }
         // 2、调用 AI 大模型，获取工具调用结果
         List<Message> messageList = getMessageList();

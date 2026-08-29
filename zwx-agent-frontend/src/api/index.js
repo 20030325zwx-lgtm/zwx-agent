@@ -103,12 +103,18 @@ export const deleteTestConversation = conversationId => request.delete(`/ai/test
 export const deleteTestAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/test-agent/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 
 // AI超级智能体聊天
-export const chatWithManus = (conversationId, message) => connectSSE('/ai/manus/chat', { conversationId, message, tenantId: TENANT_ID })
+export const chatWithManus = (conversationId, message, knowledgeSearch = false) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, tenantId: TENANT_ID })
 export const createManusConversation = () => request.post('/ai/manus/conversations').then(response => response.data)
 export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteManusConversation = conversationId => request.delete(`/ai/manus/conversations/${conversationId}`)
 export const getManusFileUrl = (conversationId, path) => `${API_BASE_URL}/ai/manus/files?conversationId=${encodeURIComponent(conversationId)}&path=${encodeURIComponent(path)}`
+
+export const listMcpServers = () => request.get('/ai/mcp/servers').then(response => response.data)
+export const createMcpServer = payload => request.post('/ai/mcp/servers', payload).then(response => response.data)
+export const updateMcpServer = (id, payload) => request.put(`/ai/mcp/servers/${id}`, payload).then(response => response.data)
+export const deleteMcpServer = id => request.delete(`/ai/mcp/servers/${id}`)
+export const testMcpServer = id => request.post(`/ai/mcp/servers/${id}/test`).then(response => response.data)
 
 export default {
   chatWithLoveApp,
@@ -123,5 +129,10 @@ export default {
   listManusConversations,
   getManusConversationMessages,
   deleteManusConversation,
-  getManusFileUrl
+  getManusFileUrl,
+  listMcpServers,
+  createMcpServer,
+  updateMcpServer,
+  deleteMcpServer,
+  testMcpServer
 }

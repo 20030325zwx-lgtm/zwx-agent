@@ -36,6 +36,11 @@ import com.zwx.zwxagent.skills.SkillConfigurationRequest;
 import com.zwx.zwxagent.skills.SkillCatalogItem;
 import com.zwx.zwxagent.app.LoveVisionChatResult;
 import com.zwx.zwxagent.constant.FileConstant;
+import com.zwx.zwxagent.mcp.McpConnectionTestResult;
+import com.zwx.zwxagent.mcp.McpServerConfiguration;
+import com.zwx.zwxagent.mcp.McpServerConfigurationRequest;
+import com.zwx.zwxagent.mcp.McpServerConfigurationService;
+import com.zwx.zwxagent.mcp.McpTools;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
@@ -49,6 +54,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -67,12 +74,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/ai")
@@ -117,6 +126,9 @@ public class AiController {
 
     @Resource
     private AgentExecutionTraceService agentExecutionTraceService;
+
+    @Resource
+    private McpServerConfigurationService mcpServerConfigurationService;
 
     @Resource
     private TravelPlannerApp travelPlannerApp;
@@ -420,13 +432,56 @@ public class AiController {
      */
     @GetMapping("/manus/chat")
     public SseEmitter doChatWithManus(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
-                                      @RequestParam String conversationId, @RequestParam String message) {
+                                      @RequestParam String conversationId, @RequestParam String message,
+                                      @RequestParam(defaultValue = "false") boolean knowledgeSearch) {
         validateTenantId(tenantId);
         agentConversationService.ensureConversation(tenantId, SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
-        ZwxManus zwxManus = new ZwxManus(allTools, dashscopeChatModel);
+        AgentKnowledgeRagResult knowledge = knowledgeSearch
+                ? agentKnowledgeRagService.retrieveWithContext(tenantId, SUPER_AGENT_KEY, message)
+                : new AgentKnowledgeRagResult("", List.of());
+        McpTools mcpTools = mcpServerConfigurationService.toolsFor(tenantId);
+        ToolCallback[] availableTools = Stream.concat(Arrays.stream(allTools), Arrays.stream(mcpTools.callbacks()))
+                .toArray(ToolCallback[]::new);
+        ZwxManus zwxManus = new ZwxManus(availableTools, dashscopeChatModel, knowledge.context());
         zwxManus.restoreHistory(agentConversationService.getRecentMessages(tenantId, SUPER_AGENT_KEY, conversationId, 20));
-        return zwxManus.runStream(message, result -> agentConversationService.saveCompletedTurn(
+        SseEmitter emitter = zwxManus.runStream(message, result -> agentConversationService.saveCompletedTurn(
                 tenantId, SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message, result.answer(), toJson(manusAttachments(result.activities()))));
+        emitter.onCompletion(mcpTools::close);
+        emitter.onTimeout(mcpTools::close);
+        emitter.onError(error -> mcpTools.close());
+        return emitter;
+    }
+
+    @GetMapping("/mcp/servers")
+    public List<McpServerConfiguration> listMcpServers(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId) {
+        validateTenantId(tenantId);
+        return mcpServerConfigurationService.list(tenantId);
+    }
+
+    @PostMapping("/mcp/servers")
+    public McpServerConfiguration createMcpServer(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                   @RequestBody McpServerConfigurationRequest request) {
+        validateTenantId(tenantId);
+        return mcpServerConfigurationService.create(tenantId, request);
+    }
+
+    @PutMapping("/mcp/servers/{id}")
+    public McpServerConfiguration updateMcpServer(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId,
+                                                   @PathVariable long id, @RequestBody McpServerConfigurationRequest request) {
+        validateTenantId(tenantId);
+        return mcpServerConfigurationService.update(tenantId, id, request);
+    }
+
+    @DeleteMapping("/mcp/servers/{id}")
+    public void deleteMcpServer(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId, @PathVariable long id) {
+        validateTenantId(tenantId);
+        mcpServerConfigurationService.delete(tenantId, id);
+    }
+
+    @PostMapping("/mcp/servers/{id}/test")
+    public McpConnectionTestResult testMcpServer(@RequestHeader(value = "X-Tenant-Id", defaultValue = "default") String tenantId, @PathVariable long id) {
+        validateTenantId(tenantId);
+        return mcpServerConfigurationService.test(tenantId, id);
     }
 
     @PostMapping("/manus/conversations")

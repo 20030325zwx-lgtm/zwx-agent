@@ -40,7 +40,7 @@
             </div>
           </div>
           <details v-if="msg.collapsibleActivities && msg.activities?.length" class="activity-trace activity-trace-collapsible" aria-label="AI 执行过程">
-            <summary>已执行 {{ msg.activities.length }} 项操作</summary>
+            <summary>{{ activitySummary(msg.activities) }}</summary>
             <div class="activity-details">
               <details v-for="(activity, activityIndex) in msg.activities" :key="`${activity.label || activity}-${activityIndex}`">
                 <summary>{{ activity.label || `步骤 ${activityIndex + 1}` }}</summary>
@@ -103,6 +103,7 @@
         <div class="input-actions">
           <button v-if="attachmentsEnabled" class="tool-button" type="button" title="上传图片" aria-label="上传图片" @click="fileInput?.click()"><Paperclip :size="18" /></button>
           <button v-if="webSearchAvailable" class="tool-button web-search-toggle" :class="{ active: webSearch }" type="button" :aria-pressed="webSearch" :title="webSearch ? '本轮允许联网搜索' : '本轮不联网搜索'" aria-label="联网搜索" @click="webSearch = !webSearch"><Globe2 :size="18" /></button>
+          <button v-if="knowledgeSearchAvailable" class="tool-button knowledge-search-toggle" :class="{ active: knowledgeSearch }" type="button" :aria-pressed="knowledgeSearch" :title="knowledgeSearch ? '本轮先检索知识库' : '本轮不检索知识库'" aria-label="检索知识库" @click="knowledgeSearch = !knowledgeSearch"><Database :size="18" /></button>
           <span class="input-hint">Enter 发送</span>
           <button class="send-button" type="button" :disabled="!inputMessage.trim() && !selectedImages.length" @click="sendMessage">发送 ↑</button>
         </div>
@@ -116,7 +117,7 @@ import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
-import { FileText, Globe2, Paperclip } from 'lucide-vue-next'
+import { Database, FileText, Globe2, Paperclip } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 
 const props = defineProps({
@@ -125,7 +126,8 @@ const props = defineProps({
   aiType: { type: String, default: 'default' },
   attachmentsEnabled: { type: Boolean, default: false },
   attachmentAccept: { type: String, default: 'image/jpeg,image/png,image/gif' },
-  webSearchAvailable: { type: Boolean, default: false }
+  webSearchAvailable: { type: Boolean, default: false },
+  knowledgeSearchAvailable: { type: Boolean, default: false }
 })
 const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message'])
 const agent = computed(() => getAgent(props.aiType))
@@ -140,6 +142,7 @@ const selectedImages = ref([])
 const editingIndex = ref(-1)
 const editingContent = ref('')
 const webSearch = ref(false)
+const knowledgeSearch = ref(false)
 
 const renderMarkdown = content => DOMPurify.sanitize(marked.parse(content || '', {
   breaks: true,
@@ -150,7 +153,8 @@ const sendMessage = () => {
   if (!inputMessage.value.trim() && !selectedImages.value.length) return
   const payload = { message: inputMessage.value.trim(), files: selectedImages.value.map(item => item.file) }
   if (props.webSearchAvailable) payload.webSearch = webSearch.value
-  emit('send-message', props.attachmentsEnabled ? payload : props.webSearchAvailable ? payload : payload.message)
+  if (props.knowledgeSearchAvailable) payload.knowledgeSearch = knowledgeSearch.value
+  emit('send-message', props.attachmentsEnabled || props.webSearchAvailable || props.knowledgeSearchAvailable ? payload : payload.message)
   inputMessage.value = ''
   clearSelectedImages()
   if (fileInput.value) fileInput.value.value = ''
@@ -158,6 +162,7 @@ const sendMessage = () => {
 const openActivity = (activity, message) => {
   if (activity?.runId) emit('view-execution', { runId: activity.runId, message })
 }
+const activitySummary = activities => activities.at(-1)?.label || `已完成 ${activities.length} 项操作`
 const copyMessage = async content => {
   try { await navigator.clipboard.writeText(content || '') }
   catch (error) { console.error('Copy message failed:', error) }

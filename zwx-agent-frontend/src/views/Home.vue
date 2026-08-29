@@ -2,7 +2,7 @@
   <main class="catalog-page">
     <header class="topbar">
       <button class="brand" type="button" aria-label="ZWX Agent 首页" @click="clearFilter"><span class="brand-mark">Z</span><span>ZWX Agent</span></button>
-      <div class="topbar-actions"><span class="topbar-note">AI 工作空间</span><button class="skill-entry" type="button" @click="router.push({ name: 'SkillSettings' })"><Settings2 :size="16" />Skill 配置</button><AgentSettingsMenu agent-key="love" default-theme="rose" trigger-label="本机服务设置" show-trigger-label /></div>
+      <div class="topbar-actions"><span class="topbar-note">AI 工作空间</span><button class="skill-entry" type="button" @click="router.push({ name: 'SkillSettings' })"><Settings2 :size="16" />Skill 配置</button><button class="skill-entry" type="button" @click="router.push({ name: 'McpSettings' })"><PlugZap :size="16" />MCP 管理</button><AgentSettingsMenu agent-key="love" default-theme="rose" trigger-label="本机服务设置" show-trigger-label /></div>
     </header>
 
     <section class="catalog-shell" aria-label="智能体目录">
@@ -68,7 +68,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { Settings2 } from 'lucide-vue-next'
+import { PlugZap, Settings2 } from 'lucide-vue-next'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 import { AGENT_LIST } from '../config/agents'
 

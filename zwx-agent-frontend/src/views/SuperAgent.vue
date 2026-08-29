@@ -6,6 +6,7 @@
         <div class="header-start">
           <button class="history-toggle" type="button" aria-label="打开历史会话" @click="sidebarOpen = true">☰</button>
           <button class="back-button" type="button" @click="goBack">智能体目录</button>
+          <button class="back-button" type="button" @click="router.push('/mcp-settings')">MCP 管理</button>
         </div>
         <div class="title">
           <span class="super-mark" aria-hidden="true">✦</span>
@@ -18,7 +19,7 @@
       </header>
 
       <section class="super-chat" :class="{ loading: messagesLoading }">
-        <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super"
+        <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" knowledge-search-available
           @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage" />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
@@ -49,10 +50,9 @@ const statusText = computed(() => connectionStatus.value === 'connecting' ? '正
 const addMessage = (content, isUser) => messages.value.push({ content, isUser, time: Date.now() })
 const toolLabels = { searchWeb: '搜索网页', generatePDF: '生成 PDF', writeFile: '写入文件', readFile: '读取文件', downloadResource: '下载资源' }
 const activityLabel = detail => {
-  const step = detail.match(/^Step (\d+):/)?.[1]
   const tool = detail.match(/工具\s+([A-Za-z0-9_]+)\s+返回/)?.[1]
-  const label = toolLabels[tool] || (tool ? `执行 ${tool}` : detail.startsWith('执行结束') ? '达到步骤上限' : '处理任务')
-  return `${step ? `步骤 ${step}` : '执行状态'} · ${label}`
+  if (tool) return `已${toolLabels[tool] || `执行 ${tool}`}`
+  return detail.startsWith('执行结束') ? '已达到步骤上限' : '正在处理任务'
 }
 const mapFiles = (conversationId, fileAttachments) => {
   try {
@@ -96,15 +96,17 @@ const removeConversation = async conversation => {
   await refreshConversations()
   if (wasActive) conversations.value.length ? await selectConversation(conversations.value[0]) : await createConversation()
 }
-const sendMessage = message => {
+const sendMessage = payload => {
   if (!chatId.value) return
+  const message = typeof payload === 'string' ? payload : payload.message
+  const knowledgeSearch = typeof payload === 'string' ? false : payload.knowledgeSearch === true
   cancelActiveStream()
   activeTurnStart = messages.value.length
   addMessage(message, true)
   messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], collapsibleActivities: true })
   const answerIndex = messages.value.length - 1
   connectionStatus.value = 'connecting'
-  eventSource = chatWithManus(chatId.value, message)
+  eventSource = chatWithManus(chatId.value, message, knowledgeSearch)
   eventSource.addEventListener('activity', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return

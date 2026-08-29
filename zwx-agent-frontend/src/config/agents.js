@@ -49,7 +49,7 @@ const registry = {
     icon: '✦',
     iconClass: 'super-icon',
     description: '真正的自主智能体：可规划任务、调用工具并多步执行',
-    capabilities: { attachments: false, conversations: false, executionTrace: false, privateKnowledge: false },
+    capabilities: { attachments: false, conversations: false, executionTrace: false, privateKnowledge: true },
     chat: {
       emptyTitle: '从一个目标开始。',
       emptyDescription: '描述目标、约束或卡点，我会帮你理清下一步。',

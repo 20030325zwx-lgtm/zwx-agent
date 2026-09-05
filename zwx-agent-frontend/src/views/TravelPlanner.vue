@@ -92,7 +92,7 @@ const sendMessage = async (payload, retryUserMessageId = null, retryIndex = -1) 
   const answerIndex = retryUserMessageId ? retryIndex + 1 : messages.value.length
   messages.value.splice(answerIndex, 0, { content: '', isUser: false, time: Date.now(), activities: [] })
   connectionStatus.value = 'connecting'
-  eventSource = chatWithTravelPlanner(chatId.value, message, webSearch, retryUserMessageId)
+  eventSource = chatWithTravelPlanner(chatId.value, message, webSearch, retryUserMessageId, (crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`))
   eventSource.addEventListener('references', event => {
     try { messages.value[answerIndex].references = JSON.parse(event.data) }
     catch (error) { console.error('Knowledge references unavailable:', error) }
@@ -119,14 +119,23 @@ const sendMessage = async (payload, retryUserMessageId = null, retryIndex = -1) 
     if (messages.value[answerIndex]) messages.value[answerIndex].content += event.data
   }
   eventSource.onerror = () => {
-    cancelActiveStream()
+    // 保留已生成内容，稍后从服务端恢复持久化结果
+    eventSource?.close(); eventSource = null; activeTurnStart = -1; activeRetry = false
+    connectionStatus.value = 'error'
+    if (messages.value[answerIndex] && !messages.value[answerIndex].content) {
+      messages.value[answerIndex].content = '连接中断，正在恢复已生成的内容...'
+    }
+    setTimeout(async () => {
+      connectionStatus.value = 'disconnected'
+      try { await refreshConversations() } catch (error) { console.error('Conversation refresh failed:', error) }
+    }, 1500)
   }
 }
 const cancelActiveStream = () => {
   if (!eventSource && connectionStatus.value !== 'connecting') return
   eventSource?.close()
   eventSource = null
-  if (activeTurnStart >= 0) messages.value.splice(activeTurnStart, activeRetry ? 1 : messages.value.length - activeTurnStart)
+  // 保留已生成内容，不再删除本轮消息
   activeTurnStart = -1
   activeRetry = false
   connectionStatus.value = 'disconnected'

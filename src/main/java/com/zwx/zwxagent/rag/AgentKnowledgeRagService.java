@@ -1,18 +1,29 @@
 package com.zwx.zwxagent.rag;
 
+import jakarta.annotation.Resource;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Service
 public class AgentKnowledgeRagService {
 
     private final VectorStore vectorStore;
+
+    @Resource(name = "ragExecutor")
+    private java.util.concurrent.Executor ragExecutor;
+
+    @Value("${app.agent.rag.timeout-ms:3000}")
+    private long timeoutMs;
 
     public AgentKnowledgeRagService(@Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore) {
         this.vectorStore = vectorStore;
@@ -29,7 +40,21 @@ public class AgentKnowledgeRagService {
     }
 
     public AgentKnowledgeRagResult retrieveWithContext(String tenantId, String agentKey, String query) {
-        List<Document> documents = retrieve(tenantId, agentKey, query, 3, 0.55);
+        List<Document> documents;
+        CompletableFuture<List<Document>> search = CompletableFuture
+                .supplyAsync(() -> retrieve(tenantId, agentKey, query, 3, 0.55), ragExecutor);
+        try {
+            documents = search.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException exception) {
+            search.cancel(true);
+            return AgentKnowledgeRagResult.EMPTY;
+        } catch (InterruptedException exception) {
+            search.cancel(true);
+            Thread.currentThread().interrupt();
+            return AgentKnowledgeRagResult.EMPTY;
+        } catch (Exception exception) {
+            return AgentKnowledgeRagResult.EMPTY;
+        }
         if (documents.isEmpty()) return new AgentKnowledgeRagResult("", List.of());
         StringBuilder context = new StringBuilder("以下内容来自当前租户为该智能体上传的私有知识库：\n");
         for (Document document : documents) {

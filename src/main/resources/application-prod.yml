@@ -1,8 +1,14 @@
-spring:
-  config:
-    activate:
-      on-profile: prod
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+knife4j:
+  enable: false
+  production: true
 
 logging:
   level:
     org.springframework.ai: INFO
+    org.springframework.security: WARN

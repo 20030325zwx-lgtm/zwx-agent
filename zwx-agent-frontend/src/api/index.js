@@ -1,57 +1,117 @@
 import axios from 'axios'
-
-const desktopApiBaseUrl = window.zwxDesktop?.apiBaseUrl
-const configuredApiBaseUrl = desktopApiBaseUrl || import.meta.env.VITE_API_BASE_URL
-const API_BASE_URL = (configuredApiBaseUrl || (import.meta.env.PROD ? '/api' : 'http://localhost:8123/api')).replace(/\/$/, '')
-const TENANT_ID = import.meta.env.VITE_TENANT_ID || 'default'
+import { API_BASE_URL, getToken, clearSession } from './auth'
 
 // 创建axios实例
 const request = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000
 })
-request.defaults.headers.common['X-Tenant-Id'] = TENANT_ID
 
-// 封装SSE连接
+request.interceptors.request.use(config => {
+  const token = getToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+request.interceptors.response.use(
+  response => response,
+  error => {
+    const status = error.response?.status
+    const url = error.config?.url || ''
+    if (status === 401 && !url.startsWith('/auth/')) {
+      clearSession()
+      if (!location.pathname.startsWith('/login')) location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
+
+// 解析 SSE 文本帧为事件流
+const parseSseStream = async (body, emit) => {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let separatorIndex
+    while ((separatorIndex = buffer.search(/\r?\n\r?\n/)) !== -1) {
+      const rawEvent = buffer.slice(0, separatorIndex)
+      buffer = buffer.slice(separatorIndex + (buffer[separatorIndex] === '\r' ? 4 : 2))
+      const event = { data: '', type: 'message' }
+      rawEvent.split(/\r?\n/).forEach(line => {
+        if (line.startsWith('data:')) event.data += (event.data ? '\n' : '') + line.slice(5).trimStart()
+        if (line.startsWith('event:')) event.type = line.slice(6).trim()
+      })
+      if (event.data) emit(event)
+    }
+  }
+}
+
+// 封装SSE连接：以 fetch 携带认证头，返回与 EventSource 兼容的最小接口
 export const connectSSE = (url, params, onMessage, onError) => {
-  // 构建带参数的URL
   const queryString = Object.entries(params)
     .filter(([, value]) => value !== null && value !== undefined)
     .flatMap(([key, value]) => Array.isArray(value)
       ? value.map(item => `${encodeURIComponent(key)}=${encodeURIComponent(item)}`)
       : `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&')
-  
-  const fullUrl = `${API_BASE_URL}${url}?${queryString}`
-  
-  // 创建EventSource
-  const eventSource = new EventSource(fullUrl)
-  
-  eventSource.onmessage = event => {
-    let data = event.data
-    
-    // 检查是否是特殊标记
-    if (data === '[DONE]') {
-      if (onMessage) onMessage('[DONE]')
-    } else {
-      // 处理普通消息
-      if (onMessage) onMessage(data)
+
+  const controller = new AbortController()
+  const listeners = {}
+  const client = {
+    onmessage: null,
+    onerror: null,
+    onopen: null,
+    readyState: 0,
+    addEventListener: (type, handler) => {
+      listeners[type] = listeners[type] || []
+      listeners[type].push(handler)
+    },
+    close: () => controller.abort()
+  }
+
+  ;(async () => {
+    try {
+      const token = getToken()
+      const response = await fetch(`${API_BASE_URL}${url}?${queryString}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal
+      })
+      if (!response.ok || !response.body) {
+        const error = new Error(`SSE request failed with status ${response.status}`)
+        error.status = response.status
+        throw error
+      }
+      client.readyState = 1
+      client.onopen?.()
+      await parseSseStream(response.body, event => {
+        ;(listeners[event.type] || []).forEach(handler => handler(event))
+        if (event.type === 'message' && client.onmessage) client.onmessage(event)
+        if (onMessage && event.type === 'message') onMessage(event.data)
+      })
+      client.readyState = 2
+    } catch (error) {
+      if (controller.signal.aborted) return
+      client.readyState = 2
+      const handled = client.onerror?.(error)
+      if (!handled && onError) onError(error)
     }
-  }
-  
-  eventSource.onerror = error => {
-    if (onError) onError(error)
-    eventSource.close()
-  }
-  
-  // 返回eventSource实例，以便后续可以关闭连接
-  return eventSource
+  })()
+
+  return client
+}
+
+// 受控资源下载：带认证头获取并转为 objectURL
+export const fetchAuthBlobUrl = async path => {
+  const response = await request.get(path, { responseType: 'blob' })
+  return URL.createObjectURL(response.data)
 }
 
 // AI恋爱大师聊天
-export const chatWithLoveApp = (message, chatId, imageKeys = [], webSearch = false, retryUserMessageId = null) => {
-  return connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, webSearch, retryUserMessageId, tenantId: TENANT_ID })
-}
+export const chatWithLoveApp = (message, chatId, imageKeys = [], webSearch = false, retryUserMessageId = null, clientRequestId = null) =>
+  connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, webSearch, retryUserMessageId, clientRequestId })
 
 export const uploadLoveImage = async (chatId, file) => {
   const formData = new FormData()
@@ -61,7 +121,7 @@ export const uploadLoveImage = async (chatId, file) => {
 }
 
 export const getLoveImageUrl = (chatId, objectKey) =>
-    `${API_BASE_URL}/ai/love_app/images?chatId=${encodeURIComponent(chatId)}&objectKey=${encodeURIComponent(objectKey)}`
+  fetchAuthBlobUrl(`/ai/love_app/images?chatId=${encodeURIComponent(chatId)}&objectKey=${encodeURIComponent(objectKey)}`)
 
 export const getLoveKnowledgeReferences = async message =>
   (await request.get('/ai/love_app/knowledge/references', { params: { message } })).data
@@ -88,14 +148,14 @@ export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-kn
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)
 export const getSkillCatalog = agentKey => request.get('/ai/skills/catalog', { params: { agentKey } }).then(response => response.data)
 export const saveSkillConfiguration = (agentKey, enabledSkillIds) => request.post('/ai/skills/config', { agentKey, enabledSkillIds }).then(response => response.data)
-export const chatWithTravelPlanner = (conversationId, message, webSearch = false, retryUserMessageId = null) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, webSearch, retryUserMessageId, tenantId: TENANT_ID })
+export const chatWithTravelPlanner = (conversationId, message, webSearch = false, retryUserMessageId = null, clientRequestId = null) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, webSearch, retryUserMessageId, clientRequestId })
 export const createTravelConversation = () => request.post('/ai/travel-planner/conversations').then(response => response.data)
 export const listTravelConversations = () => request.get('/ai/travel-planner/conversations').then(response => response.data)
 export const getTravelConversationMessages = conversationId => request.get(`/ai/travel-planner/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteTravelConversation = conversationId => request.delete(`/ai/travel-planner/conversations/${conversationId}`)
 export const deleteTravelAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/travel-planner/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 export const getTravelExecutionEvents = (conversationId, runId) => request.get(`/ai/travel-planner/conversations/${conversationId}/executions/${runId}`).then(response => response.data)
-export const chatWithTestAgent = (conversationId, message, webSearch = false, retryUserMessageId = null) => connectSSE('/ai/test-agent/chat/sse', { conversationId, message, webSearch, retryUserMessageId, tenantId: TENANT_ID })
+export const chatWithTestAgent = (conversationId, message, webSearch = false, retryUserMessageId = null, clientRequestId = null) => connectSSE('/ai/test-agent/chat/sse', { conversationId, message, webSearch, retryUserMessageId, clientRequestId })
 export const createTestConversation = () => request.post('/ai/test-agent/conversations').then(response => response.data)
 export const listTestConversations = () => request.get('/ai/test-agent/conversations').then(response => response.data)
 export const getTestConversationMessages = conversationId => request.get(`/ai/test-agent/conversations/${conversationId}/messages`).then(response => response.data)
@@ -103,12 +163,13 @@ export const deleteTestConversation = conversationId => request.delete(`/ai/test
 export const deleteTestAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/test-agent/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 
 // AI超级智能体聊天
-export const chatWithManus = (conversationId, message, knowledgeSearch = false) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, tenantId: TENANT_ID })
+export const chatWithManus = (conversationId, message, knowledgeSearch = false) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch })
 export const createManusConversation = () => request.post('/ai/manus/conversations').then(response => response.data)
 export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteManusConversation = conversationId => request.delete(`/ai/manus/conversations/${conversationId}`)
-export const getManusFileUrl = (conversationId, path) => `${API_BASE_URL}/ai/manus/files?conversationId=${encodeURIComponent(conversationId)}&path=${encodeURIComponent(path)}`
+export const getManusFileUrl = (conversationId, path) =>
+  fetchAuthBlobUrl(`/ai/manus/files?conversationId=${encodeURIComponent(conversationId)}&path=${encodeURIComponent(path)}`)
 
 export const listMcpServers = () => request.get('/ai/mcp/servers').then(response => response.data)
 export const createMcpServer = payload => request.post('/ai/mcp/servers', payload).then(response => response.data)

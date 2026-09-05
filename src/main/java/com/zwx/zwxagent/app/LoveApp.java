@@ -94,8 +94,8 @@ public class LoveApp {
      * @param chatId
      * @return
      */
-    public String doChat(String message, String chatId) {
-        conversationService.ensureConversation(chatId, message);
+    public String doChat(com.zwx.zwxagent.security.CurrentActor actor, String message, String chatId) {
+        conversationService.ensureOwnedConversation(actor, chatId, message);
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(message)
@@ -114,27 +114,17 @@ public class LoveApp {
      * @param chatId
      * @return
      */
-    public Flux<String> doChatByStream(String message, String chatId) {
-        return doChatByStream(message, chatId, "");
-    }
-
-    public Flux<String> doChatByStream(String message, String chatId, String ragContext) {
-        return doChatByStream(message, chatId, ragContext, null);
-    }
-
-    public Flux<String> doChatByStream(String message, String chatId, String ragContext, Long retryUserMessageId) {
-        return doChatByStream(message, chatId, ragContext, false, retryUserMessageId);
-    }
-
-    public Flux<String> doChatByStream(String message, String chatId, String ragContext, boolean webSearch, Long retryUserMessageId) {
-        return doChatByStream("default", message, chatId, ragContext, webSearch, retryUserMessageId);
-    }
-
-    public Flux<String> doChatByStream(String tenantId, String message, String chatId, String ragContext, boolean webSearch, Long retryUserMessageId) {
+    public Flux<String> doChatByStream(com.zwx.zwxagent.security.CurrentActor actor, String message, String chatId, String ragContext, boolean webSearch, Long retryUserMessageId, String clientRequestId) {
+        String tenantId = actor.tenantId();
         String history = conversationService.getRecentMessages(chatId, 20).stream()
                 .map(item -> item.role() + ": " + item.content())
                 .collect(Collectors.joining("\n"));
+        history = budgetHistory(history);
         StringBuilder answer = new StringBuilder();
+        long userMessageId = retryUserMessageId == null
+                ? conversationService.startUserTurn(actor, chatId, message, List.of(), clientRequestId)
+                : retryUserMessageId;
+        java.util.concurrent.atomic.AtomicBoolean persisted = new java.util.concurrent.atomic.AtomicBoolean(false);
         var prompt = streamingChatClient
                 .prompt()
                 .system(agentRegistry.get("love").systemPrompt() + skillPromptBuilder.build(tenantId, "love", webSearch) + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
@@ -144,40 +134,67 @@ public class LoveApp {
         return prompt.stream()
                 .content()
                 .doOnNext(answer::append)
-                .doOnComplete(() -> {
-                    if (retryUserMessageId == null) conversationService.saveCompletedTurn(chatId, message, List.of(), answer.toString(), "[]", "{}", null);
-                    else conversationService.appendMessage(chatId, "ASSISTANT", answer.toString());
+                .doFinally(signal -> {
+                    if (!persisted.compareAndSet(false, true)) return;
+                    boolean completed = signal == reactor.core.publisher.SignalType.ON_COMPLETE;
+                    try {
+                        if (retryUserMessageId == null) {
+                            if (answer.length() > 0) {
+                                conversationService.completeUserTurn(actor, userMessageId, null);
+                                conversationService.appendAssistantReply(actor, chatId, userMessageId, answer.toString(), completed ? "COMPLETED" : "INTERRUPTED", "[]", "{}");
+                            } else {
+                                conversationService.markUserTurnInterrupted(actor, userMessageId);
+                            }
+                        } else if (answer.length() > 0) {
+                            conversationService.appendAssistantReply(actor, chatId, userMessageId, answer.toString(), completed ? "COMPLETED" : "INTERRUPTED", "[]", "{}");
+                        }
+                    } catch (Exception exception) {
+                        log.error("Failed to persist love chat turn", exception);
+                    }
                 });
     }
 
-    public LoveVisionChatResult prepareVisionChat(String message, String chatId, List<String> imageObjectKeys, String tenantId) {
+    public LoveVisionChatResult prepareVisionChat(com.zwx.zwxagent.security.CurrentActor actor, String message, String chatId, List<String> imageObjectKeys) {
         LoveVisionAnalysis analysis = loveVisionChatService.analyze(chatId, message, imageObjectKeys);
 
         LoveRagResult ragResult = analysis.available()
                 ? loveRagService.retrieve(analysis.retrievalQuery(), visionModel)
                 : new LoveRagResult(new com.zwx.zwxagent.rag.LoveRagTrace(message, 3, 0.55, List.of(),
                 "视觉摘要不可用，未执行知识库检索，模型仅基于图片、系统提示词与会话上下文回答。",
-                List.of(), visionModel, true), "");
-        AgentKnowledgeRagResult privateKnowledge = agentKnowledgeRagService.retrieveWithContext(tenantId, "love", analysis.retrievalQuery());
+                List.of(), visionModel, true, true), "");
+        AgentKnowledgeRagResult privateKnowledge = agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), "love", analysis.retrievalQuery());
         LoveRagTrace trace = mergePrivateReferences(ragResult.trace(), privateKnowledge);
         String scopedContext = privateKnowledge.context();
         String prompt = agentRegistry.get("love").systemPrompt() + "\n\n" + ragResult.context() + "\n" + scopedContext + "\n图片分析仅是待确认线索。回答时明确区分可观察内容与推测，不要把不确定项当作事实。";
         return new LoveVisionChatResult(analysis, trace, prompt);
     }
 
-    public Flux<String> streamVisionChat(String message, String chatId, List<String> imageObjectKeys, LoveVisionChatResult preparation, Long retryUserMessageId) {
+    public Flux<String> streamVisionChat(com.zwx.zwxagent.security.CurrentActor actor, String message, String chatId, List<String> imageObjectKeys, LoveVisionChatResult preparation, Long retryUserMessageId, String clientRequestId) {
         StringBuilder content = new StringBuilder();
         List<com.zwx.zwxagent.conversation.LoveConversationMessage> history = new java.util.ArrayList<>(conversationService.getRecentMessages(chatId, 20));
         history.add(new com.zwx.zwxagent.conversation.LoveConversationMessage(0, "USER", message, imageObjectKeys, List.of(), null, preparation.analysis(), java.time.Instant.now()));
+        long userMessageId = retryUserMessageId == null
+                ? conversationService.startUserTurn(actor, chatId, message, imageObjectKeys, clientRequestId)
+                : retryUserMessageId;
+        try {
+            conversationService.completeUserTurn(actor, userMessageId, objectMapper.writeValueAsString(preparation.analysis()));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Unable to serialize vision analysis", exception);
+        }
+        java.util.concurrent.atomic.AtomicBoolean persisted = new java.util.concurrent.atomic.AtomicBoolean(false);
         return loveVisionChatService.streamChat(chatId, history, preparation.systemPrompt())
                 .doOnNext(content::append)
-                .doOnComplete(() -> {
+                .doFinally(signal -> {
+                    if (!persisted.compareAndSet(false, true)) return;
+                    boolean completed = signal == reactor.core.publisher.SignalType.ON_COMPLETE;
                     try {
+                        if (content.length() == 0) return;
                         String references = objectMapper.writeValueAsString(preparation.ragTrace().references());
                         String trace = objectMapper.writeValueAsString(preparation.ragTrace());
-                        if (retryUserMessageId == null) conversationService.saveCompletedTurn(chatId, message, imageObjectKeys, content.toString(), references, trace, objectMapper.writeValueAsString(preparation.analysis()));
-                        else { conversationService.appendMessage(chatId, "ASSISTANT", content.toString()); conversationService.saveLatestAssistantRagData(chatId, references, trace); }
-                    } catch (JsonProcessingException exception) { throw new IllegalStateException("Unable to serialize vision conversation", exception); }
+                        conversationService.appendAssistantReply(actor, chatId, userMessageId, content.toString(), completed ? "COMPLETED" : "INTERRUPTED", references, trace);
+                    } catch (Exception exception) {
+                        log.error("Failed to persist vision chat turn", exception);
+                    }
                 });
     }
 
@@ -185,12 +202,19 @@ public class LoveApp {
 
     }
 
+    private static final int MAX_HISTORY_CHARS = 8000;
+
+    private String budgetHistory(String history) {
+        if (history == null || history.length() <= MAX_HISTORY_CHARS) return history == null ? "" : history;
+        return "...（较早的对话已省略）\n" + history.substring(history.length() - MAX_HISTORY_CHARS);
+    }
+
     private LoveRagTrace mergePrivateReferences(LoveRagTrace trace, AgentKnowledgeRagResult privateKnowledge) {
         if (privateKnowledge.references().isEmpty()) return trace;
         List<com.zwx.zwxagent.rag.LoveKnowledgeReference> references = new java.util.ArrayList<>(trace.references());
         references.addAll(privateKnowledge.references());
         return new LoveRagTrace(trace.query(), trace.topK(), trace.similarityThreshold(), trace.candidates(), trace.decision(),
-                references, trace.model(), trace.streaming());
+                references, trace.model(), trace.streaming(), trace.degraded());
     }
 
     /**
@@ -261,7 +285,7 @@ public class LoveApp {
 
     // AI 调用工具能力
     @Resource
-    private ToolCallback[] allTools;
+    private com.zwx.zwxagent.tools.ToolFactory toolFactory;
 
     /**
      * AI 恋爱报告功能（支持调用工具）
@@ -277,7 +301,7 @@ public class LoveApp {
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 // 开启日志，便于观察效果
                 .advisors(new MyLoggerAdvisor())
-                .toolCallbacks(allTools)
+                .toolCallbacks(toolFactory.createTools(chatId))
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();

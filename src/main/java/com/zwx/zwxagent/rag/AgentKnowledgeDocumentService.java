@@ -46,6 +46,13 @@ public class AgentKnowledgeDocumentService {
         String filename = file.getOriginalFilename() == null ? "document.txt" : file.getOriginalFilename();
         if (!filename.toLowerCase().matches(".*\\.(md|txt|pdf|doc|docx|xls|xlsx|ppt|pptx)$"))
             throw new IllegalArgumentException("Supported knowledge files: md, txt, pdf, doc, docx, xls, xlsx, ppt, pptx");
+        // 同名文档幂等替换：先移除旧版本的记录与向量，避免新旧两版同时参与检索
+        List<String> staleIds = jdbcTemplate.queryForList(
+                "SELECT id FROM agent_knowledge_document WHERE tenant_id = ? AND agent_key = ? AND filename = ?",
+                String.class, tenantId, agentKey, filename);
+        for (String staleId : staleIds) {
+            removeDocumentCompletely(staleId);
+        }
         String id = UUID.randomUUID().toString();
         String objectKey = "knowledge/" + tenantId + "/" + agentKey + "/" + id + "-" + filename;
         try (InputStream input = file.getInputStream()) {
@@ -61,6 +68,39 @@ public class AgentKnowledgeDocumentService {
                 VALUES (?, ?, ?, ?, ?, 'PENDING')
                 """, id, tenantId, agentKey, objectKey, filename);
         return getDocumentRecord(tenantId, agentKey, id);
+    }
+
+    public void deleteDocument(String tenantId, String agentKey, String documentId) {
+        validateScope(tenantId, agentKey);
+        StoredDocument stored;
+        try {
+            stored = jdbcTemplate.queryForObject("SELECT tenant_id, agent_key, object_key, filename FROM agent_knowledge_document WHERE id = ?",
+                    (rs, rowNum) -> new StoredDocument(rs.getString("tenant_id"), rs.getString("agent_key"), rs.getString("object_key"), rs.getString("filename")), documentId);
+        } catch (org.springframework.dao.EmptyResultDataAccessException exception) {
+            throw new IllegalArgumentException("Document does not exist in the current scope");
+        }
+        removeDocumentCompletely(documentId);
+        try {
+            ossClientProvider.getClient().deleteObject(bucket, stored.objectKey());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void removeDocumentCompletely(String documentId) {
+        List<String> objectKeys = jdbcTemplate.queryForList(
+                "SELECT object_key FROM agent_knowledge_document WHERE id = ?", String.class, documentId);
+        List<String> chunkIds = jdbcTemplate.queryForList("""
+                SELECT id::text FROM agent_knowledge_vector
+                WHERE metadata ->> 'documentId' = ?
+                """, String.class, documentId);
+        if (!chunkIds.isEmpty()) vectorStore.delete(chunkIds);
+        jdbcTemplate.update("DELETE FROM agent_knowledge_document WHERE id = ?", documentId);
+        for (String objectKey : objectKeys) {
+            try {
+                ossClientProvider.getClient().deleteObject(bucket, objectKey);
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     @Async("loveKnowledgeIndexExecutor")

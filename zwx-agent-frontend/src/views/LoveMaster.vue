@@ -79,18 +79,23 @@ let activeTurnStart = -1
 let activeRetry = false
 
 const addMessage = (content, isUser, imageKeys = []) => {
-  messages.value.push({
+  const message = {
     content,
     isUser,
-    imageUrls: imageKeys.map(key => getLoveImageUrl(chatId.value, key)),
+    imageUrls: [],
     imageKeys,
     time: Date.now(),
     references: [],
     trace: null,
     thinking: '',
     activities: []
-  })
+  }
+  messages.value.push(message)
+  resolveImageUrls(chatId.value, imageKeys).then(urls => { message.imageUrls = urls })
 }
+
+const resolveImageUrls = (conversationId, imageKeys) =>
+  Promise.all((imageKeys || []).map(key => getLoveImageUrl(conversationId, key).catch(() => '')))
 
 const refreshConversations = async () => {
   historyLoading.value = true
@@ -125,7 +130,7 @@ const selectConversation = async (conversation) => {
       ? history.map(message => ({
           content: message.content,
           id: message.id,
-          imageUrls: (message.imageObjectKeys || []).map(key => getLoveImageUrl(conversation.id, key)),
+          imageUrls: [],
           imageKeys: message.imageObjectKeys || [],
           isUser: message.role === 'USER',
           time: new Date(message.createdAt).getTime(),
@@ -135,6 +140,9 @@ const selectConversation = async (conversation) => {
           visionAnalysis: message.visionAnalysis || null
         }))
       : []
+    await Promise.all(messages.value.map(async message => {
+      if (message.imageKeys?.length) message.imageUrls = await resolveImageUrls(conversation.id, message.imageKeys)
+    }))
   } finally {
     messagesLoading.value = false
   }
@@ -190,7 +198,7 @@ const sendMessage = async ({ message, files, webSearch = false }, retryUserMessa
   const aiMessageIndex = retryUserMessageId ? retryIndex + 1 : messages.value.length
   messages.value.splice(aiMessageIndex, 0, { content: '', isUser: false, time: Date.now(), activities: [] })
   connectionStatus.value = 'connecting'
-  eventSource = chatWithLoveApp(message, chatId.value, imageKeys, webSearch, retryUserMessageId)
+  eventSource = chatWithLoveApp(message, chatId.value, imageKeys, webSearch, retryUserMessageId, generateRequestId())
 
   eventSource.addEventListener('references', event => {
     try {
@@ -236,15 +244,49 @@ const sendMessage = async ({ message, files, webSearch = false }, retryUserMessa
 
   eventSource.onerror = async (error) => {
     console.error('SSE Error:', error)
-    cancelActiveStream()
+    // 保留已生成的部分内容，稍后从服务端恢复持久化的结果
+    eventSource?.close()
+    eventSource = null
+    activeTurnStart = -1
+    activeRetry = false
+    connectionStatus.value = 'error'
+    if (aiMessageIndex >= 0 && !messages.value[aiMessageIndex]?.content) {
+      messages.value[aiMessageIndex].content = '连接中断，正在恢复已生成的内容...'
+    }
+    setTimeout(() => { restoreFromServer().catch(() => {}) }, 1500)
   }
 }
+
+const restoreFromServer = async () => {
+  if (!chatId.value || connectionStatus.value === 'connecting') return
+  connectionStatus.value = 'disconnected'
+  const history = await getLoveConversationMessages(chatId.value)
+  messages.value = history.map(message => ({
+    content: message.content,
+    id: message.id,
+    imageUrls: [],
+    imageKeys: message.imageObjectKeys || [],
+    isUser: message.role === 'USER',
+    time: new Date(message.createdAt).getTime(),
+    references: message.knowledgeReferences || [],
+    trace: message.ragTrace || null,
+    activities: [],
+    visionAnalysis: message.visionAnalysis || null
+  }))
+  await Promise.all(messages.value.map(async item => {
+    if (item.imageKeys?.length) item.imageUrls = await resolveImageUrls(chatId.value, item.imageKeys)
+  }))
+  await refreshConversations()
+}
+
+const generateRequestId = () =>
+  (crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`)
 
 const cancelActiveStream = () => {
   if (!eventSource && connectionStatus.value !== 'connecting') return
   eventSource?.close()
   eventSource = null
-  if (activeTurnStart >= 0) messages.value.splice(activeTurnStart, activeRetry ? 1 : messages.value.length - activeTurnStart)
+  // 保留已生成内容，不再删除本轮消息；用户可通过重新生成继续
   activeTurnStart = -1
   activeRetry = false
   connectionStatus.value = 'disconnected'

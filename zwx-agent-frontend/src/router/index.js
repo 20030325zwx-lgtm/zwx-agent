@@ -1,6 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getToken } from '../api/auth'
 
 const routes = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('../views/Login.vue'),
+    meta: { title: '登录 - ZWX Agent', public: true }
+  },
   {
     path: '/',
     name: 'Home',
@@ -63,11 +70,14 @@ const router = createRouter({
   routes
 })
 
-// 全局导航守卫，设置文档标题
+// 全局导航守卫：未登录跳转登录页；设置文档标题
 router.beforeEach((to, from, next) => {
-  // 设置页面标题
   if (to.meta.title) {
     document.title = to.meta.title
+  }
+  if (!to.meta.public && !getToken()) {
+    next({ path: '/login', query: to.fullPath && to.fullPath !== '/' ? { redirect: to.fullPath } : {} })
+    return
   }
   next()
 })

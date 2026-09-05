@@ -10,7 +10,7 @@
           <a href="#">《隐私政策》</a>
         </div>
       </div>
-      
+
       <div class="footer-section">
         <h4>友情链接</h4>
         <div class="footer-links">
@@ -19,7 +19,7 @@
           <a href="#" target="_blank">代码小抄</a>
         </div>
       </div>
-      
+
       <div class="footer-section">
         <h4>联系我们</h4>
         <div class="footer-links">
@@ -28,7 +28,7 @@
         </div>
       </div>
     </div>
-    
+
     <div class="footer-bottom">
       <p>© {{ currentYear }} 鱼皮AI超级智能体应用平台 - 让AI为你服务</p>
     </div>
@@ -44,10 +44,10 @@ const currentYear = computed(() => new Date().getFullYear())
 
 <style scoped>
 .app-footer {
-  background-color: #fff;
+  background-color: var(--sk-bg);
   padding: 40px 0 20px;
-  color: #666;
-  border-top: 1px solid #eee;
+  color: var(--sk-label-2);
+  border-top: 1px solid var(--sk-separator);
   width: 100%;
   margin-top: auto;
   position: relative;
@@ -71,15 +71,18 @@ const currentYear = computed(() => new Date().getFullYear())
 }
 
 .footer-logo h3 {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   margin-bottom: 15px;
-  color: #333;
+  color: var(--sk-label);
 }
 
 .footer-section h4 {
-  font-size: 1rem;
+  font-size: 0.95rem;
+  font-weight: 650;
   margin-bottom: 15px;
-  color: #333;
+  color: var(--sk-label);
 }
 
 .footer-links {
@@ -89,47 +92,22 @@ const currentYear = computed(() => new Date().getFullYear())
 
 .footer-links a {
   margin-bottom: 10px;
-  color: #666;
+  color: var(--sk-label-2);
   text-decoration: none;
   transition: color 0.2s;
 }
 
 .footer-links a:hover {
-  color: #007bff;
-}
-
-.qrcode {
-  display: flex;
-  align-items: center;
-}
-
-.qrcode-container {
-  text-align: center;
-}
-
-.qrcode-placeholder {
-  width: 90px;
-  height: 90px;
-  background-color: #f5f5f5;
-  margin: 0 auto 10px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2rem;
-}
-
-.qrcode-placeholder:after {
-  content: '🤖';
+  color: var(--sk-blue);
 }
 
 .footer-bottom {
   text-align: center;
   padding-top: 20px;
   margin-top: 20px;
-  border-top: 1px solid #eee;
-  color: #999;
-  font-size: 0.9rem;
+  border-top: 1px solid var(--sk-separator);
+  color: var(--sk-label-3);
+  font-size: 0.85rem;
 }
 
 /* 响应式设计 */
@@ -137,30 +115,11 @@ const currentYear = computed(() => new Date().getFullYear())
   .footer-content {
     flex-direction: column;
   }
-  
+
   .footer-section {
     width: 100%;
     margin-bottom: 20px;
     padding: 0;
   }
 }
-
-@media (max-width: 480px) {
-  .app-footer {
-    padding: 30px 0 15px;
-  }
-  
-  .footer-section h4 {
-    font-size: 0.95rem;
-  }
-  
-  .footer-links a {
-    font-size: 0.9rem;
-  }
-  
-  .qrcode-placeholder {
-    width: 80px;
-    height: 80px;
-  }
-}
-</style> 
+</style>

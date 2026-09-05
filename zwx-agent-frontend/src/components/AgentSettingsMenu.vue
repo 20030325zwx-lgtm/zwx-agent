@@ -1,7 +1,7 @@
 <template>
   <div ref="menuRoot" class="agent-settings">
     <button class="settings-trigger" type="button" :aria-label="triggerLabel" :aria-expanded="open" @click="open = !open">
-      <Settings2 :size="18" /><span v-if="showTriggerLabel">{{ triggerLabel }}</span>
+      <Settings2 :size="17" /><span v-if="showTriggerLabel">{{ triggerLabel }}</span>
     </button>
     <div v-if="open" class="settings-menu" role="menu">
       <div class="menu-section">
@@ -61,10 +61,10 @@ const router = useRouter()
 const open = ref(false)
 const menuRoot = ref(null)
 const themes = [
-  { key: 'blue', label: '海蓝', primary: '#006fee', dark: '#005bc4', soft: '#eaf3ff', ring: 'rgba(0,111,238,.12)' },
-  { key: 'emerald', label: '翡翠绿', primary: '#0f9f6e', dark: '#087f5b', soft: '#ecfdf5', ring: 'rgba(15,159,110,.14)' },
-  { key: 'rose', label: '玫瑰红', primary: '#d65070', dark: '#bd3d5a', soft: '#fff1f4', ring: 'rgba(214,80,112,.14)' },
-  { key: 'violet', label: '紫罗兰', primary: '#7c5ce0', dark: '#6245c4', soft: '#f3efff', ring: 'rgba(124,92,224,.14)' }
+  { key: 'blue', label: '海蓝', primary: '#007aff', dark: '#0062cc', soft: '#e9f2ff', ring: 'rgba(0, 122, 255, .22)' },
+  { key: 'emerald', label: '翡翠绿', primary: '#2aa254', dark: '#1f8744', soft: '#e8f8ee', ring: 'rgba(48, 209, 88, .24)' },
+  { key: 'rose', label: '玫瑰红', primary: '#e0315f', dark: '#c2244e', soft: '#ffeaf0', ring: 'rgba(255, 55, 95, .22)' },
+  { key: 'violet', label: '紫罗兰', primary: '#8250df', dark: '#6639ba', soft: '#f1ebff', ring: 'rgba(175, 82, 222, .22)' }
 ]
 const storageKey = `zwx-agent-theme:${props.agentKey}`
 const activeTheme = ref(localStorage.getItem(storageKey) || props.defaultTheme)
@@ -93,5 +93,144 @@ onBeforeUnmount(() => document.removeEventListener('click', closeOnOutsideClick)
 </script>
 
 <style scoped>
-.agent-settings { position:relative; display:flex; width:190px; justify-content:flex-end; }.settings-trigger { display:grid; width:32px; height:32px; place-items:center; border:1px solid #e4e7ec; border-radius:7px; background:#fff; color:#667085; }.settings-trigger:has(span) { display:flex; width:auto; gap:7px; padding:0 10px; font-size:12px; }.settings-trigger:hover,.settings-trigger[aria-expanded="true"] { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); }.settings-menu { position:absolute; z-index:20; top:40px; right:0; width:340px; max-height:min(680px,calc(100vh - 90px)); overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px; background:#fff; box-shadow:0 14px 30px rgba(15,23,42,.13); }.menu-section { display:grid; gap:9px; padding:6px 7px 11px; border-bottom:1px solid #eef0f2; color:#667085; font-size:12px; }.theme-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }.theme-option { display:flex; min-width:0; height:31px; align-items:center; gap:7px; border:1px solid transparent; border-radius:5px; padding:0 7px; background:transparent; color:#667085; font-size:12px; text-align:left; }.theme-option i { display:block; width:14px; height:14px; flex:0 0 14px; border-radius:50%; }.theme-option.active { border-color:var(--zwx-primary); background:var(--zwx-primary-soft); color:var(--zwx-primary); font-weight:650; }.theme-option.active i { box-shadow:0 0 0 2px #fff,0 0 0 3px currentColor; }.knowledge-link { display:flex; width:100%; align-items:center; gap:8px; margin-top:5px; border:0; border-radius:5px; padding:9px 7px; background:transparent; color:#475467; font-size:13px; text-align:left; }.knowledge-link span { flex:1; }.knowledge-link:hover { background:#f5f7fa; color:var(--zwx-primary); }.desktop-api-settings { display:grid; gap:8px; margin-top:5px; border-top:1px solid #eef0f2; padding:11px 7px 3px; color:#667085; font-size:12px; }.desktop-api-settings strong { color:#344054; font-size:13px; }.desktop-api-settings label { display:grid; gap:4px; color:#667085; }.desktop-api-settings input,.desktop-api-settings select { min-width:0; width:100%; height:30px; border:1px solid #d9dee5; border-radius:5px; padding:0 7px; outline:0; background:#fff; color:#344054; font:inherit; font-size:12px; }.desktop-api-settings input:focus,.desktop-api-settings select:focus { border-color:var(--zwx-primary); }.desktop-api-settings p { margin:0; color:#98a2b3; font-size:11px; line-height:1.45; }.desktop-api-settings .settings-error { color:#b42318; }.save-desktop-settings { height:31px; border:0; border-radius:5px; background:var(--zwx-primary); color:#fff; font-size:12px; font-weight:650; }
+.agent-settings { position: relative; display: flex; width: 190px; justify-content: flex-end; }
+
+.settings-trigger {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: var(--sk-fill);
+  color: var(--sk-label-2);
+}
+
+.settings-trigger:has(span) { display: flex; width: auto; gap: 7px; padding: 0 12px; font-size: 12px; font-weight: 600; }
+
+.settings-trigger:hover, .settings-trigger[aria-expanded="true"] { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+
+/* macOS NSPopover：毛玻璃浮层 */
+.settings-menu {
+  position: absolute;
+  z-index: 20;
+  top: 42px;
+  right: 0;
+  width: 340px;
+  max-height: min(680px, calc(100vh - 90px));
+  overflow-y: auto;
+  border: 1px solid var(--sk-separator);
+  border-radius: 16px;
+  padding: 10px;
+  background: var(--sk-material-strong);
+  backdrop-filter: var(--sk-blur);
+  -webkit-backdrop-filter: var(--sk-blur);
+  box-shadow: var(--sk-shadow-pop);
+  transform-origin: top right;
+  animation: menu-in 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.menu-section {
+  display: grid;
+  gap: 9px;
+  padding: 8px 8px 13px;
+  border-bottom: 1px solid var(--sk-separator);
+  color: var(--sk-label-2);
+  font-size: 12px;
+}
+
+.theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+
+.theme-option {
+  display: flex;
+  min-width: 0;
+  height: 33px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  padding: 0 9px;
+  background: var(--sk-fill);
+  color: var(--sk-label-2);
+  font-size: 12px;
+  text-align: left;
+}
+
+.theme-option i { display: block; width: 14px; height: 14px; flex: 0 0 14px; border-radius: 50%; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+
+.theme-option.active { background: var(--zwx-primary-soft); color: var(--zwx-primary); font-weight: 650; }
+
+.theme-option.active i { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px currentColor; }
+
+.knowledge-link {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: 9px;
+  padding: 10px 9px;
+  background: transparent;
+  color: var(--sk-label);
+  font-size: 13px;
+  text-align: left;
+}
+
+.knowledge-link span { flex: 1; }
+.knowledge-link :deep(svg) { color: var(--zwx-primary); }
+.knowledge-link :deep(svg:last-child) { color: var(--sk-label-3); }
+
+.knowledge-link:hover { background: var(--sk-fill); }
+
+.desktop-api-settings {
+  display: grid;
+  gap: 9px;
+  margin-top: 6px;
+  border-top: 1px solid var(--sk-separator);
+  padding: 13px 8px 4px;
+  color: var(--sk-label-2);
+  font-size: 12px;
+}
+
+.desktop-api-settings strong { color: var(--sk-label); font-size: 12px; }
+
+.desktop-api-settings label { display: grid; gap: 5px; }
+
+.desktop-api-settings input, .desktop-api-settings select {
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 9px;
+  background: var(--sk-fill);
+  color: var(--sk-label);
+  font-size: 12px;
+  outline: none;
+}
+
+.desktop-api-settings input:focus, .desktop-api-settings select:focus { background: var(--sk-surface); box-shadow: 0 0 0 3px var(--zwx-primary-ring); }
+
+.desktop-api-settings p { margin: 2px 0 0; color: var(--sk-label-3); font-size: 11px; line-height: 1.55; }
+
+.settings-error { color: var(--sk-red) !important; }
+
+.save-desktop-settings {
+  height: 34px;
+  margin-top: 3px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--zwx-primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.save-desktop-settings:hover:not(:disabled) { filter: brightness(1.07); }
+
+.save-desktop-settings:active:not(:disabled) { transform: scale(0.98); }
 </style>

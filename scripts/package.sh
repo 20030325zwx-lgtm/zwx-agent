@@ -33,7 +33,7 @@ docker save -o "$IMAGE_DIR/zwx-agent-backend.tar" "zwx-agent-backend:$VERSION"
 docker save -o "$IMAGE_DIR/zwx-agent-frontend.tar" "zwx-agent-frontend:$VERSION"
 docker save -o "$IMAGE_DIR/pgvector-pg16.tar" pgvector/pgvector:pg16
 
-cp "$ROOT_DIR/docker-compose/docker-compose.yml" "$ROOT_DIR/docker-compose/.env.example" "$ROOT_DIR/docker-compose/install.sh" "$ROOT_DIR/docker-compose/stop.sh" "$RELEASE_DIR/"
+cp "$ROOT_DIR/docker-compose/docker-compose.yml" "$ROOT_DIR/docker-compose/.env.example" "$ROOT_DIR/docker-compose/globe.conf.example" "$ROOT_DIR/docker-compose/install.sh" "$ROOT_DIR/docker-compose/stop.sh" "$RELEASE_DIR/"
 chmod +x "$RELEASE_DIR/install.sh" "$RELEASE_DIR/stop.sh"
 sed -i.bak "s/^IMAGE_TAG=.*/IMAGE_TAG=$VERSION/" "$RELEASE_DIR/.env.example"
 rm -f "$RELEASE_DIR/.env.example.bak"

@@ -41,53 +41,7 @@ ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 应用项目�
 
 ## 整体架构
 
-```mermaid
-flowchart LR
-    User[用户] --> FE[Vue 3 前端<br/>Home / LoveMaster / SuperAgent<br/>TravelPlanner / TestAgent]
-
-    FE -->|REST / SSE（JWT）| GW[AiController 等<br/>认证、会话互斥、审计]
-
-    subgraph Agents[智能体层]
-        Love[LoveApp<br/>情感分析 + 视觉 + RAG]
-        Travel[TravelPlannerApp<br/>旅游规划 + 联网搜索]
-        Test[TestAgentApp<br/>功能测试]
-        Manus[ManusGraphOrchestrator<br/>多智能体图状态机]
-    end
-
-    GW --> Agents
-
-    subgraph Graph[Manus 图状态机]
-        P[planner 规划器] --> W[workers 执行器<br/>并行子智能体]
-        W --> V{verifier 质检员}
-        V -.->|revise| W
-        V -.->|pass| A[aggregator 交付器]
-    end
-    Manus --> Graph
-
-    subgraph Tools[工具层]
-        File[文件读写 / PDF]
-        Web[搜索 / 抓取 / 下载]
-        SQL[只读 SQL 查询<br/>自身库 + 外部库]
-        MCPc[MCP 动态工具]
-    end
-    W --> Tools
-    Travel --> Web
-
-    subgraph Infra[基础设施]
-        LLM[DashScope qwen-plus / qwen-vl-plus]
-        PG[(PostgreSQL + pgvector<br/>会话 / 消息 / 向量 / 执行事件)]
-        OSS[阿里云 OSS / MinIO<br/>图片与知识文档]
-        SB[ToolSandbox 会话沙箱]
-    end
-
-    Agents --> LLM
-    Agents --> PG
-    Love --> OSS
-    W --> SB
-    SQL --> PG
-```
-
-四个智能体共用同一套基础设施（认证、沙箱、RAG、持久化、线程池），差异只在编排层：Love/Travel/Test 是提示词 + 工具的单智能体链路，Manus 是图状态机驱动的多智能体协作。
+系统整体架构（架构图与分层说明）统一维护在 [design/agent-architecture.md](design/agent-architecture.md)，本文件只保留使用说明与功能介绍。
 
 ## 超级智能体：多智能体协作
 
@@ -355,6 +309,36 @@ GET http://127.0.0.1:8123/api/health
 
 发布脚本参考模块化打包方式，但针对本项目采用了更轻的三服务部署：前端 Nginx、Spring Boot 后端和 PostgreSQL + pgvector。镜像是运行时镜像，服务器不会重新下载 Maven 或 NPM 依赖。
 
+### 标准发布流程（速查）
+
+1. **定版本**：发布版本号只通过 `VERSION` 环境变量传入（驱动镜像标签与安装包命名），`pom.xml` 保持 `0.0.1-SNAPSHOT` 不动——它与 `Dockerfile` 的 `JAR_FILE` 及桌面端 `prepare-backend.sh` 的 JAR 文件名联动，改动需三处同步，日常发版不建议动。
+2. **构建前自检**（构建机）：后端 `mvn -q -DskipTests package` 通过、前端 `cd zwx-agent-frontend && npm run build` 通过。
+3. **打包**：
+   ```bash
+   VERSION=0.0.2 TARGET_PLATFORM=linux/amd64 sh scripts/package.sh
+   # 产物：release/zwx-agent-0.0.2-linux-amd64.tar.gz（离线镜像 + 编排 + 安装脚本 + 配置模板）
+   ```
+4. **传输**：`scp release/zwx-agent-0.0.2-linux-amd64.tar.gz user@server:/tmp/`，并保留本仓库与该 tar.gz 归档，作为回滚依据。
+5. **服务器安装/升级**：解压 → 首次 `cp .env.example .env` 并填写 → `sudo ./install.sh` → 首次会自动创建 `/home/globe.conf`，填入 DashScope 密钥与 JWT 密钥后再执行一次 `sudo ./install.sh`。升级时跳过填写步骤，直接执行即可（`.env`、`globe.conf`、数据卷均保留）。
+6. **部署验证**：
+   ```bash
+   cd /opt/zwx-agent
+   docker compose --env-file .env ps            # 三个服务均为 Up/running
+   curl -fsS http://127.0.0.1:8080/api/health   # 返回 ok
+   docker compose --env-file .env logs -f backend   # 异常时看日志
+   ```
+   然后浏览器访问 `http://<服务器地址>:8080`，用管理员账号登录确认核心链路。
+7. **升级到新版本**：用新版本号重复步骤 3-6；Flyway 迁移自动执行，数据不丢。
+8. **回滚**：把上一版的 tar.gz 重新解压，在其中执行 `sudo ./install.sh` 即回到旧镜像（注意：若新版包含数据库迁移，回滚后可能需手工处理表结构，因此升级前建议先备份：
+   ```bash
+   cd /opt/zwx-agent
+   set -a; source .env; set +a
+   docker compose --env-file .env exec -T postgres \
+     pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > "backup-$(date +%F).sql"
+   ```）。
+
+以下小节是上述流程中各环节的详细说明。
+
 ### 构建镜像与安装包
 
 构建机需要 Docker、JDK 21、Node.js 20+。默认构建 Linux x86_64 镜像，并将应用镜像和 pgvector 基础镜像一同导出，因此服务器可离线安装：
@@ -368,6 +352,7 @@ VERSION=0.0.1 TARGET_PLATFORM=linux/amd64 sh scripts/package.sh
 - `images/`：后端、前端和 pgvector 离线镜像。
 - `docker-compose.yml`：前端、后端、PostgreSQL + pgvector 编排。
 - `.env.example`：全部服务器配置项的无密钥模板。
+- `globe.conf.example`：服务器外部配置模板（API Key、JWT 密钥等）。
 - `install.sh`、`stop.sh`：安装、升级与停止脚本。
 
 ARM 服务器可通过 `TARGET_PLATFORM=linux/arm64` 构建对应安装包。构建机需要具备该平台的 Docker 构建能力。
@@ -381,8 +366,9 @@ tar -xzf zwx-agent-0.0.1-linux-amd64.tar.gz
 cd zwx-agent-0.0.1-linux-amd64
 cp .env.example .env
 chmod 600 .env
-# 编辑 .env，至少填写 POSTGRES_PASSWORD 与 DASHSCOPE_API_KEY
+# 编辑 .env，至少填写 POSTGRES_PASSWORD（DASHSCOPE_API_KEY 也可改填 /home/globe.conf）
 sudo ./install.sh
+# 首次执行会创建 /home/globe.conf，填写 DashScope 密钥与 JWT 密钥后重新执行
 ```
 
 脚本默认部署到 `/opt/zwx-agent`；可以通过 `ZWX_AGENT_INSTALL_DIR=/srv/zwx-agent sudo -E ./install.sh` 改为其它固定目录。后续版本执行同一安装流程时会保留该目录已有的 `.env`、`temp/` 和 PostgreSQL 数据卷，只更新镜像与编排文件。
@@ -394,9 +380,21 @@ cd /opt/zwx-agent
 sudo ./stop.sh
 ```
 
+### 服务器外部配置 globe.conf
+
+生产环境的密钥类配置（DashScope API Key、JWT 签名密钥、OSS/MinIO、搜索 API 等）维护在服务器的 `/home/globe.conf` 中，程序启动时自动读取，与本地环境的 `application-local.yml` 完全分离，不会打进镜像：
+
+- 首次执行 `install.sh` 时，若 `/home/globe.conf` 不存在会自动从模板创建，填好后重新执行安装脚本即可。
+- 格式为标准 properties（`key=value`，`#` 注释），UTF-8；可配置项见 `globe.conf.example`。
+- 优先级最高：覆盖 `.env` 与 `application*.yml`。值为空或仍是 `YOUR_*`/`CHANGE_ME_*` 占位符时视为未配置，不会覆盖其它来源。
+- 路径可通过 `.env` 的 `APP_GLOBE_CONF` 修改，容器内只读挂载，权限为 600。
+- DashScope 密钥二选一：填 `.env` 的 `DASHSCOPE_API_KEY`，或填 `globe.conf` 的 `spring.ai.dashscope.api-key`，安装脚本两者都认。
+
+管理员账号首次启动自动写入数据库（默认 `admin`/`admin123`，控制台会打印提醒），密码以 BCrypt 哈希保存在 PostgreSQL 中，不依赖环境变量；生产环境应在首次登录后尽快修改。
+
 ### 环境变量与持久化
 
-`DASHSCOPE_API_KEY` 和 `POSTGRES_PASSWORD` 是安装脚本校验的必填项。`SEARCH_API_API_KEY` 用于联网搜索；阿里云 OSS 四项用于图片与私有知识文档上传。它们只存在于服务器 `.env`，不会写进 Git、镜像或安装包。
+`POSTGRES_PASSWORD` 是安装脚本校验的必填项；`DASHSCOPE_API_KEY` 在 `.env` 与 `globe.conf` 至少填写一处（见上节）。`SEARCH_API_API_KEY` 用于联网搜索；阿里云 OSS 四项用于图片与私有知识文档上传。它们只存在于服务器 `.env` 与 `globe.conf`，不会写进 Git、镜像或安装包。
 
 应用临时目录由 `APP_TEMP_DIR` 控制，容器中固定为 `/app/temp`，映射到安装目录的 `temp/`。PDF 生成、下载和文件工具都使用该目录；应用未写入临时文件时目录保持为空。
 

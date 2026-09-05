@@ -6,36 +6,51 @@
 
 ```mermaid
 flowchart LR
-    User[用户] --> FE[Vue 3 + Vite 前端]
-    FE -->|REST / SSE| API[AiController]
+    User[用户] --> FE[Vue 3 前端<br/>Home / LoveMaster / SuperAgent<br/>TravelPlanner / TestAgent]
 
-    subgraph Agents[智能体编排]
-      Manus[ZwxManus\nReAct + ToolCall]
-      Love[LoveApp\n情感分析大师]
-      Travel[TravelPlannerApp\n旅游规划专家]
-      Test[TestAgentApp\n功能测试助手]
+    FE -->|REST / SSE（JWT）| GW[AiController 等<br/>认证、会话互斥、审计]
+
+    subgraph Agents[智能体层]
+        Love[LoveApp<br/>情感分析 + 视觉 + RAG]
+        Travel[TravelPlannerApp<br/>旅游规划 + 联网搜索]
+        Test[TestAgentApp<br/>功能测试]
+        Manus[ManusGraphOrchestrator<br/>多智能体图状态机]
     end
 
-    API --> Manus
-    API --> Love
-    API --> Travel
-    API --> Test
+    GW --> Agents
 
-    Manus --> Tools[工具注册与工具执行]
-    Love --> Model[DashScope ChatModel]
-    Travel --> Model
-    Test --> Model
-    Manus --> Model
-    Love --> RAG[Love RAG + PGVector]
-    Travel --> AgentRAG[租户知识库 RAG + PGVector]
-    Test --> AgentRAG
-    Love --> DB[(PostgreSQL)]
-    Travel --> DB
-    Test --> DB
-    Tools --> FS[本地 temp 文件 / PDF]
-    Tools --> Search[SearchAPI]
-    Tools --> OSS[OSS / MinIO]
+    subgraph Graph[Manus 图状态机]
+        P[planner 规划器] --> W[workers 执行器<br/>并行子智能体]
+        W --> V{verifier 质检员}
+        V -.->|revise| W
+        V -.->|pass| A[aggregator 交付器]
+    end
+    Manus --> Graph
+
+    subgraph Tools[工具层]
+        File[文件读写 / PDF]
+        Web[搜索 / 抓取 / 下载]
+        SQL[只读 SQL 查询<br/>自身库 + 外部库]
+        MCPc[MCP 动态工具]
+    end
+    W --> Tools
+    Travel --> Web
+
+    subgraph Infra[基础设施]
+        LLM[DashScope qwen-plus / qwen-vl-plus]
+        PG[(PostgreSQL + pgvector<br/>会话 / 消息 / 向量 / 执行事件)]
+        OSS[阿里云 OSS / MinIO<br/>图片与知识文档]
+        SB[ToolSandbox 会话沙箱]
+    end
+
+    Agents --> LLM
+    Agents --> PG
+    Love --> OSS
+    W --> SB
+    SQL --> PG
 ```
+
+四个智能体共用同一套基础设施（认证、沙箱、RAG、持久化、线程池），差异只在编排层：Love/Travel/Test 是提示词 + 工具的单智能体链路，Manus 是图状态机驱动的多智能体协作。
 
 ## 2. 运行单元
 
@@ -85,6 +100,8 @@ flowchart LR
 `HealthController` 提供 `/api/health` 健康检查。
 
 ## 5. 超级智能体执行链
+
+> 当前线上链路已切换为图状态机编排（planner / workers / verifier / aggregator，见 [plans/06-multi-agent-graph.md](./plans/06-multi-agent-graph.md)）；下述 ReAct 链路为旧实现，保留可回滚。
 
 ```mermaid
 sequenceDiagram

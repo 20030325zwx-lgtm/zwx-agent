@@ -32,6 +32,7 @@
           @send-message="sendMessage"
           @edit-message="cancelActiveStream"
           @resend-message="resendMessage"
+          @continue-message="({ message, index }) => continueMessage(message, index)"
         />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
@@ -137,7 +138,8 @@ const selectConversation = async (conversation) => {
           references: message.knowledgeReferences || [],
           trace: message.ragTrace || null,
           activities: [],
-          visionAnalysis: message.visionAnalysis || null
+          visionAnalysis: message.visionAnalysis || null,
+          status: message.status || 'COMPLETED'
         }))
       : []
     await Promise.all(messages.value.map(async message => {
@@ -232,6 +234,11 @@ const sendMessage = async ({ message, files, webSearch = false }, retryUserMessa
     }
   })
 
+  eventSource.addEventListener('generation-error', event => {
+    const answer = messages.value[aiMessageIndex]
+    if (answer) answer.thinking = event.data
+  })
+
   eventSource.onmessage = async (event) => {
     const data = event.data
     if (data && data !== '[DONE]' && aiMessageIndex < messages.value.length) {
@@ -271,12 +278,60 @@ const restoreFromServer = async () => {
     references: message.knowledgeReferences || [],
     trace: message.ragTrace || null,
     activities: [],
-    visionAnalysis: message.visionAnalysis || null
+    visionAnalysis: message.visionAnalysis || null,
+    status: message.status || 'COMPLETED'
   }))
   await Promise.all(messages.value.map(async item => {
     if (item.imageKeys?.length) item.imageUrls = await resolveImageUrls(chatId.value, item.imageKeys)
   }))
   await refreshConversations()
+}
+
+const continueMessage = (message, index) => {
+  if (!chatId.value || !message?.id || connectionStatus.value === 'connecting') return
+  cancelActiveStream()
+  connectionStatus.value = 'connecting'
+  eventSource = chatWithLoveApp('', chatId.value, [], false, null, generateRequestId(), message.id)
+
+  eventSource.addEventListener('generation-error', event => {
+    const answer = messages.value[index]
+    if (answer) answer.thinking = event.data
+  })
+
+  eventSource.addEventListener('thinking', event => {
+    const answer = messages.value[index]
+    if (answer) answer.thinking = event.data || '正在思考...'
+  })
+
+  eventSource.addEventListener('trace', event => {
+    try { messages.value[index].trace = JSON.parse(event.data) } catch (error) { console.error('RAG trace unavailable:', error) }
+  })
+
+  eventSource.addEventListener('references', event => {
+    try { messages.value[index].references = JSON.parse(event.data) } catch (error) { console.error('Knowledge references unavailable:', error) }
+  })
+
+  eventSource.onmessage = async event => {
+    const answer = messages.value[index]
+    if (event.data === '[DONE]') {
+      connectionStatus.value = 'disconnected'
+      eventSource?.close()
+      eventSource = null
+      if (answer) { answer.thinking = ''; answer.status = 'COMPLETED' }
+      setTimeout(() => { restoreFromServer().catch(() => {}) }, 300)
+      return
+    }
+    if (!answer) return
+    if (answer.status === 'INTERRUPTED') { answer.status = 'CONTINUING'; answer.content += '' }
+    answer.content += event.data
+  }
+
+  eventSource.onerror = () => {
+    eventSource?.close()
+    eventSource = null
+    connectionStatus.value = 'error'
+    setTimeout(() => { restoreFromServer().catch(() => {}) }, 1500)
+  }
 }
 
 const generateRequestId = () =>

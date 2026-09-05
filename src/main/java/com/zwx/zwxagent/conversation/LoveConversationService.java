@@ -156,6 +156,39 @@ public class LoveConversationService {
         }
     }
 
+    public String getInterruptedAssistantDraft(CurrentActor actor, long assistantMessageId) {
+        List<String> contents = jdbcTemplate.queryForList("""
+                SELECT m.content FROM love_chat_message m
+                JOIN love_conversation c ON c.id = m.conversation_id
+                WHERE m.id = ? AND m.role = 'ASSISTANT' AND m.status = 'INTERRUPTED'
+                  AND c.tenant_id = ? AND c.user_id = ?
+                """, String.class, assistantMessageId, actor.tenantId(), actor.userId());
+        if (contents.isEmpty()) {
+            throw new IllegalArgumentException("该回答不存在或不是可续写的中断状态");
+        }
+        return contents.getFirst();
+    }
+
+    public void appendToAssistantReply(CurrentActor actor, long assistantMessageId, String addition, String status) {
+        int updated = jdbcTemplate.update("""
+                UPDATE love_chat_message m SET content = m.content || ?, status = ?
+                FROM love_conversation c
+                WHERE m.conversation_id = c.id AND m.id = ? AND m.role = 'ASSISTANT'
+                  AND m.status = 'INTERRUPTED' AND c.tenant_id = ? AND c.user_id = ?
+                """, addition == null ? "" : addition, status, assistantMessageId, actor.tenantId(), actor.userId());
+        if (updated == 0) {
+            throw new IllegalArgumentException("续写失败：该回答不存在或已被处理");
+        }
+    }
+
+    public void saveAssistantRagDataFor(CurrentActor actor, long assistantMessageId, String referencesJson, String traceJson) {
+        jdbcTemplate.update("""
+                UPDATE love_chat_message m SET knowledge_references = CAST(? AS jsonb), rag_trace = CAST(? AS jsonb)
+                FROM love_conversation c
+                WHERE m.conversation_id = c.id AND m.id = ? AND c.tenant_id = ? AND c.user_id = ?
+                """, referencesJson, traceJson, assistantMessageId, actor.tenantId(), actor.userId());
+    }
+
     public List<LoveConversationSummary> listConversations(CurrentActor actor) {
         return jdbcTemplate.query("""
                         SELECT id, title, created_at, updated_at
@@ -212,8 +245,8 @@ public class LoveConversationService {
     public List<LoveConversationMessage> getMessages(CurrentActor actor, String conversationId) {
         requireOwnedConversation(actor, conversationId);
         return jdbcTemplate.query("""
-                        SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
-                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at
+                        SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at, status FROM (
+                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at, status
                             FROM love_chat_message
                             WHERE conversation_id = ?
                             ORDER BY id DESC
@@ -227,13 +260,14 @@ public class LoveConversationService {
                         toReferences(rs.getString("knowledge_references")),
                         toTrace(rs.getString("rag_trace")),
                         toVisionAnalysis(rs.getString("vision_analysis")),
-                        rs.getTimestamp("created_at").toInstant()), conversationId);
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getString("status")), conversationId);
     }
 
     public List<LoveConversationMessage> getRecentMessages(String conversationId, int limit) {
         return jdbcTemplate.query("""
-                        SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
-                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at
+                        SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at, status FROM (
+                            SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at, status
                             FROM love_chat_message
                             WHERE conversation_id = ? AND status = 'COMPLETED'
                             ORDER BY id DESC
@@ -247,7 +281,8 @@ public class LoveConversationService {
                         toReferences(rs.getString("knowledge_references")),
                         toTrace(rs.getString("rag_trace")),
                         toVisionAnalysis(rs.getString("vision_analysis")),
-                        rs.getTimestamp("created_at").toInstant()), conversationId, limit);
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getString("status")), conversationId, limit);
     }
 
     public boolean deleteConversation(CurrentActor actor, String conversationId) {

@@ -90,6 +90,13 @@ public class AiController {
     private static final String SUPER_DEFAULT_TITLE = "新的超级智能体对话";
     private static final Pattern GENERATED_FILE = Pattern.compile("(?:PDF generated successfully to:|File written successfully to:|Resource downloaded successfully to:)\\s*([^\"\\r\\n]+)");
 
+    private static final java.util.concurrent.ScheduledExecutorService HEARTBEAT_SCHEDULER =
+            java.util.concurrent.Executors.newScheduledThreadPool(2, runnable -> {
+                Thread thread = new Thread(runnable, "sse-heartbeat");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     @Resource
     private LoveApp loveApp;
 
@@ -298,15 +305,30 @@ public class AiController {
                                                                @RequestParam(required = false) List<String> imageKey,
                                                                @RequestParam(defaultValue = "false") boolean webSearch,
                                                                @RequestParam(required = false) Long retryUserMessageId,
-                                                               @RequestParam(required = false) String clientRequestId) {
+                                                               @RequestParam(required = false) String clientRequestId,
+                                                               @RequestParam(required = false) Long continueFromMessageId) {
         conversationService.ensureOwnedConversation(actor, chatId, message);
         conversationService.requireNoDuplicateRequest(actor, chatId, clientRequestId);
         if (!conversationLockManager.tryLock(chatId)) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
         List<String> imageObjectKeys = imageKey == null ? List.of() : imageKey;
-        if (!imageObjectKeys.isEmpty()) {
-            return doVisionChatWithLoveAppSSE(actor, message, chatId, imageObjectKeys, retryUserMessageId, clientRequestId)
-                    .doFinally(signal -> conversationLockManager.unlock(chatId));
+        try {
+            Flux<ServerSentEvent<String>> stream;
+            if (continueFromMessageId != null) {
+                stream = doContinuationChatWithLoveAppSSE(actor, chatId, continueFromMessageId, webSearch);
+            } else if (!imageObjectKeys.isEmpty()) {
+                stream = doVisionChatWithLoveAppSSE(actor, message, chatId, imageObjectKeys, retryUserMessageId, clientRequestId);
+            } else {
+                stream = doTextChatWithLoveAppSSE(actor, message, chatId, webSearch, retryUserMessageId, clientRequestId);
+            }
+            return withHeartbeat(stream.doFinally(signal -> conversationLockManager.unlock(chatId)));
+        } catch (RuntimeException exception) {
+            conversationLockManager.unlock(chatId);
+            throw exception;
         }
+    }
+
+    private Flux<ServerSentEvent<String>> doTextChatWithLoveAppSSE(CurrentActor actor, String message, String chatId,
+                                                                    boolean webSearch, Long retryUserMessageId, String clientRequestId) {
         return Flux.concat(
                 Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在分析你的问题与对话上下文...").build()),
                 Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在检索情感知识库与私有资料...").build()),
@@ -320,7 +342,39 @@ public class AiController {
                                 Mono.just(ServerSentEvent.<String>builder().event("trace").data(chat.traceJson()).build()),
                                 Mono.just(ServerSentEvent.<String>builder().event("references").data(chat.referencesJson()).build()),
                                 Mono.just(ServerSentEvent.<String>builder("[DONE]").build()))))
-                .doFinally(signal -> conversationLockManager.unlock(chatId));
+                .onErrorResume(error -> Flux.just(
+                        ServerSentEvent.<String>builder().event("generation-error").data(com.zwx.zwxagent.util.ErrorMessages.describe(error)).build(),
+                        ServerSentEvent.<String>builder("[DONE]").build()));
+    }
+
+    private Flux<ServerSentEvent<String>> doContinuationChatWithLoveAppSSE(CurrentActor actor, String chatId, long assistantMessageId, boolean webSearch) {
+        String draft = conversationService.getInterruptedAssistantDraft(actor, assistantMessageId);
+        String retrievalQuery = draft.length() > 200 ? draft.substring(draft.length() - 200) : draft;
+        return Flux.concat(
+                Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在加载未完成的草稿与上下文...").build()),
+                Mono.fromCallable(() -> prepareLoveTextChat(actor, retrievalQuery))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .flatMapMany(chat -> Flux.concat(
+                                Mono.just(ServerSentEvent.<String>builder().event("thinking").data("正在从中断处继续生成...").build()),
+                                loveApp.doChatContinuationByStream(actor, chatId, assistantMessageId, chat.context(), webSearch, null)
+                                        .map(chunk -> ServerSentEvent.builder(chunk).build()),
+                                Mono.fromRunnable(() -> conversationService.saveAssistantRagDataFor(actor, assistantMessageId, chat.referencesJson(), chat.traceJson()))
+                                        .thenReturn(ServerSentEvent.<String>builder().event("thinking").data("正在整理引用与会话记录...").build()),
+                                Mono.just(ServerSentEvent.<String>builder().event("trace").data(chat.traceJson()).build()),
+                                Mono.just(ServerSentEvent.<String>builder().event("references").data(chat.referencesJson()).build()),
+                                Mono.just(ServerSentEvent.<String>builder("[DONE]").build()))))
+                .onErrorResume(error -> Flux.just(
+                        ServerSentEvent.<String>builder().event("generation-error").data(com.zwx.zwxagent.util.ErrorMessages.describe(error)).build(),
+                        ServerSentEvent.<String>builder("[DONE]").build()));
+    }
+
+    private Flux<ServerSentEvent<String>> withHeartbeat(Flux<ServerSentEvent<String>> source) {
+        return source.publish(shared -> {
+            Flux<ServerSentEvent<String>> heartbeat = Flux.interval(java.time.Duration.ofSeconds(15))
+                    .map(index -> ServerSentEvent.<String>builder().event("ping").data("keep-alive").build())
+                    .onBackpressureDrop();
+            return Flux.merge(shared, heartbeat.takeUntilOther(shared.ignoreElements().then()));
+        });
     }
 
     private LoveTextChat prepareLoveTextChat(CurrentActor actor, String message) {
@@ -431,15 +485,29 @@ public class AiController {
         zwxManus.restoreHistory(agentConversationService.getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 20));
         SseEmitter emitter = zwxManus.runStream(message, result -> agentConversationService.saveCompletedTurn(
                 actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message, result.answer(), toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId)))), agentExecutor);
+        java.util.concurrent.ScheduledFuture<?>[] heartbeatHolder = new java.util.concurrent.ScheduledFuture<?>[1];
+        heartbeatHolder[0] = HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
+            try {
+                emitter.send(SseEmitter.event().name("ping").data("keep-alive"));
+            } catch (Exception exception) {
+                java.util.concurrent.ScheduledFuture<?> self = heartbeatHolder[0];
+                if (self != null) self.cancel(false);
+            }
+        }, 15, 15, java.util.concurrent.TimeUnit.SECONDS);
+        java.util.concurrent.ScheduledFuture<?> heartbeat = heartbeatHolder[0];
+        Runnable stopHeartbeat = () -> heartbeat.cancel(false);
         emitter.onCompletion(() -> {
+            stopHeartbeat.run();
             mcpTools.close();
             conversationLockManager.unlock(conversationId);
         });
         emitter.onTimeout(() -> {
+            stopHeartbeat.run();
             mcpTools.close();
             conversationLockManager.unlock(conversationId);
         });
         emitter.onError(error -> {
+            stopHeartbeat.run();
             zwxManus.stopForClientDisconnect();
             mcpTools.close();
             conversationLockManager.unlock(conversationId);
@@ -521,7 +589,7 @@ public class AiController {
         agentConversationService.requireNoDuplicateRequest(actor.tenantId(), actor.userId(), clientRequestId);
         if (!conversationLockManager.tryLock(conversationId)) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
         String runId = UUID.randomUUID().toString();
-        return Flux.<ServerSentEvent<String>>create(sink -> {
+        Flux<ServerSentEvent<String>> travelStream = Flux.<ServerSentEvent<String>>create(sink -> {
             java.util.function.Consumer<ExecutionUpdate> progress = update -> {
                 int sequence;
                 try {
@@ -536,7 +604,11 @@ public class AiController {
             reactor.core.Disposable subscription = travelPlannerApp.chat(actor.tenantId(), actor.userId(), conversationId, runId, message, retryUserMessageId, webSearch, progress,
                     references -> sink.next(ServerSentEvent.<String>builder(toJson(references)).event("references").build()), clientRequestId).subscribe(
                     chunk -> sink.next(ServerSentEvent.builder(chunk).build()),
-                    sink::error,
+                    error -> {
+                        sink.next(ServerSentEvent.<String>builder().event("generation-error").data(com.zwx.zwxagent.util.ErrorMessages.describe(error)).build());
+                        sink.next(ServerSentEvent.<String>builder("[DONE]").build());
+                        sink.complete();
+                    },
                     () -> {
                         sink.next(ServerSentEvent.<String>builder("[DONE]").build());
                         sink.complete();
@@ -548,6 +620,7 @@ public class AiController {
                         "连接中断：已生成内容将保留，可重新提问继续。", Map.of("runId", runId));
             });
         }).doFinally(signal -> conversationLockManager.unlock(conversationId));
+        return withHeartbeat(travelStream);
     }
 
     @GetMapping("/travel-planner/conversations/{conversationId}/executions/{runId}")
@@ -591,10 +664,13 @@ public class AiController {
                                                             @RequestParam(required = false) String clientRequestId) {
         agentConversationService.requireNoDuplicateRequest(actor.tenantId(), actor.userId(), clientRequestId);
         if (!conversationLockManager.tryLock(conversationId)) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
-        return testAgentApp.chat(actor.tenantId(), actor.userId(), conversationId, message, webSearch, retryUserMessageId, references -> {}, clientRequestId)
+        return withHeartbeat(testAgentApp.chat(actor.tenantId(), actor.userId(), conversationId, message, webSearch, retryUserMessageId, references -> {}, clientRequestId)
                 .map(ServerSentEvent::builder).map(ServerSentEvent.Builder::build)
                 .concatWithValues(ServerSentEvent.<String>builder("[DONE]").build())
-                .doFinally(signal -> conversationLockManager.unlock(conversationId));
+                .onErrorResume(error -> Flux.just(
+                        ServerSentEvent.<String>builder().event("generation-error").data(com.zwx.zwxagent.util.ErrorMessages.describe(error)).build(),
+                        ServerSentEvent.<String>builder("[DONE]").build()))
+                .doFinally(signal -> conversationLockManager.unlock(conversationId)));
     }
 
     @PostMapping("/test-agent/conversations")

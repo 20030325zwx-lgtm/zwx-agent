@@ -35,6 +35,12 @@ public abstract class BaseAgent {
     private static final long MAX_RUN_MILLIS = TimeUnit.MINUTES.toMillis(5);
     private static final int MAX_SAME_TOOL_RESULT_CALLS = 53;
     private static final int MAX_NO_PROGRESS_ROUNDS = 5;
+    private static final java.util.concurrent.ScheduledExecutorService STEP_WATCHDOG =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "agent-step-watchdog");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     // 核心属性
     private String name;
@@ -167,8 +173,17 @@ public abstract class BaseAgent {
                     int stepNumber = i + 1;
                     currentStep = stepNumber;
                     log.info("Executing step {}/{}", stepNumber, maxSteps);
-                    // 单步执行
-                    String stepResult = runStepBeforeDeadline(deadlineNanos);
+                    // 单步执行；看门狗保证步骤超出总时限时任务被标记停止，
+                    // 配合底层 HTTP 超时确保执行线程最终一定释放。
+                    long remainingMillis = TimeUnit.NANOSECONDS.toMillis(Math.max(0, deadlineNanos - System.nanoTime()));
+                    java.util.concurrent.ScheduledFuture<?> watchdog = STEP_WATCHDOG.schedule(
+                            () -> requestStop("已达到执行时限（步骤看门狗）"), remainingMillis, TimeUnit.MILLISECONDS);
+                    String stepResult;
+                    try {
+                        stepResult = runStepBeforeDeadline(deadlineNanos);
+                    } finally {
+                        watchdog.cancel(false);
+                    }
                     if (stopReason != null) break;
                     String result = "Step " + stepNumber + ": " + stepResult;
                     results.add(result);
@@ -228,7 +243,10 @@ public abstract class BaseAgent {
                     }
                 }
                 try {
-                    sseEmitter.send("执行错误：" + e.getMessage());
+                    String reason = com.zwx.zwxagent.util.ErrorMessages.describe(e);
+                    sseEmitter.send(SseEmitter.event().name("generation-error").data(reason));
+                    sseEmitter.send(SseEmitter.event().data("任务已中止：" + reason));
+                    sseEmitter.send(SseEmitter.event().data("[DONE]"));
                     sseEmitter.complete();
                 } catch (IOException ex) {
                     sseEmitter.completeWithError(ex);

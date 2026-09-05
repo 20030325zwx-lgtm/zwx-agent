@@ -40,13 +40,20 @@ public class WebSearchTool {
         };
     }
 
+    private static final int HTTP_TIMEOUT_MILLIS = 10_000;
+
     private String searchWithSearchApi(String query) {
         Map<String, Object> paramMap = new HashMap<>();
         paramMap.put("q", query);
         paramMap.put("api_key", apiKey);
         paramMap.put("engine", "baidu");
         try {
-            String response = HttpUtil.get(SEARCH_API_URL, paramMap);
+            String response = HttpRequest.get(SEARCH_API_URL)
+                    .form(paramMap)
+                    .setConnectionTimeout(HTTP_TIMEOUT_MILLIS)
+                    .setReadTimeout(HTTP_TIMEOUT_MILLIS)
+                    .execute()
+                    .body();
             JSONObject jsonObject = JSONUtil.parseObj(response);
             String error = jsonObject.getStr("error");
             if (error == null || error.isBlank()) error = jsonObject.getStr("message");
@@ -78,6 +85,8 @@ public class WebSearchTool {
             String response = HttpRequest.post(TAVILY_API_URL)
                     .header("Content-Type", "application/json")
                     .body(body)
+                    .setConnectionTimeout(HTTP_TIMEOUT_MILLIS)
+                    .setReadTimeout(HTTP_TIMEOUT_MILLIS)
                     .execute()
                     .body();
             JSONObject jsonObject = JSONUtil.parseObj(response);

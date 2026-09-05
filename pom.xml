@@ -90,6 +90,11 @@
             <groupId>com.alibaba.cloud.ai</groupId>
             <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
         </dependency>
+        <!-- Spring AI Alibaba Graph：多智能体图状态机编排 -->
+        <dependency>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-graph-core</artifactId>
+        </dependency>
         <!-- https://docs.spring.io/spring-ai/reference/api/chat/ollama-chat.html -->
         <dependency>
             <groupId>org.springframework.ai</groupId>

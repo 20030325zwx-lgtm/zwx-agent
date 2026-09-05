@@ -37,4 +37,18 @@ public class AgentExecutorConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean("graphWorkerExecutor")
+    ThreadPoolTaskExecutor graphWorkerExecutor(@Value("${app.graph.executor.core-pool-size:6}") int corePoolSize,
+                                               @Value("${app.graph.executor.max-pool-size:12}") int maxPoolSize,
+                                               @Value("${app.graph.executor.queue-capacity:50}") int queueCapacity) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(corePoolSize);
+        executor.setMaxPoolSize(maxPoolSize);
+        executor.setQueueCapacity(queueCapacity);
+        executor.setThreadNamePrefix("graph-worker-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
 }

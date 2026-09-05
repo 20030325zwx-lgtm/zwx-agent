@@ -1,6 +1,6 @@
 package com.zwx.zwxagent.controller;
 
-import com.zwx.zwxagent.agent.ZwxManus;
+import com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator;
 import com.zwx.zwxagent.app.LoveApp;
 import com.zwx.zwxagent.conversation.LoveConversationMessage;
 import com.zwx.zwxagent.conversation.LoveConversationService;
@@ -156,6 +156,9 @@ public class AiController {
 
     @Resource(name = "agentExecutor")
     private java.util.concurrent.Executor agentExecutor;
+
+    @Resource
+    private com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator manusGraphOrchestrator;
 
     @Resource
     private BuiltInSkillRegistry builtInSkillRegistry;
@@ -481,10 +484,16 @@ public class AiController {
         McpTools mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
         ToolCallback[] availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(conversationId)), Arrays.stream(mcpTools.callbacks()))
                 .toArray(ToolCallback[]::new);
-        ZwxManus zwxManus = new ZwxManus(availableTools, dashscopeChatModel, knowledge.context());
-        zwxManus.restoreHistory(agentConversationService.getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 20));
-        SseEmitter emitter = zwxManus.runStream(message, result -> agentConversationService.saveCompletedTurn(
-                actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message, result.answer(), toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId)))), agentExecutor);
+        String historyContext = agentConversationService
+                .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 20).stream()
+                .map(historyMessage -> ("USER".equals(historyMessage.role()) ? "用户" : "助手") + ": " + historyMessage.content())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
+                conversationId, message, historyContext, availableTools, knowledge.context(),
+                result -> agentConversationService.saveCompletedTurn(
+                        actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE,
+                        message, result.answer(), toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId)))));
+        SseEmitter emitter = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
         java.util.concurrent.ScheduledFuture<?>[] heartbeatHolder = new java.util.concurrent.ScheduledFuture<?>[1];
         heartbeatHolder[0] = HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
             try {
@@ -508,7 +517,6 @@ public class AiController {
         });
         emitter.onError(error -> {
             stopHeartbeat.run();
-            zwxManus.stopForClientDisconnect();
             mcpTools.close();
             conversationLockManager.unlock(conversationId);
         });

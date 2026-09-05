@@ -1,6 +1,6 @@
 # ZWX Agent
 
-ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包含面向情感咨询场景的“情感分析大师”对话功能，以及可扩展的 RAG、工具调用、MCP 和自主规划智能体能力。
+ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 应用项目，包含四个智能体：面向情感咨询场景的"情感分析大师"、可联网检索的"旅游规划专家"、"功能测试助手"，以及基于**多智能体图状态机**协作的"超级智能体（Manus）"——由规划器拆解任务、多个子智能体并行执行、质检员验收返工、交付器统一汇总。项目同时具备 RAG、工具调用、MCP、Skill 与执行链路可视化能力。
 
 ## 原项目与作者
 
@@ -14,15 +14,17 @@ ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包�
 
 - 认证与多用户隔离：全部业务接口需要 JWT 登录（`POST /api/auth/register`、`POST /api/auth/login`）；会话、消息、图片与生成文件按用户强归属，管理接口需要 ADMIN 角色。
 - 多轮 AI 对话：默认使用阿里云 DashScope 的 `qwen-plus`。
+- **超级智能体（多智能体协作）**：基于 Spring AI Alibaba Graph 的图状态机——规划器拆解任务（≤4 个子任务）、按角色（调研员/撰写员/分析员/通用助理）并行执行、质检员验收（最多返工一轮）、交付器汇总；执行过程以结构化事件（阶段/角色/摘要）实时推送，MemorySaver checkpoint 按会话隔离，为断线恢复打底。
+- **只读 SQL 工具**：智能体可查询本应用数据库（黑名单保护 `app_user` 等敏感表），或按用户提供的连接信息查询外部 PostgreSQL/MySQL 数据库；仅允许单条 SELECT，带表白名单、行数与超时限制（`app.tools.db-query-enabled`、`app.tools.db-query-external-enabled`，默认关闭）。
 - 情感分析大师：提供针对情感问题的对话引导、关系分析与建议。
 - 会话持久化：情感分析大师的会话和消息保存在 PostgreSQL；模型请求采用最近 20 条消息作为上下文窗口，并对历史长度做 token 预算截断；流中断时部分回答以 INTERRUPTED 状态落库，不丢轮次。
 - 图片多模态：支持选择文件和粘贴图片，使用 `qwen-vl-plus` 理解图片内容。
 - 私有图片存储：图片上传至阿里云 OSS，后端生成短时签名读取地址供视觉模型访问；聊天历史通过受控接口读取图片（校验会话归属）。
-- 多租户私有知识库：管理端可为情感分析大师或旅游规划专家上传 `.md`、`.txt` 等文档，同名文档幂等替换，支持删除；异步切片并写入 PGVector；检索始终限定为当前租户和智能体，且带超时降级与 degraded 标记。
+- 多租户私有知识库：管理端可为智能体上传 `.md`、`.txt` 等文档，同名文档幂等替换，支持删除；异步切片并写入 PGVector；检索始终限定为当前租户和智能体，且带超时降级与 degraded 标记。
 - 旅游规划专家：基于行程偏好、该智能体的私有资料和受限联网搜索工具生成方案；天气、交通、营业时间等实时信息优先检索，不配置额外地图或天气数据源。
 - 工具安全边界：LLM 工具运行在会话级沙箱目录内，路径穿越与内网地址（SSRF）被拦截；终端工具默认关闭，可用 `app.tools.terminal-enabled=true` 开启白名单版本。
-- 并发防护：会话级互斥（同一会话并发发送返回 409）；智能体执行与 RAG 检索使用专用线程池；客户端断开后服务端在调用边界停止生成。
-- 扩展能力：项目保留了 RAG、PGVector、MCP、联网搜索、文件操作、网页抓取、资源下载、PDF 生成和 ReAct 智能体相关模块。MCP 注册仅接受可解析的公网 HTTP(S) 地址。
+- 并发防护：会话级互斥（同一会话并发发送返回 409）；智能体执行、RAG 检索与图工作者使用专用线程池；客户端断开后服务端联动停止主图与全部子智能体。
+- 扩展能力：MCP 动态注册（仅接受可解析的公网 HTTP(S) 地址）、Skill 提示词与工具授权、执行链路（run/event）持久化与前端可视化。
 
 ## 功能路线图
 
@@ -32,10 +34,79 @@ ZWX Agent 是一个基于 Spring Boot 和 Vue 3 的 AI 应用项目，当前包�
 
 ## 技术栈
 
-- Java 21、Spring Boot 3.4、Spring AI
+- Java 21、Spring Boot 3.4、Spring AI、Spring AI Alibaba Graph（多智能体图编排）
 - 阿里云 DashScope SDK、阿里云 OSS SDK
 - PostgreSQL、PGVector
 - Vue 3、Vite、Vue Router
+
+## 整体架构
+
+```mermaid
+flowchart LR
+    User[用户] --> FE[Vue 3 前端<br/>Home / LoveMaster / SuperAgent<br/>TravelPlanner / TestAgent]
+
+    FE -->|REST / SSE（JWT）| GW[AiController 等<br/>认证、会话互斥、审计]
+
+    subgraph Agents[智能体层]
+        Love[LoveApp<br/>情感分析 + 视觉 + RAG]
+        Travel[TravelPlannerApp<br/>旅游规划 + 联网搜索]
+        Test[TestAgentApp<br/>功能测试]
+        Manus[ManusGraphOrchestrator<br/>多智能体图状态机]
+    end
+
+    GW --> Agents
+
+    subgraph Graph[Manus 图状态机]
+        P[planner 规划器] --> W[workers 执行器<br/>并行子智能体]
+        W --> V{verifier 质检员}
+        V -.->|revise| W
+        V -.->|pass| A[aggregator 交付器]
+    end
+    Manus --> Graph
+
+    subgraph Tools[工具层]
+        File[文件读写 / PDF]
+        Web[搜索 / 抓取 / 下载]
+        SQL[只读 SQL 查询<br/>自身库 + 外部库]
+        MCPc[MCP 动态工具]
+    end
+    W --> Tools
+    Travel --> Web
+
+    subgraph Infra[基础设施]
+        LLM[DashScope qwen-plus / qwen-vl-plus]
+        PG[(PostgreSQL + pgvector<br/>会话 / 消息 / 向量 / 执行事件)]
+        OSS[阿里云 OSS / MinIO<br/>图片与知识文档]
+        SB[ToolSandbox 会话沙箱]
+    end
+
+    Agents --> LLM
+    Agents --> PG
+    Love --> OSS
+    W --> SB
+    SQL --> PG
+```
+
+四个智能体共用同一套基础设施（认证、沙箱、RAG、持久化、线程池），差异只在编排层：Love/Travel/Test 是提示词 + 工具的单智能体链路，Manus 是图状态机驱动的多智能体协作。
+
+## 超级智能体：多智能体协作
+
+详细设计见 [design/plans/06-multi-agent-graph.md](design/plans/06-multi-agent-graph.md)。
+
+```mermaid
+flowchart TD
+    S((start)) --> P["planner 规划器<br/>拆解子任务 → 指派角色"]
+    P --> W["workers 执行器<br/>并行运行多个子 agent"]
+    W --> V{"verifier 质检员"}
+    V -.->|pass / 达返工上限| A["aggregator 交付器<br/>汇总为最终回答"]
+    V -.->|revise + 反馈| W
+    A --> E((stop))
+```
+
+- **角色与工具白名单**：调研员（搜索/抓取/下载）、撰写员（读写文件/生成 PDF）、分析员（只读 SQL/白名单命令）、通用助理（全部工具含 MCP）；每个子智能体只能看到自己角色需要的工具。
+- **受控返工**：质检员对照用户请求验收，不合格携带反馈回流 workers，最多返工一轮，`maxIterations=16` 兜底防死循环。
+- **执行过程可视化**：后端推送结构化事件 `{"phase":"work","agent":"分析员","summary":"查询数据库 → 5"}`，前端按"角色 · 摘要"渲染；生成的文件自动提取为可预览附件。
+- **安全与停止**：子智能体复用沙箱与白名单；客户端断开时联动停止主图与全部子智能体；checkpoint（MemorySaver）按 `threadId=会话ID` 隔离。
 
 ## 情感分析大师功能架构
 
@@ -195,16 +266,25 @@ GET  /api/ai/love_app/knowledge/index/jobs/{jobId}
 ```text
 POST /api/ai/agent-knowledge/documents   # multipart: agentKey=love|travel, file
 GET  /api/ai/agent-knowledge/documents?agentKey=love|travel
-GET  /api/ai/travel-planner/chat/sse?tenantId=...&message=...
+GET  /api/ai/travel-planner/chat/sse?conversationId=...&message=...
 ```
 
-本地前端可用 `VITE_TENANT_ID` 设定测试租户，常规 REST 请求使用 `X-Tenant-Id`。浏览器的 `EventSource` 无法加自定义请求头，因此 SSE 使用 `tenantId` 查询参数。这里的租户值仅用于本地逻辑隔离；生产环境必须由认证后的服务端身份确定，不能直接信任客户端提交的租户值。
+租户身份从 JWT 派生，旧版 `X-Tenant-Id` 请求头与 `tenantId` 查询参数已废弃。
 
 ## 目录说明
 
 ```text
 .
 ├── src/                              # Spring Boot 后端
+│   └── main/java/com/zwx/zwxagent/
+│       ├── agent/                    # 智能体核心（BaseAgent/ToolCallAgent 等）
+│       │   └── graph/                # 多智能体图编排（planner/workers/verifier/aggregator）
+│       ├── tools/                    # 内置工具（沙箱文件、搜索、只读 SQL、PDF 等）
+│       ├── rag/                      # PGVector 检索与知识文档
+│       ├── conversation/             # 会话持久化与互斥
+│       └── ...
+├── design/                           # 架构文档与实施方案（plans/01~06）
+├── context/                          # 跨会话工作交接摘要
 ├── zwx-agent-frontend/               # Vue 3 前端
 └── zwx-image-search-mcp-server/      # 可选的图片搜索 MCP 服务
 ```
@@ -270,8 +350,6 @@ GET http://127.0.0.1:8123/api/health
 会话、消息与生成文件按用户归属隔离：请求中的 `chatId`/`conversationId` 必须属于当前用户；旧版 `X-Tenant-Id` 请求头与 `tenantId` 查询参数已废弃，租户身份从 JWT 派生。SSE 使用 fetch 流式读取以携带认证头。
 
 接口文档地址：`http://127.0.0.1:8123/api/swagger-ui.html`（仅本地/开发 profile；生产 profile 已关闭）。
-
-## 启动前端
 
 ## Docker 部署与离线安装包
 
@@ -341,13 +419,15 @@ npm run dist:mac
 
 当前构建机未配置 Apple Developer ID，因此产物未公证。正式对外分发前，应配置 Developer ID Application 证书与 Apple notarization；否则首次打开时 macOS 可能需要在“隐私与安全性”中手动允许。
 
+## 启动前端
+
 ```bash
 cd zwx-agent-frontend
 npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-情感分析大师页面：`http://127.0.0.1:3000/love-master`。
+前端默认访问地址：`http://127.0.0.1:3000/`。智能体目录中的各页面：情感分析大师 `/love-master`、超级智能体 `/super-agent`、旅游规划专家 `/travel-planner`、功能测试助手 `/test-agent`。
 
 ## 验证构建
 

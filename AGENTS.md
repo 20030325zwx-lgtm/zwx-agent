@@ -1,5 +1,13 @@
 # Local Development Contract
 
+## Session Context Protocol
+
+- `context/` 目录保存跨会话的工作上下文（会话交接摘要、当前状态快照）；稳定的架构与实施方案在 `design/`，两者不要混放。
+- **会话开始时**：先读取 `context/` 下最新的一份 `session-*.md` 摘要，恢复前置状态（已改了什么、验证到哪、遗留什么）后再动代码。
+- **完成一批重要改动或会话收尾时**：在 `context/` 写入或更新一份压缩摘要，命名 `session-YYYY-MM-DD-<主题>.md`，必须包含：改动内容、验证结果、遗留事项、环境注意事项。
+- 旧摘要不删除；被取代时在文件头部标注「已被 `<新文件>` 取代」。
+- 交接期间若发现 `context/` 与实际代码不符，以源码为准，并在摘要中修正差异。
+
 ## Non-Negotiable: Preserve Local Configuration
 
 - **Never delete, rename, overwrite, reset, replace, or regenerate** `src/main/resources/application-local.yml`.

@@ -63,7 +63,24 @@ app:
     rag:
       top-k: 3
       similarity-threshold: 0.55
-      timeout-ms: 800
+      # 重排启用后预算放宽：召回 + 重排 + 兜底余量
+      timeout-ms: 2500
+      # 扩大召回池：放宽阈值召回更多候选，交给 rerank 精排
+      recall-top-k: 15
+      recall-similarity-threshold: 0.4
+  agent:
+    rag:
+      top-k: 3
+      similarity-threshold: 0.55
+      timeout-ms: 3000
+      recall-top-k: 15
+      recall-similarity-threshold: 0.4
+  rag:
+    rerank:
+      # 总开关：false 或未配置 DashScope api-key 时自动降级为向量原始顺序
+      enabled: true
+      model: gte-rerank-v2
+      timeout-ms: 1200
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}

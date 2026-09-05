@@ -337,8 +337,9 @@ onBeforeUnmount(() => {
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: 288px var(--chunk-panel-width) 14px minmax(0, 1fr);
-  padding: 14px 20px 20px;
+  gap: 14px;
+  grid-template-columns: 288px minmax(240px, var(--chunk-panel-width)) 10px minmax(0, 1fr);
+  padding: 16px 22px 22px;
 }
 
 .panel {
@@ -460,14 +461,14 @@ onBeforeUnmount(() => {
 
 /* ── 响应式 ─────────────────────────────────────────── */
 @media (max-width: 960px) {
-  .knowledge-workspace { grid-template-columns: 232px var(--chunk-panel-width) 14px minmax(0, 1fr); }
+  .knowledge-workspace { grid-template-columns: 232px minmax(240px, var(--chunk-panel-width)) 10px minmax(0, 1fr); gap: 12px; padding: 12px 16px 16px; }
   .agent-select span { display: none; }
 }
 
 @media (max-width: 720px) {
   .header-inner { height: auto; flex-wrap: wrap; padding: 10px 14px; }
   .back-button span { display: none; }
-  .knowledge-workspace { display: flex; flex-direction: column; overflow-y: auto; padding: 12px 14px 16px; }
+  .knowledge-workspace { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding: 12px 14px 16px; }
   .panel { flex: 0 0 auto; max-height: none; }
   .document-list, .chunk-list { max-height: 320px; }
   .chunk-resizer { display: none; }

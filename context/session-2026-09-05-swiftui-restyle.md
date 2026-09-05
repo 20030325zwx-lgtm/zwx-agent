@@ -31,6 +31,12 @@
    - 响应式：960px 收窄列；720px 改纵向滚动布局、隐藏 resizer。
    验证：build 通过（1.84s），前端 200、后端 health ok。
 
+## 追加批次 3：知识库间距修复 + 首页退出登录
+
+1. **KnowledgeAdmin 三栏间距**：网格原本没设 gap（文档卡与切片卡 0 间距贴死、拖拽轨 14px、外边距 20px，节奏混乱）。改为统一 `gap:14px` + 拖拽把手独占 10px 轨道 + 外边距 16/22；切片列宽加 `minmax(240px,…)` 下限；两个响应式断点同步。
+2. **首页退出登录**：悬浮导航最右新增账号菜单（用户名首字头像按钮 → NSPopover 风格弹层：头像+用户名+角色徽标 + 红色「退出登录」项）。逻辑复用 `api/auth.js` 的 `getCurrentUser/logout`（清 localStorage 会话），退出后 `router.replace('/login')`；document 点击外部关闭，onBeforeUnmount 移除监听。角色映射 ADMIN→管理员/USER→成员，兜底显示原值。
+   验证：build 通过（1.45s），前端 200。
+
 
 ## 改动内容（纯前端，zwx-agent-frontend/）
 

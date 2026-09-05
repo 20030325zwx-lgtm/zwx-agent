@@ -23,5 +23,11 @@ const resend = async ({ content, id, index }) => { if (id && await deleteTestAss
 onMounted(async () => { await refresh(); conversations.value.length ? await select(conversations.value[0]) : await create() }); onBeforeUnmount(cancel)
 </script>
 <style scoped>
-.test-layout{display:flex;height:100vh;overflow:hidden;background:#fff}.test-layout main{display:flex;min-width:0;flex:1;flex-direction:column}.test-layout header{display:flex;height:64px;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid #e5e7eb}.test-layout header button{border:0;background:transparent;color:#64748b;font-size:13px}.test-layout header strong{font-size:15px}@media(max-width:720px){.test-layout header{padding:0 16px}}
+.test-layout { display: flex; height: 100vh; overflow: hidden; background: var(--sk-bg) }
+.test-layout main { display: flex; min-width: 0; flex: 1; flex-direction: column }
+.test-layout header { display: flex; height: 60px; flex: 0 0 60px; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid var(--sk-separator); background: var(--sk-material); backdrop-filter: var(--sk-blur); -webkit-backdrop-filter: var(--sk-blur) }
+.test-layout header button { border: 0; background: var(--sk-fill); color: var(--sk-label); border-radius: 9px; width: 32px; height: 32px; font-size: 16px }
+.test-layout header button:hover { background: var(--sk-fill-strong) }
+.test-layout header strong { font-size: 15px; font-weight: 700; letter-spacing: -0.01em }
+@media (max-width: 720px) { .test-layout header { padding: 0 16px } }
 </style>

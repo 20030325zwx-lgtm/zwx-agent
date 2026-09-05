@@ -1,15 +1,16 @@
 <template>
   <div class="login-page">
     <form class="login-card" @submit.prevent="submit">
+      <div class="login-badge" aria-hidden="true">Z</div>
       <h1>ZWX Agent</h1>
       <p class="login-subtitle">登录后继续使用智能体服务</p>
 
       <label>
-        用户名
+        <span>用户名</span>
         <input v-model.trim="username" type="text" autocomplete="username" placeholder="3-64 位字母、数字、_ . -" required />
       </label>
       <label>
-        密码
+        <span>密码</span>
         <input v-model="password" type="password" autocomplete="current-password" placeholder="至少 6 位" required />
       </label>
 
@@ -59,15 +60,122 @@ const submit = async () => {
 </script>
 
 <style scoped>
-.login-page { display: grid; place-items: center; min-height: 100vh; background: #f5f6f8; padding: 24px; }
-.login-card { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 16px; padding: 32px; border: 1px solid #e5e7eb; border-radius: 16px; background: #fff; box-shadow: 0 10px 30px rgba(15, 23, 42, .06); }
-.login-card h1 { margin: 0; font-size: 22px; text-align: center; }
-.login-subtitle { margin: 0; color: #6b7280; font-size: 13px; text-align: center; }
-.login-card label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #374151; }
-.login-card input { height: 40px; padding: 0 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; }
-.login-card input:focus { border-color: #006fee; box-shadow: 0 0 0 3px rgba(0, 111, 238, .12); }
-.login-error { margin: 0; color: #c33232; font-size: 13px; }
-.login-submit { height: 42px; border: 0; border-radius: 8px; background: #006fee; color: #fff; font-size: 15px; cursor: pointer; }
-.login-submit:disabled { opacity: .6; cursor: default; }
-.login-switch { border: 0; background: transparent; color: #006fee; font-size: 13px; cursor: pointer; }
+.login-page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  background:
+    radial-gradient(52rem 32rem at 12% -8%, rgba(0, 122, 255, 0.1), transparent 60%),
+    radial-gradient(44rem 30rem at 108% 112%, rgba(88, 86, 214, 0.1), transparent 60%),
+    var(--sk-bg);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 368px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 36px 32px 28px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 24px;
+  background: var(--sk-material-strong);
+  backdrop-filter: var(--sk-blur);
+  -webkit-backdrop-filter: var(--sk-blur);
+  box-shadow: var(--sk-shadow-pop);
+}
+
+.login-badge {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto;
+  place-items: center;
+  border-radius: 15px;
+  background: linear-gradient(160deg, #3f9bff, var(--sk-blue) 58%, #0062cc);
+  color: #fff;
+  font-size: 24px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.login-card h1 {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+.login-subtitle {
+  margin: -8px 0 8px;
+  color: var(--sk-label-2);
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.login-card label span {
+  color: var(--sk-label-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.login-card input {
+  height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--sk-fill);
+  color: var(--sk-label);
+  font-size: 15px;
+  outline: none;
+}
+
+.login-card input::placeholder { color: var(--sk-label-3); }
+
+.login-card input:focus {
+  background: var(--sk-surface);
+  box-shadow: 0 0 0 3px var(--zwx-primary-ring), 0 0 0 1px var(--zwx-primary) inset;
+}
+
+.login-error {
+  margin: 0;
+  color: var(--sk-red);
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-submit {
+  height: 46px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #2590ff, var(--zwx-primary));
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: 0 6px 16px var(--zwx-primary-ring);
+}
+
+.login-submit:hover:not(:disabled) { filter: brightness(1.06); }
+
+.login-submit:active:not(:disabled) { transform: scale(0.98); }
+
+.login-submit:disabled { opacity: 0.5; }
+
+.login-switch {
+  border: 0;
+  background: transparent;
+  color: var(--zwx-primary);
+  font-size: 13px;
+}
+
+.login-switch:hover { text-decoration: underline; text-underline-offset: 3px; }
 </style>

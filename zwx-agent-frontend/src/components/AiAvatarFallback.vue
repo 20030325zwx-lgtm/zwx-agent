@@ -21,15 +21,15 @@ defineProps({
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  border-radius: 50%;
+  font-size: 17px;
+  border-radius: 32%;
 }
 
 .love {
-  background: linear-gradient(45deg, #ff6b8b, #ff8e8e);
+  background: linear-gradient(145deg, #ff7a95, #ff2d55);
 }
 
 .default, .super {
-  background: linear-gradient(45deg, #3f51b5, #5677fc);
+  background: linear-gradient(145deg, #4da2ff, #007aff);
 }
-</style> 
+</style>

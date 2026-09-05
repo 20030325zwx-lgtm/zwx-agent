@@ -1,19 +1,48 @@
 :root {
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  color: #1f2937;
-  background: #f7f8fa;
-  --zwx-primary: #006fee;
-  --zwx-primary-dark: #005bc4;
-  --zwx-primary-soft: #eaf3ff;
-  --zwx-primary-ring: rgba(0, 111, 238, .12);
-  --zwx-foreground: #111827;
-  --zwx-muted: #6b7280;
-  --zwx-divider: #e5e7eb;
-  --zwx-surface: #ffffff;
-  --zwx-subtle: #f4f4f5;
-  --zwx-radius-sm: 8px;
-  --zwx-radius-md: 12px;
-  --zwx-shadow: 0 8px 24px rgba(15, 23, 42, .08);
+  /* ── SwiftUI / macOS light design tokens ─────────────────────────── */
+  --sk-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+
+  /* Materials & fills */
+  --sk-bg: #f2f2f7;
+  --sk-surface: #ffffff;
+  --sk-material: rgba(255, 255, 255, 0.72);
+  --sk-material-strong: rgba(255, 255, 255, 0.88);
+  --sk-fill: rgba(120, 120, 128, 0.1);
+  --sk-fill-strong: rgba(120, 120, 128, 0.18);
+
+  /* Labels & separators (Apple semantic colors) */
+  --sk-label: #1d1d1f;
+  --sk-label-2: #6e6e73;
+  --sk-label-3: #aeaeb2;
+  --sk-separator: rgba(60, 60, 67, 0.14);
+  --sk-separator-strong: rgba(60, 60, 67, 0.24);
+
+  /* System colors */
+  --sk-blue: #007aff;
+  --sk-green: #34c759;
+  --sk-red: #ff3b30;
+  --sk-orange: #ff9500;
+
+  /* Shape & depth */
+  --sk-radius-sm: 8px;
+  --sk-radius: 12px;
+  --sk-radius-lg: 16px;
+  --sk-radius-xl: 22px;
+  --sk-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.05);
+  --sk-shadow-raised: 0 2px 6px rgba(0, 0, 0, 0.06), 0 18px 44px rgba(0, 0, 0, 0.08);
+  --sk-shadow-pop: 0 4px 14px rgba(0, 0, 0, 0.1), 0 24px 64px rgba(0, 0, 0, 0.18);
+  --sk-blur: saturate(180%) blur(20px);
+
+  /* Theme hooks — overridden at runtime by AgentSettingsMenu */
+  --zwx-primary: var(--sk-blue);
+  --zwx-primary-dark: #0062cc;
+  --zwx-primary-soft: #e9f2ff;
+  --zwx-primary-ring: rgba(0, 122, 255, 0.22);
+
+  font-family: var(--sk-font);
+  color: var(--sk-label);
+  background: var(--sk-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -22,15 +51,24 @@
 
 * { box-sizing: border-box; }
 
-body { min-width: 320px; min-height: 100vh; margin: 0; }
+body { min-width: 320px; min-height: 100vh; margin: 0; background: var(--sk-bg); }
 
-button, textarea { font: inherit; }
+button, textarea, input, select { font-family: inherit; }
 
 button { cursor: pointer; }
 
 button:disabled { cursor: not-allowed; }
 
-button, input, textarea { transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease, color .18s ease, transform .18s ease; }
-button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--zwx-primary); outline-offset: 2px; }
+button, input, textarea, select {
+  transition: border-color 0.18s ease, background-color 0.18s ease,
+    box-shadow 0.18s ease, color 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+}
+
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 3px solid var(--zwx-primary-ring);
+  outline-offset: 1px;
+}
+
+::selection { background: rgba(0, 122, 255, 0.22); }
 
 #app { width: 100%; min-height: 100vh; }

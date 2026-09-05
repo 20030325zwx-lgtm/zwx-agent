@@ -1,7 +1,3 @@
-<script setup>
-import HelloWorld from './components/HelloWorld.vue'
-</script>
-
 <template>
   <router-view />
 </template>
@@ -14,10 +10,10 @@ import HelloWorld from './components/HelloWorld.vue'
 }
 
 html, body {
-  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: var(--sk-font);
   font-size: 16px;
-  color: #333;
-  background-color: #f0f2f5;
+  color: var(--sk-label);
+  background-color: var(--sk-bg);
   width: 100%;
   height: 100%;
   overflow-x: hidden;
@@ -50,23 +46,24 @@ button {
   }
 }
 
-/* 滚动条样式 */
+/* macOS 风格细滚动条 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 3px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: rgba(60, 60, 67, 0.3);
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #aaa;
+  background-color: rgba(60, 60, 67, 0.5);
 }
 </style>

@@ -12,6 +12,7 @@
           <span class="topbar-note">AI 工作空间</span>
           <button class="skill-entry" type="button" @click="router.push({ name: 'SkillSettings' })"><Settings2 :size="14" />Skill</button>
           <button class="skill-entry" type="button" @click="router.push({ name: 'McpSettings' })"><PlugZap :size="14" />MCP</button>
+          <button class="skill-entry" type="button" @click="router.push({ name: 'KnowledgeAdmin' })"><Database :size="14" />知识库</button>
           <AgentSettingsMenu agent-key="love" default-theme="blue" trigger-label="本机服务设置" show-trigger-label />
         </div>
       </div>
@@ -102,7 +103,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { ChevronRight, PlugZap, Settings2 } from 'lucide-vue-next'
+import { ChevronRight, Database, PlugZap, Settings2 } from 'lucide-vue-next'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 import { AGENT_LIST } from '../config/agents'
 

@@ -19,6 +19,18 @@
 
 验证：`npm run build` 通过（1.72s）；`launchctl kickstart -k` 重启前端后 200，curl 抽查 vite 已下发新 Home.vue（hero-badge/featured-grid 存在）。后端无改动。
 
+## 追加批次 2：首页入口补全 + 知识库页面重设计 + 两处 bug 修复
+
+1. **Bug：特色卡悬浮纯蓝色块**——`.featured-glow` 绑了 `agent.iconClass`（`super-icon`）把图标蓝色渐变当成自己背景，且绝对定位元素绘制在普通文本之上。修复：为各 iconClass 定义专属半透明 radial-gradient 柔光；`.agent-icon/.agent-copy/.open-agent` 提到 `z-index:1`。
+2. **Bug：卡片右侧圆形箭头不居中**——文字字符 `›` 受基线影响。修复：改用 lucide `ChevronRight` SVG（grid+place-items 精确居中），并去掉 font-size/line-height hack。
+3. **首页导航新增「知识库」入口**：topbar-actions 在 MCP 后加 `<Database/> 知识库` pill（router push KnowledgeAdmin）。
+4. **KnowledgeAdmin.vue 整页重设计**（script 仅新增 useRouter；上传/轮询/拖拽调宽等逻辑全部保留）：
+   - 布局改为「灰色画布上的三张圆角卡片」：毛玻璃工具栏（返回+标题+智能体归属 select+上传按钮+设置菜单）→ 文档列表卡 / 切片列表卡（可拖拽调宽）/ 原文预览卡。
+   - 拖拽分隔条改为居中胶囊把手（hover 主题色拉长）；错误提示改为毛玻璃 toast（带 transition 动画）。
+   - 切片列与预览列新增图标配的空状态（Layers/BookOpen/FileWarning）；状态徽章语义色（ready 绿/failed 红/indexing/pending 橙）。
+   - 响应式：960px 收窄列；720px 改纵向滚动布局、隐藏 resizer。
+   验证：build 通过（1.84s），前端 200、后端 health ok。
+
 
 ## 改动内容（纯前端，zwx-agent-frontend/）
 

@@ -1,37 +1,54 @@
 <template>
   <main class="knowledge-admin">
     <header class="admin-header">
-      <div>
-        <span class="eyebrow">{{ currentAgent.name }}</span>
-        <h1>知识库管理</h1>
-      </div>
-      <div class="admin-actions">
-        <label>资料归属
-          <select v-model="agentKey" :disabled="uploading" @change="loadPrivateDocuments">
-            <option v-for="agent in KNOWLEDGE_AGENTS" :key="agent.key" :value="agent.key">{{ agent.name }}</option>
-          </select>
-        </label>
-        <input ref="knowledgeFileInput" class="knowledge-file-input" type="file" accept=".md,.txt,.pdf,text/plain,text/markdown,application/pdf" @change="uploadPrivateDocument" />
-        <button type="button" class="upload-button" :disabled="uploading" @click="knowledgeFileInput?.click()">{{ uploading ? '上传中...' : '上传资料' }}</button>
-        <AgentSettingsMenu :agent-key="agentKey" default-theme="rose" />
+      <div class="header-inner">
+        <div class="header-start">
+          <button class="back-button" type="button" aria-label="返回智能体目录" @click="router.push('/')"><ArrowLeft :size="16" />智能体目录</button>
+          <span class="header-divider" aria-hidden="true"></span>
+          <div class="header-title">
+            <h1>知识库管理</h1>
+            <span class="header-sub">{{ currentAgent.name }} · {{ currentAgent.category }}</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <label class="agent-select">
+            <span>资料归属</span>
+            <select v-model="agentKey" :disabled="uploading" @change="loadPrivateDocuments">
+              <option v-for="agent in KNOWLEDGE_AGENTS" :key="agent.key" :value="agent.key">{{ agent.name }}</option>
+            </select>
+          </label>
+          <input ref="knowledgeFileInput" class="knowledge-file-input" type="file" accept=".md,.txt,.pdf,text/plain,text/markdown,application/pdf" @change="uploadPrivateDocument" />
+          <button type="button" class="upload-button" :disabled="uploading" @click="knowledgeFileInput?.click()"><Plus :size="15" />{{ uploading ? '上传中...' : '上传资料' }}</button>
+          <AgentSettingsMenu :agent-key="agentKey" default-theme="rose" />
+        </div>
       </div>
     </header>
 
-    <p v-if="error" class="workspace-notice">{{ error }} <button type="button" @click="loadPrivateDocuments">重新加载</button></p>
+    <transition name="notice">
+      <p v-if="error" class="workspace-notice">{{ error }} <button type="button" @click="loadPrivateDocuments">重新加载</button></p>
+    </transition>
+
     <section class="knowledge-workspace" :style="{ '--chunk-panel-width': `${chunkPanelWidth}px` }">
-      <aside class="document-panel">
-        <div class="private-heading">
-          <div><span>私有资料</span><small>{{ privateDocuments.length }} 个 · 当前智能体</small></div>
+      <!-- 文档列表 -->
+      <aside class="panel document-panel">
+        <div class="panel-heading">
+          <div class="panel-title"><span>私有资料</span><small>{{ privateDocuments.length }} 个 · 仅当前智能体可检索</small></div>
           <span class="scope-status">{{ currentAgent.category }}</span>
         </div>
-        <div class="private-document-list">
-          <div v-if="loadingPrivateDocuments" class="private-state">正在读取资料...</div>
-          <button v-for="document in filteredDocuments" :key="document.id" type="button" class="private-document-row" :class="{ active: document.id === selectedDocumentId }" @click="selectDocument(document.id)">
+        <div class="document-list">
+          <div v-if="loadingPrivateDocuments" class="panel-state">正在读取资料...</div>
+          <button v-for="document in filteredDocuments" :key="document.id" type="button" class="document-row" :class="{ active: document.id === selectedDocumentId }" @click="selectDocument(document.id)">
             <strong :title="document.filename">{{ document.filename }}</strong>
-            <span>{{ document.chunkCount }} 个切片</span>
-            <em :class="`status-${document.status.toLowerCase()}`">{{ document.status === 'READY' ? '已入库' : document.status === 'FAILED' ? '失败' : document.status === 'INDEXING' ? '切片中' : '等待中' }}</em>
+            <span class="document-meta">
+              <em>{{ document.chunkCount }} 个切片</em>
+              <i :class="`status-${document.status.toLowerCase()}`">{{ document.status === 'READY' ? '已入库' : document.status === 'FAILED' ? '失败' : document.status === 'INDEXING' ? '切片中' : '等待中' }}</i>
+            </span>
           </button>
-          <p v-if="!loadingPrivateDocuments && !filteredDocuments.length" class="private-state">上传 Markdown 或文本资料后，仅当前租户和智能体可检索。</p>
+          <div v-if="!loadingPrivateDocuments && !filteredDocuments.length" class="panel-empty">
+            <FileText :size="22" />
+            <strong>还没有资料</strong>
+            <span>上传 Markdown、TXT 或 PDF 后，将自动切片并向量化入库。</span>
+          </div>
         </div>
         <label class="document-search">
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.75" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M13 13 L17.5 17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
@@ -39,30 +56,54 @@
         </label>
       </aside>
 
-      <aside class="chunk-panel">
-        <div class="panel-heading"><span>实际切片</span><small>{{ detail?.chunks.length || 0 }} 个</small></div>
+      <!-- 切片列表 -->
+      <aside class="panel chunk-panel">
+        <div class="panel-heading">
+          <div class="panel-title"><span>实际切片</span><small>{{ detail?.chunks.length || 0 }} 个向量切片</small></div>
+        </div>
         <div class="chunk-list">
           <div v-if="loadingDetail" class="panel-state">正在读取切片...</div>
           <button v-for="chunk in detail?.chunks" :key="chunk.id" type="button" class="chunk-row"
             :class="{ active: chunk.id === selectedChunkId }" @click="selectedChunkId = chunk.id">
-            <span>切片 {{ chunk.chunkIndex }}<small v-if="chunk.section"> · 第 {{ chunk.section }} 节</small></span>
+            <span class="chunk-index">切片 {{ chunk.chunkIndex }}<small v-if="chunk.section"> · 第 {{ chunk.section }} 节</small></span>
             <p>{{ excerpt(chunk.content) }}</p>
           </button>
-          <p v-if="detail && !detail.chunks.length" class="panel-state">该文档尚未写入向量库。</p>
+          <div v-if="detail && !detail.chunks.length" class="panel-empty">
+            <Sparkles :size="22" />
+            <strong>该文档尚未写入向量库</strong>
+            <span>等待索引完成后再来查看。</span>
+          </div>
+          <div v-else-if="!detail && !loadingDetail" class="panel-empty">
+            <Layers :size="22" />
+            <strong>选择一个文档</strong>
+            <span>左侧选择文档后，这里展示它的实际向量切片。</span>
+          </div>
         </div>
       </aside>
 
-      <div class="chunk-resizer" role="separator" aria-orientation="vertical" aria-label="调整切片列宽度" @pointerdown="startResize"></div>
+      <div class="chunk-resizer" role="separator" aria-orientation="vertical" aria-label="调整切片列宽度" @pointerdown="startResize"><i></i></div>
 
-      <section class="preview-panel">
+      <!-- 原文预览 -->
+      <section class="panel preview-panel">
         <div class="preview-heading">
-          <div><span class="eyebrow">原始文档预览</span><h2>{{ detail?.filename || '选择一个文档' }}</h2></div>
+          <div class="panel-title">
+            <span>原始文档预览</span>
+            <strong>{{ detail?.filename || '选择一个文档' }}</strong>
+          </div>
           <code v-if="detail">{{ detail.objectKey }}</code>
         </div>
         <div class="preview-body">
           <pre v-if="detail?.sourceContent" class="source-preview">{{ detail.sourceContent }}</pre>
-          <div v-else-if="detail" class="unavailable-preview">该文档已在向量库中，但原始文件不在当前项目内，暂不能预览。</div>
-          <div v-else class="unavailable-preview">选择左侧文档以查看其原文和切片。</div>
+          <div v-else-if="detail" class="preview-placeholder">
+            <FileWarning :size="24" />
+            <strong>暂不能预览原文</strong>
+            <span>该文档已在向量库中，但原始文件不在当前项目内。</span>
+          </div>
+          <div v-else class="preview-placeholder">
+            <BookOpen :size="24" />
+            <strong>选择左侧文档开始浏览</strong>
+            <span>这里会展示文档原文与对应的切片位置。</span>
+          </div>
         </div>
       </section>
     </section>
@@ -71,8 +112,9 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
+import { ArrowLeft, BookOpen, FileText, FileWarning, Layers, Plus, Sparkles } from 'lucide-vue-next'
 import { getAgentKnowledgeDocument, listAgentKnowledgeDocuments, uploadAgentKnowledgeDocument } from '../api'
 import { KNOWLEDGE_AGENTS, getAgent } from '../config/agents'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
@@ -80,6 +122,7 @@ import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 useHead({ title: '知识库管理 - ZWX Agent' })
 
 const route = useRoute()
+const router = useRouter()
 const requestedAgentKey = typeof route.query.agentKey === 'string' && KNOWLEDGE_AGENTS.some(agent => agent.key === route.query.agentKey) ? route.query.agentKey : 'love'
 const detail = ref(null)
 const selectedDocumentId = ref('')
@@ -187,46 +230,73 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.knowledge-admin { height: 100vh; overflow: hidden; background: var(--sk-bg); color: var(--sk-label); }
-
-.admin-header {
+.knowledge-admin {
+  position: relative;
   display: flex;
-  height: 88px;
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 32px;
+  height: 100vh;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(50rem 30rem at 88% -16rem, rgba(0, 122, 255, 0.08), transparent 66%),
+    var(--sk-bg);
+  color: var(--sk-label);
+}
+
+/* ── 毛玻璃工具栏 ───────────────────────────────────── */
+.admin-header {
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--sk-separator);
   background: var(--sk-material);
   backdrop-filter: var(--sk-blur);
   -webkit-backdrop-filter: var(--sk-blur);
 }
 
-.eyebrow { color: var(--sk-label-3); font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.header-inner {
+  display: flex;
+  height: 66px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+}
 
-.admin-header h1 { margin: 4px 0 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.header-start { display: flex; min-width: 0; align-items: center; gap: 14px; }
 
-.admin-actions { display: flex; align-items: center; gap: 10px; }
+.back-button { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; border: 0; border-radius: 10px; background: transparent; color: var(--zwx-primary); font-size: 13px; }
+.back-button:hover { opacity: 0.7; }
 
-.admin-actions label { display: flex; align-items: center; gap: 7px; color: var(--sk-label-2); font-size: 12px; font-weight: 550; }
+.header-divider { width: 1px; height: 22px; background: var(--sk-separator-strong); }
 
-.admin-actions select {
-  height: 34px;
+.header-title { display: grid; min-width: 0; gap: 1px; }
+.header-title h1 { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+.header-sub { overflow: hidden; color: var(--sk-label-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+
+.agent-select { display: flex; align-items: center; gap: 8px; color: var(--sk-label-2); font-size: 12px; font-weight: 550; }
+
+.agent-select select {
+  height: 36px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--sk-fill);
   color: var(--sk-label);
-  padding: 0 9px;
+  padding: 0 10px;
   font-size: 12px;
   outline: none;
 }
 
-.admin-actions select:focus { background: var(--sk-surface); box-shadow: 0 0 0 3px var(--zwx-primary-ring); }
+.agent-select select:focus { background: var(--sk-surface); box-shadow: 0 0 0 3px var(--zwx-primary-ring); }
+
+.knowledge-file-input { display: none; }
 
 .upload-button {
-  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 11px;
   padding: 0 14px;
   background: linear-gradient(180deg, #2590ff, var(--zwx-primary));
   color: #fff;
@@ -236,115 +306,171 @@ onBeforeUnmount(() => {
 }
 
 .upload-button:hover:not(:disabled) { filter: brightness(1.06); }
+.upload-button:active:not(:disabled) { transform: scale(0.98); }
 .upload-button:disabled { background: var(--sk-fill-strong); color: var(--sk-label-2); box-shadow: none; }
 
-.knowledge-file-input { display: none; }
-
+/* ── 错误提示浮层 ───────────────────────────────────── */
 .workspace-notice {
   position: absolute;
-  z-index: 3;
-  top: 98px;
-  right: 24px;
+  z-index: 20;
+  top: 78px;
+  right: 20px;
   margin: 0;
   border: 1px solid rgba(255, 149, 0, 0.3);
-  border-radius: 12px;
-  padding: 8px 11px;
-  background: rgba(255, 149, 0, 0.1);
+  border-radius: 14px;
+  padding: 9px 13px;
+  background: var(--sk-material-strong);
   backdrop-filter: var(--sk-blur);
   -webkit-backdrop-filter: var(--sk-blur);
   color: #8a5a00;
   font-size: 12px;
-  box-shadow: var(--sk-shadow-card);
+  box-shadow: var(--sk-shadow-pop);
 }
 
 .workspace-notice button { margin-left: 6px; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
 
-.knowledge-workspace { display: grid; height: calc(100vh - 88px); min-height: 0; grid-template-columns: 280px var(--chunk-panel-width) 10px minmax(0, 1fr); }
+.notice-enter-active, .notice-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.notice-enter-from, .notice-leave-to { opacity: 0; transform: translateY(-6px); }
 
-.document-panel, .chunk-panel, .preview-panel { min-height: 0; }
-
-.document-panel, .chunk-panel { display: flex; flex-direction: column; border-right: 1px solid var(--sk-separator); background: var(--sk-surface); }
-
-.document-panel { padding: 14px 10px 12px; }
-
-.private-heading { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 10px; color: var(--sk-label); font-size: 13px; font-weight: 700; }
-.private-heading div { display: grid; gap: 3px; }
-.private-heading small { color: var(--sk-label-3); font-size: 11px; font-weight: 400; }
-
-.scope-status { border-radius: 6px; background: var(--zwx-primary-soft); color: var(--zwx-primary); padding: 3px 7px; font-size: 10px; font-weight: 700; }
-
-.private-document-list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 2px; align-content: start; padding-bottom: 10px; }
-
-.private-state { margin: 18px 10px; color: var(--sk-label-3); font-size: 13px; }
-
-.private-document-row {
+/* ── 三栏工作区：灰色画布上的圆角卡片 ──────────────── */
+.knowledge-workspace {
   display: grid;
-  gap: 3px;
-  border: 0;
-  border-radius: 10px;
-  padding: 9px 10px;
-  background: transparent;
-  color: inherit;
-  text-align: left;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 288px var(--chunk-panel-width) 14px minmax(0, 1fr);
+  padding: 14px 20px 20px;
 }
 
-.private-document-row strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.private-document-row span { color: var(--sk-label-3); font-size: 11px; }
-
-.private-document-row em { width: max-content; border-radius: 5px; padding: 2px 6px; font-size: 10px; font-style: normal; font-weight: 700; background: var(--sk-fill); color: var(--sk-label-2); }
-.private-document-row em.status-ready { background: rgba(52, 199, 89, 0.14); color: #1f9d4d; }
-.private-document-row em.status-failed { background: rgba(255, 59, 48, 0.12); color: var(--sk-red); }
-.private-document-row em.status-indexing, .private-document-row em.status-pending { background: rgba(255, 149, 0, 0.14); color: #8a5a00; }
-
-.private-document-row:hover { background: var(--sk-fill); }
-
-.private-document-row.active { background: var(--zwx-primary-soft); }
-
-.document-search {
+.panel {
   display: flex;
-  height: 38px;
-  flex: 0 0 38px;
-  align-items: center;
-  gap: 8px;
-  border-radius: 11px;
-  padding: 0 11px;
-  background: var(--sk-fill);
-  color: var(--sk-label-3);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--sk-separator);
+  border-radius: 18px;
+  background: var(--sk-surface);
+  box-shadow: var(--sk-shadow-card);
 }
+
+.panel-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--sk-separator);
+  padding: 14px 16px 12px;
+}
+
+.panel-title { display: grid; min-width: 0; gap: 2px; }
+.panel-title span { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; }
+.panel-title small { overflow: hidden; color: var(--sk-label-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.panel-title strong { overflow: hidden; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
+
+.scope-status { flex: 0 0 auto; border-radius: 7px; background: var(--zwx-primary-soft); color: var(--zwx-primary); padding: 4px 8px; font-size: 10px; font-weight: 700; }
+
+.panel-state { padding: 24px 16px; color: var(--sk-label-3); font-size: 13px; }
+
+.panel-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin: 18px 14px;
+  border: 1px dashed var(--sk-separator-strong);
+  border-radius: 14px;
+  padding: 26px 16px;
+  color: var(--sk-label-2);
+  font-size: 12px;
+  text-align: center;
+}
+
+.panel-empty :deep(svg) { color: var(--sk-label-3); }
+.panel-empty strong { color: var(--sk-label); font-size: 13px; }
+
+/* ── 文档列表 ───────────────────────────────────────── */
+.document-list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 3px; align-content: start; padding: 10px; }
+
+.document-row { display: grid; gap: 5px; border: 0; border-radius: 12px; padding: 10px 12px; background: transparent; color: inherit; text-align: left; }
+
+.document-row strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+
+.document-meta { display: flex; align-items: center; gap: 7px; }
+.document-meta em { color: var(--sk-label-3); font-size: 11px; font-style: normal; }
+
+.document-meta i { border-radius: 6px; padding: 2px 7px; font-size: 10px; font-style: normal; font-weight: 700; background: var(--sk-fill); color: var(--sk-label-2); }
+.document-meta i.status-ready { background: rgba(52, 199, 89, 0.14); color: #1f9d4d; }
+.document-meta i.status-failed { background: rgba(255, 59, 48, 0.12); color: var(--sk-red); }
+.document-meta i.status-indexing, .document-meta i.status-pending { background: rgba(255, 149, 0, 0.14); color: #8a5a00; }
+
+.document-row:hover { background: var(--sk-fill); }
+
+.document-row.active { background: var(--zwx-primary-soft); }
+.document-row.active em { color: var(--zwx-primary); }
+
+.document-search { display: flex; height: 40px; flex: 0 0 40px; margin: 0 10px 12px; align-items: center; gap: 8px; border-radius: 12px; padding: 0 12px; background: var(--sk-fill); color: var(--sk-label-3); }
 
 .document-search svg { width: 15px; height: 15px; flex: 0 0 15px; }
 
 .document-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--sk-label); font-size: 13px; }
 .document-search input::placeholder { color: var(--sk-label-3); }
 
-.panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 16px 14px 8px; color: var(--sk-label); font-size: 13px; font-weight: 700; }
-.panel-heading small { color: var(--sk-label-3); font-size: 11px; font-weight: 400; }
+/* ── 切片列表 ───────────────────────────────────────── */
+.chunk-list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 3px; align-content: start; padding: 10px; }
 
-.chunk-list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 2px; align-content: start; padding: 0 10px 12px; }
+.chunk-row { display: grid; gap: 5px; border: 0; border-radius: 12px; padding: 10px 12px; background: transparent; color: inherit; text-align: left; }
 
-.panel-state { margin: 18px 8px; color: var(--sk-label-3); font-size: 13px; }
+.chunk-index { color: var(--sk-label); font-size: 12px; font-weight: 700; }
+.chunk-index small { color: var(--sk-label-3); font-size: 11px; font-weight: 400; }
 
-.chunk-row { display: grid; gap: 4px; border: 0; border-radius: 10px; padding: 9px 10px; background: transparent; color: inherit; text-align: left; }
-.chunk-row span { color: var(--sk-label); font-size: 12px; font-weight: 650; }
-.chunk-row span small { color: var(--sk-label-3); font-size: 11px; font-weight: 400; }
-.chunk-row p { margin: 0; color: var(--sk-label-2); font-size: 12px; line-height: 1.5; }
+.chunk-row p { margin: 0; color: var(--sk-label-2); font-size: 12px; line-height: 1.55; }
 
 .chunk-row:hover { background: var(--sk-fill); }
 .chunk-row.active { background: var(--zwx-primary-soft); }
+.chunk-row.active p { color: var(--sk-label); }
 
-.chunk-resizer { cursor: col-resize; background: transparent; transition: background-color 0.15s ease; }
-.chunk-resizer:hover { background: var(--zwx-primary-ring); }
+/* ── 拖拽分隔条 ─────────────────────────────────────── */
+.chunk-resizer { position: relative; cursor: col-resize; }
 
-.preview-panel { display: flex; min-width: 0; flex-direction: column; background: var(--sk-bg); }
+.chunk-resizer i {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--sk-separator-strong);
+  transform: translate(-50%, -50%);
+  transition: background-color 0.15s ease, height 0.15s ease;
+}
 
-.preview-heading { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 18px 24px 14px; }
-.preview-heading h2 { margin: 3px 0 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.chunk-resizer:hover i, .chunk-resizer:active i { height: 64px; background: var(--zwx-primary); }
 
-.preview-heading code { max-width: 320px; overflow: hidden; border-radius: 8px; padding: 4px 8px; background: var(--sk-surface); color: var(--sk-label-2); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); }
+/* ── 原文预览 ───────────────────────────────────────── */
+.preview-heading { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--sk-separator); padding: 14px 18px 12px; }
 
-.preview-body { min-height: 0; flex: 1; overflow: hidden; margin: 0 20px 20px; border: 1px solid var(--sk-separator); border-radius: 18px; background: var(--sk-surface); box-shadow: var(--sk-shadow-card); }
+.preview-heading code { max-width: 320px; overflow: hidden; border-radius: 8px; padding: 4px 9px; background: var(--sk-fill); color: var(--sk-label-2); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
-.source-preview { height: 100%; overflow: auto; margin: 0; padding: 20px 22px; color: var(--sk-label); font: 12.5px/1.7 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.preview-body { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 
-.unavailable-preview { display: grid; height: 100%; place-items: center; padding: 24px; color: var(--sk-label-3); font-size: 13px; text-align: center; }
+.source-preview { flex: 1; overflow: auto; margin: 0; padding: 18px 22px; color: var(--sk-label); font: 12.5px/1.75 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+
+.preview-placeholder { display: grid; flex: 1; place-content: center; justify-items: center; gap: 7px; padding: 24px; color: var(--sk-label-2); font-size: 13px; text-align: center; }
+.preview-placeholder :deep(svg) { color: var(--sk-label-3); }
+.preview-placeholder strong { color: var(--sk-label); font-size: 15px; }
+
+/* ── 响应式 ─────────────────────────────────────────── */
+@media (max-width: 960px) {
+  .knowledge-workspace { grid-template-columns: 232px var(--chunk-panel-width) 14px minmax(0, 1fr); }
+  .agent-select span { display: none; }
+}
+
+@media (max-width: 720px) {
+  .header-inner { height: auto; flex-wrap: wrap; padding: 10px 14px; }
+  .back-button span { display: none; }
+  .knowledge-workspace { display: flex; flex-direction: column; overflow-y: auto; padding: 12px 14px 16px; }
+  .panel { flex: 0 0 auto; max-height: none; }
+  .document-list, .chunk-list { max-height: 320px; }
+  .chunk-resizer { display: none; }
+  .source-preview, .preview-placeholder { min-height: 260px; }
+}
 </style>

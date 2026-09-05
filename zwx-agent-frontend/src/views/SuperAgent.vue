@@ -54,12 +54,30 @@ const activityLabel = detail => {
   if (tool) return `已${toolLabels[tool] || `执行 ${tool}`}`
   return detail.startsWith('执行结束') ? '已达到步骤上限' : '正在处理任务'
 }
+const parseActivity = data => {
+  try {
+    const event = JSON.parse(data)
+    if (event && typeof event === 'object' && event.summary) {
+      return { label: event.agent ? `${event.agent} · ${event.summary}` : event.summary, detail: event.summary }
+    }
+  } catch { /* 旧格式纯文本兜底 */ }
+  return { label: activityLabel(data), detail: data }
+}
 const mapFiles = (conversationId, fileAttachments) => {
   try {
-    const files = JSON.parse(fileAttachments || '[]').map(file => ({ ...file, url: '' }))
-    files.forEach(file => getManusFileUrl(conversationId, file.path).then(url => { file.url = url }).catch(() => {}))
-    return files
+    return JSON.parse(fileAttachments || '[]').map(file => ({ ...file, url: '' }))
   } catch { return [] }
+}
+// 通过响应式代理回填文件地址：在 messages.value 上就地替换，确保模板重新渲染
+const hydrateFileUrls = conversationId => {
+  messages.value.forEach(message => {
+    ;(message.files || []).forEach((file, index) => {
+      if (file.url || !file.path) return
+      getManusFileUrl(conversationId, file.path)
+        .then(url => { message.files[index] = { ...file, url } })
+        .catch(() => { message.files[index] = { ...file, broken: true } })
+    })
+  })
 }
 const mapMessage = message => ({
   id: message.id,
@@ -89,7 +107,10 @@ const selectConversation = async conversation => {
   chatId.value = conversation.id
   sidebarOpen.value = false
   try { messages.value = (await getManusConversationMessages(conversation.id)).map(mapMessage) }
-  finally { messagesLoading.value = false }
+  finally {
+    messagesLoading.value = false
+    hydrateFileUrls(conversation.id)
+  }
 }
 const removeConversation = async conversation => {
   if (!window.confirm(`删除“${conversation.title}”及其全部消息吗？`)) return
@@ -112,8 +133,7 @@ const sendMessage = payload => {
   eventSource.addEventListener('activity', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return
-    const detail = event.data || ''
-    answer.activities.push({ label: activityLabel(detail), detail })
+    answer.activities.push(parseActivity(event.data || ''))
   })
   eventSource.onmessage = event => {
     if (event.data === '[DONE]') { finishStream(); return }
@@ -136,6 +156,7 @@ const finishStream = async () => {
   await refreshConversations()
   const history = await getManusConversationMessages(chatId.value)
   messages.value = history.map(mapMessage)
+  hydrateFileUrls(chatId.value)
 }
 const cancelActiveStream = () => {
   eventSource?.close()

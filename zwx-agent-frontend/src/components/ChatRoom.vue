@@ -53,7 +53,7 @@
             <button v-for="(activity, activityIndex) in msg.activities" :key="`${activity.label || activity}-${activityIndex}`" type="button" :class="{ active: connectionStatus === 'connecting' && index === messages.length - 1 && activityIndex === msg.activities.length - 1 }" @click="openActivity(activity, msg)">{{ activity.label || activity }}</button>
           </div>
           <div v-if="msg.files?.length" class="message-files" aria-label="生成的文件">
-            <a v-for="file in msg.files" :key="file.path" :href="file.url" target="_blank" rel="noopener noreferrer">
+            <a v-for="file in msg.files" :key="file.path" :href="file.url || undefined" target="_blank" rel="noopener noreferrer">
               <FileText :size="16" />
               <span>{{ file.name }}</span>
               <small v-if="file.type === 'pdf'">PDF</small>

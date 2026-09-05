@@ -50,6 +50,7 @@ const parseSseStream = async (body, emit) => {
 }
 
 // 封装SSE连接：以 fetch 携带认证头，返回与 EventSource 兼容的最小接口
+// 内置看门狗：45 秒未收到任何事件（含心跳）则主动断开并触发 onerror
 export const connectSSE = (url, params, onMessage, onError) => {
   const queryString = Object.entries(params)
     .filter(([, value]) => value !== null && value !== undefined)
@@ -65,12 +66,28 @@ export const connectSSE = (url, params, onMessage, onError) => {
     onerror: null,
     onopen: null,
     readyState: 0,
+    lastEventAt: Date.now(),
     addEventListener: (type, handler) => {
       listeners[type] = listeners[type] || []
       listeners[type].push(handler)
     },
-    close: () => controller.abort()
+    close: () => {
+      client.closed = true
+      controller.abort()
+      clearInterval(watchdog)
+    }
   }
+
+  const watchdog = setInterval(() => {
+    if (client.readyState !== 1) return
+    if (Date.now() - client.lastEventAt > 45000) {
+      console.warn('SSE watchdog: no events for 45s, aborting')
+      client.close()
+      const error = new Error('连接空闲超时（45 秒无数据）')
+      const handled = client.onerror?.(error)
+      if (!handled && onError) onError(error)
+    }
+  }, 10000)
 
   ;(async () => {
     try {
@@ -85,16 +102,20 @@ export const connectSSE = (url, params, onMessage, onError) => {
         throw error
       }
       client.readyState = 1
+      client.lastEventAt = Date.now()
       client.onopen?.()
       await parseSseStream(response.body, event => {
+        client.lastEventAt = Date.now()
         ;(listeners[event.type] || []).forEach(handler => handler(event))
         if (event.type === 'message' && client.onmessage) client.onmessage(event)
         if (onMessage && event.type === 'message') onMessage(event.data)
       })
       client.readyState = 2
+      clearInterval(watchdog)
     } catch (error) {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted && (client.closed || client.readyState === 2)) return
       client.readyState = 2
+      clearInterval(watchdog)
       const handled = client.onerror?.(error)
       if (!handled && onError) onError(error)
     }
@@ -110,8 +131,8 @@ export const fetchAuthBlobUrl = async path => {
 }
 
 // AI恋爱大师聊天
-export const chatWithLoveApp = (message, chatId, imageKeys = [], webSearch = false, retryUserMessageId = null, clientRequestId = null) =>
-  connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, webSearch, retryUserMessageId, clientRequestId })
+export const chatWithLoveApp = (message, chatId, imageKeys = [], webSearch = false, retryUserMessageId = null, clientRequestId = null, continueFromMessageId = null) =>
+  connectSSE('/ai/love_app/chat/sse', { message, chatId, imageKey: imageKeys, webSearch, retryUserMessageId, clientRequestId, continueFromMessageId })
 
 export const uploadLoveImage = async (chatId, file) => {
   const formData = new FormData()

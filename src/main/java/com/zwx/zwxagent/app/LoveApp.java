@@ -154,6 +154,41 @@ public class LoveApp {
                 });
     }
 
+    public Flux<String> doChatContinuationByStream(com.zwx.zwxagent.security.CurrentActor actor, String chatId, long assistantMessageId,
+                                                   String ragContext, boolean webSearch, String clientRequestId) {
+        String tenantId = actor.tenantId();
+        String draft = conversationService.getInterruptedAssistantDraft(actor, assistantMessageId);
+        String history = budgetHistory(conversationService.getRecentMessages(chatId, 20).stream()
+                .map(item -> item.role() + ": " + item.content())
+                .collect(Collectors.joining("\n")));
+        StringBuilder answer = new StringBuilder();
+        var prompt = streamingChatClient
+                .prompt()
+                .system(agentRegistry.get("love").systemPrompt() + skillPromptBuilder.build(tenantId, "love", webSearch)
+                        + "\n\n" + ragContext
+                        + "\n\n最近对话：\n" + history
+                        + "\n\n上次未完成的回答草稿：\n" + draft)
+                .user("你上一条回答因连接中断只完成了一部分。请从草稿的中断处继续，保持风格与逻辑连贯，不要重复草稿中已有的内容，直接输出后续正文。");
+        var skillTools = skillRegistry.toolCallbacksFor(tenantId, "love", webSearch);
+        if (skillTools.length > 0) prompt.toolCallbacks(skillTools);
+        java.util.concurrent.atomic.AtomicBoolean persisted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        return prompt.stream()
+                .content()
+                .doOnNext(answer::append)
+                .doFinally(signal -> {
+                    if (!persisted.compareAndSet(false, true)) return;
+                    boolean completed = signal == reactor.core.publisher.SignalType.ON_COMPLETE;
+                    try {
+                        if (answer.length() > 0) {
+                            conversationService.appendToAssistantReply(actor, assistantMessageId, answer.toString(),
+                                    completed ? "COMPLETED" : "INTERRUPTED");
+                        }
+                    } catch (Exception exception) {
+                        log.error("Failed to persist continued answer", exception);
+                    }
+                });
+    }
+
     public LoveVisionChatResult prepareVisionChat(com.zwx.zwxagent.security.CurrentActor actor, String message, String chatId, List<String> imageObjectKeys) {
         LoveVisionAnalysis analysis = loveVisionChatService.analyze(chatId, message, imageObjectKeys);
 
@@ -172,7 +207,7 @@ public class LoveApp {
     public Flux<String> streamVisionChat(com.zwx.zwxagent.security.CurrentActor actor, String message, String chatId, List<String> imageObjectKeys, LoveVisionChatResult preparation, Long retryUserMessageId, String clientRequestId) {
         StringBuilder content = new StringBuilder();
         List<com.zwx.zwxagent.conversation.LoveConversationMessage> history = new java.util.ArrayList<>(conversationService.getRecentMessages(chatId, 20));
-        history.add(new com.zwx.zwxagent.conversation.LoveConversationMessage(0, "USER", message, imageObjectKeys, List.of(), null, preparation.analysis(), java.time.Instant.now()));
+        history.add(new com.zwx.zwxagent.conversation.LoveConversationMessage(0, "USER", message, imageObjectKeys, List.of(), null, preparation.analysis(), java.time.Instant.now(), "COMPLETED"));
         long userMessageId = retryUserMessageId == null
                 ? conversationService.startUserTurn(actor, chatId, message, imageObjectKeys, clientRequestId)
                 : retryUserMessageId;

@@ -78,6 +78,10 @@
             </div>
           </div>
           <time class="message-time">{{ formatTime(msg.time) }}</time>
+          <div v-if="!msg.isUser && msg.status === 'INTERRUPTED' && connectionStatus !== 'connecting'" class="continue-row">
+            <span class="continue-hint">回答被中断，已保留部分内容</span>
+            <button type="button" class="continue-button" @click="emit('continue-message', { message: msg, index })">继续生成 ▸</button>
+          </div>
           <div v-if="msg.isUser && editingIndex !== index" class="message-actions" aria-label="消息操作">
             <button type="button" title="复制消息" aria-label="复制消息" @click="copyMessage(msg.content)">⧉</button>
             <button type="button" title="编辑消息" aria-label="编辑消息" @click="editMessage(msg.content, index)">✎</button>
@@ -129,7 +133,7 @@ const props = defineProps({
   webSearchAvailable: { type: Boolean, default: false },
   knowledgeSearchAvailable: { type: Boolean, default: false }
 })
-const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message'])
+const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message', 'continue-message'])
 const agent = computed(() => getAgent(props.aiType))
 const quickPrompts = computed(() => agent.value.chat.quickPrompts)
 const emptyTitle = computed(() => agent.value.chat.emptyTitle)
@@ -226,6 +230,10 @@ onMounted(scrollToBottom)
 .message-time { display: block; margin-top: 7px; color: #aaa; font-size: 11px; }
 .user-message .message-time { text-align: right; }
 .message-actions { position:absolute; z-index:1; top:calc(100% + 10px); right:0; display:flex; align-items:center; gap:12px; height:30px; padding:0 2px; opacity:0; pointer-events:none; transform:translateY(-3px); transition:opacity .15s ease,transform .15s ease; }.message-wrapper.user:hover .message-actions,.message-actions:focus-within { opacity:1; pointer-events:auto; transform:translateY(0); }.message-actions button { display:grid; width:26px; height:30px; place-items:center; border:0; border-radius:4px; background:transparent; color:#7d8288; font-size:19px; line-height:1; }.message-actions button:hover { background:#edf0f2; color:#34383d; }
+.continue-row { display:flex; margin-top:6px; align-items:center; gap:10px; }
+.continue-hint { color:#a3a8ae; font-size:12px; }
+.continue-button { border:1px solid #e3d5d9; border-radius:14px; padding:3px 12px; background:#fff; color:#d65070; font-size:12px; cursor:pointer; }
+.continue-button:hover { background:#fdf2f5; }
 .typing-indicator { display: inline-block; margin-left: 3px; color: var(--zwx-primary); animation: blink 1s step-end infinite; }
 .thinking-state { display: flex; align-items: center; gap: 9px; min-height: 34px; color: #8d5663; font-size: 14px; }.thinking-dots { display: inline-flex; gap: 4px; }.thinking-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: thinking-pulse 1.1s ease-in-out infinite; }.thinking-dots i:nth-child(2) { animation-delay: .16s; }.thinking-dots i:nth-child(3) { animation-delay: .32s; }.activity-trace { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; color:#657080; font-size:12px; }.activity-trace > span:first-child { color:#8b95a1; }.activity-trace button { border:1px solid #dfe7e4; border-radius:5px; padding:3px 6px; background:#f8fbfa; color:inherit; font:inherit; text-align:left; }.activity-trace button:hover { border-color:#8fcdb6; background:#effbf5; color:#16794d; }.activity-trace button.active { border-color:#8fcdb6; background:#effbf5; color:#16794d; }
 .activity-trace-collapsible { display:block; max-width:100%; border:0; color:#7d858f; }.activity-trace-collapsible > summary { cursor:pointer; width:max-content; max-width:100%; list-style:none; }.activity-trace-collapsible > summary::-webkit-details-marker { display:none; }.activity-trace-collapsible > summary::after { content:'⌄'; display:inline-block; margin-left:7px; color:#a0a6ad; transition:transform .15s ease; }.activity-trace-collapsible[open] > summary::after { transform:rotate(180deg); }.activity-details { display:grid; gap:7px; margin-top:10px; }.activity-details details { border-left:2px solid #e0e5e9; padding:2px 0 2px 9px; }.activity-details summary { cursor:pointer; color:#5f6873; }.activity-details pre { max-height:240px; overflow:auto; margin:7px 0 2px; padding:8px; border-radius:5px; background:#f6f8f9; color:#5b6570; font:11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space:pre-wrap; word-break:break-word; }

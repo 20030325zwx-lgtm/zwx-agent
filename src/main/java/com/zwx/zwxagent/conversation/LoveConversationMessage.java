@@ -9,5 +9,6 @@ import java.util.List;
 
 public record LoveConversationMessage(long id, String role, String content, List<String> imageObjectKeys,
                                       List<LoveKnowledgeReference> knowledgeReferences,
-                                      LoveRagTrace ragTrace, LoveVisionAnalysis visionAnalysis, Instant createdAt) {
+                                      LoveRagTrace ragTrace, LoveVisionAnalysis visionAnalysis, Instant createdAt,
+                                      String status) {
 }

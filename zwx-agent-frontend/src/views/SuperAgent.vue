@@ -56,7 +56,9 @@ const activityLabel = detail => {
 }
 const mapFiles = (conversationId, fileAttachments) => {
   try {
-    return JSON.parse(fileAttachments || '[]').map(file => ({ ...file, url: getManusFileUrl(conversationId, file.path) }))
+    const files = JSON.parse(fileAttachments || '[]').map(file => ({ ...file, url: '' }))
+    files.forEach(file => getManusFileUrl(conversationId, file.path).then(url => { file.url = url }).catch(() => {}))
+    return files
   } catch { return [] }
 }
 const mapMessage = message => ({

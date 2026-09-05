@@ -19,9 +19,11 @@ public class McpServerConfigurationService {
     private static final Duration INITIALIZATION_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private final JdbcTemplate jdbcTemplate;
+    private final com.zwx.zwxagent.tools.UrlAccessPolicy urlAccessPolicy;
 
-    public McpServerConfigurationService(JdbcTemplate jdbcTemplate) {
+    public McpServerConfigurationService(JdbcTemplate jdbcTemplate, com.zwx.zwxagent.tools.UrlAccessPolicy urlAccessPolicy) {
         this.jdbcTemplate = jdbcTemplate;
+        this.urlAccessPolicy = urlAccessPolicy;
     }
 
     public List<McpServerConfiguration> list(String tenantId) {
@@ -72,16 +74,24 @@ public class McpServerConfigurationService {
 
     public McpTools toolsFor(String tenantId) {
         List<McpSyncClient> clients = new ArrayList<>();
-        try {
-            for (McpServerConfiguration config : list(tenantId)) {
-                if (!config.enabled()) continue;
-                clients.add(connect(config.endpoint()));
+        List<org.springframework.ai.tool.ToolCallback> callbacks = new ArrayList<>();
+        for (McpServerConfiguration config : list(tenantId)) {
+            if (!config.enabled()) continue;
+            McpSyncClient client = null;
+            try {
+                client = connect(config.endpoint());
+                clients.add(client);
+                var provider = new SyncMcpToolCallbackProvider(List.of(client));
+                callbacks.addAll(List.of(provider.getToolCallbacks()));
+            } catch (Exception exception) {
+                if (client != null) client.close();
             }
-            return clients.isEmpty() ? McpTools.EMPTY : new McpTools(new SyncMcpToolCallbackProvider(clients).getToolCallbacks(), clients);
-        } catch (Exception exception) {
+        }
+        if (callbacks.isEmpty()) {
             clients.forEach(McpSyncClient::close);
             return McpTools.EMPTY;
         }
+        return new McpTools(callbacks.toArray(org.springframework.ai.tool.ToolCallback[]::new), clients);
     }
 
     private McpSyncClient connect(String endpoint) {
@@ -116,16 +126,16 @@ public class McpServerConfigurationService {
     }
 
     private String normalizeEndpoint(String endpoint) {
+        URI value;
         try {
-            URI value = URI.create(endpoint == null ? "" : endpoint.trim());
-            if (!("http".equalsIgnoreCase(value.getScheme()) || "https".equalsIgnoreCase(value.getScheme()))
-                    || value.getHost() == null || value.getUserInfo() != null || value.getFragment() != null) {
-                throw new IllegalArgumentException("MCP 地址必须是无凭据的 HTTP(S) URL");
-            }
-            return value.toString().replaceAll("/$", "");
+            value = urlAccessPolicy.validateHttpUrl(endpoint);
         } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("MCP 地址必须是有效的 HTTP(S) URL");
+            throw new IllegalArgumentException("MCP 地址必须是可解析的公网 HTTP(S) URL");
         }
+        if (value.getFragment() != null) {
+            throw new IllegalArgumentException("MCP 地址必须是无凭据的 HTTP(S) URL");
+        }
+        return value.toString().replaceAll("/$", "");
     }
 
     private String safeMessage(Exception exception) {

@@ -37,20 +37,35 @@ public class TestAgentApp {
         this.skillPromptBuilder = skillPromptBuilder;
     }
 
-    public Flux<String> chat(String tenantId, String conversationId, String message, boolean webSearch, Long retryUserMessageId,
-                             Consumer<List<LoveKnowledgeReference>> references) {
+    public Flux<String> chat(String tenantId, String userId, String conversationId, String message, boolean webSearch, Long retryUserMessageId,
+                             Consumer<List<LoveKnowledgeReference>> references, String clientRequestId) {
+        long userMessageId = retryUserMessageId == null
+                ? conversationService.startUserTurn(tenantId, userId, KEY, conversationId, message, clientRequestId)
+                : retryUserMessageId;
         AgentKnowledgeRagResult retrieval = knowledgeRagService.retrieveWithContext(tenantId, KEY, message);
         references.accept(retrieval.references());
-        String history = conversationService.getRecentMessages(tenantId, KEY, conversationId, 20).stream()
+        String history = conversationService.getRecentMessages(tenantId, userId, KEY, conversationId, 20).stream()
                 .map(item -> item.role() + ": " + item.content()).reduce("", (left, right) -> left + "\n" + right);
         StringBuilder answer = new StringBuilder();
         var prompt = chatClient.prompt().system(agentRegistry.get(KEY).systemPrompt() + skillPromptBuilder.build(tenantId, KEY, webSearch) + "\n" + retrieval.context() + "\n最近对话：" + history)
                 .user(message);
         var skillTools = skillRegistry.toolCallbacksFor(tenantId, KEY, webSearch);
         if (skillTools.length > 0) prompt.toolCallbacks(skillTools);
-        return prompt.stream().content().doOnNext(answer::append).doOnComplete(() -> {
-                    if (retryUserMessageId == null) conversationService.saveCompletedTurn(tenantId, KEY, conversationId, DEFAULT_TITLE, message, answer.toString());
-                    else conversationService.appendMessage(tenantId, KEY, conversationId, "ASSISTANT", answer.toString());
-                });
+        java.util.concurrent.atomic.AtomicBoolean persisted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        return prompt.stream().content().doOnNext(answer::append).doFinally(signal -> {
+            if (!persisted.compareAndSet(false, true)) return;
+            boolean completed = signal == reactor.core.publisher.SignalType.ON_COMPLETE;
+            try {
+                if (answer.length() == 0) {
+                    conversationService.markUserTurnInterrupted(tenantId, userId, userMessageId);
+                } else {
+                    conversationService.completeUserTurn(tenantId, userId, userMessageId);
+                    conversationService.appendAssistantReply(tenantId, userId, KEY, conversationId, userMessageId,
+                            answer.toString(), completed ? "COMPLETED" : "INTERRUPTED", null);
+                }
+            } catch (Exception exception) {
+                org.slf4j.LoggerFactory.getLogger(TestAgentApp.class).error("Failed to persist test agent turn", exception);
+            }
+        });
     }
 }

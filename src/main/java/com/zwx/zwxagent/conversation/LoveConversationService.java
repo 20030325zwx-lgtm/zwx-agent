@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwx.zwxagent.rag.LoveKnowledgeReference;
 import com.zwx.zwxagent.rag.LoveRagTrace;
 import com.zwx.zwxagent.app.LoveVisionAnalysis;
+import com.zwx.zwxagent.security.CurrentActor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,20 +30,38 @@ public class LoveConversationService {
         this.objectMapper = objectMapper;
     }
 
-    public LoveConversationSummary createConversation() {
+    public LoveConversationSummary createConversation(CurrentActor actor) {
         String conversationId = UUID.randomUUID().toString();
-        jdbcTemplate.update("INSERT INTO love_conversation (id, title) VALUES (?, ?)", conversationId, DEFAULT_TITLE);
+        jdbcTemplate.update("INSERT INTO love_conversation (id, title, tenant_id, user_id) VALUES (?, ?, ?, ?)",
+                conversationId, DEFAULT_TITLE, actor.tenantId(), actor.userId());
         return getConversation(conversationId);
     }
 
-    public void ensureConversation(String conversationId, String firstMessage) {
+    public void ensureOwnedConversation(CurrentActor actor, String conversationId, String firstMessage) {
+        requireConversationId(conversationId);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM love_conversation WHERE id = ? AND tenant_id = ? AND user_id = ?",
+                Integer.class, conversationId, actor.tenantId(), actor.userId());
+        if (count != null && count > 0) {
+            touchConversation(conversationId);
+            return;
+        }
+        Integer anyOwner = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM love_conversation WHERE id = ?", Integer.class, conversationId);
+        if (anyOwner != null && anyOwner > 0) {
+            throw new AccessDeniedException("Conversation does not belong to the current user");
+        }
         String title = toTitle(firstMessage);
-        jdbcTemplate.update("""
-                INSERT INTO love_conversation (id, title) VALUES (?, ?)
-                ON CONFLICT (id) DO UPDATE SET
-                    title = CASE WHEN love_conversation.title = ? THEN EXCLUDED.title ELSE love_conversation.title END,
-                    updated_at = CURRENT_TIMESTAMP
-                """, conversationId, title, DEFAULT_TITLE);
+        jdbcTemplate.update("INSERT INTO love_conversation (id, title, tenant_id, user_id) VALUES (?, ?, ?, ?)",
+                conversationId, title, actor.tenantId(), actor.userId());
+    }
+
+    public boolean ownsConversation(CurrentActor actor, String conversationId) {
+        if (conversationId == null) return false;
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM love_conversation WHERE id = ? AND tenant_id = ? AND user_id = ?",
+                Integer.class, conversationId, actor.tenantId(), actor.userId());
+        return count != null && count > 0;
     }
 
     public void appendMessage(String conversationId, String role, String content) {
@@ -60,59 +80,137 @@ public class LoveConversationService {
             statement.setArray(4, connection.createArrayOf("text", imageObjectKeys.toArray(String[]::new)));
             return statement;
         });
-        jdbcTemplate.update("UPDATE love_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", conversationId);
+        touchConversation(conversationId);
     }
 
-    public List<LoveConversationSummary> listConversations() {
+    @Transactional
+    public long startUserTurn(CurrentActor actor, String conversationId, String message, List<String> imageObjectKeys, String clientRequestId) {
+        ensureOwnedConversation(actor, conversationId, message);
+        requireNoDuplicateRequest(actor, conversationId, clientRequestId);
+        List<String> keys = imageObjectKeys == null ? List.of() : imageObjectKeys;
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement(
+                    "INSERT INTO love_chat_message (conversation_id, role, content, image_object_keys, status, client_request_id) VALUES (?, 'USER', ?, ?, 'IN_PROGRESS', ?)");
+            statement.setString(1, conversationId);
+            statement.setString(2, message == null ? "" : message);
+            statement.setArray(3, connection.createArrayOf("text", keys.toArray(String[]::new)));
+            statement.setString(4, clientRequestId);
+            return statement;
+        });
+        Long id = jdbcTemplate.queryForObject(
+                "SELECT id FROM love_chat_message WHERE conversation_id = ? AND role = 'USER' ORDER BY id DESC LIMIT 1",
+                Long.class, conversationId);
+        touchConversation(conversationId);
+        return id == null ? 0 : id;
+    }
+
+    public void requireNoDuplicateRequest(CurrentActor actor, String conversationId, String clientRequestId) {
+        if (clientRequestId != null && !clientRequestId.isBlank() && hasClientRequestId(actor, conversationId, clientRequestId)) {
+            throw new DuplicateRequestException();
+        }
+    }
+
+    private boolean hasClientRequestId(CurrentActor actor, String conversationId, String clientRequestId) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM love_chat_message m
+                JOIN love_conversation c ON c.id = m.conversation_id
+                WHERE m.client_request_id = ? AND c.tenant_id = ? AND c.user_id = ?
+                """, Integer.class, clientRequestId, actor.tenantId(), actor.userId());
+        return count != null && count > 0;
+    }
+
+    public void completeUserTurn(CurrentActor actor, long userMessageId, String visionAnalysisJson) {
+        jdbcTemplate.update("""
+                UPDATE love_chat_message m SET status = 'COMPLETED', vision_analysis = CAST(? AS jsonb)
+                FROM love_conversation c
+                WHERE m.conversation_id = c.id AND m.id = ? AND c.tenant_id = ? AND c.user_id = ?
+                  AND m.status = 'IN_PROGRESS'
+                """, visionAnalysisJson, userMessageId, actor.tenantId(), actor.userId());
+    }
+
+    public void markUserTurnInterrupted(CurrentActor actor, long userMessageId) {
+        jdbcTemplate.update("""
+                UPDATE love_chat_message m SET status = 'INTERRUPTED'
+                FROM love_conversation c
+                WHERE m.conversation_id = c.id AND m.id = ? AND c.tenant_id = ? AND c.user_id = ?
+                  AND m.status = 'IN_PROGRESS'
+                """, userMessageId, actor.tenantId(), actor.userId());
+    }
+
+    @Transactional
+    public long appendAssistantReply(CurrentActor actor, String conversationId, long userMessageId, String content,
+                                     String status, String referencesJson, String traceJson) {
+        Long id = jdbcTemplate.queryForObject("""
+                INSERT INTO love_chat_message (conversation_id, role, content, status, knowledge_references, rag_trace)
+                VALUES (?, 'ASSISTANT', ?, ?, CAST(? AS jsonb), CAST(? AS jsonb))
+                RETURNING id
+                """, Long.class, conversationId, content == null ? "" : content, status,
+                referencesJson == null ? "[]" : referencesJson, traceJson);
+        touchConversation(conversationId);
+        return id == null ? 0 : id;
+    }
+
+    public static class DuplicateRequestException extends RuntimeException {
+        public DuplicateRequestException() {
+            super("Duplicate request: this message turn is already being processed");
+        }
+    }
+
+    public List<LoveConversationSummary> listConversations(CurrentActor actor) {
         return jdbcTemplate.query("""
                         SELECT id, title, created_at, updated_at
                         FROM love_conversation
+                        WHERE tenant_id = ? AND user_id = ?
                         ORDER BY updated_at DESC
                         """,
                 (rs, rowNum) -> new LoveConversationSummary(
                         rs.getString("id"),
                         rs.getString("title"),
                         rs.getTimestamp("created_at").toInstant(),
-                        rs.getTimestamp("updated_at").toInstant()));
+                        rs.getTimestamp("updated_at").toInstant()),
+                actor.tenantId(), actor.userId());
     }
 
-    public void saveLatestAssistantRagData(String conversationId, String referencesJson, String traceJson) {
+    public void saveLatestAssistantRagData(CurrentActor actor, String conversationId, String referencesJson, String traceJson) {
         jdbcTemplate.update("""
                         UPDATE love_chat_message
                         SET knowledge_references = CAST(? AS jsonb), rag_trace = CAST(? AS jsonb)
                         WHERE id = (
-                            SELECT id FROM love_chat_message
-                            WHERE conversation_id = ? AND role = 'ASSISTANT'
-                            ORDER BY id DESC
+                            SELECT m.id FROM love_chat_message m
+                            JOIN love_conversation c ON c.id = m.conversation_id
+                            WHERE m.conversation_id = ? AND m.role = 'ASSISTANT'
+                              AND c.tenant_id = ? AND c.user_id = ?
+                            ORDER BY m.id DESC
                             LIMIT 1
                         )
-                        """, referencesJson, traceJson, conversationId);
-    }
-
-    public void saveLatestUserVisionAnalysis(String conversationId, String analysisJson) {
-        jdbcTemplate.update("""
-                        UPDATE love_chat_message
-                        SET vision_analysis = CAST(? AS jsonb)
-                        WHERE id = (
-                            SELECT id FROM love_chat_message
-                            WHERE conversation_id = ? AND role = 'USER'
-                            ORDER BY id DESC
-                            LIMIT 1
-                        )
-                        """, analysisJson, conversationId);
+                        """, referencesJson, traceJson, conversationId, actor.tenantId(), actor.userId());
     }
 
     @Transactional
-    public void saveCompletedTurn(String conversationId, String message, List<String> imageObjectKeys, String answer,
+    public void saveCompletedTurn(CurrentActor actor, String conversationId, String message, List<String> imageObjectKeys, String answer,
                                   String referencesJson, String traceJson, String visionAnalysisJson) {
-        ensureConversation(conversationId, message);
+        ensureOwnedConversation(actor, conversationId, message);
         appendMessage(conversationId, "USER", message, imageObjectKeys);
-        if (visionAnalysisJson != null) saveLatestUserVisionAnalysis(conversationId, visionAnalysisJson);
+        if (visionAnalysisJson != null) {
+            jdbcTemplate.update("""
+                            UPDATE love_chat_message
+                            SET vision_analysis = CAST(? AS jsonb)
+                            WHERE id = (
+                                SELECT m.id FROM love_chat_message m
+                                JOIN love_conversation c ON c.id = m.conversation_id
+                                WHERE m.conversation_id = ? AND m.role = 'USER'
+                                  AND c.tenant_id = ? AND c.user_id = ?
+                                ORDER BY m.id DESC
+                                LIMIT 1
+                            )
+                            """, visionAnalysisJson, conversationId, actor.tenantId(), actor.userId());
+        }
         appendMessage(conversationId, "ASSISTANT", answer);
-        saveLatestAssistantRagData(conversationId, referencesJson, traceJson);
+        saveLatestAssistantRagData(actor, conversationId, referencesJson, traceJson);
     }
 
-    public List<LoveConversationMessage> getMessages(String conversationId) {
+    public List<LoveConversationMessage> getMessages(CurrentActor actor, String conversationId) {
+        requireOwnedConversation(actor, conversationId);
         return jdbcTemplate.query("""
                         SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
                             SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at
@@ -137,7 +235,7 @@ public class LoveConversationService {
                         SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at FROM (
                             SELECT id, role, content, image_object_keys, knowledge_references, rag_trace, vision_analysis, created_at
                             FROM love_chat_message
-                            WHERE conversation_id = ?
+                            WHERE conversation_id = ? AND status = 'COMPLETED'
                             ORDER BY id DESC
                             LIMIT ?
                         ) recent_messages
@@ -152,11 +250,14 @@ public class LoveConversationService {
                         rs.getTimestamp("created_at").toInstant()), conversationId, limit);
     }
 
-    public boolean deleteConversation(String conversationId) {
-        return jdbcTemplate.update("DELETE FROM love_conversation WHERE id = ?", conversationId) > 0;
+    public boolean deleteConversation(CurrentActor actor, String conversationId) {
+        requireOwnedConversation(actor, conversationId);
+        return jdbcTemplate.update("DELETE FROM love_conversation WHERE id = ? AND tenant_id = ? AND user_id = ?",
+                conversationId, actor.tenantId(), actor.userId()) > 0;
     }
 
-    public boolean deleteAssistantReply(String conversationId, long userMessageId) {
+    public boolean deleteAssistantReply(CurrentActor actor, String conversationId, long userMessageId) {
+        requireOwnedConversation(actor, conversationId);
         return jdbcTemplate.update("""
                 DELETE FROM love_chat_message
                 WHERE id = (
@@ -168,6 +269,27 @@ public class LoveConversationService {
                     ORDER BY reply.id LIMIT 1
                 )
                 """, conversationId, userMessageId, conversationId, userMessageId) > 0;
+    }
+
+    private void requireOwnedConversation(CurrentActor actor, String conversationId) {
+        if (!ownsConversation(actor, conversationId)) {
+            throw new AccessDeniedException("Conversation does not belong to the current user");
+        }
+    }
+
+    private void requireConversationId(String conversationId) {
+        if (conversationId == null) {
+            throw new IllegalArgumentException("Conversation id is required");
+        }
+        try {
+            UUID.fromString(conversationId);
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("Conversation id must be a UUID");
+        }
+    }
+
+    private void touchConversation(String conversationId) {
+        jdbcTemplate.update("UPDATE love_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", conversationId);
     }
 
     private LoveConversationSummary getConversation(String conversationId) {

@@ -2,25 +2,42 @@ package com.zwx.zwxagent.tools;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.junit.jupiter.api.io.TempDir;
 
-@SpringBootTest
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 class FileOperationToolTest {
 
+    @TempDir
+    Path tempDir;
+
     @Test
-    void readFile() {
-        FileOperationTool fileOperationTool = new FileOperationTool();
-        String fileName = "编程导航.txt";
-        String result = fileOperationTool.readFile(fileName);
-        Assertions.assertNotNull(result);
+    void writeAndReadFile() {
+        ToolSandbox sandbox = new ToolSandbox();
+        FileOperationTool tool = new FileOperationTool(sandbox, tempDir);
+        String written = tool.writeFile("notes.txt", "hello world");
+        Assertions.assertTrue(written.contains("File written successfully to:"));
+        String read = tool.readFile("notes.txt");
+        Assertions.assertEquals("hello world", read);
     }
 
     @Test
-    void writeFile() {
-        FileOperationTool fileOperationTool = new FileOperationTool();
-        String fileName = "编程导航.txt";
-        String content = "https://www.codefather.cn 程序员编程学习交流社区";
-        String result = fileOperationTool.writeFile(fileName, content);
-        Assertions.assertNotNull(result);
+    void rejectPathTraversal() {
+        ToolSandbox sandbox = new ToolSandbox();
+        FileOperationTool tool = new FileOperationTool(sandbox, tempDir);
+        String written = tool.writeFile("../../escape.txt", "nope");
+        Assertions.assertTrue(written.startsWith("Error writing to file:"));
+        String absolute = tool.writeFile(tempDir.getParent().resolve("escape-abs.txt").toString(), "nope");
+        Assertions.assertTrue(absolute.startsWith("Error writing to file:"));
+        Assertions.assertFalse(Files.exists(tempDir.getParent().resolve("escape.txt")));
+    }
+
+    @Test
+    void readFileReturnsErrorForMissingFile() {
+        ToolSandbox sandbox = new ToolSandbox();
+        FileOperationTool tool = new FileOperationTool(sandbox, tempDir);
+        String read = tool.readFile("missing.txt");
+        Assertions.assertTrue(read.startsWith("Error reading file:"));
     }
 }

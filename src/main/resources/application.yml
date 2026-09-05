@@ -2,7 +2,7 @@ spring:
   application:
     name: zwx-agent
   profiles:
-    active: local
+    default: local
   sql:
     init:
       mode: never
@@ -52,6 +52,11 @@ spring.servlet.multipart:
   max-file-size: 10MB
   max-request-size: 10MB
 app:
+  security:
+    jwt-secret: ${JWT_SECRET:zwx-agent-dev-jwt-secret-change-me-0123456789abcdef}
+    jwt-ttl-hours: ${JWT_TTL_HOURS:72}
+    admin-username: ${APP_SECURITY_ADMIN_USERNAME:admin}
+    admin-password: ${APP_SECURITY_ADMIN_PASSWORD:}
   temp-dir: ${APP_TEMP_DIR:${user.dir}/temp}
   love:
     vision-model: qwen-vl-plus
@@ -95,7 +100,7 @@ search-api:
   # Supported providers: searchapi, tavily
   provider: ${SEARCH_API_PROVIDER:searchapi}
   api-key: ${SEARCH_API_API_KEY:}
-# 修改日志级别，查看 Spring AI 更多调用细节
+# 生产环境由 application-prod.yml 收敛日志与 API 文档；本地默认仅 INFO
 logging:
   level:
-    org.springframework.ai: DEBUG
+    org.springframework.ai: INFO

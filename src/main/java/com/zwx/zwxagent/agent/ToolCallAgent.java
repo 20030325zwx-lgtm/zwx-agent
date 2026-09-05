@@ -43,8 +43,12 @@ public class ToolCallAgent extends ReActAgent {
 
     private boolean lastStepUsedTool;
     private boolean nextStepPromptAdded;
+    private boolean lastThinkFailed;
 
     private List<ToolExecution> lastToolExecutions = List.of();
+
+    private static final int THINK_MAX_ATTEMPTS = 3;
+    private static final long THINK_RETRY_BASE_MILLIS = 1000;
 
     public ToolCallAgent(ToolCallback[] availableTools) {
         super();
@@ -58,7 +62,13 @@ public class ToolCallAgent extends ReActAgent {
 
     @Override
     public String step() {
+        lastThinkFailed = false;
         if (!think()) {
+            if (lastThinkFailed) {
+                // 模型调用在重试后仍失败：显式失败并中断任务，绝不把上一轮的
+                // 陈旧响应当作最终答案交付，也不把错误文案写进记忆。
+                throw new IllegalStateException("模型调用在重试后仍然失败，任务已中止");
+            }
             setState(AgentState.FINISHED);
             return toolCallChatResponse == null
                     ? "未能生成回答"
@@ -127,8 +137,35 @@ public class ToolCallAgent extends ReActAgent {
                 return true;
             }
         } catch (Exception e) {
-            log.error(getName() + "的思考过程遇到了问题：" + e.getMessage());
-            getMessageList().add(new AssistantMessage("处理时遇到了错误：" + e.getMessage()));
+            // 瞬时故障（限流、网络抖动）先重试；重试耗尽后显式失败。
+            // 不把错误文案写入记忆，避免污染后续轮次的上下文。
+            for (int attempt = 1; attempt < THINK_MAX_ATTEMPTS; attempt++) {
+                try {
+                    Thread.sleep(THINK_RETRY_BASE_MILLIS * (1L << (attempt - 1)));
+                    ChatResponse retried = getChatClient().prompt(prompt)
+                            .system(getSystemPrompt())
+                            .toolCallbacks(availableTools)
+                            .call()
+                            .chatResponse();
+                    this.toolCallChatResponse = retried;
+                    AssistantMessage retriedMessage = retried.getResult().getOutput();
+                    List<AssistantMessage.ToolCall> retriedCalls = retriedMessage.getToolCalls();
+                    log.info(getName() + "第 " + (attempt + 1) + " 次尝试成功");
+                    if (retriedCalls.isEmpty()) {
+                        getMessageList().add(retriedMessage);
+                        return false;
+                    }
+                    lastStepUsedTool = true;
+                    return true;
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception retryError) {
+                    log.warn(getName() + "第 " + (attempt + 1) + " 次尝试失败：" + retryError.getMessage());
+                }
+            }
+            log.error(getName() + "的思考过程在重试后仍然失败：" + e.getMessage());
+            lastThinkFailed = true;
             return false;
         }
     }

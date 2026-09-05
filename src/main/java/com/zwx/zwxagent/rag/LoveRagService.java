@@ -19,6 +19,9 @@ public class LoveRagService {
     @Resource(name = "loveAppVectorStore")
     private VectorStore vectorStore;
 
+    @Resource(name = "ragExecutor")
+    private java.util.concurrent.Executor ragExecutor;
+
     @Value("${app.love.rag.top-k:3}")
     private int topK;
 
@@ -35,7 +38,7 @@ public class LoveRagService {
     public LoveRagResult retrieve(String message, String model) {
         List<Document> documents;
         CompletableFuture<List<Document>> search = CompletableFuture.supplyAsync(() -> vectorStore.similaritySearch(SearchRequest.builder()
-                .query(message).topK(topK).similarityThreshold(similarityThreshold).build()));
+                .query(message).topK(topK).similarityThreshold(similarityThreshold).build()), ragExecutor);
         try {
             documents = search.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {
@@ -60,17 +63,22 @@ public class LoveRagService {
         String decision = documents.isEmpty()
                 ? "没有文档达到相似度阈值，模型仅使用系统提示词与会话上下文回答。"
                 : "命中文档达到相似度阈值，已注入 RAG 上下文并用于生成回答。";
-        LoveRagTrace trace = new LoveRagTrace(message, topK, similarityThreshold, candidates, decision, references, model, true);
+        LoveRagTrace trace = new LoveRagTrace(message, topK, similarityThreshold, candidates, decision, references, model, true, false);
         return new LoveRagResult(trace, toContext(documents));
     }
 
     private LoveRagResult timedOut(String message, String model) {
-        return unavailable(message, model, "知识库检索超过 " + timeoutMs + "ms 预算，已降级为仅使用系统提示词与会话上下文回答。");
+        return unavailable(message, model, "知识库检索超过 " + timeoutMs + "ms 预算，已降级为仅使用系统提示词与会话上下文回答。", true);
     }
 
     private LoveRagResult unavailable(String message, String model, String decision) {
-        return new LoveRagResult(new LoveRagTrace(message, topK, similarityThreshold, List.of(), decision,
-                List.of(), model, true), "");
+        return unavailable(message, model, decision, true);
+    }
+
+    private LoveRagResult unavailable(String message, String model, String decision, boolean degraded) {
+        LoveRagTrace trace = new LoveRagTrace(message, topK, similarityThreshold, List.of(), decision,
+                List.of(), model, true, degraded);
+        return new LoveRagResult(trace, "");
     }
 
     private String toContext(List<Document> documents) {

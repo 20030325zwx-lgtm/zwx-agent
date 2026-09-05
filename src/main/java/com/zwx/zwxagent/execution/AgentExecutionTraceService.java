@@ -19,16 +19,29 @@ public class AgentExecutionTraceService {
     }
 
     public int record(String runId, String tenantId, String agentKey, String conversationId, String phase, String summary, Map<String, Object> detail) {
-        Integer next = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_execution_event WHERE run_id = ?", Integer.class, runId);
+        String json;
         try {
-            jdbcTemplate.update("""
-                    INSERT INTO agent_execution_event (run_id, tenant_id, agent_key, conversation_id, sequence, phase, summary, detail)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))
-                    """, runId, tenantId, agentKey, conversationId, next, phase, summary, objectMapper.writeValueAsString(detail));
-            return next;
+            json = objectMapper.writeValueAsString(detail);
         } catch (Exception exception) {
-            throw new IllegalStateException("Unable to persist execution event", exception);
+            throw new IllegalStateException("Unable to serialize execution event detail", exception);
         }
+        RuntimeException lastFailure = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                Integer sequence = jdbcTemplate.queryForObject("""
+                        INSERT INTO agent_execution_event (run_id, tenant_id, agent_key, conversation_id, sequence, phase, summary, detail)
+                        SELECT ?, ?, ?, ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, CAST(? AS jsonb)
+                        FROM agent_execution_event WHERE run_id = ?
+                        RETURNING sequence
+                        """, Integer.class, runId, tenantId, agentKey, conversationId, phase, summary, json, runId);
+                return sequence == null ? 0 : sequence;
+            } catch (org.springframework.dao.DataIntegrityViolationException exception) {
+                lastFailure = exception;
+            } catch (Exception exception) {
+                throw new IllegalStateException("Unable to persist execution event", exception);
+            }
+        }
+        throw new IllegalStateException("Unable to persist execution event after retries", lastFailure);
     }
 
     public List<AgentExecutionEvent> listTravelEvents(String tenantId, String conversationId, String runId) {

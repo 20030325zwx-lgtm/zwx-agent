@@ -40,7 +40,8 @@ public class PostgresChatMemory implements ChatMemory {
 
     @Override
     public void clear(String conversationId) {
-        conversationService.deleteConversation(conversationId);
+        org.slf4j.LoggerFactory.getLogger(PostgresChatMemory.class)
+                .warn("ChatMemory.clear is not supported without an authenticated actor; conversation {} was left untouched", conversationId);
     }
 
     private Message toMessage(LoveConversationMessage message) {

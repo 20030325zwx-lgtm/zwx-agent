@@ -117,10 +117,15 @@ public abstract class BaseAgent {
     }
 
     public SseEmitter runStream(String userPrompt, Consumer<RunResult> completionHandler) {
+        return runStream(userPrompt, completionHandler, null);
+    }
+
+    public SseEmitter runStream(String userPrompt, Consumer<RunResult> completionHandler, java.util.concurrent.Executor executor) {
         // 创建一个超时时间较长的 SseEmitter
         // 比执行硬时限多留少量余量，确保执行线程能先输出中断总结。
         SseEmitter sseEmitter = new SseEmitter(MAX_RUN_MILLIS + TimeUnit.SECONDS.toMillis(5));
-        // 使用线程异步处理，避免阻塞主线程
+        // 使用线程异步处理，避免阻塞主线程；优先使用专用执行器，避免占用公共池
+        java.util.concurrent.Executor runExecutor = executor != null ? executor : java.util.concurrent.ForkJoinPool.commonPool();
         CompletableFuture.runAsync(() -> {
             // 1、基础校验
             try {
@@ -215,6 +220,13 @@ public abstract class BaseAgent {
             } catch (Exception e) {
                 state = AgentState.ERROR;
                 log.error("error executing agent", e);
+                if (!answer.isEmpty()) {
+                    try {
+                        completionHandler.accept(new RunResult(answer.toString(), List.copyOf(activities)));
+                    } catch (Exception persistenceError) {
+                        log.error("failed to persist partial agent answer", persistenceError);
+                    }
+                }
                 try {
                     sseEmitter.send("执行错误：" + e.getMessage());
                     sseEmitter.complete();
@@ -233,6 +245,7 @@ public abstract class BaseAgent {
             this.cleanup();
             log.warn("SSE connection timeout");
         });
+        sseEmitter.onError(error -> requestStop("客户端连接已断开"));
         // 设置完成回调
         sseEmitter.onCompletion(() -> {
             if (this.state == AgentState.RUNNING) {
@@ -265,13 +278,10 @@ public abstract class BaseAgent {
             requestStop("已达到 5 分钟执行时限");
             return "";
         }
-        Future<String> stepFuture = CompletableFuture.supplyAsync(this::step);
-        activeStep = stepFuture;
+        // 直接在执行线程上顺序执行：每步本就依赖上一步结果，异步 + 阻塞等待
+        // 只会额外占用一个公共池线程并在并发时导致线程饥饿。
         try {
-            return stepFuture.get(remainingNanos, TimeUnit.NANOSECONDS);
-        } catch (TimeoutException exception) {
-            requestStop("已达到 5 分钟执行时限");
-            return "";
+            return step();
         } finally {
             activeStep = null;
         }
@@ -282,6 +292,10 @@ public abstract class BaseAgent {
         state = AgentState.FINISHED;
         Future<?> stepFuture = activeStep;
         if (stepFuture != null) stepFuture.cancel(true);
+    }
+
+    public void stopForClientDisconnect() {
+        requestStop("客户端连接已断开");
     }
 
     private boolean isMeaningful(String result) {

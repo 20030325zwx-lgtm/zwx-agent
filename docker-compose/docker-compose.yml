@@ -39,6 +39,8 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./temp:/app/temp
+      # 服务器外部配置（API Key、JWT 密钥等），只读挂载；路径可用 .env 的 APP_GLOBE_CONF 覆盖
+      - ${APP_GLOBE_CONF:-/home/globe.conf}:/home/globe.conf:ro
 
   frontend:
     image: zwx-agent-frontend:${IMAGE_TAG}

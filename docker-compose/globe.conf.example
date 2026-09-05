@@ -1,0 +1,41 @@
+# ============================================================
+# ZWX Agent 服务器配置模板
+# ============================================================
+# 用法：把本文件复制为服务器的 /home/globe.conf 并填写实际值，
+# 程序启动时自动读取，优先级高于 .env 与 application*.yml。
+# 格式：标准 properties（key=value，# 开头为注释），UTF-8 编码。
+# 值为空或仍是 YOUR_* / CHANGE_ME_* 占位符时视为未配置，不会覆盖其他来源。
+#
+# 自定义路径：容器/进程可通过环境变量 GLOBE_CONF_PATH 或系统属性
+# globe.conf.path 指向其它文件；docker-compose 中用 .env 的 APP_GLOBE_CONF。
+# ============================================================
+
+# —— 模型服务（必填）：阿里云百炼 DashScope ——
+spring.ai.dashscope.api-key=YOUR_DASHSCOPE_API_KEY
+
+# —— JWT 签名密钥（必填）：至少 32 位随机字符串，更换后已登录会话失效 ——
+app.security.jwt-secret=CHANGE_ME_TO_A_LONG_RANDOM_SECRET_AT_LEAST_32_CHARS
+
+# —— 联网搜索（可选，开启联网搜索后填写；provider 见 .env 的 SEARCH_API_PROVIDER）——
+search-api.api-key=
+
+# —— 阿里云 OSS（可选，图片/知识库文档上传走 OSS 时填写四项）——
+# app.oss.endpoint=https://oss-cn-hangzhou.aliyuncs.com
+# app.oss.bucket=
+# app.oss.access-key-id=
+# app.oss.access-key-secret=
+
+# —— 自建 MinIO（可选，图片上传走 MinIO 时填写；默认 compose 编排未含 MinIO 服务）——
+# app.storage.endpoint=http://minio:9000
+# app.storage.public-endpoint=
+# app.storage.access-key=
+# app.storage.secret-key=
+# app.storage.bucket=love-chat-images
+
+# —— 独立 Apache Tika 文档解析服务（可选）——
+# app.document-parser.tika.base-url=http://tika:9998
+
+# —— 数据库（可选；compose 已通过 .env 注入，仅直连外部库时才需要）——
+# spring.datasource.url=jdbc:postgresql://postgres:5432/zwx_agent
+# spring.datasource.username=
+# spring.datasource.password=

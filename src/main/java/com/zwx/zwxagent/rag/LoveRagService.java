@@ -22,13 +22,22 @@ public class LoveRagService {
     @Resource(name = "ragExecutor")
     private java.util.concurrent.Executor ragExecutor;
 
+    @Resource
+    private DashScopeRerankService rerankService;
+
     @Value("${app.love.rag.top-k:3}")
     private int topK;
 
     @Value("${app.love.rag.similarity-threshold:0.55}")
     private double similarityThreshold;
 
-    @Value("${app.love.rag.timeout-ms:800}")
+    @Value("${app.love.rag.recall-top-k:15}")
+    private int recallTopK;
+
+    @Value("${app.love.rag.recall-similarity-threshold:0.4}")
+    private double recallSimilarityThreshold;
+
+    @Value("${app.love.rag.timeout-ms:2500}")
     private long timeoutMs;
 
     public LoveRagTrace trace(String message, String model) {
@@ -36,11 +45,10 @@ public class LoveRagService {
     }
 
     public LoveRagResult retrieve(String message, String model) {
-        List<Document> documents;
-        CompletableFuture<List<Document>> search = CompletableFuture.supplyAsync(() -> vectorStore.similaritySearch(SearchRequest.builder()
-                .query(message).topK(topK).similarityThreshold(similarityThreshold).build()), ragExecutor);
+        RetrievalOutcome outcome;
+        CompletableFuture<RetrievalOutcome> search = CompletableFuture.supplyAsync(() -> recallAndRerank(message), ragExecutor);
         try {
-            documents = search.get(timeoutMs, TimeUnit.MILLISECONDS);
+            outcome = search.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {
             search.cancel(true);
             return timedOut(message, model);
@@ -51,7 +59,17 @@ public class LoveRagService {
         } catch (Exception exception) {
             return unavailable(message, model, "知识库检索暂不可用，模型仅使用系统提示词与会话上下文回答。");
         }
-        List<LoveRetrievalCandidate> candidates = documents.stream().map(this::toCandidate).toList();
+        List<Document> documents = outcome.documents();
+        String rerankModel = documents.isEmpty() ? null : outcome.rerankModel();
+        List<Double> rerankScores = documents.isEmpty() ? null : outcome.rerankScores();
+        List<LoveRetrievalCandidate> candidates = new java.util.ArrayList<>();
+        for (int i = 0; i < documents.size(); i++) {
+            Document document = documents.get(i);
+            LoveKnowledgeReference reference = toReference(document);
+            Double rerankScore = rerankScores == null ? null : rerankScores.get(i);
+            candidates.add(new LoveRetrievalCandidate(reference.filename(), reference.section(), reference.objectKey(),
+                    score(document), rerankScore));
+        }
         List<LoveKnowledgeReference> references = documents.stream()
                 .map(this::toReference)
                 .collect(java.util.stream.Collectors.toMap(
@@ -62,9 +80,44 @@ public class LoveRagService {
                 .values().stream().toList();
         String decision = documents.isEmpty()
                 ? "没有文档达到相似度阈值，模型仅使用系统提示词与会话上下文回答。"
-                : "命中文档达到相似度阈值，已注入 RAG 上下文并用于生成回答。";
-        LoveRagTrace trace = new LoveRagTrace(message, topK, similarityThreshold, candidates, decision, references, model, true, false);
+                : rerankModel != null
+                        ? "向量召回候选后经 " + rerankModel + " 重排，取前 " + topK + " 条注入 RAG 上下文。"
+                        : "重排不可用，按向量相似度取前 " + topK + " 条注入 RAG 上下文。";
+        LoveRagTrace trace = new LoveRagTrace(message, topK, similarityThreshold, candidates, decision, references, model, true, false,
+                rerankModel);
         return new LoveRagResult(trace, toContext(documents));
+    }
+
+    /** 单次检索的结果：最终文档 + 对应重排分（未重排为 null）+ 重排模型名。 */
+    private record RetrievalOutcome(List<Document> documents, List<Double> rerankScores, String rerankModel) {
+    }
+
+    /**
+     * 两段式检索：先放宽阈值扩大向量召回池，再由重排序器精排；重排不可用时降级为按向量分截断。
+     */
+    private RetrievalOutcome recallAndRerank(String message) {
+        List<Document> pool = vectorStore.similaritySearch(SearchRequest.builder()
+                .query(message).topK(Math.max(recallTopK, topK))
+                .similarityThreshold(Math.min(recallSimilarityThreshold, similarityThreshold)).build());
+        if (pool.isEmpty()) return new RetrievalOutcome(pool, null, null);
+        List<Document> byVectorScore = pool.stream()
+                .sorted(java.util.Comparator.comparingDouble((Document document) -> score(document)).reversed())
+                .toList();
+        List<String> texts = byVectorScore.stream().map(Document::getText).toList();
+        return rerankService.rerank(message, texts)
+                .<RetrievalOutcome>map(hits -> {
+                    List<Document> documents = new java.util.ArrayList<>();
+                    List<Double> scores = new java.util.ArrayList<>();
+                    hits.stream().limit(topK).forEach(hit -> {
+                        documents.add(byVectorScore.get(hit.index()));
+                        scores.add(hit.score());
+                    });
+                    return new RetrievalOutcome(documents, scores, rerankService.modelName());
+                })
+                .orElseGet(() -> new RetrievalOutcome(byVectorScore.stream()
+                        .filter(document -> score(document) >= similarityThreshold)
+                        .limit(topK)
+                        .toList(), null, null));
     }
 
     private LoveRagResult timedOut(String message, String model) {
@@ -101,9 +154,8 @@ public class LoveRagService {
                 excerpt(document.getText()));
     }
 
-    private LoveRetrievalCandidate toCandidate(Document document) {
-        LoveKnowledgeReference reference = toReference(document);
-        return new LoveRetrievalCandidate(reference.filename(), reference.section(), reference.objectKey(), document.getScore());
+    private Double score(Document document) {
+        return document.getScore() == null ? 0.0 : document.getScore();
     }
 
     private Integer chunkIndex(Document document) {

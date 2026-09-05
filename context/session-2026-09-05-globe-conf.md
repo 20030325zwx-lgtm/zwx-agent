@@ -22,6 +22,7 @@
 7. **application-prod.yml**：头部注释说明 prod profile 与 globe.conf 的关系（密钥不在此文件维护）。
 8. **README**：部署章节新增「服务器外部配置 globe.conf」小节，安装命令注释同步；另新增「标准发布流程（速查）」八步端到端清单（定版本→自检→打包→传输→安装→验证→升级→回滚含备份命令），注明 pom 版本不要动（与 Dockerfile JAR_FILE/prepare-backend.sh 联动）。
 9. **架构文档归位**：README「整体架构」整节迁出，原位置只留指向 `design/agent-architecture.md` 的链接；design 文档的「系统总览」图替换为 README 迁来的当前版（图状态机 + JWT/审计 + OSS/沙箱），第 5 节 ReAct 执行链补充「旧实现保留可回滚、当前为 plans/06 图编排」状态注记。
+10. **桌面端重打包**：`zwx-agent-desktop` 版本 0.1.1→0.1.2，`npm run dist:mac` 全流程成功（build:web→assets→backend→runtime→icon→electron-builder，未签名）。已验证新包含当天全部改动：app/assets 含 SwiftUI `--sk-*` 令牌，server/zwx-agent.jar 含 `GlobeConfEnvironmentPostProcessor` 与 `graph/ManusGraphOrchestrator`。产物：`release/ZWX Agent-0.1.2-arm64.dmg/.zip`（各约 255MB）；旧 0.1.1 产物保留作回滚。
 
 ## 验证结果
 

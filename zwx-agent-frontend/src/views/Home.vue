@@ -14,6 +14,18 @@
           <button class="skill-entry" type="button" @click="router.push({ name: 'McpSettings' })"><PlugZap :size="14" />MCP</button>
           <button class="skill-entry" type="button" @click="router.push({ name: 'KnowledgeAdmin' })"><Database :size="14" />知识库</button>
           <AgentSettingsMenu agent-key="love" default-theme="blue" trigger-label="本机服务设置" show-trigger-label />
+          <div ref="userMenuRoot" class="user-menu">
+            <button class="user-trigger" type="button" :aria-expanded="userMenuOpen" aria-label="账号菜单" @click="userMenuOpen = !userMenuOpen">
+              <span class="user-avatar">{{ userInitial }}</span>
+            </button>
+            <div v-if="userMenuOpen" class="user-popover" role="menu">
+              <div class="user-info">
+                <span class="user-avatar large">{{ userInitial }}</span>
+                <div class="user-copy"><strong>{{ currentUser?.username || '未登录' }}</strong><small>{{ roleLabel }}</small></div>
+              </div>
+              <button class="logout-item" type="button" role="menuitem" @click="handleLogout"><LogOut :size="15" />退出登录</button>
+            </div>
+          </div>
         </div>
       </div>
     </header>
@@ -100,12 +112,13 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { ChevronRight, Database, PlugZap, Settings2 } from 'lucide-vue-next'
+import { ChevronRight, Database, LogOut, PlugZap, Settings2 } from 'lucide-vue-next'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 import { AGENT_LIST } from '../config/agents'
+import { getCurrentUser, logout } from '../api/auth'
 
 useHead({
   title: 'ZWX Agent - 智能体目录',
@@ -133,6 +146,21 @@ const navigateTo = path => router.push(path)
 const clearFilter = () => {
   query.value = ''
 }
+
+/* 账号菜单 */
+const currentUser = computed(() => getCurrentUser())
+const userInitial = computed(() => (currentUser.value?.username || 'U').trim().slice(0, 1).toUpperCase())
+const roleLabel = computed(() => ({ ADMIN: '管理员', USER: '成员' })[currentUser.value?.role] || currentUser.value?.role || '成员')
+const userMenuOpen = ref(false)
+const userMenuRoot = ref(null)
+const closeUserMenu = event => { if (!userMenuRoot.value?.contains(event.target)) userMenuOpen.value = false }
+const handleLogout = () => {
+  userMenuOpen.value = false
+  logout()
+  router.replace({ name: 'Login' })
+}
+onMounted(() => document.addEventListener('click', closeUserMenu))
+onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 </script>
 
 <style scoped>
@@ -224,6 +252,74 @@ const clearFilter = () => {
 }
 
 .skill-entry:hover { background: var(--sk-fill-strong); color: var(--sk-label); transform: translateY(-1px); }
+
+/* ── 账号菜单 ───────────────────────────────────────── */
+.user-menu { position: relative; display: flex; }
+
+.user-trigger { display: grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 50%; }
+
+.user-trigger:hover .user-avatar { filter: brightness(1.08); }
+
+.user-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #98a2b3, #64748b);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 6px rgba(0, 0, 0, 0.14);
+}
+
+.user-avatar.large { width: 40px; height: 40px; flex: 0 0 40px; font-size: 16px; }
+
+.user-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 12px);
+  right: 0;
+  width: 240px;
+  border: 1px solid var(--sk-separator);
+  border-radius: 16px;
+  padding: 8px;
+  background: var(--sk-material-strong);
+  backdrop-filter: var(--sk-blur);
+  -webkit-backdrop-filter: var(--sk-blur);
+  box-shadow: var(--sk-shadow-pop);
+  transform-origin: top right;
+  animation: user-menu-in 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes user-menu-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.user-info { display: flex; align-items: center; gap: 11px; padding: 8px 8px 12px; border-bottom: 1px solid var(--sk-separator); }
+
+.user-copy { display: grid; min-width: 0; gap: 2px; }
+.user-copy strong { overflow: hidden; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
+.user-copy small { color: var(--sk-label-3); font-size: 11px; }
+
+.logout-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 10px;
+  background: transparent;
+  color: var(--sk-red);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.logout-item:hover { background: rgba(255, 59, 48, 0.1); }
 
 /* ── Hero ───────────────────────────────────────────── */
 .hero {

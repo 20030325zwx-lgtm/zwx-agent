@@ -55,3 +55,33 @@
 - `application-local.yml` 未触碰；DashScope key 已配置，rerank 自动启用。
 - 验证知识库链路：上传 `POST /api/ai/agent-knowledge/documents?agentKey=love`（multipart，`-F "file=@路径;filename=同名.md"` 可控制逻辑文档归属）；检索验证走 love SSE（sync 不接私有库）。
 - 本地测试后 DB 留有 refund-policy v1(ARCHIVED)/v2(ACTIVE) 测试数据，如需清理走 DELETE API（会连向量+OSS 一起删）。
+
+---
+
+# 追加：Agent Hook 管线阶段 1（design/plans/08）
+
+> 状态：已完成、已打包重启（health ok）、manus 图编排烟雾通过。全量测试 80 个中 5 个 Error 为**存量环境问题**（stash 验证改动前同样失败：LoveAppTest 4 个 DB FK、PgVectorVectorStoreConfigTest 1 个），与本改动无关。
+
+## 改动内容
+
+1. `agent/hook/` 新增五件套：`AgentRunContext`（每 run 一份 + attributes 属性袋）、`PlannedToolCall`（工具调用计划可变视图）、`HookAbortException`（拦截型唯一短路手段）、`AgentHook`（8 切点 + onFinish/onInterrupted/onError/afterRun，default 空实现）、`AgentHookPipeline`（@Component，容器收集按 order 排序、同 id 去重；观察型异常吞掉记 warn，HookAbortException 传播）。
+2. 装配点：agent 实例是手工 new 的非 Spring Bean → `AgentHooks` 静态持有器，Pipeline @PostConstruct install；无 Spring（单测）时 pipeline()==null 全部 no-op。
+3. `BaseAgent` 插桩：run()/runStream() 在 state=RUNNING 后建 ctx（`newRunContext` 可重写），fireBeforeRun；循环内 beforeStep/afterStep（ctx.currentStep 同步）；stopReason 分支 fireOnInterrupted；正常结束 fireOnFinish；catch 加 HookAbortException 专用受控分支（不发 generation-error，走 onInterrupted+摘要式输出）；finally fireAfterRun 并清 activeRunContext。
+4. `ToolCallAgent` 插桩：step() 包裹 think（beforeThink/afterThink，think 本体未动）；act() 前 fireBeforeToolCalls（HookAbortException → 返回「工具调用被拦截：原因」），计划被修改则 `applyPlannedCalls` 重建 AssistantMessage/ChatResponse（未修改原样返回零开销）；工具执行后 fireAfterToolCalls。
+5. 测试：`AgentHookPipelineTest`（6：顺序/去重/隔离/短路/计划修改/静态装配）、`ToolCallAgentHookTest`（2：计划未变原样返回/修改后重建保 id 与文本）。
+
+## 设计要点（写在 plans/08，不再重复）
+
+- SseEmitter 不交给 hook，事件仍由 BaseAgent 统一发。
+- think 重试、completionHandler 落库、RAG 拼接、各 Tool 内沙箱**不迁**（理由见 plans/08 §4.2）。
+- 阶段 2 待做：ExecutionTraceHook（manus/test/graph 补 trace）、StepMonitoringHook（activity+无进展检测迁出 runStream）；阶段 3：ToolGuardHook/技能注入/记忆压缩。
+
+## 验证结果
+
+- 新增 8 个单测全过；全量 80 个测试中 5 个 Error 与改动前完全一致（存量）。
+- `mvn -DskipTests package` + launchctl 重启 health ok；日志出现 `[agent-hook] pipeline 已装配到 AgentHooks，注册 hook 数：0`。
+- manus SSE 端到端（graph → GraphWorker 继承 ToolCallAgent）正常返回 plan/work activity 事件，插桩零行为变化确认。
+
+## 环境注意事项
+
+- 写新 hook 只需：实现 AgentHook 接口 + @Component 注解（id/order 必填），自动进管线；单测里 new AgentHookPipeline(List.of(hook)) 即可，不依赖 Spring。

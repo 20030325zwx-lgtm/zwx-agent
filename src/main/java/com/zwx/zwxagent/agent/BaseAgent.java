@@ -1,6 +1,10 @@
 package com.zwx.zwxagent.agent;
 
 import cn.hutool.core.util.StrUtil;
+import com.zwx.zwxagent.agent.hook.AgentHookPipeline;
+import com.zwx.zwxagent.agent.hook.AgentHooks;
+import com.zwx.zwxagent.agent.hook.AgentRunContext;
+import com.zwx.zwxagent.agent.hook.HookAbortException;
 import com.zwx.zwxagent.agent.model.AgentState;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -64,6 +68,54 @@ public abstract class BaseAgent {
 
     private volatile Future<?> activeStep;
     private volatile String stopReason;
+    private volatile AgentRunContext activeRunContext;
+
+    /** 当前 run 的 hook 上下文；脱离 run() 生命周期直接调用 step() 时返回 null。 */
+    protected AgentRunContext activeRunContext() {
+        return activeRunContext;
+    }
+
+    // ---- Hook 管线（design/plans/08）：管线为空时全部切点为 no-op，行为与无 hook 完全一致 ----
+
+    /** 构建本次 run 的上下文；子类可重写补充 agentKey / tenantId / conversationId。 */
+    protected AgentRunContext newRunContext(String userPrompt) {
+        return AgentRunContext.builder().agentName(name).userPrompt(userPrompt).build();
+    }
+
+    private void fireBeforeRun(AgentRunContext context) {
+        AgentHookPipeline pipeline = AgentHooks.pipeline();
+        if (pipeline != null) pipeline.fireBeforeRun(context);
+    }
+
+    private void fireBeforeStep(AgentRunContext context) {
+        AgentHookPipeline pipeline = AgentHooks.pipeline();
+        if (pipeline != null) pipeline.fireBeforeStep(context);
+    }
+
+    private void fireAfterStep(AgentRunContext context, String stepResult) {
+        AgentHookPipeline pipeline = AgentHooks.pipeline();
+        if (pipeline != null) pipeline.fireAfterStep(context, stepResult);
+    }
+
+    private void fireOnFinish(AgentRunContext context) {
+        AgentHookPipeline pipeline = AgentHooks.pipeline();
+        if (pipeline != null) pipeline.fireOnFinish(context);
+    }
+
+    private void fireOnInterrupted(AgentRunContext context, String reason) {
+        AgentHookPipeline pipeline = AgentHooks.pipeline();
+        if (pipeline != null) pipeline.fireOnInterrupted(context, reason);
+    }
+
+    private void fireOnError(AgentRunContext context, Exception error) {
+        AgentHookPipeline pipeline = AgentHooks.pipeline();
+        if (pipeline != null) pipeline.fireOnError(context, error);
+    }
+
+    private void fireAfterRun(AgentRunContext context) {
+        AgentHookPipeline pipeline = AgentHooks.pipeline();
+        if (pipeline != null) pipeline.fireAfterRun(context);
+    }
 
     /**
      * 运行代理
@@ -83,16 +135,21 @@ public abstract class BaseAgent {
         this.state = AgentState.RUNNING;
         // 记录消息上下文
         messageList.add(new UserMessage(userPrompt));
-        // 保存结果列表
+        AgentRunContext runContext = newRunContext(userPrompt);
+        activeRunContext = runContext;
         List<String> results = new ArrayList<>();
         try {
+            fireBeforeRun(runContext);
             // 执行循环
             for (int i = 0; i < maxSteps && state != AgentState.FINISHED; i++) {
                 int stepNumber = i + 1;
                 currentStep = stepNumber;
+                runContext.currentStep(stepNumber);
                 log.info("Executing step {}/{}", stepNumber, maxSteps);
                 // 单步执行
+                fireBeforeStep(runContext);
                 String stepResult = step();
+                fireAfterStep(runContext, stepResult);
                 String result = "Step " + stepNumber + ": " + stepResult;
                 results.add(result);
             }
@@ -101,12 +158,21 @@ public abstract class BaseAgent {
                 state = AgentState.FINISHED;
                 results.add("Terminated: Reached max steps (" + maxSteps + ")");
             }
+            fireOnFinish(runContext);
+            return String.join("\n", results);
+        } catch (HookAbortException exception) {
+            fireOnInterrupted(runContext, exception.getMessage());
+            results.add("任务已按策略终止：" + exception.getMessage());
+            state = AgentState.FINISHED;
             return String.join("\n", results);
         } catch (Exception e) {
             state = AgentState.ERROR;
             log.error("error executing agent", e);
+            fireOnError(runContext, e);
             return "执行错误" + e.getMessage();
         } finally {
+            fireAfterRun(runContext);
+            activeRunContext = null;
             // 3、清理资源
             this.cleanup();
         }
@@ -154,6 +220,8 @@ public abstract class BaseAgent {
             this.stopReason = null;
             // 记录消息上下文
             messageList.add(new UserMessage(userPrompt));
+            AgentRunContext runContext = newRunContext(userPrompt);
+            activeRunContext = runContext;
             // 保存结果列表
             List<String> results = new ArrayList<>();
             List<String> activities = new ArrayList<>();
@@ -164,6 +232,7 @@ public abstract class BaseAgent {
             Set<String> observedToolResults = new HashSet<>();
             int noProgressRounds = 0;
             try {
+                fireBeforeRun(runContext);
                 // 执行循环
                 for (int i = 0; i < maxSteps && state == AgentState.RUNNING; i++) {
                     if (System.nanoTime() >= deadlineNanos) {
@@ -172,6 +241,7 @@ public abstract class BaseAgent {
                     }
                     int stepNumber = i + 1;
                     currentStep = stepNumber;
+                    runContext.currentStep(stepNumber);
                     log.info("Executing step {}/{}", stepNumber, maxSteps);
                     // 单步执行；看门狗保证步骤超出总时限时任务被标记停止，
                     // 配合底层 HTTP 超时确保执行线程最终一定释放。
@@ -180,7 +250,9 @@ public abstract class BaseAgent {
                             () -> requestStop("已达到执行时限（步骤看门狗）"), remainingMillis, TimeUnit.MILLISECONDS);
                     String stepResult;
                     try {
+                        fireBeforeStep(runContext);
                         stepResult = runStepBeforeDeadline(deadlineNanos);
+                        fireAfterStep(runContext, stepResult);
                     } finally {
                         watchdog.cancel(false);
                     }
@@ -219,6 +291,7 @@ public abstract class BaseAgent {
                     requestStop("已达到最大执行轮数（" + maxSteps + "）");
                 }
                 if (stopReason != null) {
+                    fireOnInterrupted(runContext, stopReason);
                     String summary = buildInterruptedSummary(stopReason, activities);
                     sseEmitter.send(summary);
                     answer.append(summary);
@@ -228,13 +301,29 @@ public abstract class BaseAgent {
                     sseEmitter.send(fallbackAnswer);
                     answer.append(fallbackAnswer);
                 }
+                fireOnFinish(runContext);
                 completionHandler.accept(new RunResult(answer.toString(), List.copyOf(activities)));
                 // 正常完成
                 sseEmitter.send("[DONE]");
                 sseEmitter.complete();
+            } catch (HookAbortException exception) {
+                // hook 受控拦截：以面向用户的原因结束本次 run，不进入错误路径
+                String reason = exception.getMessage();
+                fireOnInterrupted(runContext, reason);
+                try {
+                    String message = "任务已按策略终止：" + reason;
+                    sseEmitter.send(message);
+                    answer.append(message);
+                    completionHandler.accept(new RunResult(answer.toString(), List.copyOf(activities)));
+                    sseEmitter.send(SseEmitter.event().data("[DONE]"));
+                    sseEmitter.complete();
+                } catch (IOException ioException) {
+                    sseEmitter.completeWithError(ioException);
+                }
             } catch (Exception e) {
                 state = AgentState.ERROR;
                 log.error("error executing agent", e);
+                fireOnError(runContext, e);
                 if (!answer.isEmpty()) {
                     try {
                         completionHandler.accept(new RunResult(answer.toString(), List.copyOf(activities)));
@@ -252,6 +341,8 @@ public abstract class BaseAgent {
                     sseEmitter.completeWithError(ex);
                 }
             } finally {
+                fireAfterRun(runContext);
+                activeRunContext = null;
                 // 3、清理资源
                 this.cleanup();
             }

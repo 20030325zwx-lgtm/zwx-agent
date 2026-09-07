@@ -3,6 +3,10 @@ package com.zwx.zwxagent.agent;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.zwx.zwxagent.agent.hook.AgentHooks;
+import com.zwx.zwxagent.agent.hook.AgentRunContext;
+import com.zwx.zwxagent.agent.hook.HookAbortException;
+import com.zwx.zwxagent.agent.hook.PlannedToolCall;
 import com.zwx.zwxagent.agent.model.AgentState;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -12,6 +16,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingManager;
@@ -63,7 +68,11 @@ public class ToolCallAgent extends ReActAgent {
     @Override
     public String step() {
         lastThinkFailed = false;
-        if (!think()) {
+        AgentRunContext runContext = currentRunContext();
+        fireBeforeThink(runContext);
+        boolean needToolCall = think();
+        fireAfterThink(runContext, needToolCall);
+        if (!needToolCall) {
             if (lastThinkFailed) {
                 // 模型调用在重试后仍失败：显式失败并中断任务，绝不把上一轮的
                 // 陈旧响应当作最终答案交付，也不把错误文案写进记忆。
@@ -75,6 +84,20 @@ public class ToolCallAgent extends ReActAgent {
                     : toolCallChatResponse.getResult().getOutput().getText();
         }
         return act();
+    }
+
+    private AgentRunContext currentRunContext() {
+        AgentRunContext active = activeRunContext();
+        if (active != null) return active;
+        return AgentRunContext.builder().agentName(getName()).build();
+    }
+
+    private void fireBeforeThink(AgentRunContext runContext) {
+        if (AgentHooks.pipeline() != null) AgentHooks.pipeline().fireBeforeThink(runContext);
+    }
+
+    private void fireAfterThink(AgentRunContext runContext, boolean toolCallPlanned) {
+        if (AgentHooks.pipeline() != null) AgentHooks.pipeline().fireAfterThink(runContext, toolCallPlanned);
     }
 
     @Override
@@ -180,6 +203,17 @@ public class ToolCallAgent extends ReActAgent {
         if (!toolCallChatResponse.hasToolCalls()) {
             return "没有工具需要调用";
         }
+        AgentRunContext runContext = currentRunContext();
+        List<PlannedToolCall> plannedCalls = plannedCalls(toolCallChatResponse);
+        if (AgentHooks.pipeline() != null) {
+            try {
+                AgentHooks.pipeline().fireBeforeToolCalls(runContext, plannedCalls);
+            } catch (HookAbortException exception) {
+                log.info(getName() + "的工具调用被 hook 拦截：" + exception.getMessage());
+                return "工具调用被拦截：" + exception.getMessage();
+            }
+            toolCallChatResponse = applyPlannedCalls(toolCallChatResponse, plannedCalls);
+        }
         // 调用工具
         Prompt prompt = new Prompt(getMessageList(), this.chatOptions);
         ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(prompt, toolCallChatResponse);
@@ -189,11 +223,43 @@ public class ToolCallAgent extends ReActAgent {
         lastToolExecutions = toolResponseMessage.getResponses().stream()
                 .map(response -> new ToolExecution(response.name(), toolArguments(response.name()), response.responseData()))
                 .toList();
+        if (AgentHooks.pipeline() != null) {
+            AgentHooks.pipeline().fireAfterToolCalls(runContext, lastToolExecutions);
+        }
         String results = toolResponseMessage.getResponses().stream()
                 .map(response -> "工具 " + response.name() + " 返回的结果：" + response.responseData())
                 .collect(Collectors.joining("\n"));
         log.info(results);
         return results;
+    }
+
+    /** 从模型响应中提取计划调用的工具（可变视图，供 hook 审查与转换）。 */
+    static List<PlannedToolCall> plannedCalls(ChatResponse response) {
+        return response.getResult().getOutput().getToolCalls().stream()
+                .map(toolCall -> new PlannedToolCall(toolCall.id(), toolCall.type(), toolCall.name(), toolCall.arguments()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 若 hook 修改了调用计划（增删改参数），重建包含新调用列表的响应；
+     * 计划未变化时原样返回，保证零开销与零行为变化。
+     */
+    static ChatResponse applyPlannedCalls(ChatResponse response, List<PlannedToolCall> plannedCalls) {
+        AssistantMessage output = response.getResult().getOutput();
+        List<AssistantMessage.ToolCall> original = output.getToolCalls();
+        boolean unchanged = plannedCalls.size() == original.size();
+        for (int i = 0; unchanged && i < plannedCalls.size(); i++) {
+            AssistantMessage.ToolCall toolCall = original.get(i);
+            PlannedToolCall planned = plannedCalls.get(i);
+            unchanged = toolCall.id().equals(planned.id()) && toolCall.name().equals(planned.name())
+                    && toolCall.arguments().equals(planned.arguments());
+        }
+        if (unchanged) return response;
+        List<AssistantMessage.ToolCall> rebuilt = plannedCalls.stream()
+                .map(planned -> new AssistantMessage.ToolCall(planned.id(), planned.type(), planned.name(), planned.arguments()))
+                .toList();
+        AssistantMessage rebuiltMessage = new AssistantMessage(output.getText(), output.getMetadata(), rebuilt);
+        return new ChatResponse(List.of(new Generation(rebuiltMessage)), response.getMetadata());
     }
 
     private String toolArguments(String toolName) {

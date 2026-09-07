@@ -239,7 +239,7 @@ public class AiController {
     @PostMapping(value = "/agent-knowledge/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public AgentKnowledgeDocument uploadAgentKnowledgeDocument(CurrentActor actor, @RequestParam String agentKey, @RequestPart("file") MultipartFile file) {
         actor.requireAdmin();
-        AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(actor.tenantId(), agentKey, file);
+        AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(actor.tenantId(), agentKey, file, actor.username());
         agentKnowledgeDocumentService.indexDocument(document.id());
         return document;
     }

@@ -8,8 +8,8 @@
 | [02](./02-tool-sandbox-security.md) | 工具安全边界与沙箱 | ✅ 已实施（2026-09-05） | ToolSandbox 会话级工作目录；UrlAccessPolicy 拦截私网/SSRF；终端工具默认关闭（白名单+超时版本保留）；MCP 私网校验+单服务故障隔离；生成文件按会话隔离下载 |
 | [03](./03-streaming-reliability.md) | 流式链路可靠性 | ✅ 已实施（2026-09-05） | USER 先行落库 + doFinally 兜底（INTERRUPTED 状态）；manus 客户端断开即停；travel 中断保留执行轨迹；clientRequestId 幂等（409）；前端断线保留内容并从服务端恢复 |
 | [04](./04-concurrency-and-execution.md) | 并发模型与执行正确性 | ✅ 已实施（2026-09-05） | agentExecutor/ragExecutor 专用线程池；BaseAgent 同线程步执行；会话级互斥（409）；执行事件序号原子化+重试；索引队列扩容+429 |
-| [05](./05-agent-architecture-rag-memory.md) | 智能体架构演进、RAG 质量与长期记忆 | ◐ 部分实施（2026-09-05） | 已完成：文档幂等上传/删除端点、私有库检索超时、RAG degraded 标记、QueryRewriter 接入主链路（带预算）、ToolCallAgent think 重试修复、历史上下文字符预算。待做：混合检索+rerank、RAG 评测集、四阶段状态机、run 持久化恢复、长期记忆 |
-| [07](./07-knowledge-document-versioning.md) | 知识库文档版本与有效性治理 | ◌ 设计提案（2026-09-07） | 规划 logical_key、版本链、ACTIVE/ARCHIVED 生命周期、原子发布、重复检测、冲突处理与版本感知检索；尚未实施 |
+| [05](./05-agent-architecture-rag-memory.md) | 智能体架构演进、RAG 质量与长期记忆 | ◐ 部分实施（2026-09-07） | 已完成：文档幂等上传/删除端点、私有库检索超时、RAG degraded 标记、QueryRewriter 接入主链路（带预算）、ToolCallAgent think 重试修复、历史上下文字符预算、召回-重排两段式检索（召回池 15 条 + DashScope gte-rerank-v2 精排 + 降级兜底，详见 context/session-2026-09-07-knowledge-versioning.md）。待做：混合检索、RAG 评测集、四阶段状态机、run 持久化恢复、长期记忆 |
+| [07](./07-knowledge-document-versioning.md) | 知识库文档版本与有效性治理 | ◐ 部分实施（2026-09-07） | 已完成第一批（最小闭环+前端展示）：V6 migration（logical_key/version_no/lifecycle_status/content_sha256 等 + 单一 ACTIVE 部分唯一索引）、版本链上传、INDEXING→READY→ACTIVE 原子发布（向量元数据同事务翻转）、检索仅 ACTIVE + logical_key 去重、引用/上下文带版本号、KnowledgeAdmin 版本与生命周期徽章。待做：hash 去重拦截、publish/rollback/versions/retire API、冲突检测、评测集 |
 
 排序原则：先封住"上线即事故"的安全与数据归属问题，再解决日常使用中的丢消息、卡死、串话，最后扩展智能体能力。
 

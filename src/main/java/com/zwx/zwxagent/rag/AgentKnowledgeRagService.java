@@ -72,10 +72,13 @@ public class AgentKnowledgeRagService {
             return AgentKnowledgeRagResult.EMPTY;
         }
         if (documents.isEmpty()) return new AgentKnowledgeRagResult("", List.of());
-        StringBuilder context = new StringBuilder("以下内容来自当前租户为该智能体上传的私有知识库：\n");
+        StringBuilder context = new StringBuilder("以下内容来自当前租户为该智能体上传的私有知识库（仅当前生效版本）：\n");
         for (Document document : documents) {
             String text = document.getText().replaceAll("\\s+", " ").trim();
-            context.append("- ").append(text, 0, Math.min(1200, text.length())).append('\n');
+            Object version = document.getMetadata().get("versionNo");
+            String versionTag = version instanceof Number number ? "（v" + number.intValue() + "）" : "";
+            context.append("- ").append(document.getMetadata().get("filename")).append(versionTag)
+                    .append("：").append(text, 0, Math.min(1200, text.length())).append('\n');
         }
         List<LoveKnowledgeReference> references = documents.stream().map(this::toReference)
                 .collect(java.util.stream.Collectors.toMap(reference -> reference.objectKey() + "|" + reference.chunkIndex(), reference -> reference,
@@ -88,36 +91,53 @@ public class AgentKnowledgeRagService {
     }
 
     /**
-     * 两段式检索：先放宽阈值扩大向量召回池，再由重排序器精排；重排不可用时降级为按向量分截断。
+     * 两段式检索：版本有效性过滤（必须先于 rerank）→ 向量召回 → 逻辑文档去重 → 重排序精排；
+     * 重排不可用时降级为按向量分截断。
      */
     private RetrievalOutcome recall(String tenantId, String agentKey, String query) {
         List<Document> pool = vectorStore.similaritySearch(searchRequest(tenantId, agentKey, query,
                 Math.max(recallTopK, topK), Math.min(recallSimilarityThreshold, similarityThreshold)));
+        // 防御过滤：发布切换期间可能存在脏向量，metadata 非 ACTIVE 的切片直接排除
+        pool = pool.stream()
+                .filter(document -> "ACTIVE".equals(String.valueOf(document.getMetadata().get("lifecycleStatus"))))
+                .toList();
         if (pool.isEmpty()) return new RetrievalOutcome(pool, null);
         List<Document> byVectorScore = pool.stream()
                 .sorted(java.util.Comparator.comparingDouble(this::score).reversed())
                 .toList();
-        List<String> texts = byVectorScore.stream().map(Document::getText).toList();
+        // 同一逻辑文档只保留当前版本（正常数据下唯一 ACTIVE 已保证，此处兜底去重）
+        java.util.Set<String> seenLogicalKeys = new java.util.HashSet<>();
+        List<Document> deduped = byVectorScore.stream()
+                .filter(document -> {
+                    String logicalKey = String.valueOf(document.getMetadata().getOrDefault("logicalKey",
+                            document.getMetadata().get("documentId")));
+                    return seenLogicalKeys.add(logicalKey);
+                })
+                .toList();
+        List<String> texts = deduped.stream().map(Document::getText).toList();
         return rerankService.rerank(query, texts)
                 .<RetrievalOutcome>map(hits -> {
                     List<Document> documents = new ArrayList<>();
                     List<Double> scores = new ArrayList<>();
                     hits.stream().limit(topK).forEach(hit -> {
-                        documents.add(byVectorScore.get(hit.index()));
+                        documents.add(deduped.get(hit.index()));
                         scores.add(hit.score());
                     });
                     return new RetrievalOutcome(documents, scores);
                 })
-                .orElseGet(() -> new RetrievalOutcome(byVectorScore.stream()
+                .orElseGet(() -> new RetrievalOutcome(deduped.stream()
                         .filter(document -> score(document) >= similarityThreshold)
                         .limit(topK)
                         .toList(), null));
     }
 
+    private final java.util.Set<String> seenLogicalKeys = new java.util.HashSet<>();
+
     private SearchRequest searchRequest(String tenantId, String agentKey, String query, int topK, double similarityThreshold) {
         return SearchRequest.builder().query(query).topK(topK)
                 .similarityThreshold(similarityThreshold)
-                .filterExpression("tenantId == '" + tenantId + "' && agentKey == '" + agentKey + "'").build();
+                .filterExpression("tenantId == '" + tenantId + "' && agentKey == '" + agentKey
+                        + "' && lifecycleStatus == 'ACTIVE'").build();
     }
 
     private double score(Document document) {
@@ -127,8 +147,12 @@ public class AgentKnowledgeRagService {
     private LoveKnowledgeReference toReference(Document document) {
         Object chunk = document.getMetadata().get("chunkIndex");
         Integer chunkIndex = chunk instanceof Number number ? number.intValue() : null;
+        Object version = document.getMetadata().get("versionNo");
+        Integer versionNo = version instanceof Number number ? number.intValue() : null;
+        Object logicalKey = document.getMetadata().get("logicalKey");
         String text = document.getText().replaceAll("\\s+", " ").trim();
         return new LoveKnowledgeReference(String.valueOf(document.getMetadata().get("filename")), null, chunkIndex,
-                String.valueOf(document.getMetadata().get("objectKey")), text.length() <= 280 ? text : text.substring(0, 280) + "...");
+                String.valueOf(document.getMetadata().get("objectKey")), text.length() <= 280 ? text : text.substring(0, 280) + "...",
+                logicalKey == null ? null : String.valueOf(logicalKey), versionNo);
     }
 }

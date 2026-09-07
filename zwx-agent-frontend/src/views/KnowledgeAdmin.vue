@@ -41,7 +41,8 @@
             <strong :title="document.filename">{{ document.filename }}</strong>
             <span class="document-meta">
               <em>{{ document.chunkCount }} 个切片</em>
-              <i :class="`status-${document.status.toLowerCase()}`">{{ document.status === 'READY' ? '已入库' : document.status === 'FAILED' ? '失败' : document.status === 'INDEXING' ? '切片中' : '等待中' }}</i>
+              <i v-if="document.versionNo != null" class="version-chip">v{{ document.versionNo }}</i>
+              <i :class="`lc-${lifecycleClass(document)}`">{{ lifecycleLabel(document) }}</i>
             </span>
           </button>
           <div v-if="!loadingPrivateDocuments && !filteredDocuments.length" class="panel-empty">
@@ -146,6 +147,15 @@ const filteredDocuments = computed(() => {
 })
 
 const excerpt = content => content.replace(/\s+/g, ' ').slice(0, 88)
+const lifecycleClass = document => (document.lifecycleStatus || document.status || 'indexing').toLowerCase()
+const lifecycleLabel = document => ({
+  ACTIVE: '生效中',
+  READY: '待发布',
+  ARCHIVED: '已归档',
+  FAILED: '失败',
+  INDEXING: '处理中',
+  CONFLICT: '冲突'
+})[document.lifecycleStatus || document.status] || '等待中'
 const loadPrivateDocuments = async () => {
   loadingPrivateDocuments.value = true
   detail.value = null
@@ -402,6 +412,13 @@ onBeforeUnmount(() => {
 .document-meta i.status-ready { background: rgba(52, 199, 89, 0.14); color: #1f9d4d; }
 .document-meta i.status-failed { background: rgba(255, 59, 48, 0.12); color: var(--sk-red); }
 .document-meta i.status-indexing, .document-meta i.status-pending { background: rgba(255, 149, 0, 0.14); color: #8a5a00; }
+.document-meta i.version-chip { background: rgba(99, 102, 241, 0.12); color: #4f46e5; }
+.document-meta i.lc-active { background: rgba(52, 199, 89, 0.14); color: #1f9d4d; }
+.document-meta i.lc-ready { background: rgba(255, 149, 0, 0.14); color: #8a5a00; }
+.document-meta i.lc-archived { background: rgba(142, 142, 147, 0.14); color: #6e6e73; }
+.document-meta i.lc-failed { background: rgba(255, 59, 48, 0.12); color: var(--sk-red); }
+.document-meta i.lc-indexing, .document-meta i.lc-conflict { background: rgba(255, 149, 0, 0.14); color: #8a5a00; }
+.document-meta i.lc-conflict { background: rgba(255, 59, 48, 0.12); color: var(--sk-red); }
 
 .document-row:hover { background: var(--sk-fill); }
 

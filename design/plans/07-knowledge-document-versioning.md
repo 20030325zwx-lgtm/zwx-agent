@@ -1,6 +1,6 @@
 # 知识库文档版本与有效性治理方案
 
-> 状态：设计提案，尚未实施
+> 状态：第一批（最小闭环 + 前端展示）已实施，见 `context/session-2026-09-07-knowledge-versioning.md`；hash 去重、publish/rollback/versions/retire API、冲突检测尚未实施
 >
 > 目标：在同名文档、重复文档、新旧版本并存或规则冲突时，保证检索只使用当前有效内容，并让回答能够解释其来源。
 

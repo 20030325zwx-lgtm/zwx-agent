@@ -58,6 +58,9 @@ app:
     admin-username: ${APP_SECURITY_ADMIN_USERNAME:admin}
     admin-password: ${APP_SECURITY_ADMIN_PASSWORD:}
   temp-dir: ${APP_TEMP_DIR:${user.dir}/temp}
+  workspace:
+    # 统一工作区根（design/plans/09 批次 A）；空 = {temp-dir}/workspaces
+    root: ${APP_WORKSPACE_ROOT:}
   love:
     vision-model: qwen-vl-plus
     rag:
@@ -75,6 +78,9 @@ app:
       timeout-ms: 3000
       recall-top-k: 15
       recall-similarity-threshold: 0.4
+    hook:
+      # 工具结果截断阈值（字符）
+      tool-result-max-chars: 8000
   rag:
     rerank:
       # 总开关：false 或未配置 DashScope api-key 时自动降级为向量原始顺序

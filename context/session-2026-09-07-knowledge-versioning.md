@@ -112,3 +112,33 @@
 - StepMonitoringHook 迁移（死循环/无进展检测 + activity 出 runStream）——单独一批，需逐字节对照 SSE 行为；
 - manus 前端展示执行时间线（数据已有，等 UI）；
 - 阶段 3：ToolGuardHook / 技能注入 / 记忆压缩。
+
+---
+
+# 追加：批次 A 统一工作区（design/plans/2026-09-08-memory-skills-workspace）
+
+> 状态：已完成、已打包重启（health ok）、manus 端到端验证（写文件→清单→下载全通）。
+
+## 改动内容
+
+1. `workspace/WorkspaceService`（新增）：目录模型 `temp/workspaces/{tenantId}/{agentKey}/{conversationId}/`（默认根 = FILE_SAVE_DIR/workspaces，`app.workspace.root` 可覆盖）+ `{tenant}/{agent}/shared/` 跨会话共享；`resolveWithin` 复用 ToolSandbox 守卫（穿越/符号链接拒绝）；`listFiles`（相对路径/大小/修改时间，limit 上限）；`legacyScopeDir` 供旧目录回退。
+2. `ToolFactory`：新增 `createTools(tenantId, agentKey, conversationId)`（workDir 来自工作区），旧 `createTools(scope)` 保留（ZwxManusTest、LoveApp.doChatWithTools 等无租户上下文的调用点）。子目录名沿用工具既有约定 file/、download/、pdf/，工具类零改动。
+3. `AiController`：manus 链路切工作区签名；`manus/files` 改为工作区优先 + 旧 tools 目录回退（历史会话兼容）；新增 `GET /workspace/files?agentKey=&conversationId=&limit=`（hasConversation 归属校验 + tenant 隔离）。
+4. `application.yml`：`app.workspace.root`（默认空 = temp/workspaces）、`app.agent.hook.tool-result-max-chars` 显式化。
+5. 测试：`WorkspaceServiceTest` 5 个（三级布局/非法组件拒绝/穿越拒绝/清单排序与大小/limit）。
+
+## 事故记录
+
+- application.yml 曾加出重复 `agent:` 键（与 rerank 批次的 app.agent.rag 撞键）→ SnakeYAML DuplicateKeyException 启动失败；合并两块后恢复。教训：改 yml 前先 grep 现有键。
+
+## 验证结果
+
+- manus 任务"保存 note.txt"→ 文件落在 `temp/workspaces/default/super/{conversationId}/file/note.txt`；
+- `GET /workspace/files` 返回 `file/note.txt`（size 21）；`GET /manus/files?path=file/note.txt` 下载内容一致；
+- 全量测试除 5 个存量环境错误外全过（WorkspaceServiceTest 5 个全过）。
+
+## 遗留（plans/2026-09-08 批次 B/C）
+
+- 批次 B：markdown 技能仓库（SkillRepository + front-matter + reload + 内置回落 + PromptBuilder 接入）；
+- 批次 C：分层记忆（V7 事实表 + MemoryService + 压缩/提取/注入 hook，提取开关默认关）；
+- LoveApp.doChatWithTools 为无生产调用方的遗留代码，仍走旧签名（可在后续清理）。

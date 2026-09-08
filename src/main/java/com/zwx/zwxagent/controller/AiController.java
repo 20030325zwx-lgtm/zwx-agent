@@ -107,6 +107,9 @@ public class AiController {
     private com.zwx.zwxagent.tools.ToolSandbox toolSandbox;
 
     @Resource
+    private com.zwx.zwxagent.workspace.WorkspaceService workspaceService;
+
+    @Resource
     private ChatModel dashscopeChatModel;
 
     @Resource
@@ -482,7 +485,7 @@ public class AiController {
                 ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, message)
                 : new AgentKnowledgeRagResult("", List.of());
         McpTools mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
-        ToolCallback[] availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(conversationId)), Arrays.stream(mcpTools.callbacks()))
+        ToolCallback[] availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)), Arrays.stream(mcpTools.callbacks()))
                 .toArray(ToolCallback[]::new);
         String historyContext = agentConversationService
                 .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 20).stream()
@@ -578,15 +581,42 @@ public class AiController {
         if (!agentConversationService.hasConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId)) {
             return ResponseEntity.notFound().build();
         }
-        Path scopeRoot = toolSandbox.scopeDir(conversationId);
-        Path file = scopeRoot.resolve(path).normalize();
-        if (!file.startsWith(scopeRoot) || !Files.isRegularFile(file)) return ResponseEntity.notFound().build();
+        Path file = resolveConversationFile(actor.tenantId(), conversationId, path);
+        if (file == null || !Files.isRegularFile(file)) return ResponseEntity.notFound().build();
         String detectedType = Files.probeContentType(file);
         MediaType mediaType = detectedType == null ? MediaType.APPLICATION_OCTET_STREAM : MediaType.parseMediaType(detectedType);
         return ResponseEntity.ok()
                 .contentType(mediaType)
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(file.getFileName().toString(), StandardCharsets.UTF_8).build().toString())
                 .body(new FileSystemResource(file));
+    }
+
+    /** 会话文件解析：优先统一工作区，回退旧工具目录（历史会话兼容）。 */
+    private Path resolveConversationFile(String tenantId, String conversationId, String path) {
+        try {
+            Path workspaceRoot = workspaceService.conversationRoot(tenantId, SUPER_AGENT_KEY, conversationId);
+            Path file = workspaceService.resolveWithin(workspaceRoot, path);
+            if (Files.isRegularFile(file)) return file;
+        } catch (Exception ignored) {
+        }
+        try {
+            Path legacyRoot = toolSandbox.scopeDir(conversationId);
+            Path file = legacyRoot.resolve(path).normalize();
+            if (file.startsWith(legacyRoot) && Files.isRegularFile(file)) return file;
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /** 会话工作区文件清单（design/plans/09 批次 A）。 */
+    @GetMapping("/workspace/files")
+    public List<com.zwx.zwxagent.workspace.WorkspaceService.FileEntry> listWorkspaceFiles(
+            CurrentActor actor, @RequestParam String agentKey, @RequestParam String conversationId,
+            @RequestParam(defaultValue = "200") int limit) {
+        if (!agentConversationService.hasConversation(actor.tenantId(), actor.userId(), agentKey, conversationId)) {
+            return List.of();
+        }
+        return workspaceService.listFiles(actor.tenantId(), agentKey, conversationId, Math.min(Math.max(limit, 1), 500));
     }
 
     @GetMapping(value = "/travel-planner/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

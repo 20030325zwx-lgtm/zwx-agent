@@ -14,6 +14,7 @@ import java.util.Set;
 public class ToolFactory {
 
     private final ToolSandbox sandbox;
+    private final com.zwx.zwxagent.workspace.WorkspaceService workspaceService;
     private final UrlAccessPolicy urlAccessPolicy;
     private final WebSearchTool webSearchTool;
     private final boolean terminalEnabled;
@@ -28,6 +29,7 @@ public class ToolFactory {
     private final boolean dbQueryExternalEnabled;
 
     public ToolFactory(ToolSandbox sandbox,
+                       com.zwx.zwxagent.workspace.WorkspaceService workspaceService,
                        UrlAccessPolicy urlAccessPolicy,
                        @Value("${search-api.api-key}") String searchApiKey,
                        @Value("${search-api.provider:searchapi}") String searchProvider,
@@ -42,6 +44,7 @@ public class ToolFactory {
                        @Value("${app.tools.db-query-timeout-seconds:5}") int dbQueryTimeoutSeconds,
                        @Value("${app.tools.db-query-external-enabled:false}") boolean dbQueryExternalEnabled) {
         this.sandbox = sandbox;
+        this.workspaceService = workspaceService;
         this.urlAccessPolicy = urlAccessPolicy;
         this.webSearchTool = new WebSearchTool(searchProvider, searchApiKey);
         this.terminalEnabled = terminalEnabled;
@@ -58,8 +61,19 @@ public class ToolFactory {
         this.dbQueryExternalEnabled = dbQueryExternalEnabled;
     }
 
+    /** 工作区签名（design/plans/09 批次 A）：工具 workDir 来自统一工作区目录模型。 */
+    public ToolCallback[] createTools(String tenantId, String agentKey, String conversationId) {
+        Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
+        return buildTools(workDir);
+    }
+
+    /** 旧签名（scope 目录）：保留给测试与 legacy 调用。 */
     public ToolCallback[] createTools(String scope) {
         Path workDir = sandbox.scopeDir(scope);
+        return buildTools(workDir);
+    }
+
+    private ToolCallback[] buildTools(Path workDir) {
         java.util.List<Object> tools = new java.util.ArrayList<>(java.util.List.of(
                 new FileOperationTool(sandbox, workDir),
                 webSearchTool,

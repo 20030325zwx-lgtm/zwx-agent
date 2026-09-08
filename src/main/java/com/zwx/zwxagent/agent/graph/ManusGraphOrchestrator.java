@@ -114,6 +114,7 @@ public class ManusGraphOrchestrator {
     }
 
     public record ManusRunRequest(String conversationId,
+                                  String tenantId,
                                   String message,
                                   String historyContext,
                                   ToolCallback[] tools,
@@ -144,7 +145,8 @@ public class ManusGraphOrchestrator {
         StringBuilder answer = new StringBuilder();
         List<String> activities = new ArrayList<>();
         try {
-            RunContext context = RunContext.of(request.tools(), request.knowledgeContext(), stopped::get);
+            RunContext context = RunContext.of(request.tools(), request.knowledgeContext(), stopped::get,
+                    request.tenantId(), request.conversationId());
             Map<String, Object> inputs = Map.of(
                     GraphState.INPUT, request.message(),
                     GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext(),

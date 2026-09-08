@@ -489,7 +489,7 @@ public class AiController {
                 .map(historyMessage -> ("USER".equals(historyMessage.role()) ? "用户" : "助手") + ": " + historyMessage.content())
                 .collect(java.util.stream.Collectors.joining("\n"));
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
-                conversationId, message, historyContext, availableTools, knowledge.context(),
+                conversationId, actor.tenantId(), message, historyContext, availableTools, knowledge.context(),
                 result -> agentConversationService.saveCompletedTurn(
                         actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE,
                         message, result.answer(), toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId)))));
@@ -637,6 +637,18 @@ public class AiController {
             return List.of();
         }
         return agentExecutionTraceService.listTravelEvents(actor.tenantId(), conversationId, runId);
+    }
+
+    /** 通用执行轨迹查询（hook ExecutionTraceHook 落库），tenant 隔离；runId 可空（空则返回会话最近事件）。 */
+    @org.springframework.web.bind.annotation.GetMapping("/executions")
+    public List<com.zwx.zwxagent.execution.AgentExecutionEvent> listExecutionEvents(
+            CurrentActor actor, @RequestParam String agentKey, @RequestParam String conversationId,
+            @RequestParam(required = false) String runId,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "200") int limit) {
+        if (runId != null && !runId.isBlank()) {
+            return agentExecutionTraceService.listEvents(actor.tenantId(), agentKey, conversationId, runId);
+        }
+        return agentExecutionTraceService.listRecentEvents(actor.tenantId(), agentKey, conversationId, Math.min(Math.max(limit, 1), 500));
     }
 
     @PostMapping("/travel-planner/conversations")

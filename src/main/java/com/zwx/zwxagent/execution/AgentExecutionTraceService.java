@@ -45,11 +45,26 @@ public class AgentExecutionTraceService {
     }
 
     public List<AgentExecutionEvent> listTravelEvents(String tenantId, String conversationId, String runId) {
+        return listEvents(tenantId, "travel", conversationId, runId);
+    }
+
+    /** 通用执行轨迹查询（tenant 隔离）；listTravelEvents 委托复用。 */
+    public List<AgentExecutionEvent> listEvents(String tenantId, String agentKey, String conversationId, String runId) {
         return jdbcTemplate.query("""
                 SELECT sequence, phase, summary, detail, created_at FROM agent_execution_event
-                WHERE run_id = ? AND tenant_id = ? AND agent_key = 'travel' AND conversation_id = ? ORDER BY sequence
+                WHERE run_id = ? AND tenant_id = ? AND agent_key = ? AND conversation_id = ? ORDER BY sequence
                 """, (rs, rowNum) -> new AgentExecutionEvent(rs.getInt("sequence"), rs.getString("phase"), rs.getString("summary"),
-                readDetail(rs.getString("detail")), rs.getTimestamp("created_at").toInstant()), runId, tenantId, conversationId);
+                readDetail(rs.getString("detail")), rs.getTimestamp("created_at").toInstant()), runId, tenantId, agentKey, conversationId);
+    }
+
+    /** 按会话查最近事件（不限 run），供会话级时间线展示。 */
+    public List<AgentExecutionEvent> listRecentEvents(String tenantId, String agentKey, String conversationId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT sequence, phase, summary, detail, created_at FROM agent_execution_event
+                WHERE tenant_id = ? AND agent_key = ? AND conversation_id = ?
+                ORDER BY id DESC LIMIT ?
+                """, (rs, rowNum) -> new AgentExecutionEvent(rs.getInt("sequence"), rs.getString("phase"), rs.getString("summary"),
+                readDetail(rs.getString("detail")), rs.getTimestamp("created_at").toInstant()), tenantId, agentKey, conversationId, limit);
     }
 
     public void deleteRun(String tenantId, String conversationId, String runId) {

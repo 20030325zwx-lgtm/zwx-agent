@@ -10,7 +10,7 @@
 | [04](./04-concurrency-and-execution.md) | 并发模型与执行正确性 | ✅ 已实施（2026-09-05） | agentExecutor/ragExecutor 专用线程池；BaseAgent 同线程步执行；会话级互斥（409）；执行事件序号原子化+重试；索引队列扩容+429 |
 | [05](./05-agent-architecture-rag-memory.md) | 智能体架构演进、RAG 质量与长期记忆 | ◐ 部分实施（2026-09-07） | 已完成：文档幂等上传/删除端点、私有库检索超时、RAG degraded 标记、QueryRewriter 接入主链路（带预算）、ToolCallAgent think 重试修复、历史上下文字符预算、召回-重排两段式检索（召回池 15 条 + DashScope gte-rerank-v2 精排 + 降级兜底，详见 context/session-2026-09-07-knowledge-versioning.md）。待做：混合检索、RAG 评测集、四阶段状态机、run 持久化恢复、长期记忆 |
 | [07](./07-knowledge-document-versioning.md) | 知识库文档版本与有效性治理 | ◐ 部分实施（2026-09-07） | 已完成第一批（最小闭环+前端展示）：V6 migration（logical_key/version_no/lifecycle_status/content_sha256 等 + 单一 ACTIVE 部分唯一索引）、版本链上传、INDEXING→READY→ACTIVE 原子发布（向量元数据同事务翻转）、检索仅 ACTIVE + logical_key 去重、引用/上下文带版本号、KnowledgeAdmin 版本与生命周期徽章。待做：hash 去重拦截、publish/rollback/versions/retire API、冲突检测、评测集 |
-| [08](./08-agent-hook-pipeline.md) | Agent Hook 管线（可插拔中间件） | ◐ 部分实施（2026-09-07） | 阶段 1 已完成：AgentRunContext/PlannedToolCall/HookAbortException/AgentHook/AgentHookPipeline（Spring 收集 + AgentHooks 静态装配）+ BaseAgent、ToolCallAgent 全切点插桩（空管线零行为变化，8 个切点 + 3 终态回调，beforeToolCalls 支持计划修改重建）。待做：阶段 2 迁移 ExecutionTraceHook/StepMonitoringHook，阶段 3 承载技能注入/记忆压缩/统一沙箱 |
+| [08](./08-agent-hook-pipeline.md) | Agent Hook 管线（可插拔中间件） | ◐ 部分实施（2026-09-08） | 阶段 1 完成（五件套 + 全切点插桩，空管线零行为变化）；阶段 2 第一批完成：ExecutionTraceHook（manus/graph 执行轨迹落库 agent_execution_event，通用查询 GET /ai/executions）、ToolResultTruncationHook（afterToolCalls 原地截断并同步回消息历史，tool-result-max-chars 默认 8000）、AgentRunIdentity 身份传递。待做：StepMonitoringHook 迁移、阶段 3（ToolGuardHook/技能注入/记忆压缩） |
 
 排序原则：先封住"上线即事故"的安全与数据归属问题，再解决日常使用中的丢消息、卡死、串话，最后扩展智能体能力。
 

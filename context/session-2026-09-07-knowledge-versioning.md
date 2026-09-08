@@ -85,3 +85,30 @@
 ## 环境注意事项
 
 - 写新 hook 只需：实现 AgentHook 接口 + @Component 注解（id/order 必填），自动进管线；单测里 new AgentHookPipeline(List.of(hook)) 即可，不依赖 Spring。
+
+---
+
+# 追加：Hook 管线阶段 2 第一批（ExecutionTraceHook + ToolResultTruncationHook）
+
+> 状态：已完成、已打包重启（health ok）、manus 端到端验证轨迹落库。设计细化见 design/plans/08 §8。
+
+## 改动内容
+
+1. **身份传递**：新增 `agent/AgentRunIdentity(tenantId, agentKey, conversationId)`；`BaseAgent.setRunIdentity()` + `newRunContext()` 填入 AgentRunContext（此前只有 agentName/userPrompt）。接线：`ManusRunRequest` 加 tenantId → graph `RunContext` 加 tenantId/conversationId（RunContext 重构为规范构造器归一化 knowledgeContext）→ `WorkersNode.runWorker` 构建 GraphWorker 后 setRunIdentity(tenantId,"super",conversationId)；AiController manus 入口传 actor.tenantId()。无身份（单测/程序内调用）自动跳过。
+2. **ExecutionTraceHook**（order=100，观察型，@Component）：beforeRun→agent_started、afterStep→step、afterToolCalls→逐工具 tool（detail 含 args/result 摘要 2000 字符）、onFinish/onInterrupted→agent_finished/agent_interrupted；summary 截 120；复用 AgentExecutionTraceService.record（sequence 原子+重试）；记录失败仅 warn 不影响 agent。
+3. **afterToolCalls 约定升级**：hook 可原地修改 executions 列表（list.set 替换）；`ToolCallAgent.act()` 用 mutable copy 传给管线，fire 后对比变化 → `rebuildToolResponseMessage`（按 name 对应替换 responseData，静态包私有可测）重建 ToolResponseMessage 替换 conversationHistory 末条 + 同步 lastToolExecutions。
+4. **ToolResultTruncationHook**（order=300，转换型）：超长结果（`app.agent.hook.tool-result-max-chars` 默认 8000）截断为前 70% + 省略标记（含原始长度）+ 后 30%；order 在 trace 之后保证轨迹记录完整结果。
+5. **通用查询端点**：`AgentExecutionTraceService.listEvents`（泛化原 travel 硬编码）+ `listRecentEvents`（会话级最近 N 条）；`GET /ai/executions?agentKey=&conversationId=[&runId=][&limit=]`，tenant 隔离。
+6. 测试 15 个（管线 6 + 计划修改 2 + trace 4 + 截断 3）全过。
+
+## 验证结果
+
+- manus 端到端两次验证：① 简单任务产生 agent_started/step/agent_finished（sequence 1-3 连续）；② 触发数据库工具的任务产生完整 agent_started→tool→step→agent_finished（sequence 1-6 连续），且观察到 verifier 重试产生的第二轮 worker 各自独立 runId，轨迹互不混淆。
+- 全量测试 87 个，5 个 Error 为已确认的存量环境问题（与改动无关）。
+- 截断 hook 自然触发难造（需单次工具返回 >8000 字符），逻辑由单测覆盖。
+
+## 遗留
+
+- StepMonitoringHook 迁移（死循环/无进展检测 + activity 出 runStream）——单独一批，需逐字节对照 SSE 行为；
+- manus 前端展示执行时间线（数据已有，等 UI）；
+- 阶段 3：ToolGuardHook / 技能注入 / 记忆压缩。

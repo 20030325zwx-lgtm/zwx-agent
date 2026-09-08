@@ -204,3 +204,36 @@ public class AgentHookPipeline {
 3. **阶段 3（能力扩展，另行立项）**：ToolGuardHook 统一沙箱入口；技能 markdown 化 + SkillInjectionHook；记忆压缩 hook。
 
 不要在阶段 1 顺手迁移任何现有逻辑——先让插桩本身证明「空管线 = 零行为变化」，再分批搬运。
+
+## 8. 阶段 2 第一批实施细化（2026-09-07 定稿）
+
+第一批落地两个 hook：`ExecutionTraceHook`（补 manus/graph 执行轨迹缺口）+ `ToolResultTruncationHook`（防工具结果撑爆上下文）。
+
+### 8.1 身份传递（trace 的前置）
+
+- 新增 `AgentRunIdentity(tenantId, agentKey, conversationId)`；`BaseAgent` 增加可设置字段，`newRunContext()` 填入 `AgentRunContext` 对应字段。
+- 接线（当前 ReAct 生产链路只有 manus 图编排）：`ManusRunRequest` 增加 tenantId → graph `RunContext` 增加 tenantId/conversationId → `WorkersNode` 构建 GraphWorker 后 `setRunIdentity(tenantId, "super", conversationId)`。
+- 无身份（程序内调用、单测）→ trace hook 自动跳过，零影响。
+
+### 8.2 ExecutionTraceHook（order=100，观察型）
+
+- 复用 `agent_execution_event` 表与 `AgentExecutionTraceService.record`（sequence 原子递增、重试已有）。
+- 记录粒度：`beforeRun → phase="agent_started"`；`afterStep → phase="step"`（summary 为 stepResult 摘要）；`afterToolCalls → phase="tool"`（逐工具记录，detail 含参数与结果摘要）；`onFinish/onInterrupted → phase="agent_finished"/"agent_interrupted"`。
+- 写库失败由管线隔离（warn），绝不影响 agent 主流程；travel 现有 phase 级记录不动，hook 补充 step/tool 级细节。
+
+### 8.3 ToolResultTruncationHook（order=300，转换型）
+
+- **`afterToolCalls` 约定升级：hook 可原地修改传入的 executions 列表**（`ToolExecution` 为 immutable record，用 `list.set(i, ...)` 替换）；`act()` 在 fire 完成后对比列表，若变化则按 id 对应重建 `ToolResponseMessage`（构造器 `(List<ToolResponse>)`）替换 conversationHistory 末条，并同步 `lastToolExecutions`。
+- order 语义：trace(100) 先执行、记录完整结果（自行摘要入库）；truncation(300) 后执行、真正改写进入模型上下文的内容。
+- 截断策略：`app.agent.hook.tool-result-max-chars`（默认 8000），超长取前 70% + 省略标记（含原始长度）+ 后 30%；短结果原样。
+
+### 8.4 通用查询端点
+
+- `AgentExecutionTraceService.listEvents(tenantId, agentKey, conversationId, runId)` 泛化（listTravelEvents 委托复用）；
+- `GET /ai/executions?agentKey=&conversationId=&runId=`，按 actor.tenantId() 隔离。
+
+### 8.5 验收
+
+- manus 一次多步任务后，`agent_execution_event` 出现 agent_started/step/tool/agent_finished 序列，sequence 连续；
+- 超长工具结果在 messageList 中被截断且带原始长度标记，短结果不变；
+- 无身份调用（ZwxManusTest 路径）不产生任何事件记录；现有全部测试回归通过。

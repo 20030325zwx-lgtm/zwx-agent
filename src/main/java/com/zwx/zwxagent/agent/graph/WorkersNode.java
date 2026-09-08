@@ -97,7 +97,7 @@ public class WorkersNode implements NodeAction {
             events.add(ActivityEvent.of("work", step.role().displayName(),
                     "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title()));
             futures.add(CompletableFuture.supplyAsync(() ->
-                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck), workerExecutor));
+                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck, context), workerExecutor));
         }
         List<String> activities = new ArrayList<>();
         List<String> results = new ArrayList<>();
@@ -120,10 +120,15 @@ public class WorkersNode implements NodeAction {
     }
 
     private WorkerOutcome runWorker(PlanStep step, int stepNumber, ToolCallback[] allTools,
-                                    String feedback, ChatClient sharedClient, BooleanSupplier stopCheck) {
+                                    String feedback, ChatClient sharedClient, BooleanSupplier stopCheck,
+                                    RunContext runContext) {
         WorkerRole role = step.role();
         ToolCallback[] roleTools = filterTools(allTools, role);
         GraphWorker worker = new GraphWorker(roleTools, role, step.title());
+        if (runContext != null && runContext.tenantId() != null) {
+            worker.setRunIdentity(new com.zwx.zwxagent.agent.AgentRunIdentity(
+                    runContext.tenantId(), "super", runContext.conversationId()));
+        }
         worker.setName("worker-" + stepNumber + "-" + role.key());
         worker.setSystemPrompt("""
                 你是多智能体团队中的%s。专注完成分配给你的子任务，不要展开任务范围。

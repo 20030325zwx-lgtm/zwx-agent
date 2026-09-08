@@ -70,6 +70,13 @@ public abstract class BaseAgent {
     private volatile String stopReason;
     private volatile AgentRunContext activeRunContext;
 
+    /** run 归属身份（租户/智能体/会话），创建方在 run 前设置；缺省 null 时依赖身份的 hook 自动跳过。 */
+    private volatile AgentRunIdentity runIdentity;
+
+    public void setRunIdentity(AgentRunIdentity identity) {
+        this.runIdentity = identity;
+    }
+
     /** 当前 run 的 hook 上下文；脱离 run() 生命周期直接调用 step() 时返回 null。 */
     protected AgentRunContext activeRunContext() {
         return activeRunContext;
@@ -79,7 +86,14 @@ public abstract class BaseAgent {
 
     /** 构建本次 run 的上下文；子类可重写补充 agentKey / tenantId / conversationId。 */
     protected AgentRunContext newRunContext(String userPrompt) {
-        return AgentRunContext.builder().agentName(name).userPrompt(userPrompt).build();
+        AgentRunIdentity identity = runIdentity;
+        return AgentRunContext.builder()
+                .agentName(name)
+                .userPrompt(userPrompt)
+                .tenantId(identity == null ? null : identity.tenantId())
+                .agentKey(identity == null ? null : identity.agentKey())
+                .conversationId(identity == null ? null : identity.conversationId())
+                .build();
     }
 
     private void fireBeforeRun(AgentRunContext context) {

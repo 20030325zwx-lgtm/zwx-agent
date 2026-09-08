@@ -32,6 +32,11 @@ public interface AgentHook {
     default void beforeToolCalls(AgentRunContext context, List<PlannedToolCall> plannedCalls) {
     }
 
+    /**
+     * 约定：可原地修改传入列表（{@code list.set(i, ...)} 替换 ToolExecution），
+     * 修改会同步回模型消息历史（工具结果真正进入上下文的内容）。
+     * order 在前的 hook 先执行——排在前面的 hook 看到的是修改前的完整结果。
+     */
     default void afterToolCalls(AgentRunContext context, List<BaseAgent.ToolExecution> executions) {
     }
 

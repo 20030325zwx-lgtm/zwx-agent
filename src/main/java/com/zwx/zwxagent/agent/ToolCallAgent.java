@@ -220,9 +220,21 @@ public class ToolCallAgent extends ReActAgent {
         // 记录消息上下文，conversationHistory 已经包含了助手消息和工具调用返回的结果
         setMessageList(toolExecutionResult.conversationHistory());
         ToolResponseMessage toolResponseMessage = (ToolResponseMessage) CollUtil.getLast(toolExecutionResult.conversationHistory());
-        lastToolExecutions = toolResponseMessage.getResponses().stream()
+        List<ToolExecution> executions = new java.util.ArrayList<>(toolResponseMessage.getResponses().stream()
                 .map(response -> new ToolExecution(response.name(), toolArguments(response.name()), response.responseData()))
-                .toList();
+                .toList());
+        if (AgentHooks.pipeline() != null) {
+            // hook 可原地修改 executions（如截断超长结果）；修改需同步回消息历史
+            List<ToolExecution> beforeHooks = List.copyOf(executions);
+            AgentHooks.pipeline().fireAfterToolCalls(runContext, executions);
+            if (!executions.equals(beforeHooks)) {
+                toolResponseMessage = rebuildToolResponseMessage(toolResponseMessage, executions);
+                List<Message> history = new java.util.ArrayList<>(getMessageList());
+                history.set(history.size() - 1, toolResponseMessage);
+                setMessageList(history);
+            }
+        }
+        lastToolExecutions = executions;
         if (AgentHooks.pipeline() != null) {
             AgentHooks.pipeline().fireAfterToolCalls(runContext, lastToolExecutions);
         }
@@ -260,6 +272,22 @@ public class ToolCallAgent extends ReActAgent {
                 .toList();
         AssistantMessage rebuiltMessage = new AssistantMessage(output.getText(), output.getMetadata(), rebuilt);
         return new ChatResponse(List.of(new Generation(rebuiltMessage)), response.getMetadata());
+    }
+
+    /** 按修改后的 executions 重建工具响应消息（按 id 对应替换 responseData，顺序与原响应一致）。 */
+    static ToolResponseMessage rebuildToolResponseMessage(ToolResponseMessage original, List<ToolExecution> executions) {
+        java.util.Map<String, String> updatedResults = new java.util.HashMap<>();
+        for (ToolExecution execution : executions) {
+            updatedResults.merge(execution.name(), execution.result(), (first, ignored) -> first);
+        }
+        List<ToolResponseMessage.ToolResponse> rebuilt = original.getResponses().stream()
+                .map(response -> {
+                    String result = updatedResults.get(response.name());
+                    return response.responseData().equals(result) ? response
+                            : new ToolResponseMessage.ToolResponse(response.id(), response.name(),
+                            result == null ? response.responseData() : result);
+                }).toList();
+        return new ToolResponseMessage(rebuilt, original.getMetadata());
     }
 
     private String toolArguments(String toolName) {

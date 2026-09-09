@@ -35,6 +35,7 @@ import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
 import com.zwx.zwxagent.skills.SkillConfigurationRequest;
 import com.zwx.zwxagent.skills.SkillCatalogItem;
+import com.zwx.zwxagent.skills.SkillRepository;
 import com.zwx.zwxagent.app.LoveVisionChatResult;
 import com.zwx.zwxagent.constant.FileConstant;
 import com.zwx.zwxagent.mcp.McpConnectionTestResult;
@@ -167,6 +168,9 @@ public class AiController {
     private BuiltInSkillRegistry builtInSkillRegistry;
 
     @Resource
+    private SkillRepository skillRepository;
+
+    @Resource
     private com.zwx.zwxagent.rag.QueryRewriter queryRewriter;
 
     @Resource(name = "ragExecutor")
@@ -186,6 +190,13 @@ public class AiController {
         if (request == null || request.agentKey() == null || request.enabledSkillIds() == null) throw new IllegalArgumentException("Invalid Skill configuration");
         builtInSkillRegistry.saveConfiguration(actor.tenantId(), request.agentKey(), request.enabledSkillIds());
         return builtInSkillRegistry.catalogWithConfiguration(actor.tenantId(), request.agentKey());
+    }
+
+    @PostMapping("/skills/reload")
+    public List<SkillCatalogItem> reloadSkills(CurrentActor actor, @RequestParam String agentKey) {
+        actor.requireAdmin();
+        skillRepository.reload();
+        return builtInSkillRegistry.catalogWithConfiguration(actor.tenantId(), agentKey);
     }
 
     @PostMapping("/love_app/conversations")

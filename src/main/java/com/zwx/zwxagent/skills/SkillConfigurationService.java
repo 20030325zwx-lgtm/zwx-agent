@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Set;
+import java.util.TreeSet;
 
 @Service
 public class SkillConfigurationService {
@@ -23,10 +24,12 @@ public class SkillConfigurationService {
     }
 
     @Transactional
-    public void save(String tenantId, String agentKey, Set<String> skillIds) {
+    public void save(String tenantId, String agentKey, Set<String> knownSkillIds, Set<String> enabledSkillIds) {
         jdbcTemplate.update("DELETE FROM agent_skill_configuration WHERE tenant_id = ? AND agent_key = ?", tenantId, agentKey);
         jdbcTemplate.batchUpdate(
                 "INSERT INTO agent_skill_configuration (tenant_id, agent_key, skill_id, enabled) VALUES (?, ?, ?, ?)",
-                Set.of("web-research").stream().map(skillId -> new Object[]{tenantId, agentKey, skillId, skillIds.contains(skillId)}).toList());
+                new TreeSet<>(knownSkillIds).stream()
+                        .map(skillId -> new Object[]{tenantId, agentKey, skillId, enabledSkillIds.contains(skillId)})
+                        .toList());
     }
 }

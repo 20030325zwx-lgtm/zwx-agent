@@ -1,7 +1,13 @@
 package com.zwx.zwxagent.skills;
 
+import java.util.List;
 import java.util.Set;
 
 /** Metadata and trigger policy for a project-owned agent skill. */
-public record BuiltInSkill(String id, String name, String description, String trigger, Set<String> agentKeys) {
+public record BuiltInSkill(String id, String name, String description, String trigger, Set<String> agentKeys,
+                           List<String> tools, String instruction, String source) {
+
+    public BuiltInSkill(String id, String name, String description, String trigger, Set<String> agentKeys) {
+        this(id, name, description, trigger, agentKeys, List.of(), "", "builtin");
+    }
 }

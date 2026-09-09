@@ -19,7 +19,7 @@
         </div>
         <article v-for="skill in skills" :key="skill.id" class="skill-row">
           <div class="skill-icon"><Sparkles :size="18" /></div>
-          <div class="skill-copy"><strong>{{ skill.name }}</strong><small>{{ skill.description }}</small><p>触发：{{ skill.trigger }}</p><code>{{ skill.id }}</code></div>
+          <div class="skill-copy"><strong>{{ skill.name }}</strong><small>{{ skill.description }}</small><p>触发：{{ skill.trigger }}</p><div class="skill-tags"><code>{{ skill.id }}</code><code class="source-tag">{{ skill.source === 'markdown' ? 'markdown' : '内置' }}</code></div></div>
           <label class="switch"><input v-model="skill.enabled" type="checkbox" /><span aria-hidden="true"></span><em>{{ skill.enabled ? '已启用' : '已停用' }}</em></label>
         </article>
         <div v-if="skills.length" class="actions"><span v-if="saved">已保存，后续对话立即生效</span><button type="button" :disabled="saving" @click="save">{{ saving ? '保存中...' : '保存配置' }}</button></div>
@@ -131,7 +131,9 @@ load()
 .skill-copy { display: grid; min-width: 0; gap: 5px; }
 .skill-copy strong { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .skill-copy small, .skill-copy p { margin: 0; color: var(--sk-label-2); font-size: 12px; line-height: 1.55; }
-.skill-copy code { width: max-content; border-radius: 6px; padding: 2px 6px; background: var(--sk-fill); color: var(--sk-label-2); font-size: 11px; }
+.skill-tags { display: flex; align-items: center; gap: 6px; }
+.skill-tags code { width: max-content; border-radius: 6px; padding: 2px 6px; background: var(--sk-fill); color: var(--sk-label-2); font-size: 11px; }
+.skill-tags .source-tag { background: var(--zwx-primary-soft); color: var(--zwx-primary); font-weight: 600; }
 
 /* iOS 开关 */
 .switch { display: flex; align-items: center; gap: 8px; color: var(--sk-label-2); font-size: 12px; }

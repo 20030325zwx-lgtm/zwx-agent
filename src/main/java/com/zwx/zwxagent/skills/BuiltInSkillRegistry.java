@@ -5,40 +5,51 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 /** Resolves the skills and tool callbacks that are authorized for one chat turn. */
 @Component
 public class BuiltInSkillRegistry {
-    private static final BuiltInSkill WEB_RESEARCH = new BuiltInSkill(
-            "web-research", "联网查询", "检索可能变化的公开信息，并以工具返回内容为依据回答。",
-            "用户询问天气、交通、营业时间、价格、新闻、活动或其他时效性事实，且本轮已开启联网查询。",
-            Set.of("love", "travel", "test"));
+
+    /** Tool alias used in skill front-matter; maps to the shared web-search callbacks. */
+    public static final String WEB_SEARCH_TOOL = "webSearch";
 
     private final ToolCallback[] webResearchTools;
     private final SkillConfigurationService configurationService;
+    private final SkillRepository skillRepository;
 
     @Autowired
     public BuiltInSkillRegistry(@Qualifier("travelTools") ToolCallback[] webResearchTools,
-                                SkillConfigurationService configurationService) {
+                                SkillConfigurationService configurationService,
+                                SkillRepository skillRepository) {
         this.webResearchTools = webResearchTools;
         this.configurationService = configurationService;
+        this.skillRepository = skillRepository;
     }
 
-    /** Small constructor used by isolated unit tests without a database. */
+    /** Small constructor used by isolated unit tests without a database; falls back to built-in skills. */
     public BuiltInSkillRegistry(ToolCallback[] webResearchTools) {
-        this.webResearchTools = webResearchTools;
-        this.configurationService = null;
+        this(webResearchTools, null, new SkillRepository(Path.of("nonexistent-skills-dir-for-isolated-tests")));
     }
 
     public List<BuiltInSkill> catalogFor(String agentKey) {
-        return List.of(WEB_RESEARCH).stream().filter(skill -> skill.agentKeys().contains(agentKey)).toList();
+        return skillRepository.catalog().stream().filter(skill -> skill.agentKeys().contains(agentKey)).toList();
     }
 
     public List<BuiltInSkill> availableFor(String tenantId, String agentKey, boolean webSearchEnabled) {
-        if (!webSearchEnabled || !isEnabled(tenantId, agentKey, WEB_RESEARCH.id()) || !WEB_RESEARCH.agentKeys().contains(agentKey)) return List.of();
-        return List.of(WEB_RESEARCH);
+        List<BuiltInSkill> available = new ArrayList<>();
+        for (BuiltInSkill skill : skillRepository.catalog()) {
+            if (!skill.agentKeys().contains(agentKey)) continue;
+            if (!isEnabled(tenantId, agentKey, skill.id())) continue;
+            if (skill.tools().contains(WEB_SEARCH_TOOL) && !webSearchEnabled) continue;
+            available.add(skill);
+        }
+        return List.copyOf(available);
     }
 
     public List<BuiltInSkill> availableFor(String agentKey, boolean webSearchEnabled) {
@@ -46,7 +57,15 @@ public class BuiltInSkillRegistry {
     }
 
     public ToolCallback[] toolCallbacksFor(String tenantId, String agentKey, boolean webSearchEnabled) {
-        return availableFor(tenantId, agentKey, webSearchEnabled).isEmpty() ? new ToolCallback[0] : webResearchTools;
+        Set<ToolCallback> callbacks = new LinkedHashSet<>();
+        for (BuiltInSkill skill : availableFor(tenantId, agentKey, webSearchEnabled)) {
+            for (String tool : skill.tools()) {
+                if (WEB_SEARCH_TOOL.equals(tool)) {
+                    callbacks.addAll(Arrays.asList(webResearchTools));
+                }
+            }
+        }
+        return callbacks.toArray(new ToolCallback[0]);
     }
 
     public ToolCallback[] toolCallbacksFor(String agentKey, boolean webSearchEnabled) {
@@ -63,12 +82,13 @@ public class BuiltInSkillRegistry {
         Set<String> knownIds = catalogFor(agentKey).stream().map(BuiltInSkill::id).collect(java.util.stream.Collectors.toSet());
         if (knownIds.isEmpty()) throw new IllegalArgumentException("Unknown or unsupported Skill agent: " + agentKey);
         if (!knownIds.containsAll(enabledSkillIds)) throw new IllegalArgumentException("Unknown Skill for agent: " + agentKey);
-        configurationService.save(tenantId, agentKey, enabledSkillIds);
+        configurationService.save(tenantId, agentKey, knownIds, enabledSkillIds);
     }
 
     public List<SkillCatalogItem> catalogWithConfiguration(String tenantId, String agentKey) {
         return catalogFor(agentKey).stream()
-                .map(skill -> new SkillCatalogItem(skill.id(), skill.name(), skill.description(), skill.trigger(), isEnabled(tenantId, agentKey, skill.id())))
+                .map(skill -> new SkillCatalogItem(skill.id(), skill.name(), skill.description(), skill.trigger(),
+                        isEnabled(tenantId, agentKey, skill.id()), skill.source()))
                 .toList();
     }
 }

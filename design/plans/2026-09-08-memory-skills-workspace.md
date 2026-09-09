@@ -1,6 +1,6 @@
 # 智能体长期记忆、技能仓库与统一工作区
 
-> 状态：设计提案，尚未实施
+> 状态：批次 A（工作区）已实施（2026-09-08，见 context/session-2026-09-07-knowledge-versioning.md 批次 A 追加节）；批次 B（技能仓库）已实施（2026-09-09，见 context/session-2026-09-09-skills-repository.md）；批次 C（记忆）待做。
 >
 > 目标：在 design/plans/08 的 hook 管线轨道上，补齐 AgentScope Harness 剩余三项能力——分层长期记忆、markdown 技能仓库、统一工作区。原则：**新能力 = 服务类/存储 + hook 挂载**，核心执行类（BaseAgent/ToolCallAgent）零改动。
 

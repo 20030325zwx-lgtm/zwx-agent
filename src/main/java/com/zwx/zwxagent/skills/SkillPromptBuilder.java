@@ -24,7 +24,7 @@ public class SkillPromptBuilder {
         }
 
         String definitions = skills.stream()
-                .map(skill -> "- " + skill.id() + "（" + skill.name() + "）：" + skill.description() + " 触发条件：" + skill.trigger())
+                .map(SkillPromptBuilder::definitionLine)
                 .reduce("", (left, right) -> left + "\n" + right);
         return """
 
@@ -35,5 +35,12 @@ public class SkillPromptBuilder {
                 3. 只能根据工具实际返回的内容陈述查询结论；回答中说明已使用的 Skill，不能声称调用了未授权 Skill。
                 4. 用户未开启联网查询时，外部工具绝对不可用。
                 """.formatted(definitions);
+    }
+
+    private static String definitionLine(BuiltInSkill skill) {
+        String line = "- " + skill.id() + "（" + skill.name() + "）：" + skill.description() + " 触发条件：" + skill.trigger();
+        if (skill.instruction() == null || skill.instruction().isBlank()) return line;
+        String indented = skill.instruction().replaceAll("\n", "\n  ");
+        return line + "\n  指引：" + indented;
     }
 }

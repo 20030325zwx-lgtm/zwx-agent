@@ -1,5 +1,7 @@
 package com.zwx.zwxagent.agent.hook;
 
+import org.springframework.ai.chat.messages.Message;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -17,6 +19,8 @@ public final class AgentRunContext {
     private final String conversationId;
     private final String agentName;
     private final String userPrompt;
+    /** 本次 run 的工作记忆（活引用，可变）：转换型 hook（压缩/注入）经它改写消息历史；无 run 生命周期时为 null。 */
+    private final List<Message> messageHistory;
     private final Map<String, Object> attributes = new ConcurrentHashMap<>();
     private volatile int currentStep;
 
@@ -27,6 +31,7 @@ public final class AgentRunContext {
         this.conversationId = builder.conversationId;
         this.agentName = builder.agentName;
         this.userPrompt = builder.userPrompt;
+        this.messageHistory = builder.messageHistory;
     }
 
     public static Builder builder() {
@@ -57,6 +62,11 @@ public final class AgentRunContext {
         return userPrompt;
     }
 
+    /** 工作记忆活引用；直接 step()（无 run 生命周期）时为 null，依赖它的 hook 必须判空。 */
+    public List<Message> messageHistory() {
+        return messageHistory;
+    }
+
     public int currentStep() {
         return currentStep;
     }
@@ -77,6 +87,7 @@ public final class AgentRunContext {
         private String conversationId;
         private String agentName;
         private String userPrompt;
+        private List<Message> messageHistory;
 
         public Builder runId(String value) {
             this.runId = value;
@@ -105,6 +116,11 @@ public final class AgentRunContext {
 
         public Builder userPrompt(String value) {
             this.userPrompt = value;
+            return this;
+        }
+
+        public Builder messageHistory(List<Message> value) {
+            this.messageHistory = value;
             return this;
         }
 

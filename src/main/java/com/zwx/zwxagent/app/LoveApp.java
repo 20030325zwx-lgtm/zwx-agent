@@ -12,6 +12,7 @@ import com.zwx.zwxagent.rag.LoveRagTrace;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.agent.AgentRegistry;
+import com.zwx.zwxagent.memory.MemoryService;
 import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
 import com.zwx.zwxagent.skills.SkillPromptBuilder;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -57,13 +58,15 @@ public class LoveApp {
     private final String visionModel;
     private final AgentKnowledgeRagService agentKnowledgeRagService;
     private final AgentRegistry agentRegistry;
+    private final MemoryService memoryService;
 
     public LoveApp(ChatModel dashscopeChatModel, PostgresChatMemory chatMemory,
                    LoveConversationService conversationService,
                    LoveVisionChatService loveVisionChatService, LoveRagService loveRagService,
                    ObjectMapper objectMapper, @org.springframework.beans.factory.annotation.Value("${app.love.vision-model}") String visionModel,
                    AgentKnowledgeRagService agentKnowledgeRagService, AgentRegistry agentRegistry,
-                   BuiltInSkillRegistry skillRegistry, SkillPromptBuilder skillPromptBuilder) {
+                   BuiltInSkillRegistry skillRegistry, SkillPromptBuilder skillPromptBuilder,
+                   MemoryService memoryService) {
         this.conversationService = conversationService;
         this.loveVisionChatService = loveVisionChatService;
         this.loveRagService = loveRagService;
@@ -73,6 +76,7 @@ public class LoveApp {
         this.agentRegistry = agentRegistry;
         this.skillRegistry = skillRegistry;
         this.skillPromptBuilder = skillPromptBuilder;
+        this.memoryService = memoryService;
         String systemPrompt = agentRegistry.get("love").systemPrompt();
         chatClient = ChatClient.builder(dashscopeChatModel)
                 .defaultSystem(systemPrompt)
@@ -120,6 +124,7 @@ public class LoveApp {
                 .map(item -> item.role() + ": " + item.content())
                 .collect(Collectors.joining("\n"));
         history = budgetHistory(history);
+        String memoryContext = buildMemoryContext(tenantId, message);
         StringBuilder answer = new StringBuilder();
         long userMessageId = retryUserMessageId == null
                 ? conversationService.startUserTurn(actor, chatId, message, List.of(), clientRequestId)
@@ -127,7 +132,8 @@ public class LoveApp {
         java.util.concurrent.atomic.AtomicBoolean persisted = new java.util.concurrent.atomic.AtomicBoolean(false);
         var prompt = streamingChatClient
                 .prompt()
-                .system(agentRegistry.get("love").systemPrompt() + skillPromptBuilder.build(tenantId, "love", webSearch) + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
+                .system(agentRegistry.get("love").systemPrompt() + skillPromptBuilder.build(tenantId, "love", webSearch)
+                        + memoryContext + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
                 .user(message);
         var skillTools = skillRegistry.toolCallbacksFor(tenantId, "love", webSearch);
         if (skillTools.length > 0) prompt.toolCallbacks(skillTools);
@@ -151,7 +157,28 @@ public class LoveApp {
                     } catch (Exception exception) {
                         log.error("Failed to persist love chat turn", exception);
                     }
+                    // 长期记忆：本轮问答异步交给 MemoryService 抽取事实（开关默认关，内部吞异常）
+                    if (answer.length() > 0) {
+                        try {
+                            memoryService.extractAsync(tenantId, "love", actor.userId(), chatId, message, answer.toString());
+                        } catch (Exception memoryError) {
+                            log.warn("memory extraction submit failed", memoryError);
+                        }
+                    }
                 });
+    }
+
+    /** 长期记忆上下文段：factsFor 命中时拼入 system prompt；查询失败返回空串，绝不阻断对话。 */
+    private String buildMemoryContext(String tenantId, String message) {
+        try {
+            List<String> facts = memoryService.factsFor(tenantId, "love", message, 5);
+            if (facts.isEmpty()) return "";
+            return "\n\n【用户长期记忆参考】以下是该用户此前交互中积累的事实，供个性化回应，不要直接复述：\n"
+                    + facts.stream().map(fact -> "- " + fact).collect(Collectors.joining("\n"));
+        } catch (Exception cause) {
+            log.warn("build memory context failed", cause);
+            return "";
+        }
     }
 
     public Flux<String> doChatContinuationByStream(com.zwx.zwxagent.security.CurrentActor actor, String chatId, long assistantMessageId,

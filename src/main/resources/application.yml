@@ -84,6 +84,13 @@ app:
     hook:
       # 工具结果截断阈值（字符）
       tool-result-max-chars: 8000
+    memory:
+      # 工作记忆压缩（批次 C L1）：messageList 超 context-budget 字符时压缩最旧块，保留最近 recent-keep 条
+      compression-enabled: true
+      context-budget: 24000
+      recent-keep: 6
+      # 长期事实提取（批次 C L3）：LLM 成本考虑默认关
+      extraction-enabled: false
   rag:
     rerank:
       # 总开关：false 或未配置 DashScope api-key 时自动降级为向量原始顺序

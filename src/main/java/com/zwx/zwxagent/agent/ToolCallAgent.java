@@ -210,6 +210,7 @@ public class ToolCallAgent extends ReActAgent {
                 AgentHooks.pipeline().fireBeforeToolCalls(runContext, plannedCalls);
             } catch (HookAbortException exception) {
                 log.info(getName() + "的工具调用被 hook 拦截：" + exception.getMessage());
+                recordBlockedToolCalls(plannedCalls, exception.getMessage());
                 return "工具调用被拦截：" + exception.getMessage();
             }
             toolCallChatResponse = applyPlannedCalls(toolCallChatResponse, plannedCalls);
@@ -250,6 +251,26 @@ public class ToolCallAgent extends ReActAgent {
         return response.getResult().getOutput().getToolCalls().stream()
                 .map(toolCall -> new PlannedToolCall(toolCall.id(), toolCall.type(), toolCall.name(), toolCall.arguments()))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 拦截反馈入历史：以「助手工具调用 + 工具响应」成对写入（Spring AI 协议要求成对），
+     * 模型下一轮能看到拒绝原因并自我纠正，避免无反馈重复调用烧满步数。
+     */
+    private void recordBlockedToolCalls(List<PlannedToolCall> plannedCalls, String reason) {
+        try {
+            if (plannedCalls.isEmpty()) return;
+            List<AssistantMessage.ToolCall> calls = plannedCalls.stream()
+                    .map(planned -> new AssistantMessage.ToolCall(planned.id(), planned.type(), planned.name(), planned.arguments()))
+                    .toList();
+            getMessageList().add(new AssistantMessage("", java.util.Map.of(), calls));
+            List<ToolResponseMessage.ToolResponse> responses = calls.stream()
+                    .map(call -> new ToolResponseMessage.ToolResponse(call.id(), call.name(), "工具调用被拦截：" + reason))
+                    .toList();
+            getMessageList().add(new ToolResponseMessage(responses, java.util.Map.of()));
+        } catch (Exception exception) {
+            log.warn(getName() + "记录拦截反馈失败：" + exception.getMessage());
+        }
     }
 
     /**

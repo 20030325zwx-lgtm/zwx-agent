@@ -84,6 +84,8 @@ app:
     hook:
       # 工具结果截断阈值（字符）
       tool-result-max-chars: 8000
+      # 工具调用安全护栏（ToolGuardHook）：beforeToolCalls 中央预检（shell 元字符/越权路径/SSRF URL），拦截即短路
+      tool-guard-enabled: true
     memory:
       # 工作记忆压缩（批次 C L1）：messageList 超 context-budget 字符时压缩最旧块，保留最近 recent-keep 条
       compression-enabled: true

@@ -32,3 +32,12 @@
 - `src/main/resources/application-local.yml` 存在且未读取、编辑、复制或加入 Git。
 - PostgreSQL 与 MinIO Docker 容器保持运行。服务使用 launchctl 管理；后端重启前须重新打包。
 - 不运行 `git clean`、`git reset --hard` 等清理操作。
+
+## 提交与并发冒烟测试（追加）
+
+- 提交：`56d8c9e feat: harden agent tool and execution safety`。用户原有未跟踪设计文件未加入提交。
+- 服务启动状态：后端 health `ok`，前端 HTTP 200。
+- 压测用户通过 `/auth/register` 创建，普通用户，默认 `default` tenant；7 次不同会话 Test Agent 请求，档位 1/2/4 并发，均结束且客户端未观察到 SSE `generation-error`。单条校验响应 HTTP 200，约 0.53s；4 并发档请求约 0.46–0.55s。此为极小样本冒烟，不代表容量上限或稳态性能。
+- 同会话互斥测试：并发请求得到 HTTP 200 和 HTTP 409（第二个约 0.019s 返回），证明会话 lease 生效。
+- 健康接口 ApacheBench：1000 请求/20 并发，约 4808 req/s、p95 12 ms；10000 请求/100 并发，约 15004 req/s、p95 42 ms，0 失败。此指标只代表健康端点，不代表 Agent。
+- 压测用户/对话记录目前保留；登录名在本次执行记录中，密码为执行时生成的随机值。若要清理，按 username 精确删除该用户及关联对话数据；勿用宽泛清理 SQL。

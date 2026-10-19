@@ -43,19 +43,19 @@ const formatUpdatedAt = (value) => {
 </script>
 
 <style scoped>
-/* macOS 窗口侧栏：半透明材质 + 内嵌分组列表 */
+/* 蓝白工作台侧栏：轻玻璃材质 + 清晰的会话分组 */
 .conversation-sidebar {
-  width: 256px;
+  width: 270px;
   box-sizing: border-box;
-  flex: 0 0 256px;
+  flex: 0 0 270px;
   display: flex;
   height: 100vh;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  padding: 16px 12px 10px;
-  border-right: 1px solid var(--sk-separator);
-  background: rgba(243, 243, 247, 0.82);
+  padding: 18px 13px 12px;
+  border-right: 1px solid rgba(205, 219, 241, 0.92);
+  background: rgba(246, 250, 255, 0.82);
   backdrop-filter: var(--sk-blur);
   -webkit-backdrop-filter: var(--sk-blur);
 }
@@ -82,7 +82,7 @@ const formatUpdatedAt = (value) => {
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--zwx-primary-soft);
   color: var(--zwx-primary);
   font-size: 10px;
@@ -98,16 +98,16 @@ const formatUpdatedAt = (value) => {
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  border: 0;
-  border-radius: 11px;
+  border: 1px solid #cfe0ff;
+  border-radius: 9px;
   padding: 0 12px;
-  background: var(--sk-fill);
-  color: var(--sk-label);
+  background: #eef5ff;
+  color: #24406d;
   font-size: 14px;
   font-weight: 600;
 }
 
-.new-conversation:hover { background: var(--sk-fill-strong); }
+.new-conversation:hover { background: #e1edff; border-color: #b7d1ff; }
 
 .new-conversation:active { transform: scale(0.98); }
 
@@ -142,7 +142,7 @@ const formatUpdatedAt = (value) => {
 
 .conversation-item:hover { background: var(--sk-fill); color: var(--sk-label); }
 
-.conversation-item.active { background: var(--zwx-primary); color: #fff; }
+.conversation-item.active { background: linear-gradient(135deg, #316fe8, var(--zwx-primary)); color: #fff; box-shadow: 0 5px 12px var(--zwx-primary-ring); }
 
 .conversation-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 

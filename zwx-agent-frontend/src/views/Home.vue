@@ -168,7 +168,8 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   position: relative;
   min-height: 100vh;
   overflow-x: clip;
-  background: var(--sk-bg);
+  background:
+    linear-gradient(120deg, rgba(213, 226, 255, 0.92), rgba(247, 251, 255, 0.82) 44%, rgba(222, 236, 255, 0.86));
   color: var(--sk-label);
 }
 
@@ -178,9 +179,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(46rem 30rem at 50% -14rem, rgba(0, 122, 255, 0.13), transparent 68%),
-    radial-gradient(34rem 24rem at 8% 22%, rgba(255, 45, 85, 0.06), transparent 65%),
-    radial-gradient(36rem 26rem at 96% 30%, rgba(52, 199, 89, 0.06), transparent 65%);
+    radial-gradient(48rem 32rem at 44% -10rem, rgba(62, 110, 245, 0.26), transparent 68%),
+    radial-gradient(36rem 26rem at 100% 26%, rgba(111, 191, 255, 0.18), transparent 67%),
+    linear-gradient(125deg, transparent 0 62%, rgba(255, 255, 255, 0.28) 62% 63%, transparent 63%);
 }
 
 /* ── 悬浮胶囊导航 ───────────────────────────────────── */
@@ -193,16 +194,16 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 
 .topbar-inner {
   display: flex;
-  max-width: 1080px;
+  max-width: 1200px;
   height: 58px;
   margin: 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   border: 1px solid rgba(255, 255, 255, 0.65);
-  border-radius: 999px;
+  border-radius: 14px;
   padding: 0 10px 0 18px;
-  background: var(--sk-material);
+  background: rgba(255, 255, 255, 0.76);
   backdrop-filter: var(--sk-blur);
   -webkit-backdrop-filter: var(--sk-blur);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 32px rgba(0, 0, 0, 0.08);
@@ -225,8 +226,8 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   width: 32px;
   height: 32px;
   place-items: center;
-  border-radius: 10px;
-  background: linear-gradient(160deg, #3f9bff, var(--zwx-primary) 58%, var(--zwx-primary-dark));
+  border-radius: 8px;
+  background: linear-gradient(145deg, #4f8df7, var(--zwx-primary) 58%, #2248bd);
   color: #fff;
   font-size: 15px;
   font-weight: 800;
@@ -325,9 +326,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 .hero {
   position: relative;
   display: flex;
-  max-width: 760px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 84px 24px 24px;
+  padding: 92px 24px 30px;
   flex-direction: column;
   align-items: center;
   text-align: center;
@@ -338,10 +339,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   align-items: center;
   gap: 7px;
   border: 1px solid var(--sk-separator);
-  border-radius: 999px;
+  border-radius: 7px;
   padding: 6px 14px;
-  background: var(--sk-surface);
-  color: var(--sk-label-2);
+  background: rgba(228, 238, 255, 0.88);
+  color: #3566c8;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -358,7 +359,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 
 .hero h1 {
   margin: 26px 0 0;
-  font-size: 54px;
+  font-size: 58px;
   font-weight: 800;
   line-height: 1.12;
   letter-spacing: -0.03em;
@@ -366,7 +367,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 
 .gradient-text {
   font-style: normal;
-  background: linear-gradient(100deg, var(--sk-blue) 8%, #5856d6 52%, #ff2d55 96%);
+  background: linear-gradient(100deg, #1d4ed8 8%, #3679ec 52%, #1a4eb7 96%);
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -384,22 +385,22 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 /* 主搜索：Raycast / Perplexity 式居中大搜索框 */
 .search-box {
   display: flex;
-  width: min(100%, 620px);
-  height: 60px;
+  width: min(100%, 700px);
+  height: 68px;
   margin-top: 34px;
   align-items: center;
   gap: 13px;
-  border: 1px solid var(--sk-separator);
-  border-radius: 19px;
+  border: 2px solid #263a60;
+  border-radius: 14px;
   padding: 0 10px 0 20px;
   background: var(--sk-surface);
   color: var(--sk-label-3);
-  box-shadow: var(--sk-shadow-raised);
+  box-shadow: 0 12px 28px rgba(41, 73, 133, 0.15);
   transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
 .search-box:focus-within {
-  border-color: transparent;
+  border-color: var(--zwx-primary);
   box-shadow: 0 0 0 4px var(--zwx-primary-ring), var(--sk-shadow-raised);
   transform: translateY(-1px);
 }
@@ -463,9 +464,14 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 /* ── 目录 ───────────────────────────────────────────── */
 .catalog-shell {
   position: relative;
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 56px 24px 40px;
+  max-width: 1120px;
+  margin: 20px auto 48px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 18px;
+  padding: 42px 36px 40px;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 20px 56px rgba(53, 86, 145, 0.13);
+  backdrop-filter: blur(18px);
 }
 
 .section-heading { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; }
@@ -502,11 +508,11 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   align-items: center;
   gap: 18px;
   border: 1px solid var(--sk-separator);
-  border-radius: 22px;
-  padding: 24px 26px;
+  border-radius: 12px;
+  padding: 22px 24px;
   background: var(--sk-surface);
   color: inherit;
-  box-shadow: var(--sk-shadow-card);
+  box-shadow: 0 8px 22px rgba(42, 72, 127, 0.07);
   text-align: left;
   overflow: hidden;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;

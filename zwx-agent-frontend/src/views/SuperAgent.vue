@@ -176,18 +176,18 @@ onBeforeUnmount(cancelActiveStream)
 </script>
 
 <style scoped>
-.super-layout { display: flex; height: 100vh; overflow: hidden; background: var(--sk-bg); }
+.super-layout { display: flex; height: 100vh; overflow: hidden; background: linear-gradient(135deg, #e5efff, #f5f9ff 44%, #eaf3ff); }
 .super-main { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
 
 .super-header {
   display: flex;
-  height: 60px;
-  flex: 0 0 60px;
+  height: 66px;
+  flex: 0 0 66px;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
   border-bottom: 1px solid var(--sk-separator);
-  background: var(--sk-material);
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: var(--sk-blur);
   -webkit-backdrop-filter: var(--sk-blur);
 }
@@ -200,7 +200,7 @@ onBeforeUnmount(cancelActiveStream)
   height: 32px;
   place-items: center;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
   color: var(--sk-label-2);
   font-size: 18px;
@@ -243,9 +243,9 @@ onBeforeUnmount(cancelActiveStream)
   flex: 1;
   margin: 16px 20px 20px;
   border: 1px solid var(--sk-separator);
-  border-radius: 22px;
-  background: var(--sk-surface);
-  box-shadow: var(--sk-shadow-card);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 16px 40px rgba(45, 76, 132, 0.12);
   overflow: hidden;
 }
 

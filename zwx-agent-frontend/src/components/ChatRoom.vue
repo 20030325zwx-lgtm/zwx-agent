@@ -210,7 +210,7 @@ onMounted(scrollToBottom)
   min-height: 0;
   height: 100%;
   flex-direction: column;
-  background: transparent;
+  background: linear-gradient(180deg, rgba(247, 250, 255, 0.82), rgba(255, 255, 255, 0.96) 34%);
 }
 
 .chat-messages {
@@ -235,8 +235,8 @@ onMounted(scrollToBottom)
   width: 62px;
   height: 62px;
   place-items: center;
-  border-radius: 20px;
-  background: var(--zwx-primary-soft);
+  border-radius: 14px;
+  background: linear-gradient(145deg, #eff5ff, #dce9ff);
   color: var(--zwx-primary);
   font-size: 32px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), var(--sk-shadow-card);
@@ -255,7 +255,7 @@ onMounted(scrollToBottom)
 
 .suggestion-list button {
   border: 1px solid var(--sk-separator);
-  border-radius: 14px;
+  border-radius: 9px;
   padding: 13px 16px;
   background: var(--sk-surface);
   color: var(--sk-label);
@@ -301,11 +301,11 @@ onMounted(scrollToBottom)
 /* 用户气泡：主题色渐变（iMessage 蓝，随主题联动） */
 .user-message {
   position: relative;
-  border-radius: 20px 20px 6px 20px;
+  border-radius: 14px 14px 4px 14px;
   padding: 11px 16px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--zwx-primary) 88%, #ffffff), var(--zwx-primary));
   color: #fff;
-  box-shadow: 0 3px 10px var(--zwx-primary-ring);
+  box-shadow: 0 5px 14px var(--zwx-primary-ring);
 }
 
 .user-message::after {

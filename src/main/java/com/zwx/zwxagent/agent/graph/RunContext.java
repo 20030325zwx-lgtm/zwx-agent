@@ -3,6 +3,7 @@ package com.zwx.zwxagent.agent.graph;
 import org.springframework.ai.tool.ToolCallback;
 
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * 一次图运行的上下文：跟随 OverAllState 传递，但不参与图状态合并语义。
@@ -12,18 +13,24 @@ public record RunContext(ToolCallback[] tools,
                          String knowledgeContext,
                          BooleanSupplier stopCheck,
                          String tenantId,
-                         String conversationId) {
+                         String conversationId,
+                         Consumer<String> answerChunkSink) {
 
     public RunContext {
         if (knowledgeContext == null) knowledgeContext = "";
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck) {
-        return new RunContext(tools, knowledgeContext, stopCheck, null, null);
+        return new RunContext(tools, knowledgeContext, stopCheck, null, null, null);
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
                                 String tenantId, String conversationId) {
-        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId);
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, null);
+    }
+
+    public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
+                                String tenantId, String conversationId, Consumer<String> answerChunkSink) {
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, answerChunkSink);
     }
 }

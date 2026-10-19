@@ -119,6 +119,7 @@ public class ManusGraphOrchestrator {
                                   String historyContext,
                                   ToolCallback[] tools,
                                   String knowledgeContext,
+                                  String ragTraceJson,
                                   Consumer<BaseAgent.RunResult> completionHandler) {
     }
 
@@ -150,8 +151,19 @@ public class ManusGraphOrchestrator {
         StringBuilder answer = new StringBuilder();
         List<String> activities = new ArrayList<>();
         try {
+            if (request.ragTraceJson() != null && !request.ragTraceJson().isBlank()) {
+                emitter.send(SseEmitter.event().name("rag-trace").data(request.ragTraceJson()));
+            }
             RunContext context = RunContext.of(request.tools(), request.knowledgeContext(), stopped::get,
-                    request.tenantId(), request.conversationId());
+                    request.tenantId(), request.conversationId(), chunk -> {
+                        if (!stopped.get()) {
+                            try {
+                                emitter.send(chunk);
+                            } catch (java.io.IOException exception) {
+                                throw new IllegalStateException("Unable to stream answer chunk", exception);
+                            }
+                        }
+                    });
             Map<String, Object> inputs = Map.of(
                     GraphState.INPUT, request.message(),
                     GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext(),
@@ -190,7 +202,6 @@ public class ManusGraphOrchestrator {
                         : "未能生成本次任务的最终回答，请调整请求后重试。");
             }
             request.completionHandler().accept(new BaseAgent.RunResult(answer.toString(), List.copyOf(activities)));
-            emitter.send(answer.toString());
             emitter.send("[DONE]");
             emitter.complete();
         } catch (Exception exception) {

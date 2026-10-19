@@ -66,6 +66,34 @@
               <p>{{ reference.excerpt || '该历史引用未保存切片摘录。' }}</p>
             </details>
           </div>
+          <details v-if="msg.ragTrace" class="rag-inspector">
+            <summary>查看检索过程 <span>{{ ragStatusLabel(msg.ragTrace.status) }} · {{ msg.ragTrace.totalMillis }} ms</span></summary>
+            <div class="rag-inspector-body">
+              <p class="rag-query">查询：{{ msg.ragTrace.query }}</p>
+              <div class="rag-stats">
+                <span>向量 {{ msg.ragTrace.vectorCandidateCount }}</span>
+                <span>词法 {{ msg.ragTrace.lexicalCandidateCount }}</span>
+                <span>融合 {{ msg.ragTrace.fusedCandidateCount }}</span>
+                <span>最终 {{ msg.ragTrace.selectedCount }}</span>
+                <span>阶段：向量 {{ msg.ragTrace.vectorMillis }} ms / 词法 {{ msg.ragTrace.lexicalMillis }} ms / 重排 {{ msg.ragTrace.rerankMillis }} ms</span>
+              </div>
+              <p v-if="!msg.ragTrace.candidates?.length" class="rag-empty">本轮没有可展示的候选片段。</p>
+              <article v-for="candidate in msg.ragTrace.candidates" :key="candidate.documentId" class="rag-candidate">
+                <header><strong>{{ candidate.filename }}<span v-if="candidate.pageNumber"> · 第 {{ candidate.pageNumber }} 页</span><span v-if="candidate.chunkIndex"> · 切片 {{ candidate.chunkIndex }}</span></strong><em v-if="candidate.selected">已送入回答</em></header>
+                <div class="rag-ranks">
+                  <span>向量 {{ candidate.vectorRank ? `#${candidate.vectorRank} · ${candidate.vectorScore?.toFixed(3)}` : '未命中' }}</span>
+                  <span>词法 {{ candidate.lexicalRank ? `#${candidate.lexicalRank} · ${candidate.lexicalScore} 词` : '未命中' }}</span>
+                  <span>RRF {{ candidate.fusedRank ? `#${candidate.fusedRank} · ${candidate.fusionScore?.toFixed(4)}` : '未融合' }}</span>
+                  <span>重排 {{ candidate.rerankRank ? `#${candidate.rerankRank} · ${candidate.rerankScore?.toFixed(3)}` : '未参与' }}</span>
+                </div>
+                <p>{{ candidate.excerpt }}</p>
+                <div class="rag-judgment" :aria-label="`人工相关性判断：${candidate.filename}`">
+                  <span>这段资料相关吗？</span>
+                  <button v-for="choice in relevanceChoices" :key="choice.value" type="button" :disabled="candidate.judgmentSaving" :class="{ selected: candidate.judgment === choice.value }" @click="judgeCandidate(msg, candidate, choice.value)">{{ choice.label }}</button>
+                </div>
+              </article>
+            </div>
+          </details>
           <div v-if="msg.trace" class="trace-entry">
             <button type="button" class="trace-button" aria-label="查看本次回答的调用流程">i</button>
             <div class="trace-popover" role="tooltip">
@@ -123,6 +151,7 @@ import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
 import { Database, FileText, Globe2, Paperclip } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
+import { judgeRagCandidate as saveRagJudgment } from '../api'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -147,6 +176,29 @@ const editingIndex = ref(-1)
 const editingContent = ref('')
 const webSearch = ref(false)
 const knowledgeSearch = ref(false)
+const relevanceChoices = [{ value: 'RELEVANT', label: '相关' }, { value: 'PARTIAL', label: '部分相关' }, { value: 'IRRELEVANT', label: '不相关' }]
+
+const ragStatusLabel = status => ({ SUCCESS: '已召回', NO_HIT: '无命中', TIMEOUT: '超时', OVERLOADED: '繁忙', FAILED: '失败' }[status] || status)
+const judgeCandidate = async (message, candidate, judgment) => {
+  if (!message.id || !candidate.documentId) return
+  candidate.judgmentSaving = true
+  try {
+    await saveRagJudgment(message.id, props.aiType, candidate.documentId, judgment)
+    candidate.judgment = judgment
+    if (message.ragTrace) {
+      message.ragTrace.judgments = { ...(message.ragTrace.judgments || {}), [candidate.documentId]: judgment }
+    }
+  } catch (error) {
+    console.error('Unable to save RAG relevance judgment:', error)
+  } finally {
+    candidate.judgmentSaving = false
+  }
+}
+const hydrateRagJudgments = trace => {
+  if (!trace?.judgments) return trace
+  trace.candidates?.forEach(candidate => { candidate.judgment = trace.judgments[candidate.documentId] || null })
+  return trace
+}
 
 const renderMarkdown = content => DOMPurify.sanitize(marked.parse(content || '', {
   breaks: true,
@@ -542,6 +594,21 @@ onMounted(scrollToBottom)
 .reference-card p { margin: 0; border-top: 1px solid var(--sk-separator); padding: 7px 9px; color: var(--sk-label-2); line-height: 1.55; white-space: pre-wrap; }
 
 .trace-entry { position: relative; display: inline-flex; margin-top: 10px; }
+.rag-inspector { margin-top: 12px; border-top: 1px solid var(--sk-separator); color: var(--sk-label-2); font-size: 12px; }
+.rag-inspector > summary { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: 9px; padding: 8px 0; cursor: pointer; color: var(--zwx-primary); }
+.rag-inspector > summary span { color: var(--sk-label-3); }
+.rag-inspector-body { display: grid; gap: 9px; max-width: 760px; padding: 2px 0 8px; }
+.rag-query, .rag-empty { margin: 0; }
+.rag-stats, .rag-ranks, .rag-judgment { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.rag-stats { color: var(--sk-label-3); }
+.rag-candidate { padding: 10px 0; border-top: 1px solid var(--sk-separator); }
+.rag-candidate > header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+.rag-candidate > header strong { color: var(--sk-label); font-weight: 600; }
+.rag-candidate > header em { color: var(--zwx-primary); font-style: normal; }
+.rag-candidate > p { margin: 8px 0; white-space: normal; }
+.rag-judgment > span { color: var(--sk-label-3); }
+.rag-judgment button { border: 1px solid var(--sk-separator); border-radius: 6px; padding: 4px 8px; background: transparent; color: var(--sk-label-2); cursor: pointer; }
+.rag-judgment button.selected { border-color: var(--zwx-primary); color: var(--zwx-primary); background: var(--zwx-primary-soft); }
 
 .trace-button {
   width: 20px;

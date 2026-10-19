@@ -180,6 +180,7 @@ export const chatWithTestAgent = (conversationId, message, webSearch = false, re
 export const createTestConversation = () => request.post('/ai/test-agent/conversations').then(response => response.data)
 export const listTestConversations = () => request.get('/ai/test-agent/conversations').then(response => response.data)
 export const getTestConversationMessages = conversationId => request.get(`/ai/test-agent/conversations/${conversationId}/messages`).then(response => response.data)
+export const judgeRagCandidate = (messageId, agentKey, candidateId, judgment) => request.post(`/ai/rag-evaluations/${messageId}/judgments`, { agentKey, candidateId, judgment })
 export const deleteTestConversation = conversationId => request.delete(`/ai/test-agent/conversations/${conversationId}`)
 export const deleteTestAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/test-agent/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 

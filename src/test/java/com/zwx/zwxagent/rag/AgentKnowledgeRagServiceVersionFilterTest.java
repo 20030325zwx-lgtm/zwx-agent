@@ -29,21 +29,24 @@ class AgentKnowledgeRagServiceVersionFilterTest {
         Assertions.assertEquals(1, result.references().size());
         Assertions.assertEquals("refund-policy", result.references().get(0).logicalKey());
         Assertions.assertEquals(2, result.references().get(0).versionNo());
+        Assertions.assertEquals(KnowledgeRetrievalStatus.SUCCESS, result.outcome().status());
     }
 
     @Test
-    void deduplicatesSameLogicalDocumentBeforeRerank() {
-        Document newer = chunk("v2-1", "v2 退货期限七天", "ACTIVE", "refund-policy", 2, 0.8);
-        Document newer2 = chunk("v2-2", "v2 退货流程说明", "ACTIVE", "refund-policy", 2, 0.75);
+    void keepsDistinctChunksFromSameLogicalDocumentForRerank() {
+        Document newer = chunk("v2-1", "v2 退货期限七天", "ACTIVE", "refund-policy", 2, 0.8, 1);
+        Document newer2 = chunk("v2-2", "v2 退货流程说明", "ACTIVE", "refund-policy", 2, 0.75, 2);
         Document other = chunk("other-1", "会员积分规则", "ACTIVE", "points-rule", 1, 0.7);
-        List<DashScopeRerankService.RerankHit> hits = List.of(
-                new DashScopeRerankService.RerankHit(0, 0.99),
-                new DashScopeRerankService.RerankHit(1, 0.98));
-        AgentKnowledgeRagService service = service(List.of(newer2, newer, other), Optional.of(hits));
+        List<List<String>> rerankInputs = new java.util.ArrayList<>();
+        AgentKnowledgeRagService service = service(List.of(newer2, newer, other), Optional.empty(), rerankInputs);
         AgentKnowledgeRagResult result = service.retrieveWithContext(TENANT, AGENT, "退货规则");
-        Assertions.assertEquals(2, result.references().size());
-        Assertions.assertEquals("v2 退货期限七天", result.references().get(0).excerpt());
-        Assertions.assertEquals("points-rule", result.references().get(1).logicalKey());
+        Assertions.assertEquals(1, rerankInputs.size());
+        Assertions.assertEquals(3, rerankInputs.getFirst().size());
+        Assertions.assertTrue(rerankInputs.getFirst().containsAll(
+                List.of("v2 退货流程说明", "v2 退货期限七天", "会员积分规则")));
+        Assertions.assertEquals(3, result.references().size());
+        Assertions.assertTrue(result.context().contains("v2 退货期限七天"));
+        Assertions.assertTrue(result.context().contains("v2 退货流程说明"));
     }
 
     @Test
@@ -54,9 +57,15 @@ class AgentKnowledgeRagServiceVersionFilterTest {
         AgentKnowledgeRagResult result = service.retrieveWithContext(TENANT, AGENT, "任意问题");
         Assertions.assertEquals(1, result.references().size());
         Assertions.assertEquals("高分有效期内容", result.references().get(0).excerpt());
+        Assertions.assertFalse(result.outcome().reranked());
     }
 
     private AgentKnowledgeRagService service(List<Document> pool, Optional<List<DashScopeRerankService.RerankHit>> rerankHits) {
+        return service(pool, rerankHits, null);
+    }
+
+    private AgentKnowledgeRagService service(List<Document> pool, Optional<List<DashScopeRerankService.RerankHit>> rerankHits,
+                                             List<List<String>> rerankInputs) {
         VectorStore stubStore = new VectorStore() {
             @Override
             public void add(List<Document> documents) { }
@@ -77,6 +86,7 @@ class AgentKnowledgeRagServiceVersionFilterTest {
         DashScopeRerankService rerankStub = new DashScopeRerankService("sk-test", false, "gte-rerank-v2", 1000) {
             @Override
             public Optional<List<DashScopeRerankService.RerankHit>> rerank(String query, List<String> documents) {
+                if (rerankInputs != null) rerankInputs.add(List.copyOf(documents));
                 return rerankHits;
             }
         };
@@ -95,6 +105,11 @@ class AgentKnowledgeRagServiceVersionFilterTest {
     }
 
     private static Document chunk(String id, String text, String lifecycleStatus, String logicalKey, int versionNo, double score) {
+        return chunk(id, text, lifecycleStatus, logicalKey, versionNo, score, 1);
+    }
+
+    private static Document chunk(String id, String text, String lifecycleStatus, String logicalKey, int versionNo,
+                                  double score, int chunkIndex) {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("documentId", id);
         metadata.put("tenantId", TENANT);
@@ -103,7 +118,7 @@ class AgentKnowledgeRagServiceVersionFilterTest {
         metadata.put("logicalKey", logicalKey);
         metadata.put("versionNo", versionNo);
         metadata.put("lifecycleStatus", lifecycleStatus);
-        metadata.put("chunkIndex", 1);
+        metadata.put("chunkIndex", chunkIndex);
         metadata.put("objectKey", "knowledge/" + id);
         return Document.builder().id(id).text(text).metadata(metadata).score(score).build();
     }

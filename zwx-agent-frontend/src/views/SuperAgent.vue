@@ -86,8 +86,10 @@ const mapMessage = message => ({
   time: new Date(message.createdAt).getTime(),
   activities: [],
   collapsibleActivities: message.role === 'ASSISTANT',
-  files: mapFiles(chatId.value, message.fileAttachments)
+  files: mapFiles(chatId.value, message.fileAttachments),
+  ragTrace: parseRagTrace(message.ragRetrievalTrace)
 })
+const parseRagTrace = value => { try { const trace = JSON.parse(value || 'null'); if (!trace?.traceId) return null; trace.candidates?.forEach(candidate => { candidate.judgment = trace.judgments?.[candidate.documentId] || null }); return trace } catch { return null } }
 const refreshConversations = async () => {
   historyLoading.value = true
   try { conversations.value = await listManusConversations() }
@@ -130,6 +132,10 @@ const sendMessage = payload => {
   const answerIndex = messages.value.length - 1
   connectionStatus.value = 'connecting'
   eventSource = chatWithManus(chatId.value, message, knowledgeSearch)
+  eventSource.addEventListener('rag-trace', event => {
+    try { messages.value[answerIndex].ragTrace = JSON.parse(event.data) }
+    catch (error) { console.error('RAG retrieval trace unavailable:', error) }
+  })
   eventSource.addEventListener('activity', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return

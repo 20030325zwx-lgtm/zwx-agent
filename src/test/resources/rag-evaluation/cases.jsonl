@@ -1,0 +1,4 @@
+{"id":"bonus-formula","question":"Acme Nebula 的年度奖金怎么计算？","expectedDocumentIds":["synthetic-acme-2026-bonus-policy"],"expectedEvidence":"固定月薪 x 岗位系数 x 绩效系数 x 公司系数","answerable":true}
+{"id":"bonus-payment","question":"星河云图 2026 年奖金最晚什么时候发？","expectedDocumentIds":["synthetic-acme-2026-bonus-policy"],"expectedEvidence":"2027 年 3 月 15 日前","answerable":true}
+{"id":"bonus-cap","question":"年度奖金最多能拿几个月工资？","expectedDocumentIds":["synthetic-acme-2026-bonus-policy"],"expectedEvidence":"8 个月固定月薪","answerable":true}
+{"id":"unanswerable-stock","question":"这份制度给员工多少期权？","expectedDocumentIds":[],"expectedEvidence":"","answerable":false}

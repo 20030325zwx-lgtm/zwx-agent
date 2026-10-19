@@ -73,22 +73,24 @@ public class AgentConversationService {
     public List<AgentConversationMessage> getTravelMessages(String tenantId, String userId, String conversationId) {
         requireOwned(tenantId, userId, TRAVEL, conversationId);
         return jdbcTemplate.query("""
-                SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments, m.created_at FROM agent_chat_message m
+                SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments,
+                       m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at FROM agent_chat_message m
                 JOIN agent_conversation c ON c.id = m.conversation_id
                 WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC
                 """, (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
-                rs.getString("file_attachments"), rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, userId, TRAVEL);
+                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, userId, TRAVEL);
     }
 
     public List<AgentConversationMessage> getRecentTravelMessages(String tenantId, String userId, String conversationId, int limit) {
         return jdbcTemplate.query("""
-                SELECT id, role, content, execution_run_id, created_at FROM (
-                    SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments, m.created_at FROM agent_chat_message m
+                SELECT id, role, content, execution_run_id, file_attachments, rag_retrieval_trace, created_at FROM (
+                    SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments,
+                           m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at FROM agent_chat_message m
                     JOIN agent_conversation c ON c.id = m.conversation_id
                     WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id DESC LIMIT ?
                 ) recent_messages ORDER BY id ASC
                 """, (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
-                rs.getString("file_attachments"), rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, userId, TRAVEL, limit);
+                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, userId, TRAVEL, limit);
     }
 
     public void deleteTravelConversation(String tenantId, String userId, String conversationId) {
@@ -133,13 +135,20 @@ public class AgentConversationService {
 
     @Transactional
     public void saveCompletedTurn(String tenantId, String userId, String agentKey, String conversationId, String defaultTitle, String message, String answer, String fileAttachments) {
+        saveCompletedTurn(tenantId, userId, agentKey, conversationId, defaultTitle, message, answer, fileAttachments, null);
+    }
+
+    @Transactional
+    public void saveCompletedTurn(String tenantId, String userId, String agentKey, String conversationId, String defaultTitle,
+                                  String message, String answer, String fileAttachments, String ragRetrievalTrace) {
         ensureConversation(tenantId, userId, agentKey, conversationId, defaultTitle, message);
         appendMessage(tenantId, userId, agentKey, conversationId, "USER", message);
         int inserted = jdbcTemplate.update("""
-                INSERT INTO agent_chat_message (conversation_id, role, content, file_attachments)
-                SELECT id, 'ASSISTANT', ?, CAST(? AS jsonb) FROM agent_conversation
+                INSERT INTO agent_chat_message (conversation_id, role, content, file_attachments, rag_retrieval_trace)
+                SELECT id, 'ASSISTANT', ?, CAST(? AS jsonb), CAST(? AS jsonb) FROM agent_conversation
                 WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?
-                """, answer == null ? "" : answer, fileAttachments == null ? "[]" : fileAttachments, conversationId, tenantId, userId, agentKey);
+                """, answer == null ? "" : answer, fileAttachments == null ? "[]" : fileAttachments,
+                ragRetrievalTrace == null ? "{}" : ragRetrievalTrace, conversationId, tenantId, userId, agentKey);
         if (inserted == 0) throw new IllegalArgumentException("Agent conversation was not found");
         jdbcTemplate.update("UPDATE agent_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?",
                 conversationId, tenantId, userId, agentKey);
@@ -215,11 +224,38 @@ public class AgentConversationService {
 
     public void appendAssistantReply(String tenantId, String userId, String agentKey, String conversationId, long userMessageId,
                                      String content, String status, String executionRunId) {
+        appendAssistantReply(tenantId, userId, agentKey, conversationId, userMessageId, content, status, executionRunId, null);
+    }
+
+    public boolean saveRagJudgment(String tenantId, String userId, String agentKey, long messageId,
+                                   String candidateId, String judgment) {
+        if (!List.of("travel", "test", "super").contains(agentKey)) {
+            throw new IllegalArgumentException("Unsupported agent key for RAG judgment");
+        }
+        if (!List.of("RELEVANT", "PARTIAL", "IRRELEVANT").contains(judgment)) {
+            throw new IllegalArgumentException("Unsupported RAG relevance judgment");
+        }
+        return jdbcTemplate.update("""
+                UPDATE agent_chat_message m
+                SET rag_retrieval_trace = COALESCE(m.rag_retrieval_trace, '{}'::jsonb)
+                    || jsonb_build_object('judgments',
+                        COALESCE(m.rag_retrieval_trace -> 'judgments', '{}'::jsonb)
+                        || jsonb_build_object(?, ?::text))
+                FROM agent_conversation c
+                WHERE m.conversation_id = c.id AND m.id = ? AND m.role = 'ASSISTANT'
+                  AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ?
+                  AND m.rag_retrieval_trace -> 'candidates' @> jsonb_build_array(jsonb_build_object('documentId', ?))
+                """, candidateId, judgment, messageId, tenantId, userId, agentKey, candidateId) == 1;
+    }
+
+    public void appendAssistantReply(String tenantId, String userId, String agentKey, String conversationId, long userMessageId,
+                                     String content, String status, String executionRunId, String ragRetrievalTrace) {
         int inserted = jdbcTemplate.update("""
-                INSERT INTO agent_chat_message (conversation_id, role, content, status, execution_run_id)
-                SELECT id, 'ASSISTANT', ?, ?, ? FROM agent_conversation
+                INSERT INTO agent_chat_message (conversation_id, role, content, status, execution_run_id, rag_retrieval_trace)
+                SELECT id, 'ASSISTANT', ?, ?, ?, CAST(? AS jsonb) FROM agent_conversation
                 WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?
-                """, content == null ? "" : content, status, executionRunId, conversationId, tenantId, userId, agentKey);
+                """, content == null ? "" : content, status, executionRunId,
+                ragRetrievalTrace == null ? "{}" : ragRetrievalTrace, conversationId, tenantId, userId, agentKey);
         if (inserted == 0) throw new IllegalArgumentException("Agent conversation was not found");
         jdbcTemplate.update("UPDATE agent_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", conversationId);
     }
@@ -246,8 +282,8 @@ public class AgentConversationService {
 
     public List<AgentConversationMessage> getMessages(String tenantId, String userId, String agentKey, String conversationId) {
         requireOwned(tenantId, userId, agentKey, conversationId);
-        return jdbcTemplate.query("SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments, m.created_at FROM agent_chat_message m JOIN agent_conversation c ON c.id = m.conversation_id WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC",
-                (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"), rs.getString("file_attachments"), rs.getTimestamp("created_at").toInstant()),
+        return jdbcTemplate.query("SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments, m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at FROM agent_chat_message m JOIN agent_conversation c ON c.id = m.conversation_id WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC",
+                (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"), rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant()),
                 conversationId, tenantId, userId, agentKey);
     }
 

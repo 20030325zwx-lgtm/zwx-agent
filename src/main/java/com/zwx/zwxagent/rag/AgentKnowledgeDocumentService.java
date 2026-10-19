@@ -136,7 +136,8 @@ public class AgentKnowledgeDocumentService {
         }
         if (originalLifecycle == null) return;
         try {
-            jdbcTemplate.update("UPDATE agent_knowledge_document SET status = 'INDEXING' WHERE id = ?", documentId);
+            jdbcTemplate.update("UPDATE agent_knowledge_document SET status = 'INDEXING', index_attempts = index_attempts + 1, "
+                    + "error_message = NULL, next_retry_at = NULL WHERE id = ?", documentId);
             StoredDocument stored = queryStoredDocument(documentId, false);
             originalLifecycle = stored.lifecycleStatus();
             ParsedDocument parsed;
@@ -171,8 +172,11 @@ public class AgentKnowledgeDocumentService {
             jdbcTemplate.update("""
                     UPDATE agent_knowledge_document SET status = 'FAILED',
                         lifecycle_status = CASE WHEN ? = 'INDEXING' THEN 'FAILED' ELSE ? END,
-                        error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?
-                    """, originalLifecycle, originalLifecycle, truncate(exception.getMessage()), documentId);
+                        error_message = ?, completed_at = CURRENT_TIMESTAMP,
+                        next_retry_at = CASE WHEN ? = 'INDEXING' AND index_attempts < 3
+                            THEN CURRENT_TIMESTAMP + INTERVAL '1 minute' * index_attempts ELSE NULL END
+                    WHERE id = ?
+                    """, originalLifecycle, originalLifecycle, truncate(exception.getMessage()), originalLifecycle, documentId);
             return;
         }
         // 新版本流程（INDEXING → READY）自动发布，兼容旧上传即生效行为；人工发布接口后续开放
@@ -298,7 +302,10 @@ public class AgentKnowledgeDocumentService {
         metadata.put("versionNo", stored.versionNo());
         metadata.put("lifecycleStatus", stored.lifecycleStatus());
         metadata.put("chunkIndex", chunkIndex);
-        return Document.builder().id(UUID.nameUUIDFromBytes((stored.documentId() + "|" + document.getText()).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString())
+        metadata.put("parentDocumentId", stored.documentId());
+        metadata.put("parentLogicalKey", stored.logicalKey());
+        if (chunkIndex > 1) metadata.put("previousChunkIndex", chunkIndex - 1);
+        return Document.builder().id(UUID.nameUUIDFromBytes((stored.documentId() + "|chunk|" + chunkIndex).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString())
                 .text(document.getText()).metadata(metadata).build();
     }
 

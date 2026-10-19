@@ -69,7 +69,7 @@ const selectConversation = async conversation => {
   sidebarOpen.value = false
   try {
     const history = await getTravelConversationMessages(conversation.id)
-    messages.value = history.map(message => ({ id: message.id, content: message.content, isUser: message.role === 'USER', time: new Date(message.createdAt).getTime(), activities: message.executionRunId ? [{ label: '查看执行过程', runId: message.executionRunId }] : [] }))
+    messages.value = history.map(message => ({ id: message.id, content: message.content, isUser: message.role === 'USER', time: new Date(message.createdAt).getTime(), activities: message.executionRunId ? [{ label: '查看执行过程', runId: message.executionRunId }] : [], ragTrace: parseRagTrace(message.ragRetrievalTrace) }))
   } finally { messagesLoading.value = false }
 }
 const removeConversation = async conversation => {
@@ -97,6 +97,10 @@ const sendMessage = async (payload, retryUserMessageId = null, retryIndex = -1) 
     try { messages.value[answerIndex].references = JSON.parse(event.data) }
     catch (error) { console.error('Knowledge references unavailable:', error) }
   })
+  eventSource.addEventListener('rag-trace', event => {
+    try { messages.value[answerIndex].ragTrace = JSON.parse(event.data) }
+    catch (error) { console.error('RAG retrieval trace unavailable:', error) }
+  })
   eventSource.addEventListener('thinking', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return
@@ -114,7 +118,10 @@ const sendMessage = async (payload, retryUserMessageId = null, retryIndex = -1) 
   })
   eventSource.onmessage = async event => {
     if (event.data === '[DONE]') {
-      connectionStatus.value = 'disconnected'; eventSource?.close(); eventSource = null; activeTurnStart = -1; activeRetry = false; await refreshConversations(); return
+      connectionStatus.value = 'disconnected'; eventSource?.close(); eventSource = null; activeTurnStart = -1; activeRetry = false; await refreshConversations();
+      const history = await getTravelConversationMessages(chatId.value)
+      messages.value = history.map(item => ({ id: item.id, content: item.content, isUser: item.role === 'USER', time: new Date(item.createdAt).getTime(), activities: item.executionRunId ? [{ label: '查看执行过程', runId: item.executionRunId }] : [], ragTrace: parseRagTrace(item.ragRetrievalTrace) }))
+      return
     }
     if (messages.value[answerIndex]) messages.value[answerIndex].content += event.data
   }
@@ -131,6 +138,7 @@ const sendMessage = async (payload, retryUserMessageId = null, retryIndex = -1) 
     }, 1500)
   }
 }
+const parseRagTrace = value => { try { const trace = JSON.parse(value || 'null'); if (!trace?.traceId) return null; trace.candidates?.forEach(candidate => { candidate.judgment = trace.judgments?.[candidate.documentId] || null }); return trace } catch { return null } }
 const cancelActiveStream = () => {
   if (!eventSource && connectionStatus.value !== 'connecting') return
   eventSource?.close()

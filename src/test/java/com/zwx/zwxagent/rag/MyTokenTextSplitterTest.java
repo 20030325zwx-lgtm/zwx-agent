@@ -49,4 +49,15 @@ class MyTokenTextSplitterTest {
         System.out.println("structured markdown chunks=" + chunks.size());
         chunks.forEach(chunk -> System.out.println("---\n" + chunk.getText()));
     }
+
+    @Test
+    void preservesPdfPageProvenanceForCitations() {
+        String extractedPdf = """
+                [PDF 第 3 页]
+                ## 发放规则
+                奖金在三月发放。
+                """;
+        List<Document> chunks = new MyTokenTextSplitter().splitStructuredMarkdown(List.of(Document.builder().text(extractedPdf).build()));
+        assertTrue(chunks.stream().allMatch(chunk -> Integer.valueOf(3).equals(chunk.getMetadata().get("pageNumber"))));
+    }
 }

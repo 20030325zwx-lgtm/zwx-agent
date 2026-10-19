@@ -5,6 +5,7 @@ import com.zwx.zwxagent.conversation.AgentConversationService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
 import com.zwx.zwxagent.rag.LoveKnowledgeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
 import com.zwx.zwxagent.skills.SkillPromptBuilder;
 import org.springframework.ai.chat.client.ChatClient;
@@ -25,25 +26,27 @@ public class TestAgentApp {
     private final AgentRegistry agentRegistry;
     private final BuiltInSkillRegistry skillRegistry;
     private final SkillPromptBuilder skillPromptBuilder;
+    private final ObjectMapper objectMapper;
 
     public TestAgentApp(ChatModel dashscopeChatModel, AgentKnowledgeRagService knowledgeRagService,
                         AgentConversationService conversationService, AgentRegistry agentRegistry, BuiltInSkillRegistry skillRegistry,
-                        SkillPromptBuilder skillPromptBuilder) {
+                        SkillPromptBuilder skillPromptBuilder, ObjectMapper objectMapper) {
         this.chatClient = ChatClient.builder(dashscopeChatModel).build();
         this.knowledgeRagService = knowledgeRagService;
         this.conversationService = conversationService;
         this.agentRegistry = agentRegistry;
         this.skillRegistry = skillRegistry;
         this.skillPromptBuilder = skillPromptBuilder;
+        this.objectMapper = objectMapper;
     }
 
     public Flux<String> chat(String tenantId, String userId, String conversationId, String message, boolean webSearch, Long retryUserMessageId,
-                             Consumer<List<LoveKnowledgeReference>> references, String clientRequestId) {
+                             Consumer<AgentKnowledgeRagResult> retrievalConsumer, String clientRequestId) {
         long userMessageId = retryUserMessageId == null
                 ? conversationService.startUserTurn(tenantId, userId, KEY, conversationId, message, clientRequestId)
                 : retryUserMessageId;
         AgentKnowledgeRagResult retrieval = knowledgeRagService.retrieveWithContext(tenantId, KEY, message);
-        references.accept(retrieval.references());
+        retrievalConsumer.accept(retrieval);
         String history = conversationService.getRecentMessages(tenantId, userId, KEY, conversationId, 20).stream()
                 .map(item -> item.role() + ": " + item.content()).reduce("", (left, right) -> left + "\n" + right);
         StringBuilder answer = new StringBuilder();
@@ -60,8 +63,9 @@ public class TestAgentApp {
                     conversationService.markUserTurnInterrupted(tenantId, userId, userMessageId);
                 } else {
                     conversationService.completeUserTurn(tenantId, userId, userMessageId);
+                    String traceJson = objectMapper.writeValueAsString(retrieval.trace());
                     conversationService.appendAssistantReply(tenantId, userId, KEY, conversationId, userMessageId,
-                            answer.toString(), completed ? "COMPLETED" : "INTERRUPTED", null);
+                            answer.toString(), completed ? "COMPLETED" : "INTERRUPTED", null, traceJson);
                 }
             } catch (Exception exception) {
                 org.slf4j.LoggerFactory.getLogger(TestAgentApp.class).error("Failed to persist test agent turn", exception);

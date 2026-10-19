@@ -517,9 +517,11 @@ public class AiController {
         McpTools activeMcpTools = mcpTools;
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
                 conversationId, actor.tenantId(), message, historyContext, availableTools, knowledge.context(),
+                knowledge.trace() == null ? null : toJson(knowledge.trace()),
                 result -> agentConversationService.saveCompletedTurn(
                         actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE,
-                        message, result.answer(), toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId)))));
+                        message, result.answer(), toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId))),
+                        knowledge.trace() == null ? "{}" : toJson(knowledge.trace())));
         SseEmitter emitter;
         try {
             emitter = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
@@ -666,7 +668,10 @@ public class AiController {
             };
             progress.accept(new ExecutionUpdate("received", "正在接收并理解你的旅行需求...", Map.of("message", message)));
             reactor.core.Disposable subscription = travelPlannerApp.chat(actor.tenantId(), actor.userId(), conversationId, runId, message, retryUserMessageId, webSearch, progress,
-                    references -> sink.next(ServerSentEvent.<String>builder(toJson(references)).event("references").build()), clientRequestId).subscribe(
+                    retrieval -> {
+                        sink.next(ServerSentEvent.<String>builder(toJson(retrieval.references())).event("references").build());
+                        sink.next(ServerSentEvent.<String>builder(toJson(retrieval.trace())).event("rag-trace").build());
+                    }, clientRequestId).subscribe(
                     chunk -> sink.next(ServerSentEvent.builder(chunk).build()),
                     error -> {
                         sink.next(ServerSentEvent.<String>builder().event("generation-error").data(com.zwx.zwxagent.util.ErrorMessages.describe(error)).build());
@@ -741,13 +746,27 @@ public class AiController {
         agentConversationService.requireNoDuplicateRequest(actor.tenantId(), actor.userId(), clientRequestId);
         var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":test:" + conversationId);
         if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
-        return withHeartbeat(Flux.defer(() -> testAgentApp.chat(actor.tenantId(), actor.userId(), conversationId, message, webSearch, retryUserMessageId, references -> {}, clientRequestId))
-                .map(ServerSentEvent::builder).map(ServerSentEvent.Builder::build)
-                .concatWithValues(ServerSentEvent.<String>builder("[DONE]").build())
-                .onErrorResume(error -> Flux.just(
-                        ServerSentEvent.<String>builder().event("generation-error").data(com.zwx.zwxagent.util.ErrorMessages.describe(error)).build(),
-                        ServerSentEvent.<String>builder("[DONE]").build()))
-                .doFinally(signal -> conversationLease.close()));
+        return withHeartbeat(Flux.<ServerSentEvent<String>>create(sink -> {
+            reactor.core.Disposable subscription = testAgentApp.chat(actor.tenantId(), actor.userId(), conversationId, message,
+                    webSearch, retryUserMessageId, retrieval -> {
+                        sink.next(ServerSentEvent.<String>builder(toJson(retrieval.references())).event("references").build());
+                        sink.next(ServerSentEvent.<String>builder(toJson(retrieval.trace())).event("rag-trace").build());
+                    }, clientRequestId).subscribe(
+                    chunk -> sink.next(ServerSentEvent.builder(chunk).build()),
+                    error -> {
+                        sink.next(ServerSentEvent.<String>builder().event("generation-error").data(com.zwx.zwxagent.util.ErrorMessages.describe(error)).build());
+                        sink.next(ServerSentEvent.<String>builder("[DONE]").build());
+                        sink.complete();
+                    },
+                    () -> {
+                        sink.next(ServerSentEvent.<String>builder("[DONE]").build());
+                        sink.complete();
+                    });
+            sink.onCancel(() -> {
+                subscription.dispose();
+                conversationLease.close();
+            });
+        }).doFinally(signal -> conversationLease.close()));
     }
 
     @PostMapping("/test-agent/conversations")
@@ -762,6 +781,16 @@ public class AiController {
     public List<AgentConversationMessage> getTestMessages(CurrentActor actor, @PathVariable String conversationId) {
         return agentConversationService.getMessages(actor.tenantId(), actor.userId(), "test", conversationId);
     }
+
+    @org.springframework.web.bind.annotation.PostMapping("/rag-evaluations/{messageId}/judgments")
+    public ResponseEntity<Void> judgeRagCandidate(CurrentActor actor, @PathVariable long messageId,
+                                                   @org.springframework.web.bind.annotation.RequestBody RagJudgmentRequest request) {
+        boolean saved = agentConversationService.saveRagJudgment(actor.tenantId(), actor.userId(), request.agentKey(),
+                messageId, request.candidateId(), request.judgment());
+        return saved ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
+
+    public record RagJudgmentRequest(String agentKey, String candidateId, String judgment) { }
     @DeleteMapping("/test-agent/conversations/{conversationId}")
     public void deleteTestConversation(CurrentActor actor, @PathVariable String conversationId) {
         agentConversationService.deleteConversation(actor.tenantId(), actor.userId(), "test", conversationId);

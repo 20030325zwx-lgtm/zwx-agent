@@ -3,6 +3,7 @@ package com.zwx.zwxagent.app;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.rag.LoveKnowledgeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwx.zwxagent.agent.AgentRegistry;
 import com.zwx.zwxagent.conversation.AgentConversationService;
 import com.zwx.zwxagent.execution.ExecutionUpdate;
@@ -27,15 +28,18 @@ public class TravelPlannerApp {
     private final AgentKnowledgeRagService knowledgeRagService;
     private final AgentConversationService conversationService;
     private final AgentRegistry agentRegistry;
+    private final ObjectMapper objectMapper;
 
     public TravelPlannerApp(ChatModel dashscopeChatModel, BuiltInSkillRegistry skillRegistry, SkillPromptBuilder skillPromptBuilder,
-                            AgentKnowledgeRagService knowledgeRagService, AgentConversationService conversationService, AgentRegistry agentRegistry) {
+                            AgentKnowledgeRagService knowledgeRagService, AgentConversationService conversationService, AgentRegistry agentRegistry,
+                            ObjectMapper objectMapper) {
         this.chatClient = ChatClient.builder(dashscopeChatModel).build();
         this.skillRegistry = skillRegistry;
         this.skillPromptBuilder = skillPromptBuilder;
         this.knowledgeRagService = knowledgeRagService;
         this.conversationService = conversationService;
         this.agentRegistry = agentRegistry;
+        this.objectMapper = objectMapper;
     }
 
     public Flux<String> chat(String tenantId, String userId, String conversationId, String runId, String message, Consumer<ExecutionUpdate> progress) {
@@ -47,7 +51,7 @@ public class TravelPlannerApp {
     }
 
     public Flux<String> chat(String tenantId, String userId, String conversationId, String runId, String message, Long retryUserMessageId,
-                             boolean webSearch, Consumer<ExecutionUpdate> progress, Consumer<List<LoveKnowledgeReference>> referenceConsumer, String clientRequestId) {
+                             boolean webSearch, Consumer<ExecutionUpdate> progress, Consumer<AgentKnowledgeRagResult> retrievalConsumer, String clientRequestId) {
         long userMessageId = retryUserMessageId == null
                 ? conversationService.startUserTurn(tenantId, userId, "travel", conversationId, message, clientRequestId)
                 : retryUserMessageId;
@@ -55,7 +59,7 @@ public class TravelPlannerApp {
         progress.accept(new ExecutionUpdate("retrieval", "正在检索当前智能体的私有资料...", java.util.Map.of("query", message)));
         AgentKnowledgeRagResult retrieval = knowledgeRagService.retrieveWithContext(tenantId, "travel", message);
         String context = retrieval.context();
-        referenceConsumer.accept(retrieval.references());
+        retrievalConsumer.accept(retrieval);
         progress.accept(new ExecutionUpdate("retrieval", context.isBlank() ? "未命中私有资料，正在准备联网规划..." : "已召回私有资料，正在制定规划...", java.util.Map.of("contextAvailable", !context.isBlank())));
         String history = conversationService.getRecentTravelMessages(tenantId, userId, conversationId, 20).stream()
                 .map(item -> item.role() + ": " + item.content()).reduce("", (left, right) -> left + "\n" + right);
@@ -77,8 +81,9 @@ public class TravelPlannerApp {
                             conversationService.markUserTurnInterrupted(tenantId, userId, userMessageId);
                         } else {
                             conversationService.completeUserTurn(tenantId, userId, userMessageId);
+                            String traceJson = objectMapper.writeValueAsString(retrieval.trace());
                             conversationService.appendAssistantReply(tenantId, userId, "travel", conversationId, userMessageId,
-                                    answer.toString(), completed ? "COMPLETED" : "INTERRUPTED", runId);
+                                    answer.toString(), completed ? "COMPLETED" : "INTERRUPTED", runId, traceJson);
                         }
                     } catch (Exception exception) {
                         org.slf4j.LoggerFactory.getLogger(TravelPlannerApp.class).error("Failed to persist travel turn", exception);

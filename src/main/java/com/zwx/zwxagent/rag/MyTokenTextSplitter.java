@@ -17,6 +17,7 @@ import java.util.regex.Pattern;
 class MyTokenTextSplitter {
     private static final int STRUCTURED_MAX_CHARS = 1200;
     private static final Pattern MARKDOWN_HEADING = Pattern.compile("^(#{1,6})\\s+(.+?)\\s*$");
+    private static final Pattern PDF_PAGE = Pattern.compile("^\\[PDF 第 (\\d+) 页]\\s*$");
     private static final Pattern SENTENCE_END = Pattern.compile("(?<=[。！？；.!?;])\\s+");
 
     public List<Document> splitDocuments(List<Document> documents) {
@@ -43,11 +44,18 @@ class MyTokenTextSplitter {
         List<Document> chunks = new ArrayList<>();
         List<String> headings = new ArrayList<>();
         StringBuilder block = new StringBuilder();
+        Integer pageNumber = null;
         String[] lines = source.getText().replace("\r\n", "\n").split("\n", -1);
         for (String line : lines) {
+            var page = PDF_PAGE.matcher(line.trim());
+            if (page.matches()) {
+                flushBlock(chunks, source, headings, block, pageNumber);
+                pageNumber = Integer.parseInt(page.group(1));
+                continue;
+            }
             var heading = MARKDOWN_HEADING.matcher(line);
             if (heading.matches()) {
-                flushBlock(chunks, source, headings, block);
+                flushBlock(chunks, source, headings, block, pageNumber);
                 int level = heading.group(1).length();
                 while (headings.size() < level) headings.add("");
                 headings.set(level - 1, heading.group(2));
@@ -61,11 +69,11 @@ class MyTokenTextSplitter {
                 block.append(line);
             }
         }
-        flushBlock(chunks, source, headings, block);
+        flushBlock(chunks, source, headings, block, pageNumber);
         return chunks;
     }
 
-    private void flushBlock(List<Document> chunks, Document source, List<String> headings, StringBuilder block) {
+    private void flushBlock(List<Document> chunks, Document source, List<String> headings, StringBuilder block, Integer pageNumber) {
         if (block.isEmpty()) return;
         String content = block.toString().trim();
         block.setLength(0);
@@ -74,6 +82,7 @@ class MyTokenTextSplitter {
             Map<String, Object> metadata = new HashMap<>(source.getMetadata());
             String sectionPath = headings.stream().filter(value -> !value.isBlank()).reduce((left, right) -> left + " > " + right).orElse("");
             if (!sectionPath.isBlank()) metadata.put("sectionPath", sectionPath);
+            if (pageNumber != null) metadata.put("pageNumber", pageNumber);
             metadata.put("chunking", "structured-markdown");
             String contextualContent = sectionPath.isBlank() ? part : "[章节] " + sectionPath + "\n\n" + part;
             chunks.add(Document.builder().text(contextualContent).metadata(metadata).build());

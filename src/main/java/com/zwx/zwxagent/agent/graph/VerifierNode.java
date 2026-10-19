@@ -54,11 +54,12 @@ public class VerifierNode implements NodeAction {
                 .orElse(List.of());
         int previousRevisions = state.value(GraphState.REVISION, 0);
         if (previousRevisions >= MAX_REVISIONS) {
-            // 已返工过一轮，不再消耗质检调用，直接放行进入交付。
-            return Map.of(GraphState.VERIFICATION_STATUS, "pass",
+            // 返工后未进行第二次模型验收，不能将其标记为通过。
+            return Map.of(GraphState.VERIFICATION_STATUS, "unverified",
                     GraphState.VERIFICATION_FEEDBACK, "",
                     GraphState.REVISION, previousRevisions,
-                    GraphState.ACTIVITIES, List.of("已完成一轮返工，直接进入交付"));
+                    GraphState.ACTIVITIES, List.of("已完成一轮返工，未进行二次验收，交付结果将标记为未验收"),
+                    GraphState.SSE_EVENTS, List.of(ActivityEvent.of("verify", "质检员", "返工已完成，但未进行二次验收")));
         }
         String verdictJson;
         String activity;
@@ -80,10 +81,10 @@ public class VerifierNode implements NodeAction {
             feedback = verdict.path("feedback").asText("");
             activity = "pass".equals(status) ? "质检通过" : "质检要求返工：" + compact(feedback);
         } catch (Exception exception) {
-            log.warn("verifier 调用失败，按通过处理：{}", exception.getMessage());
-            status = "pass";
+            log.warn("verifier 调用失败，结果标记为未验收：{}", exception.getMessage());
+            status = "unverified";
             feedback = "";
-            activity = "质检器暂不可用，按通过处理";
+            activity = "质检器暂不可用，结果未验收";
         }
         int revision = "revise".equals(status) ? previousRevisions + 1 : previousRevisions;
         log.info(activity);
@@ -93,7 +94,8 @@ public class VerifierNode implements NodeAction {
                 GraphState.ACTIVITIES, List.of(activity),
                 GraphState.SSE_EVENTS, List.of(ActivityEvent.of("verify", "质检员",
                         "pass".equals(status) ? "结果通过验收"
-                                : "要求返工：" + compact(feedback, 80))));
+                                : "revise".equals(status) ? "要求返工：" + compact(feedback, 80)
+                                : "质检不可用，结果未验收")));
     }
 
     /** 提取输出中第一个 JSON 对象片段；找不到时返回原文让 readTree 自行失败。 */

@@ -75,6 +75,8 @@ app:
       recall-top-k: 15
       recall-similarity-threshold: 0.4
   agent:
+    # 数据库租约锁支持多实例会话互斥；续期间隔为租期的 1/3，崩溃后等待租约过期回收
+    conversation-lock-lease-seconds: 600
     rag:
       top-k: 3
       similarity-threshold: 0.55
@@ -86,6 +88,8 @@ app:
       tool-result-max-chars: 8000
       # 工具调用安全护栏（ToolGuardHook）：beforeToolCalls 中央预检（shell 元字符/越权路径/SSRF URL），拦截即短路
       tool-guard-enabled: true
+      # 未登记工具默认拒绝；MCP 工具需完成策略评审后按名称加入此逗号分隔列表
+      allowed-unregistered-tools: ${APP_ALLOWED_UNREGISTERED_TOOLS:}
     memory:
       # 工作记忆压缩（批次 C L1）：messageList 超 context-budget 字符时压缩最旧块，保留最近 recent-keep 条
       compression-enabled: true

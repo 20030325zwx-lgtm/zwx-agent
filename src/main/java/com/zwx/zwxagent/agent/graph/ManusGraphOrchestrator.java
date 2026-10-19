@@ -25,8 +25,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -110,7 +110,7 @@ public class ManusGraphOrchestrator {
     }
 
     private String routeAfterVerifier(OverAllState state) throws Exception {
-        return route(state.value(GraphState.VERIFICATION_STATUS, "pass"));
+        return route(state.value(GraphState.VERIFICATION_STATUS, "unverified"));
     }
 
     public record ManusRunRequest(String conversationId,
@@ -128,11 +128,16 @@ public class ManusGraphOrchestrator {
     public SseEmitter runStream(ManusRunRequest request, Executor runExecutor) {
         SseEmitter emitter = new SseEmitter(MAX_RUN_MILLIS + TimeUnit.SECONDS.toMillis(5));
         AtomicBoolean stopped = new AtomicBoolean(false);
-        CompletableFuture.runAsync(() -> execute(request, emitter, stopped), runExecutor);
+        FutureTask<Void> runTask = new FutureTask<>(() -> {
+            execute(request, emitter, stopped);
+            return null;
+        });
         Runnable stop = () -> {
             stopped.set(true);
-            workersNode.stopAll();
+            runTask.cancel(true);
+            workersNode.stopAll(request.conversationId());
         };
+        runExecutor.execute(runTask);
         emitter.onTimeout(() -> {
             stop.run();
             log.warn("manus graph SSE connection timeout");

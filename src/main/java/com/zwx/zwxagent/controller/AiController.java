@@ -326,7 +326,8 @@ public class AiController {
                                                                @RequestParam(required = false) Long continueFromMessageId) {
         conversationService.ensureOwnedConversation(actor, chatId, message);
         conversationService.requireNoDuplicateRequest(actor, chatId, clientRequestId);
-        if (!conversationLockManager.tryLock(chatId)) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
+        var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":love:" + chatId);
+        if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
         List<String> imageObjectKeys = imageKey == null ? List.of() : imageKey;
         try {
             Flux<ServerSentEvent<String>> stream;
@@ -337,9 +338,9 @@ public class AiController {
             } else {
                 stream = doTextChatWithLoveAppSSE(actor, message, chatId, webSearch, retryUserMessageId, clientRequestId);
             }
-            return withHeartbeat(stream.doFinally(signal -> conversationLockManager.unlock(chatId)));
+            return withHeartbeat(stream.doFinally(signal -> conversationLease.close()));
         } catch (RuntimeException exception) {
-            conversationLockManager.unlock(chatId);
+            conversationLease.close();
             throw exception;
         }
     }
@@ -491,23 +492,42 @@ public class AiController {
     public SseEmitter doChatWithManus(CurrentActor actor, @RequestParam String conversationId, @RequestParam String message,
                                       @RequestParam(defaultValue = "false") boolean knowledgeSearch) {
         agentConversationService.ensureConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
-        if (!conversationLockManager.tryLock(conversationId)) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
-        AgentKnowledgeRagResult knowledge = knowledgeSearch
-                ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, message)
-                : new AgentKnowledgeRagResult("", List.of());
-        McpTools mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
-        ToolCallback[] availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)), Arrays.stream(mcpTools.callbacks()))
-                .toArray(ToolCallback[]::new);
-        String historyContext = agentConversationService
-                .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 20).stream()
-                .map(historyMessage -> ("USER".equals(historyMessage.role()) ? "用户" : "助手") + ": " + historyMessage.content())
-                .collect(java.util.stream.Collectors.joining("\n"));
+        var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
+        if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
+        AgentKnowledgeRagResult knowledge;
+        McpTools mcpTools = null;
+        ToolCallback[] availableTools;
+        String historyContext;
+        try {
+            knowledge = knowledgeSearch
+                    ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, message)
+                    : new AgentKnowledgeRagResult("", List.of());
+            mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
+            availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)), Arrays.stream(mcpTools.callbacks()))
+                    .toArray(ToolCallback[]::new);
+            historyContext = agentConversationService
+                    .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 20).stream()
+                    .map(historyMessage -> ("USER".equals(historyMessage.role()) ? "用户" : "助手") + ": " + historyMessage.content())
+                    .collect(java.util.stream.Collectors.joining("\n"));
+        } catch (RuntimeException exception) {
+            if (mcpTools != null) mcpTools.close();
+            conversationLease.close();
+            throw exception;
+        }
+        McpTools activeMcpTools = mcpTools;
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
                 conversationId, actor.tenantId(), message, historyContext, availableTools, knowledge.context(),
                 result -> agentConversationService.saveCompletedTurn(
                         actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE,
                         message, result.answer(), toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId)))));
-        SseEmitter emitter = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
+        SseEmitter emitter;
+        try {
+            emitter = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
+        } catch (RuntimeException exception) {
+            activeMcpTools.close();
+            conversationLease.close();
+            throw exception;
+        }
         java.util.concurrent.ScheduledFuture<?>[] heartbeatHolder = new java.util.concurrent.ScheduledFuture<?>[1];
         heartbeatHolder[0] = HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
             try {
@@ -518,22 +538,16 @@ public class AiController {
             }
         }, 15, 15, java.util.concurrent.TimeUnit.SECONDS);
         java.util.concurrent.ScheduledFuture<?> heartbeat = heartbeatHolder[0];
-        Runnable stopHeartbeat = () -> heartbeat.cancel(false);
-        emitter.onCompletion(() -> {
-            stopHeartbeat.run();
-            mcpTools.close();
-            conversationLockManager.unlock(conversationId);
-        });
-        emitter.onTimeout(() -> {
-            stopHeartbeat.run();
-            mcpTools.close();
-            conversationLockManager.unlock(conversationId);
-        });
-        emitter.onError(error -> {
-            stopHeartbeat.run();
-            mcpTools.close();
-            conversationLockManager.unlock(conversationId);
-        });
+        java.util.concurrent.atomic.AtomicBoolean cleanedUp = new java.util.concurrent.atomic.AtomicBoolean();
+        Runnable cleanup = () -> {
+            if (!cleanedUp.compareAndSet(false, true)) return;
+            heartbeat.cancel(false);
+            activeMcpTools.close();
+            conversationLease.close();
+        };
+        emitter.onCompletion(cleanup);
+        emitter.onTimeout(cleanup);
+        emitter.onError(error -> cleanup.run());
         return emitter;
     }
 
@@ -636,7 +650,8 @@ public class AiController {
                                                                 @RequestParam(required = false) String clientRequestId) {
         agentConversationService.ensureTravelConversation(actor.tenantId(), actor.userId(), conversationId, message);
         agentConversationService.requireNoDuplicateRequest(actor.tenantId(), actor.userId(), clientRequestId);
-        if (!conversationLockManager.tryLock(conversationId)) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
+        var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":travel:" + conversationId);
+        if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
         String runId = UUID.randomUUID().toString();
         Flux<ServerSentEvent<String>> travelStream = Flux.<ServerSentEvent<String>>create(sink -> {
             java.util.function.Consumer<ExecutionUpdate> progress = update -> {
@@ -664,11 +679,11 @@ public class AiController {
                     });
             sink.onCancel(() -> {
                 subscription.dispose();
-                conversationLockManager.unlock(conversationId);
+                conversationLease.close();
                 agentExecutionTraceService.record(runId, actor.tenantId(), "travel", conversationId, "interrupted",
                         "连接中断：已生成内容将保留，可重新提问继续。", Map.of("runId", runId));
             });
-        }).doFinally(signal -> conversationLockManager.unlock(conversationId));
+        }).doFinally(signal -> conversationLease.close());
         return withHeartbeat(travelStream);
     }
 
@@ -724,14 +739,15 @@ public class AiController {
                                                             @RequestParam String message, @RequestParam(defaultValue = "false") boolean webSearch, @RequestParam(required = false) Long retryUserMessageId,
                                                             @RequestParam(required = false) String clientRequestId) {
         agentConversationService.requireNoDuplicateRequest(actor.tenantId(), actor.userId(), clientRequestId);
-        if (!conversationLockManager.tryLock(conversationId)) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
-        return withHeartbeat(testAgentApp.chat(actor.tenantId(), actor.userId(), conversationId, message, webSearch, retryUserMessageId, references -> {}, clientRequestId)
+        var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":test:" + conversationId);
+        if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
+        return withHeartbeat(Flux.defer(() -> testAgentApp.chat(actor.tenantId(), actor.userId(), conversationId, message, webSearch, retryUserMessageId, references -> {}, clientRequestId))
                 .map(ServerSentEvent::builder).map(ServerSentEvent.Builder::build)
                 .concatWithValues(ServerSentEvent.<String>builder("[DONE]").build())
                 .onErrorResume(error -> Flux.just(
                         ServerSentEvent.<String>builder().event("generation-error").data(com.zwx.zwxagent.util.ErrorMessages.describe(error)).build(),
                         ServerSentEvent.<String>builder("[DONE]").build()))
-                .doFinally(signal -> conversationLockManager.unlock(conversationId)));
+                .doFinally(signal -> conversationLease.close()));
     }
 
     @PostMapping("/test-agent/conversations")

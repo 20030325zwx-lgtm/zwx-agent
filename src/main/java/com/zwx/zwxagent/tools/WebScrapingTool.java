@@ -26,6 +26,7 @@ public class WebScrapingTool {
             Document document = Jsoup.connect(validated.toString())
                     .timeout(TIMEOUT_MILLIS)
                     .maxBodySize(MAX_BODY_BYTES)
+                    .followRedirects(false)
                     .userAgent("zwx-agent-bot/0.1")
                     .get();
             String text = document.body() == null ? "" : document.body().text();

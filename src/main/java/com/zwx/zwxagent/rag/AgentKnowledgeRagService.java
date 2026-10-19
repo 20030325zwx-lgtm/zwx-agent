@@ -57,8 +57,12 @@ public class AgentKnowledgeRagService {
 
     public AgentKnowledgeRagResult retrieveWithContext(String tenantId, String agentKey, String query) {
         List<Document> documents;
-        CompletableFuture<RetrievalOutcome> search = CompletableFuture
-                .supplyAsync(() -> recall(tenantId, agentKey, query), ragExecutor);
+        CompletableFuture<RetrievalOutcome> search;
+        try {
+            search = CompletableFuture.supplyAsync(() -> recall(tenantId, agentKey, query), ragExecutor);
+        } catch (RuntimeException exception) {
+            return AgentKnowledgeRagResult.EMPTY;
+        }
         try {
             documents = search.get(timeoutMs, TimeUnit.MILLISECONDS).documents();
         } catch (TimeoutException exception) {

@@ -18,7 +18,6 @@ import java.util.Map;
 public class ExecutionTraceHook implements AgentHook {
 
     static final int MAX_SUMMARY_CHARS = 120;
-    private static final int MAX_DETAIL_CHARS = 2000;
 
     private final AgentExecutionTraceService traceService;
 
@@ -38,16 +37,15 @@ public class ExecutionTraceHook implements AgentHook {
 
     @Override
     public void beforeRun(AgentRunContext context) {
-        recordEvent(context, "agent_started",
-                "开始执行：" + compact(context.userPrompt(), MAX_SUMMARY_CHARS),
-                Map.of("agentName", context.agentName()));
+        recordEvent(context, "agent_started", "开始执行", Map.of("agentName", context.agentName()));
     }
 
     @Override
     public void afterStep(AgentRunContext context, String stepResult) {
         recordEvent(context, "step",
-                "第 " + context.currentStep() + " 步完成：" + compact(stepResult, MAX_SUMMARY_CHARS),
-                Map.of("step", context.currentStep(), "agentName", context.agentName()));
+                "第 " + context.currentStep() + " 步完成",
+                Map.of("step", context.currentStep(), "agentName", context.agentName(),
+                        "resultChars", stepResult == null ? 0 : stepResult.length()));
     }
 
     @Override
@@ -56,8 +54,8 @@ public class ExecutionTraceHook implements AgentHook {
             recordEvent(context, "tool",
                     "工具 " + execution.name() + " 执行完成",
                     Map.of("tool", execution.name(),
-                            "arguments", compact(execution.arguments(), MAX_DETAIL_CHARS),
-                            "result", compact(execution.result(), MAX_DETAIL_CHARS)));
+                            "argumentChars", execution.arguments() == null ? 0 : execution.arguments().length(),
+                            "resultChars", execution.result() == null ? 0 : execution.result().length()));
         }
     }
 
@@ -70,7 +68,7 @@ public class ExecutionTraceHook implements AgentHook {
     @Override
     public void onInterrupted(AgentRunContext context, String reason) {
         recordEvent(context, "agent_interrupted",
-                "执行中断：" + compact(reason, MAX_SUMMARY_CHARS), Map.of("agentName", context.agentName()));
+                "执行中断", Map.of("agentName", context.agentName(), "reasonChars", reason == null ? 0 : reason.length()));
     }
 
     private void recordEvent(AgentRunContext context, String phase, String summary, Map<String, Object> detail) {
@@ -86,8 +84,4 @@ public class ExecutionTraceHook implements AgentHook {
         }
     }
 
-    private String compact(String value, int maxChars) {
-        String normalized = value == null ? "" : value.replaceAll("\\s+", " ").trim();
-        return normalized.length() <= maxChars ? normalized : normalized.substring(0, maxChars) + "...";
-    }
 }

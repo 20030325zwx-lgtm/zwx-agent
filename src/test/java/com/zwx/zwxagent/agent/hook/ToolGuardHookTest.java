@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 class ToolGuardHookTest {
 
     private ToolGuardHook hook(boolean enabled) {
-        return new ToolGuardHook(enabled, "", new UrlAccessPolicy());
+        return new ToolGuardHook(enabled, "", "", new UrlAccessPolicy());
     }
 
     private AgentRunContext context() {
@@ -48,6 +48,11 @@ class ToolGuardHookTest {
                 new PlannedToolCall("id-2", "function", "downloadResource",
                         "{\"url\": \"http://192.168.1.1/x\", \"fileName\": \"a.bin\"}"));
         assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), download));
+
+        List<PlannedToolCall> externalDatabase = List.of(
+                new PlannedToolCall("id-3", "function", "queryExternalDatabase",
+                        "{\"databaseType\":\"postgresql\",\"host\":\"127.0.0.1\",\"port\":5432,\"sql\":\"SELECT 1\"}"));
+        assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), externalDatabase));
     }
 
     @Test
@@ -64,7 +69,7 @@ class ToolGuardHookTest {
     void legitimateCallsPass() {
         UrlAccessPolicy urlPolicy = mock(UrlAccessPolicy.class);
         when(urlPolicy.validateHttpUrl(anyString())).thenAnswer(invocation -> URI.create(invocation.getArgument(0)));
-        ToolGuardHook hook = new ToolGuardHook(true, "", urlPolicy);
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "readFile", "{\"fileName\": \"notes/report.txt\"}"),
                 new PlannedToolCall("id-2", "function", "executeTerminalCommand", "{\"command\": \"grep -rn TODO .\"}"),
@@ -73,10 +78,12 @@ class ToolGuardHookTest {
     }
 
     @Test
-    void unknownToolPassesThrough() {
+    void unknownToolRequiresExplicitRegistration() {
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "someFutureTool", "{\"path\": \"/etc/passwd\"}"));
-        assertDoesNotThrow(() -> hook(true).beforeToolCalls(context(), calls));
+        assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), calls));
+        ToolGuardHook registered = new ToolGuardHook(true, "", "someFutureTool", new UrlAccessPolicy());
+        assertDoesNotThrow(() -> registered.beforeToolCalls(context(), calls));
     }
 
     @Test
@@ -96,9 +103,24 @@ class ToolGuardHookTest {
     }
 
     @Test
-    void malformedArgumentsForUnknownToolPassThrough() {
+    void malformedArgumentsForUnknownToolAreDenied() {
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "someFutureTool", "not-json"));
-        assertDoesNotThrow(() -> hook(true).beforeToolCalls(context(), calls));
+        assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), calls));
+    }
+
+    @Test
+    void databaseQueryMustBeReadOnlyAndSingleStatement() {
+        List<PlannedToolCall> calls = List.of(new PlannedToolCall("id-1", "function", "executeDatabaseQuery",
+                "{\"sql\":\"SELECT 1; DROP TABLE app_user\"}"));
+        assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), calls));
+    }
+
+    @Test
+    void rejectionLogsDoNotContainRawArguments() {
+        String secret = "password-do-not-log";
+        List<PlannedToolCall> calls = List.of(new PlannedToolCall("id-1", "function", "executeTerminalCommand",
+                "{\"command\":\"ls; echo " + secret + "\"}"));
+        assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), calls));
     }
 }

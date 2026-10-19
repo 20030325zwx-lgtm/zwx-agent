@@ -27,8 +27,7 @@ class VerifierRoutingTest {
     }
 
     @Test
-    void revisionBudgetBlocksSecondRework() throws Exception {
-        // VerifierNode: 上一轮 revision 已达上限时，强制放行
+    void revisionBudgetMarksResultUnverifiedWithoutSecondReview() throws Exception {
         com.alibaba.cloud.ai.graph.OverAllState state = new com.alibaba.cloud.ai.graph.OverAllState();
         state.registerKeyAndStrategy(GraphState.REVISION, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
         state.registerKeyAndStrategy(GraphState.VERIFICATION_STATUS, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
@@ -38,6 +37,7 @@ class VerifierRoutingTest {
                 GraphState.REVISION, VerifierNode.MAX_REVISIONS,
                 GraphState.VERIFICATION_STATUS, "revise"));
         var result = new VerifierNode(org.mockito.Mockito.mock(org.springframework.ai.chat.model.ChatModel.class)).apply(state);
-        Assertions.assertEquals("pass", result.get(GraphState.VERIFICATION_STATUS));
+        Assertions.assertEquals("unverified", result.get(GraphState.VERIFICATION_STATUS));
+        Assertions.assertTrue(((java.util.List<?>) result.get(GraphState.ACTIVITIES)).getFirst().toString().contains("未进行二次验收"));
     }
 }

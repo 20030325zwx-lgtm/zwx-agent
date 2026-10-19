@@ -16,10 +16,16 @@ public class ExternalDatabaseQueryTool {
 
     private final int maxRows;
     private final int timeoutSeconds;
+    private final UrlAccessPolicy urlAccessPolicy;
 
     public ExternalDatabaseQueryTool(int maxRows, int timeoutSeconds) {
+        this(maxRows, timeoutSeconds, new UrlAccessPolicy());
+    }
+
+    public ExternalDatabaseQueryTool(int maxRows, int timeoutSeconds, UrlAccessPolicy urlAccessPolicy) {
         this.maxRows = Math.max(1, maxRows);
         this.timeoutSeconds = Math.max(1, timeoutSeconds);
+        this.urlAccessPolicy = urlAccessPolicy;
     }
 
     @Tool(description = "Connect to a user-provided PostgreSQL or MySQL database and run a single read-only SELECT query")
@@ -41,7 +47,15 @@ public class ExternalDatabaseQueryTool {
         if (syntaxError != null) {
             return "Error executing query: " + syntaxError;
         }
-        int effectivePort = port != null && port > 0 ? port : ("postgresql".equals(type) ? 5432 : 3306);
+        int effectivePort = port == null ? ("postgresql".equals(type) ? 5432 : 3306) : port;
+        if (effectivePort < 1 || effectivePort > 65535) {
+            return "Error executing query: database port is invalid";
+        }
+        try {
+            urlAccessPolicy.validateHttpUrl("http://" + host.trim() + ":" + effectivePort + "/");
+        } catch (IllegalArgumentException exception) {
+            return "Error executing query: database host must resolve to a public address";
+        }
         String statement = sql.trim();
         if (statement.endsWith(";")) {
             statement = statement.substring(0, statement.length() - 1);

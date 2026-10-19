@@ -143,10 +143,11 @@ public class ToolCallAgent extends ReActAgent {
             List<AssistantMessage.ToolCall> toolCallList = assistantMessage.getToolCalls();
             // 输出提示信息
             String result = assistantMessage.getText();
-            log.info(getName() + "的思考：" + result);
+            log.info("{} received model response, chars={}", getName(), result == null ? 0 : result.length());
             log.info(getName() + "选择了 " + toolCallList.size() + " 个工具来使用");
             String toolCallInfo = toolCallList.stream()
-                    .map(toolCall -> String.format("工具名称：%s，参数：%s", toolCall.name(), toolCall.arguments()))
+                    .map(toolCall -> String.format("工具名称：%s，参数字符数：%d", toolCall.name(),
+                            toolCall.arguments() == null ? 0 : toolCall.arguments().length()))
                     .collect(Collectors.joining("\n"));
             log.info(toolCallInfo);
             // 如果不需要调用工具，返回 false

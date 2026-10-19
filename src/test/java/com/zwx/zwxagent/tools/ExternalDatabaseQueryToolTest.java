@@ -20,6 +20,18 @@ class ExternalDatabaseQueryToolTest {
     }
 
     @Test
+    void privateDatabaseHostIsRejectedBeforeConnecting() {
+        String result = tool.queryExternalDatabase("postgresql", "127.0.0.1", 5432, "db", "u", "p", "SELECT 1");
+        Assertions.assertTrue(result.contains("public address"), result);
+    }
+
+    @Test
+    void invalidPortIsRejected() {
+        String result = tool.queryExternalDatabase("postgresql", "db.example.com", 70000, "db", "u", "p", "SELECT 1");
+        Assertions.assertTrue(result.contains("port is invalid"), result);
+    }
+
+    @Test
     void nonSelectIsRejected() {
         String result = tool.queryExternalDatabase("mysql", "10.0.0.8", 3306, "shop", "u", "p",
                 "UPDATE users SET name = 'x'");

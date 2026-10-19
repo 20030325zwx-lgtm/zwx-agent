@@ -46,7 +46,12 @@ public class LoveRagService {
 
     public LoveRagResult retrieve(String message, String model) {
         RetrievalOutcome outcome;
-        CompletableFuture<RetrievalOutcome> search = CompletableFuture.supplyAsync(() -> recallAndRerank(message), ragExecutor);
+        CompletableFuture<RetrievalOutcome> search;
+        try {
+            search = CompletableFuture.supplyAsync(() -> recallAndRerank(message), ragExecutor);
+        } catch (RuntimeException exception) {
+            return unavailable(message, model, "知识库检索队列已满，模型仅使用系统提示词与会话上下文回答。");
+        }
         try {
             outcome = search.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {

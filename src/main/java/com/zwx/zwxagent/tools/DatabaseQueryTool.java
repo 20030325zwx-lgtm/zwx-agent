@@ -109,7 +109,7 @@ public class DatabaseQueryTool {
         return null;
     }
 
-    static String validateSyntax(String sql) {
+    public static String validateSyntax(String sql) {
         if (sql == null || sql.isBlank()) {
             return "the SQL statement is empty";
         }

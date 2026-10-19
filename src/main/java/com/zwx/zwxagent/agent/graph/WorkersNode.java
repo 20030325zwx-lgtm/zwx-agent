@@ -17,8 +17,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 
@@ -38,7 +40,8 @@ public class WorkersNode implements NodeAction {
     private final Executor workerExecutor;
 
     /** 当前运行中尚未结束的子 agent，供客户端断开时联动停止。 */
-    private final List<ToolCallAgent> activeWorkers = new CopyOnWriteArrayList<>();
+    private final Map<String, List<ToolCallAgent>> activeWorkers = new ConcurrentHashMap<>();
+    private final Map<String, List<FutureTask<WorkerOutcome>>> activeTasks = new ConcurrentHashMap<>();
 
     /** 逐步采集工具调用的子 agent：每次 step 后把工具执行转成语义事件。 */
     private static class GraphWorker extends ToolCallAgent {
@@ -76,6 +79,8 @@ public class WorkersNode implements NodeAction {
                 .orElse(List.of());
         String feedback = state.value(GraphState.VERIFICATION_FEEDBACK, "");
         BooleanSupplier stopCheck = context == null ? () -> false : context.stopCheck();
+        String runKey = context == null || context.conversationId() == null
+                ? java.util.UUID.randomUUID().toString() : context.conversationId();
         ToolCallback[] tools = context == null ? new ToolCallback[0] : context.tools();
         if (context != null && stopCheck.getAsBoolean()) {
             return Map.of(GraphState.ACTIVITIES, List.of("收到停止信号，跳过剩余子任务"));
@@ -90,28 +95,61 @@ public class WorkersNode implements NodeAction {
                 .defaultAdvisors(new MyLoggerAdvisor())
                 .build();
         List<ActivityEvent> events = new ArrayList<>();
-        List<CompletableFuture<WorkerOutcome>> futures = new ArrayList<>();
+        List<FutureTask<WorkerOutcome>> futures = new ArrayList<>();
+        List<String> activities = new ArrayList<>();
+        List<String> results = new ArrayList<>();
         for (int index = 0; index < plan.size(); index++) {
+            if (stopCheck.getAsBoolean()) break;
             PlanStep step = plan.get(index);
             final int stepNumber = index + 1;
             events.add(ActivityEvent.of("work", step.role().displayName(),
                     "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title()));
-            futures.add(CompletableFuture.supplyAsync(() ->
-                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck, context), workerExecutor));
-        }
-        List<String> activities = new ArrayList<>();
-        List<String> results = new ArrayList<>();
-        for (CompletableFuture<WorkerOutcome> future : futures) {
+            FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
+                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck, context, runKey));
+            futures.add(task);
+            activeTasks.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(task);
             try {
-                WorkerOutcome outcome = future.join();
+                workerExecutor.execute(task);
+            } catch (java.util.concurrent.RejectedExecutionException exception) {
+                task.cancel(false);
+                futures.remove(task);
+                List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(runKey);
+                if (tasks != null) {
+                    tasks.remove(task);
+                    if (tasks.isEmpty()) activeTasks.remove(runKey, tasks);
+                }
+                activities.add("子任务未能启动：执行队列已满");
+                results.add("【" + step.title() + "】执行队列已满，未能启动");
+                events.add(ActivityEvent.of("work", "执行器", "执行队列已满，子任务未能启动"));
+            }
+        }
+        for (FutureTask<WorkerOutcome> future : futures) {
+            try {
+                WorkerOutcome outcome = future.get();
                 activities.addAll(outcome.activities());
                 results.add(outcome.summary());
                 events.addAll(outcome.events());
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                futures.forEach(task -> task.cancel(true));
+                break;
+            } catch (ExecutionException exception) {
+                Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+                log.warn("worker 执行失败：{}", cause.getMessage());
+                activities.add("子任务执行失败：" + cause.getMessage());
+                results.add("子任务失败：" + cause.getMessage());
+                events.add(ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(cause.getMessage(), 80)));
             } catch (Exception exception) {
                 log.warn("worker 执行失败：{}", exception.getMessage());
                 activities.add("子任务执行失败：" + exception.getMessage());
                 results.add("子任务失败：" + exception.getMessage());
                 events.add(ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(exception.getMessage(), 80)));
+            } finally {
+                List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(runKey);
+                if (tasks != null) {
+                    tasks.remove(future);
+                    if (tasks.isEmpty()) activeTasks.remove(runKey, tasks);
+                }
             }
         }
         return Map.of(GraphState.TASK_RESULTS, results,
@@ -121,7 +159,10 @@ public class WorkersNode implements NodeAction {
 
     private WorkerOutcome runWorker(PlanStep step, int stepNumber, ToolCallback[] allTools,
                                     String feedback, ChatClient sharedClient, BooleanSupplier stopCheck,
-                                    RunContext runContext) {
+                                    RunContext runContext, String runKey) {
+        if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+            return WorkerOutcome.stopped(step.title());
+        }
         WorkerRole role = step.role();
         ToolCallback[] roleTools = filterTools(allTools, role);
         GraphWorker worker = new GraphWorker(roleTools, role, step.title());
@@ -141,7 +182,10 @@ public class WorkersNode implements NodeAction {
                 : feedback + "\n开始执行你的子任务，需要时调用工具。");
         worker.setMaxSteps(WORKER_MAX_STEPS);
         worker.setChatClient(sharedClient);
-        activeWorkers.add(worker);
+        activeWorkers.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(worker);
+        if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+            worker.stopForClientDisconnect();
+        }
         try {
             String taskPrompt = "子任务标题：" + step.title() + "\n子任务要求：" + step.detail();
             log.info("启动 {}：{}", worker.getName(), step.title());
@@ -160,7 +204,11 @@ public class WorkersNode implements NodeAction {
                     "完成：" + compact(summary, MAX_EVENT_SUMMARY_CHARS)));
             return new WorkerOutcome(activities, events, "【" + step.title() + "】" + summary);
         } finally {
-            activeWorkers.remove(worker);
+            List<ToolCallAgent> workers = activeWorkers.get(runKey);
+            if (workers != null) {
+                workers.remove(worker);
+                if (workers.isEmpty()) activeWorkers.remove(runKey, workers);
+            }
         }
     }
 
@@ -188,8 +236,11 @@ public class WorkersNode implements NodeAction {
                 .toArray(ToolCallback[]::new);
     }
 
-    void stopAll() {
-        activeWorkers.forEach(ToolCallAgent::stopForClientDisconnect);
+    void stopAll(String conversationId) {
+        List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(conversationId);
+        if (tasks != null) tasks.forEach(task -> task.cancel(true));
+        List<ToolCallAgent> workers = activeWorkers.get(conversationId);
+        if (workers != null) workers.forEach(ToolCallAgent::stopForClientDisconnect);
     }
 
     private static String compact(String value) {
@@ -202,5 +253,10 @@ public class WorkersNode implements NodeAction {
     }
 
     private record WorkerOutcome(List<String> activities, List<ActivityEvent> events, String summary) {
+        private static WorkerOutcome stopped(String title) {
+            return new WorkerOutcome(List.of("子任务已取消：" + title),
+                    List.of(ActivityEvent.of("work", "执行器", "子任务已取消")),
+                    "【" + title + "】已取消");
+        }
     }
 }

@@ -15,7 +15,7 @@ import java.util.Set;
  * 工具调用安全护栏（拦截型）：beforeToolCalls 中央校验入口，
  * 按「工具名 → 参数策略」对计划调用做预检，越权参数抛 HookAbortException 短路本 step。
  * 工具内部校验（resolveWithin / UrlAccessPolicy / 本策略）保留为第二道防线，本 hook 是统一入口与审计点。
- * 未知工具放行（新工具不因缺少策略注册而被误伤，由工具内部校验兜底）。
+ * 未登记工具默认拒绝；配置 allowlist 只表示管理员显式允许该工具名，不替代工具自身的参数与资源授权。
  */
 @Slf4j
 @Component
@@ -23,16 +23,19 @@ public class ToolGuardHook implements AgentHook {
 
     private final boolean enabled;
     private final Set<String> terminalAllowlist;
+    private final Set<String> allowedUnregisteredTools;
     private final UrlAccessPolicy urlAccessPolicy;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ToolGuardHook(@Value("${app.agent.hook.tool-guard-enabled:true}") boolean enabled,
                          @Value("${app.tools.terminal-allowlist:}") String terminalAllowlist,
+                         @Value("${app.agent.hook.allowed-unregistered-tools:}") String allowedUnregisteredTools,
                          UrlAccessPolicy urlAccessPolicy) {
         this.enabled = enabled;
         this.terminalAllowlist = terminalAllowlist == null || terminalAllowlist.isBlank()
                 ? Set.of() : java.util.Arrays.stream(terminalAllowlist.split(","))
                         .map(String::trim).filter(value -> !value.isEmpty()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        this.allowedUnregisteredTools = parseNames(allowedUnregisteredTools);
         this.urlAccessPolicy = urlAccessPolicy;
     }
 
@@ -54,9 +57,9 @@ public class ToolGuardHook implements AgentHook {
         for (PlannedToolCall call : plannedCalls) {
             String reason = violationOf(call);
             if (reason != null) {
-                log.warn("[tool-guard] 拦截工具调用 agent={} conversation={} step={} tool={} args={} 原因={}",
+                log.warn("[tool-guard] 拦截工具调用 agent={} conversation={} step={} tool={} argsSummary={} 原因={}",
                         context.agentKey(), context.conversationId(), context.currentStep(),
-                        call.name(), call.arguments(), reason);
+                        call.name(), argumentSummary(call.arguments()), reason);
                 throw new HookAbortException("工具 " + call.name() + " 被安全策略拦截：" + reason);
             }
         }
@@ -66,7 +69,8 @@ public class ToolGuardHook implements AgentHook {
     private String violationOf(PlannedToolCall call) {
         Map<String, Object> args = parseArguments(call.arguments());
         if (args == null) {
-            return isGuardedTool(call.name()) ? "工具参数不是有效 JSON" : null;
+            if (isKnownTool(call.name())) return "工具参数不是有效 JSON";
+            return allowedUnregisteredTools.contains(call.name()) ? null : "工具未登记，默认拒绝";
         }
         return switch (call.name()) {
             case "executeTerminalCommand" -> ToolGuardPolicy.terminalViolation(text(args, "command"), terminalAllowlist);
@@ -75,16 +79,54 @@ public class ToolGuardHook implements AgentHook {
                     urlViolation(text(args, "url")),
                     ToolGuardPolicy.relativePathViolation(text(args, "fileName")));
             case "scrapeWebPage" -> urlViolation(text(args, "url"));
-            default -> null;
+            case "webSearch" -> null;
+            case "executeDatabaseQuery" -> com.zwx.zwxagent.tools.DatabaseQueryTool.validateSyntax(text(args, "sql"));
+            case "queryExternalDatabase" -> firstNonBlank(
+                    com.zwx.zwxagent.tools.DatabaseQueryTool.validateSyntax(text(args, "sql")),
+                    externalDatabaseTargetViolation(args));
+            default -> allowedUnregisteredTools.contains(call.name()) ? null : "工具未登记，默认拒绝";
         };
     }
 
-    private boolean isGuardedTool(String toolName) {
+    private String externalDatabaseTargetViolation(Map<String, Object> args) {
+        String type = text(args, "databaseType");
+        String host = text(args, "host");
+        if (!"postgresql".equalsIgnoreCase(type) && !"mysql".equalsIgnoreCase(type)) {
+            return "不支持的外部数据库类型";
+        }
+        String portText = text(args, "port");
+        int port;
+        try {
+            port = portText == null || portText.isBlank() ? ("mysql".equalsIgnoreCase(type) ? 3306 : 5432)
+                    : Integer.parseInt(portText);
+        } catch (NumberFormatException exception) {
+            return "数据库端口无效";
+        }
+        if (port < 1 || port > 65535) return "数据库端口无效";
+        return urlViolation("http://" + host + ":" + port + "/");
+    }
+
+    private boolean isKnownTool(String toolName) {
         return switch (toolName) {
             case "executeTerminalCommand", "readFile", "writeFile", "generatePDF",
-                    "downloadResource", "scrapeWebPage" -> true;
+                    "downloadResource", "scrapeWebPage", "webSearch", "executeDatabaseQuery",
+                    "queryExternalDatabase" -> true;
             default -> false;
         };
+    }
+
+    private Set<String> parseNames(String names) {
+        if (names == null || names.isBlank()) return Set.of();
+        return java.util.Arrays.stream(names.split(","))
+                .map(String::trim).filter(value -> !value.isEmpty())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    private String argumentSummary(String arguments) {
+        if (arguments == null) return "<null>";
+        Map<String, Object> parsed = parseArguments(arguments);
+        return parsed == null ? "<invalid-json, chars=" + arguments.length() + ">"
+                : "keys=" + parsed.keySet() + ", chars=" + arguments.length();
     }
 
     /** 复用 UrlAccessPolicy（SSRF 防护：仅公网 HTTP(S)），异常消息即拒绝原因。 */
@@ -97,7 +139,7 @@ public class ToolGuardHook implements AgentHook {
         }
     }
 
-    /** 参数 JSON 解析失败返回 null（放行）；参数缺失返回空 Map（按缺参拒绝）。 */
+    /** 参数 JSON 解析失败返回 null；受管工具和未登记工具均 fail-closed。 */
     private Map<String, Object> parseArguments(String arguments) {
         if (arguments == null || arguments.isBlank()) {
             return Map.of();

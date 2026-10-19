@@ -40,11 +40,14 @@ public class AggregatorNode implements NodeAction {
         List<String> results = state.value(GraphState.TASK_RESULTS)
                 .map(value -> (List<String>) value)
                 .orElse(List.of());
+        String verificationStatus = state.value(GraphState.VERIFICATION_STATUS, "unverified");
+        boolean verified = "pass".equals(verificationStatus);
         String finalAnswer;
         try {
             finalAnswer = chatClient.prompt()
                     .system(SYSTEM_PROMPT)
                     .user("用户请求：" + input
+                            + "\n\n验收状态：" + (verified ? "已通过" : "未完成或未通过；不得声称已验收通过")
                             + "\n\n各子任务结果（含工作记录与结论）：\n" + String.join("\n\n", results))
                     .call()
                     .content();
@@ -54,6 +57,9 @@ public class AggregatorNode implements NodeAction {
         } catch (Exception exception) {
             log.warn("aggregator 调用失败，回退为结果拼接：{}", exception.getMessage());
             finalAnswer = "本次任务的执行结果：\n\n" + String.join("\n\n", results);
+        }
+        if (!verified) {
+            finalAnswer = "[未验收] 本次结果未完成质量验收，请核对后再使用。\n\n" + finalAnswer;
         }
         return Map.of(GraphState.FINAL_ANSWER, finalAnswer);
     }

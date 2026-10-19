@@ -107,7 +107,7 @@ public class LoveApp {
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
+        log.info("AI response received, chars={}", content == null ? 0 : content.length());
         return content;
     }
 
@@ -341,7 +341,7 @@ public class LoveApp {
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
+        log.info("AI response received, chars={}", content == null ? 0 : content.length());
         return content;
     }
 
@@ -367,7 +367,7 @@ public class LoveApp {
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
+        log.info("AI response received, chars={}", content == null ? 0 : content.length());
         return content;
     }
 
@@ -394,7 +394,7 @@ public class LoveApp {
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
+        log.info("AI response received, chars={}", content == null ? 0 : content.length());
         return content;
     }
 }

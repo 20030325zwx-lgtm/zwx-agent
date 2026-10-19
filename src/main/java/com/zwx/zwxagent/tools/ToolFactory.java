@@ -88,7 +88,7 @@ public class ToolFactory {
                     dbQueryMaxRows, dbQueryTimeoutSeconds));
         }
         if (dbQueryExternalEnabled) {
-            tools.add(new ExternalDatabaseQueryTool(dbQueryMaxRows, dbQueryTimeoutSeconds));
+            tools.add(new ExternalDatabaseQueryTool(dbQueryMaxRows, dbQueryTimeoutSeconds, urlAccessPolicy));
         }
         return ToolCallbacks.from(tools.toArray());
     }

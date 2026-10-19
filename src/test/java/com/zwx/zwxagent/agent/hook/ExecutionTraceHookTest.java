@@ -42,6 +42,11 @@ class ExecutionTraceHookTest {
         verify(traceService, org.mockito.Mockito.times(4)).record(
                 eq("run-1"), eq("default"), eq("super"), eq("conv-1"), phase.capture(), anyString(), any());
         Assertions.assertEquals(List.of("agent_started", "step", "tool", "agent_finished"), phase.getAllValues());
+        ArgumentCaptor<Map<String, Object>> detail = ArgumentCaptor.forClass(Map.class);
+        verify(traceService, org.mockito.Mockito.times(4)).record(
+                eq("run-1"), eq("default"), eq("super"), eq("conv-1"), anyString(), anyString(), detail.capture());
+        Assertions.assertFalse(detail.getAllValues().toString().contains("搜索结果内容"));
+        Assertions.assertFalse(detail.getAllValues().toString().contains("\"{}\""));
     }
 
     @Test
@@ -76,8 +81,6 @@ class ExecutionTraceHookTest {
         hook.beforeRun(context);
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(traceService).record(anyString(), anyString(), anyString(), anyString(), anyString(), summary.capture(), any());
-        // "开始执行：" 前缀 + 截断到 120 字符 + "..." 后缀
-        Assertions.assertTrue(summary.getValue().length() <= "开始执行：".length() + ExecutionTraceHook.MAX_SUMMARY_CHARS + 3);
-        Assertions.assertTrue(summary.getValue().endsWith("..."));
+        Assertions.assertEquals("开始执行", summary.getValue());
     }
 }

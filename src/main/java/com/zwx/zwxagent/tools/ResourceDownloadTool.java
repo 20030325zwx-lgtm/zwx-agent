@@ -57,7 +57,7 @@ public class ResourceDownloadTool {
             if (status >= 300 && status < 400) {
                 String location = connection.getHeaderField("Location");
                 if (location == null) throw new IOException("Redirect without Location header");
-                return download(urlAccessPolicy.validateHttpUrl(location), target, redirectDepth + 1);
+                return download(urlAccessPolicy.validateHttpUrl(uri.resolve(location).toString()), target, redirectDepth + 1);
             }
             if (status < 200 || status >= 300) {
                 throw new IOException("HTTP status " + status);

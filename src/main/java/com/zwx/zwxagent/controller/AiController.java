@@ -266,6 +266,14 @@ public class AiController {
         return agentKnowledgeDocumentService.listDocuments(actor.tenantId(), agentKey);
     }
 
+    @GetMapping("/agent-knowledge/chunks/{chunkId}")
+    public com.zwx.zwxagent.rag.AgentKnowledgeChunkPreview getAgentKnowledgeChunk(
+            CurrentActor actor, @PathVariable String chunkId, @RequestParam String agentKey) {
+        return agentKnowledgeDocumentService.getChunk(actor.tenantId(), agentKey, chunkId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Knowledge chunk not found"));
+    }
+
     @GetMapping("/agent-knowledge/documents/{documentId}")
     public AgentKnowledgeDocumentDetail getAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
         actor.requireAdmin();
@@ -545,22 +553,25 @@ public class AiController {
             conversationLease.close();
             throw exception;
         }
+        Runnable cleanup = () -> {
+            activeMcpTools.close();
+            conversationLease.close();
+        };
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
                 conversationId, actor.tenantId(), message, historyContext, availableTools, knowledge.context(),
-                knowledge.trace() == null ? null : ragTraceJson, runId, null, null,
+                knowledge.trace() == null ? null : ragTraceJson, runId, null, null, cleanup,
                 result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result));
-        SseEmitter emitter;
+        ManusGraphOrchestrator.ManusRunHandle handle;
         try {
-            emitter = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
+            handle = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
         } catch (RuntimeException exception) {
             agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
             agentRunService.finish(runId, "FAILED", null, exception.getMessage(), null);
-            activeMcpTools.close();
-            conversationLease.close();
+            cleanup.run();
             throw exception;
         }
-        manageManusEmitter(emitter, conversationLease, activeMcpTools);
-        return emitter;
+        manageManusEmitter(handle.emitter(), handle.stream());
+        return handle.emitter();
     }
 
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}")
@@ -580,6 +591,27 @@ public class AiController {
                 "partialAnswerLength", checkpoint == null || checkpoint.partialAnswer() == null ? 0 : checkpoint.partialAnswer().length(),
                 "finalAnswerLength", checkpoint == null || checkpoint.finalAnswer() == null ? 0 : checkpoint.finalAnswer().length(),
                 "resumeCount", run.resumeCount());
+    }
+
+    @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/reconnect")
+    public SseEmitter reconnectManusRun(CurrentActor actor, @PathVariable String conversationId,
+                                        @PathVariable String runId,
+                                        @RequestParam(required = false) String lastEventId) {
+        agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        ManusGraphOrchestrator.ReconnectResult result = manusGraphOrchestrator.reconnect(runId, lastEventId);
+        if (result.emitter() == null) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    "history-gap".equals(result.error())
+                            ? "SSE history is no longer available; continue from the persisted checkpoint"
+                            : "This run is not live on this instance");
+        }
+        if (!result.completed()) {
+            manageManusEmitter(result.emitter(), result.stream());
+        }
+        return result.emitter();
     }
 
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/resume")
@@ -622,28 +654,31 @@ public class AiController {
         if (resumeCheckpoint == null) resumeCheckpoint = checkpoint;
         agentRunService.restart(runId);
         String ragTraceJson = run.ragTraceJson() == null ? "{}" : run.ragTraceJson();
+        Runnable cleanup = () -> {
+            activeMcpTools.close();
+            conversationLease.close();
+        };
         com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest runRequest =
                 new com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest(
                         conversationId, actor.tenantId(), run.input(),
                         run.historyContext() == null ? "" : run.historyContext(),
                         availableTools, run.knowledgeContext() == null ? "" : run.knowledgeContext(),
-                        run.ragTraceJson(), runId, resumeCheckpoint, resumeFrom,
+                        run.ragTraceJson(), runId, resumeCheckpoint, resumeFrom, cleanup,
                         result -> completeManusRun(actor, conversationId, run.userMessageId(), runId,
                                 ragTraceJson, run.assistantMessageId(), result));
-        SseEmitter emitter;
+        com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunHandle handle;
         try {
-            emitter = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
+            handle = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
         } catch (RuntimeException exception) {
             agentRunService.finish(runId, "FAILED", run.displayAnswer(), exception.getMessage(), run.assistantMessageId());
-            activeMcpTools.close();
-            conversationLease.close();
+            cleanup.run();
             throw exception;
         }
-        manageManusEmitter(emitter, conversationLease, activeMcpTools);
-        return emitter;
+        manageManusEmitter(handle.emitter(), handle.stream());
+        return handle.emitter();
     }
 
-    private void manageManusEmitter(SseEmitter emitter, AutoCloseable lease, McpTools mcpTools) {
+    private void manageManusEmitter(SseEmitter emitter, com.zwx.zwxagent.agent.graph.RunStream stream) {
         java.util.concurrent.ScheduledFuture<?>[] heartbeatHolder = new java.util.concurrent.ScheduledFuture<?>[1];
         heartbeatHolder[0] = HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
             try {
@@ -651,24 +686,22 @@ public class AiController {
             } catch (Exception exception) {
                 java.util.concurrent.ScheduledFuture<?> self = heartbeatHolder[0];
                 if (self != null) self.cancel(false);
+                stream.detach(emitter);
             }
         }, 15, 15, java.util.concurrent.TimeUnit.SECONDS);
         java.util.concurrent.ScheduledFuture<?> heartbeat = heartbeatHolder[0];
-        java.util.concurrent.atomic.AtomicBoolean cleanedUp = new java.util.concurrent.atomic.AtomicBoolean();
-        Runnable cleanup = () -> {
-            if (!cleanedUp.compareAndSet(false, true)) return;
+        emitter.onCompletion(() -> {
             heartbeat.cancel(false);
-            mcpTools.close();
-            try {
-                lease.close();
-            } catch (Exception exception) {
-                org.slf4j.LoggerFactory.getLogger(AiController.class)
-                        .warn("Failed to release conversation lease", exception);
-            }
-        };
-        emitter.onCompletion(cleanup);
-        emitter.onTimeout(cleanup);
-        emitter.onError(error -> cleanup.run());
+            if (!stream.completed()) stream.detach(emitter);
+        });
+        emitter.onTimeout(() -> {
+            heartbeat.cancel(false);
+            stream.detach(emitter);
+        });
+        emitter.onError(error -> {
+            heartbeat.cancel(false);
+            stream.detach(emitter);
+        });
     }
 
     private void completeManusRun(CurrentActor actor, String conversationId, long userMessageId, String runId,

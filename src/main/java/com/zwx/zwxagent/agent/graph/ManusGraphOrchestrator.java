@@ -15,6 +15,8 @@ import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.state.strategy.AppendStrategy;
 import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 import com.zwx.zwxagent.execution.AgentRunService;
+import com.zwx.zwxagent.execution.AgentToolCallLedgerService;
+import com.zwx.zwxagent.tools.IdempotentToolCallback;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
@@ -26,8 +28,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -47,10 +52,28 @@ public class ManusGraphOrchestrator {
     static final String NODE_RESUME_ROUTER = "resume_router";
 
     private static final long MAX_RUN_MILLIS = TimeUnit.MINUTES.toMillis(5);
+    private static final ScheduledExecutorService RECONNECT_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(task -> {
+                Thread thread = new Thread(task, "manus-sse-retention");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    private final ConcurrentHashMap<String, RunStream> runStreams = new ConcurrentHashMap<>();
+
+    @org.springframework.beans.factory.annotation.Value("${app.agent.sse-reconnect-grace-seconds:30}")
+    private long reconnectGraceSeconds = 30;
+
+    @org.springframework.beans.factory.annotation.Value("${app.agent.sse-history-max-events:5000}")
+    private int sseHistoryMaxEvents = 5000;
+
+    @org.springframework.beans.factory.annotation.Value("${app.agent.sse-replay-retention-seconds:120}")
+    private long replayRetentionSeconds = 120;
 
     private final ChatModel chatModel;
     private final Executor workerExecutor;
     private final AgentRunService agentRunService;
+    private final AgentToolCallLedgerService toolCallLedger;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private CompiledGraph compiledGraph;
@@ -61,17 +84,19 @@ public class ManusGraphOrchestrator {
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor) {
-        this(dashscopeChatModel, workerExecutor, null);
+        this(dashscopeChatModel, workerExecutor, null, null);
     }
 
     @Autowired
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor,
-                                  AgentRunService agentRunService) {
+                                  AgentRunService agentRunService,
+                                  AgentToolCallLedgerService toolCallLedger) {
         this.chatModel = dashscopeChatModel;
         this.workerExecutor = workerExecutor;
         this.agentRunService = agentRunService;
+        this.toolCallLedger = toolCallLedger;
     }
 
     @PostConstruct
@@ -193,6 +218,7 @@ public class ManusGraphOrchestrator {
                                   String runId,
                                   GraphCheckpoint resumeCheckpoint,
                                   String resumeFrom,
+                                  Runnable cleanup,
                                   Consumer<ManusRunResult> completionHandler) {
     }
 
@@ -200,50 +226,86 @@ public class ManusGraphOrchestrator {
                                  String status, String error) {
     }
 
+    public record ManusRunHandle(SseEmitter emitter, RunStream stream) {
+    }
+
+    public record ReconnectResult(SseEmitter emitter, RunStream stream, boolean completed, String error) {
+    }
+
     /**
      * 与旧 BaseAgent.runStream 对齐：activity 事件承载过程，默认消息承载最终回答，[DONE] 收尾。
      */
-    public SseEmitter runStream(ManusRunRequest request, Executor runExecutor) {
-        SseEmitter emitter = new SseEmitter(MAX_RUN_MILLIS + TimeUnit.SECONDS.toMillis(5));
-        AtomicBoolean stopped = new AtomicBoolean(false);
+    public ManusRunHandle runStream(ManusRunRequest request, Executor runExecutor) {
         GraphInstance runGraph;
         try {
             runGraph = buildGraph();
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to build agent graph", exception);
         }
+        String runId = request.runId() == null || request.runId().isBlank()
+                ? java.util.UUID.randomUUID().toString() : request.runId();
+        AtomicBoolean stopped = new AtomicBoolean(false);
+        RunStream[] holder = new RunStream[1];
         FutureTask<Void> runTask = new FutureTask<>(() -> {
-            execute(request, emitter, stopped, runGraph.graph());
+            try {
+                execute(request, holder[0], stopped, runGraph.graph());
+            } finally {
+                holder[0].cleanup();
+                scheduleStreamRemoval(runId, holder[0]);
+            }
             return null;
         });
-        Runnable stop = () -> {
-            stopped.set(true);
-            runTask.cancel(true);
-            runGraph.workers().stopAll(request.conversationId());
-        };
-        runExecutor.execute(runTask);
-        emitter.onTimeout(() -> {
-            stop.run();
-            log.warn("manus graph SSE connection timeout");
-        });
-        emitter.onError(error -> stop.run());
-        return emitter;
+        RunStream stream = new RunStream(runId, sseHistoryMaxEvents, reconnectGraceSeconds, RECONNECT_SCHEDULER,
+                () -> {
+                    stopped.set(true);
+                    runTask.cancel(true);
+                    runGraph.workers().stopAll(request.conversationId());
+                },
+                request.cleanup());
+        holder[0] = stream;
+        runStreams.put(runId, stream);
+        SseEmitter emitter = stream.createEmitter();
+        try {
+            runExecutor.execute(runTask);
+        } catch (RuntimeException exception) {
+            runStreams.remove(runId, stream);
+            stream.cleanup();
+            throw exception;
+        }
+        return new ManusRunHandle(emitter, stream);
     }
 
-    private void execute(ManusRunRequest request, SseEmitter emitter, AtomicBoolean stopped, CompiledGraph graph) {
+    /** 客户端重连：重放 lastEventId 之后的事件，并恢复后续实时推送。 */
+    public ReconnectResult reconnect(String runId, String lastEventId) {
+        RunStream stream = runStreams.get(runId);
+        if (stream == null) return new ReconnectResult(null, null, false, "not-live");
+        SseEmitter emitter = new SseEmitter(TimeUnit.MINUTES.toMillis(6));
+        if (!stream.attach(emitter, RunStream.parseSequence(lastEventId))) {
+            return new ReconnectResult(null, stream, false, "history-gap");
+        }
+        return new ReconnectResult(emitter, stream, stream.completed(), null);
+    }
+
+    private void scheduleStreamRemoval(String runId, RunStream stream) {
+        RECONNECT_SCHEDULER.schedule(() -> runStreams.remove(runId, stream),
+                Math.max(1, replayRetentionSeconds), TimeUnit.SECONDS);
+    }
+
+    private void execute(ManusRunRequest request, RunStream stream, AtomicBoolean stopped, CompiledGraph graph) {
         StringBuilder streamedAnswer = new StringBuilder();
         List<String> activities = new ArrayList<>();
         AtomicBoolean finalized = new AtomicBoolean(false);
         String finalAnswer = "";
         try {
             if (request.ragTraceJson() != null && !request.ragTraceJson().isBlank()) {
-                emitter.send(SseEmitter.event().name("rag-trace").data(request.ragTraceJson()));
+                stream.send("rag-trace", request.ragTraceJson());
             }
             if (request.runId() != null && !request.runId().isBlank()) {
-                emitter.send(SseEmitter.event().name("run").data(request.runId()));
+                stream.send("run", request.runId());
             }
             long[] lastPartialFlush = {0};
-            RunContext context = RunContext.of(request.tools(), request.knowledgeContext(), stopped::get,
+            ToolCallback[] tools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(), toolCallLedger);
+            RunContext context = RunContext.of(tools, request.knowledgeContext(), stopped::get,
                     request.tenantId(), request.conversationId(), chunk -> {
                         // 先保留已生成内容，再尝试推送；客户端断开后仍能把草稿落库。
                         streamedAnswer.append(chunk);
@@ -255,12 +317,7 @@ public class ManusGraphOrchestrator {
                             }
                         }
                         if (!stopped.get()) {
-                            try {
-                                emitter.send(chunk);
-                            } catch (java.io.IOException exception) {
-                                stopped.set(true);
-                                throw new IllegalStateException("Unable to stream answer chunk", exception);
-                            }
+                            stream.sendMessage(chunk);
                         }
                     });
             Map<String, Object> inputs = Map.of(
@@ -286,8 +343,7 @@ public class ManusGraphOrchestrator {
                         .map(value -> (List<ActivityEvent>) value)
                         .orElse(List.of());
                 while (sentEvents < events.size()) {
-                    emitter.send(SseEmitter.event().name("activity")
-                            .data(objectMapper.writeValueAsString(events.get(sentEvents++))));
+                    stream.send("activity", objectMapper.writeValueAsString(events.get(sentEvents++)));
                 }
                 // 内部留痕（附件提取依赖），不再直接推给前端
                 List<String> latest = state.value(GraphState.ACTIVITIES)
@@ -308,21 +364,15 @@ public class ManusGraphOrchestrator {
             String answer = completed ? finalAnswer : completedAnswer(finalAnswer, streamedAnswer, stopped.get());
             String status = completed ? "COMPLETED" : "INTERRUPTED";
             persist(request, answer, activities, completed, status, null, finalized);
-            sendDone(emitter, completed);
+            sendDone(stream, completed);
         } catch (Exception exception) {
             log.error("manus graph 执行失败", exception);
             String answer = completedAnswer(finalAnswer, streamedAnswer, stopped.get());
             String status = stopped.get() ? "INTERRUPTED" : "FAILED";
             persist(request, answer, activities, false, status, exception.getMessage(), finalized);
-            try {
-                emitter.send(SseEmitter.event().name("generation-error")
-                        .data(com.zwx.zwxagent.util.ErrorMessages.describe(exception)));
-                emitter.send("任务已中止：" + com.zwx.zwxagent.util.ErrorMessages.describe(exception));
-                emitter.send("[DONE]");
-                emitter.complete();
-            } catch (Exception sendError) {
-                emitter.completeWithError(sendError);
-            }
+            stream.send("generation-error", com.zwx.zwxagent.util.ErrorMessages.describe(exception));
+            stream.sendMessage("任务已中止：" + com.zwx.zwxagent.util.ErrorMessages.describe(exception));
+            stream.complete();
         }
     }
 
@@ -420,16 +470,11 @@ public class ManusGraphOrchestrator {
         }
     }
 
-    private void sendDone(SseEmitter emitter, boolean completed) {
-        try {
-            if (!completed) {
-                emitter.send(SseEmitter.event().name("interrupted").data("回答已中断，已保留部分内容"));
-            }
-            emitter.send("[DONE]");
-            emitter.complete();
-        } catch (Exception sendError) {
-            emitter.completeWithError(sendError);
+    private void sendDone(RunStream stream, boolean completed) {
+        if (!completed) {
+            stream.send("interrupted", "回答已中断，已保留部分内容");
         }
+        stream.complete();
     }
 
     /** 返回编译图的 Mermaid 表示（调试与文档用）。 */

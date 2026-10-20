@@ -7,7 +7,7 @@
       :open="sidebarOpen"
       @create="createConversation"
       @select="selectConversation"
-      @delete="removeConversation"
+      @delete="requestDelete"
       @close="sidebarOpen = false"
     />
 
@@ -37,6 +37,8 @@
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
     </main>
+    <ConfirmDialog :open="!!pendingDelete" title="删除会话" :message="deleteMessage" confirm-text="删除"
+      @confirm="confirmDelete" @cancel="pendingDelete = null" />
   </div>
 </template>
 
@@ -47,6 +49,7 @@ import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import {
   chatWithLoveApp,
   createLoveConversation,
@@ -75,6 +78,7 @@ const conversations = ref([])
 const historyLoading = ref(false)
 const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
+const pendingDelete = ref(null)
 let eventSource = null
 let activeTurnStart = -1
 let activeRetry = false
@@ -150,8 +154,17 @@ const selectConversation = async (conversation) => {
   }
 }
 
-const removeConversation = async (conversation) => {
-  if (!window.confirm(`删除“${conversation.title}”及其全部消息吗？`)) return
+const deleteMessage = computed(() => pendingDelete.value
+  ? `删除“${pendingDelete.value.title}”及其全部消息吗？删除后无法恢复。`
+  : '')
+const requestDelete = conversation => {
+  if (connectionStatus.value === 'connecting') return
+  pendingDelete.value = conversation
+}
+const confirmDelete = async () => {
+  const conversation = pendingDelete.value
+  pendingDelete.value = null
+  if (!conversation) return
   await deleteLoveConversation(conversation.id)
   const wasActive = chatId.value === conversation.id
   await refreshConversations()

@@ -266,6 +266,25 @@ public class AgentKnowledgeDocumentService {
         }
     }
 
+    /**
+     * 按持久化切片 ID 读取引用原文，用于回答下方“引用资料”预览。
+     * 只校验 tenant/agent 作用域，不要求管理员权限；引用来自当前用户可见的回答。
+     */
+    public java.util.Optional<AgentKnowledgeChunkPreview> getChunk(String tenantId, String agentKey, String chunkId) {
+        validateScope(tenantId, agentKey);
+        return jdbcTemplate.query("""
+                SELECT id::text AS chunk_id, content,
+                       metadata ->> 'documentId' AS document_id,
+                       metadata ->> 'filename' AS filename,
+                       NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index
+                FROM agent_knowledge_vector
+                WHERE id::text = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
+                """, (rs, rowNum) -> new AgentKnowledgeChunkPreview(
+                        rs.getString("chunk_id"), rs.getString("document_id"), rs.getString("filename"),
+                        rs.getObject("chunk_index", Integer.class), rs.getString("content")),
+                chunkId, tenantId, agentKey).stream().findFirst();
+    }
+
     public AgentKnowledgeDocument getDocumentRecordForScope(String tenantId, String agentKey, String documentId) {
         validateScope(tenantId, agentKey);
         return getDocumentRecord(tenantId, agentKey, documentId);

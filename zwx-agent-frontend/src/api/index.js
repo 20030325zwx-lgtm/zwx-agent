@@ -43,6 +43,7 @@ const parseSseStream = async (body, emit) => {
       rawEvent.split(/\r?\n/).forEach(line => {
         if (line.startsWith('data:')) event.data += (event.data ? '\n' : '') + line.slice(5).trimStart()
         if (line.startsWith('event:')) event.type = line.slice(6).trim()
+        if (line.startsWith('id:')) event.id = line.slice(3).trim()
       })
       if (event.data) emit(event)
     }
@@ -67,6 +68,7 @@ export const connectSSE = (url, params, onMessage, onError) => {
     onopen: null,
     readyState: 0,
     lastEventAt: Date.now(),
+    lastEventId: null,
     addEventListener: (type, handler) => {
       listeners[type] = listeners[type] || []
       listeners[type].push(handler)
@@ -106,6 +108,7 @@ export const connectSSE = (url, params, onMessage, onError) => {
       client.onopen?.()
       await parseSseStream(response.body, event => {
         client.lastEventAt = Date.now()
+        if (event.id) client.lastEventId = event.id
         ;(listeners[event.type] || []).forEach(handler => handler(event))
         if (event.type === 'message' && client.onmessage) client.onmessage(event)
         if (onMessage && event.type === 'message') onMessage(event.data)
@@ -165,6 +168,7 @@ export const uploadAgentKnowledgeDocument = (agentKey, file) => {
   formData.append('file', file)
   return request.post('/ai/agent-knowledge/documents', formData).then(response => response.data)
 }
+export const getAgentKnowledgeChunk = (chunkId, agentKey) => request.get(`/ai/agent-knowledge/chunks/${encodeURIComponent(chunkId)}`, { params: { agentKey } }).then(response => response.data)
 export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)
 export const getSkillCatalog = agentKey => request.get('/ai/skills/catalog', { params: { agentKey } }).then(response => response.data)
@@ -187,6 +191,9 @@ export const deleteTestAssistantReply = (conversationId, userMessageId) => reque
 // AI超级智能体聊天
 export const chatWithManus = (conversationId, message, knowledgeSearch = false, clientRequestId = null) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, clientRequestId })
 export const resumeManusRun = (conversationId, runId) => connectSSE(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/resume`, {})
+export const reconnectManusRun = (conversationId, runId, lastEventId = null) => connectSSE(
+  `/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/reconnect`,
+  { lastEventId })
 export const createManusConversation = () => request.post('/ai/manus/conversations').then(response => response.data)
 export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
@@ -210,6 +217,7 @@ export default {
   deleteLoveConversation,
   chatWithManus,
   resumeManusRun,
+  reconnectManusRun,
   createManusConversation,
   listManusConversations,
   getManusConversationMessages,

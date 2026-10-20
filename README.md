@@ -14,7 +14,12 @@ ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 应用项目�
 
 - 认证与多用户隔离：全部业务接口需要 JWT 登录（`POST /api/auth/register`、`POST /api/auth/login`）；会话、消息、图片与生成文件按用户强归属，管理接口需要 ADMIN 角色。
 - 多轮 AI 对话：默认使用阿里云 DashScope 的 `qwen-plus`。
-- **超级智能体（多智能体协作）**：基于 Spring AI Alibaba Graph 的图状态机——规划器拆解任务（≤4 个子任务）、按角色（调研员/撰写员/分析员/通用助理）并行执行、质检员验收（最多返工一轮）、交付器汇总；执行过程以结构化事件（阶段/角色/摘要）实时推送，MemorySaver checkpoint 按会话隔离，为断线恢复打底。
+- **超级智能体（多智能体协作）**：基于 Spring AI Alibaba Graph 的图状态机——规划器拆解任务（≤4 个子任务）、按角色（调研员/撰写员/分析员/通用助理）并行执行、质检员验收（最多返工一轮）、交付器汇总；执行过程以结构化事件（阶段/角色/摘要）实时推送。
+- **跨重启续跑**：每次超级智能体执行写入 `agent_run` 检查点（plan、任务结果、质检状态、部分回答）；服务崩溃或重启后，可从最近完成节点继续，而不是从 planner 重做。未完成的助手消息以 `INTERRUPTED` 保留，前端提供“继续生成”。
+- **SSE 断线重连**：事件带 `id`，连接断开后前端带 `Last-Event-ID` 重连，服务端补发缺失事件；客户端断开后保留宽限期继续执行，避免弱网导致任务白跑。
+- **工具调用幂等**：`agent_tool_call` 账本记录每次工具调用的参数哈希、状态和结果；恢复时复用成功结果，结果未知的副作用调用会被阻止重放。
+- **引用切片预览**：回答中的 `[文件名#切片号]` 会在消息下方生成“引用资料”卡片，点击可预览该切片的完整原文。
+- **应用内确认弹窗**：删除会话和 MCP 服务使用统一的应用内确认弹窗，支持 Esc 取消、Enter 确认和移动端布局。
 - **只读 SQL 工具**：智能体可查询本应用数据库（黑名单保护 `app_user` 等敏感表），或按用户提供的连接信息查询外部 PostgreSQL/MySQL 数据库；仅允许单条 SELECT，带表白名单、行数与超时限制（`app.tools.db-query-enabled`、`app.tools.db-query-external-enabled`，默认关闭）。
 - 情感分析大师：提供针对情感问题的对话引导、关系分析与建议。
 - 会话持久化：情感分析大师的会话和消息保存在 PostgreSQL；模型请求采用最近 20 条消息作为上下文窗口，并对历史长度做 token 预算截断；流中断时部分回答以 INTERRUPTED 状态落库，不丢轮次。
@@ -23,7 +28,7 @@ ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 应用项目�
 - 多租户私有知识库：管理端可为智能体上传 `.md`、`.txt` 等文档，同名文档幂等替换，支持删除；异步切片并写入 PGVector；检索始终限定为当前租户和智能体，且带超时降级与 degraded 标记。
 - 旅游规划专家：基于行程偏好、该智能体的私有资料和受限联网搜索工具生成方案；天气、交通、营业时间等实时信息优先检索，不配置额外地图或天气数据源。
 - 工具安全边界：LLM 工具运行在会话级沙箱目录内，路径穿越与内网地址（SSRF）被拦截；终端工具默认关闭，可用 `app.tools.terminal-enabled=true` 开启白名单版本。
-- 并发防护：会话级互斥（同一会话并发发送返回 409）；智能体执行、RAG 检索与图工作者使用专用线程池；客户端断开后服务端联动停止主图与全部子智能体。
+- 并发防护：会话级互斥（同一会话并发发送返回 409）；智能体执行、RAG 检索与图工作者使用专用线程池；客户端断开后进入可重连宽限期，超时仍无连接才停止主图与全部子智能体。
 - 扩展能力：MCP 动态注册（仅接受可解析的公网 HTTP(S) 地址）、Skill 提示词与工具授权、执行链路（run/event）持久化与前端可视化。
 
 ## 功能路线图
@@ -60,7 +65,28 @@ flowchart TD
 - **角色与工具白名单**：调研员（搜索/抓取/下载）、撰写员（读写文件/生成 PDF）、分析员（只读 SQL/白名单命令）、通用助理（全部工具含 MCP）；每个子智能体只能看到自己角色需要的工具。
 - **受控返工**：质检员对照用户请求验收，不合格携带反馈回流 workers，最多返工一轮，`maxIterations=16` 兜底防死循环。
 - **执行过程可视化**：后端推送结构化事件 `{"phase":"work","agent":"分析员","summary":"查询数据库 → 5"}`，前端按"角色 · 摘要"渲染；生成的文件自动提取为可预览附件。
-- **安全与停止**：子智能体复用沙箱与白名单；客户端断开时联动停止主图与全部子智能体；checkpoint（MemorySaver）按 `threadId=会话ID` 隔离。
+- **安全与停止**：子智能体复用沙箱与白名单；客户端断开后进入 SSE 重连宽限期，超时仍无连接才停止主图与全部子智能体；运行检查点持久化到 PostgreSQL `agent_run`，支持跨重启续跑。
+
+## 超级智能体执行恢复与接口
+
+```text
+GET /api/ai/manus/chat?conversationId=...&message=...
+GET /api/ai/manus/conversations/{conversationId}/runs/{runId}
+GET /api/ai/manus/conversations/{conversationId}/runs/{runId}/reconnect?lastEventId=...
+GET /api/ai/manus/conversations/{conversationId}/runs/{runId}/resume
+```
+
+- `runs/{runId}` 返回 run 状态、最近完成节点、下一节点、检查点规模和续跑次数。
+- `reconnect` 仅适用于仍在当前实例执行的 run；通过 `Last-Event-ID` 补发缺失事件。
+- `resume` 用于进程重启或宽限期结束后的检查点续跑。
+- 迁移 V11 增加 `agent_run`，V12 增加实例心跳与租约归属，V13 增加工具调用幂等账本。
+
+相关设计：
+- [跨重启续跑](./design/2026-10-20-super-agent-run-resume.md)
+- [SSE 断线重连](./design/2026-10-20-sse-reconnect-replay.md)
+- [工具调用幂等](./design/2026-10-20-tool-call-idempotency.md)
+- [回答引用切片预览](./design/2026-10-20-answer-citation-preview.md)
+- [会话删除应用内确认](./design/2026-10-20-in-app-confirm-dialog.md)
 
 ## 情感分析大师功能架构
 
@@ -221,6 +247,7 @@ GET  /api/ai/love_app/knowledge/index/jobs/{jobId}
 POST /api/ai/agent-knowledge/documents   # multipart: agentKey=love|travel, file
 GET  /api/ai/agent-knowledge/documents?agentKey=love|travel
 GET  /api/ai/travel-planner/chat/sse?conversationId=...&message=...
+GET  /api/ai/agent-knowledge/chunks/{chunkId}?agentKey=super   # 回答引用切片预览
 ```
 
 租户身份从 JWT 派生，旧版 `X-Tenant-Id` 请求头与 `tenantId` 查询参数已废弃。

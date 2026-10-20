@@ -1,6 +1,6 @@
 <template>
   <div class="travel-layout">
-    <ConversationSidebar title="旅游规划专家" mark="⌖" theme="travel" :conversations="conversations" :active-id="chatId" :loading="historyLoading" :open="sidebarOpen" @create="createConversation" @select="selectConversation" @delete="removeConversation" @close="sidebarOpen = false" />
+    <ConversationSidebar title="旅游规划专家" mark="⌖" theme="travel" :conversations="conversations" :active-id="chatId" :loading="historyLoading" :open="sidebarOpen" @create="createConversation" @select="selectConversation" @delete="requestDelete" @close="sidebarOpen = false" />
     <main class="travel-main">
       <header class="travel-header">
         <div class="header-start"><button class="history-toggle" type="button" aria-label="打开历史会话" @click="sidebarOpen = true">☰</button><button class="back-button" type="button" @click="router.push('/')">智能体目录</button></div>
@@ -24,6 +24,8 @@
         </li>
       </ol>
     </aside>
+    <ConfirmDialog :open="!!pendingDelete" title="删除会话" :message="deleteMessage" confirm-text="删除"
+      @confirm="confirmDelete" @cancel="pendingDelete = null" />
   </div>
 </template>
 
@@ -34,6 +36,7 @@ import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { chatWithTravelPlanner, createTravelConversation, deleteTravelAssistantReply, deleteTravelConversation, getTravelConversationMessages, getTravelExecutionEvents, listTravelConversations, uploadAgentKnowledgeDocument } from '../api'
 
 useHead({ title: '旅游规划专家 - ZWX Agent' })
@@ -45,6 +48,7 @@ const connectionStatus = ref('disconnected')
 const historyLoading = ref(false)
 const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
+const pendingDelete = ref(null)
 const executionPanel = ref({ open: false, loading: false, error: '', events: [] })
 let eventSource = null
 let activeTurnStart = -1
@@ -72,8 +76,17 @@ const selectConversation = async conversation => {
     messages.value = history.map(message => ({ id: message.id, content: message.content, isUser: message.role === 'USER', time: new Date(message.createdAt).getTime(), activities: message.executionRunId ? [{ label: '查看执行过程', runId: message.executionRunId }] : [], ragTrace: parseRagTrace(message.ragRetrievalTrace) }))
   } finally { messagesLoading.value = false }
 }
-const removeConversation = async conversation => {
-  if (!window.confirm(`删除“${conversation.title}”及其全部消息吗？`)) return
+const deleteMessage = computed(() => pendingDelete.value
+  ? `删除“${pendingDelete.value.title}”及其全部消息吗？删除后无法恢复。`
+  : '')
+const requestDelete = conversation => {
+  if (connectionStatus.value === 'connecting') return
+  pendingDelete.value = conversation
+}
+const confirmDelete = async () => {
+  const conversation = pendingDelete.value
+  pendingDelete.value = null
+  if (!conversation) return
   await deleteTravelConversation(conversation.id)
   const wasActive = chatId.value === conversation.id
   await refreshConversations()

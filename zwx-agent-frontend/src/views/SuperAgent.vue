@@ -1,6 +1,6 @@
 <template>
   <div class="super-layout">
-    <ConversationSidebar title="超级智能体" mark="✦" theme="travel" :conversations="conversations" :active-id="chatId" :loading="historyLoading" :open="sidebarOpen" @create="createConversation" @select="selectConversation" @delete="removeConversation" @close="sidebarOpen = false" />
+    <ConversationSidebar title="超级智能体" mark="✦" theme="travel" :conversations="conversations" :active-id="chatId" :loading="historyLoading" :open="sidebarOpen" @create="createConversation" @select="selectConversation" @delete="requestDelete" @close="sidebarOpen = false" />
     <main class="super-main">
       <header class="super-header">
         <div class="header-start">
@@ -25,6 +25,14 @@
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
     </main>
+    <ConfirmDialog
+      :open="!!pendingDelete"
+      title="删除会话"
+      :message="deleteMessage"
+      confirm-text="删除"
+      @confirm="confirmDelete"
+      @cancel="pendingDelete = null"
+    />
   </div>
 </template>
 
@@ -34,7 +42,8 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
-import { chatWithManus, resumeManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, listManusConversations } from '../api'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { chatWithManus, resumeManusRun, reconnectManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, listManusConversations } from '../api'
 
 useHead({ title: '超级智能体 - ZWX Agent', meta: [{ name: 'description', content: 'ZWX Agent 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -45,8 +54,10 @@ const connectionStatus = ref('disconnected')
 const historyLoading = ref(false)
 const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
+const pendingDelete = ref(null)
 let eventSource = null
 let activeTurnStart = -1
+let reconnectAttempts = 0
 const statusText = computed(() => connectionStatus.value === 'connecting' ? '正在执行' : connectionStatus.value === 'error' ? '连接异常' : '就绪')
 const addMessage = (content, isUser) => messages.value.push({ content, isUser, time: Date.now() })
 const toolLabels = { searchWeb: '搜索网页', generatePDF: '生成 PDF', writeFile: '写入文件', readFile: '读取文件', downloadResource: '下载资源' }
@@ -117,8 +128,17 @@ const selectConversation = async conversation => {
     hydrateFileUrls(conversation.id)
   }
 }
-const removeConversation = async conversation => {
-  if (!window.confirm(`删除“${conversation.title}”及其全部消息吗？`)) return
+const deleteMessage = computed(() => pendingDelete.value
+  ? `删除“${pendingDelete.value.title}”及其全部消息吗？删除后无法恢复。`
+  : '')
+const requestDelete = conversation => {
+  if (connectionStatus.value === 'connecting') return
+  pendingDelete.value = conversation
+}
+const confirmDelete = async () => {
+  const conversation = pendingDelete.value
+  pendingDelete.value = null
+  if (!conversation) return
   await deleteManusConversation(conversation.id)
   const wasActive = chatId.value === conversation.id
   await refreshConversations()
@@ -135,34 +155,62 @@ const sendMessage = payload => {
   const answerIndex = messages.value.length - 1
   const requestId = crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`
   connectionStatus.value = 'connecting'
+  reconnectAttempts = 0
   eventSource = chatWithManus(chatId.value, message, knowledgeSearch, requestId)
-  eventSource.addEventListener('rag-trace', event => {
+  attachManusStream(eventSource, answerIndex)
+}
+const attachManusStream = (stream, answerIndex) => {
+  stream.onopen = () => { reconnectAttempts = 0 }
+  stream.addEventListener('run', event => {
+    const answer = messages.value[answerIndex]
+    if (answer) answer.runId = event.data
+  })
+  stream.addEventListener('rag-trace', event => {
     try { messages.value[answerIndex].ragTrace = JSON.parse(event.data) }
     catch (error) { console.error('RAG retrieval trace unavailable:', error) }
   })
-  eventSource.addEventListener('activity', event => {
+  stream.addEventListener('activity', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return
     answer.activities.push(parseActivity(event.data || ''))
   })
-  eventSource.onmessage = event => {
+  stream.addEventListener('interrupted', () => {
+    const answer = messages.value[answerIndex]
+    if (answer) answer.status = 'INTERRUPTED'
+  })
+  stream.onmessage = event => {
     if (event.data === '[DONE]') { finishStream(); return }
     if (event.data && messages.value[answerIndex]) messages.value[answerIndex].content += event.data
   }
-  eventSource.onerror = () => {
-    eventSource?.close()
-    eventSource = null
-    const answer = messages.value[answerIndex]
-    if (answer && !answer.content) answer.content = '连接异常，暂时无法完成请求，请稍后重试。'
-    activeTurnStart = -1
-    connectionStatus.value = 'error'
+  stream.onerror = () => handleManusStreamError(answerIndex)
+}
+const handleManusStreamError = answerIndex => {
+  const answer = messages.value[answerIndex]
+  const lastEventId = eventSource?.lastEventId || null
+  eventSource?.close()
+  eventSource = null
+  if (answer?.runId && reconnectAttempts < 3) {
+    reconnectAttempts += 1
+    connectionStatus.value = 'connecting'
+    const delay = 400 * reconnectAttempts
+    setTimeout(() => {
+      if (!chatId.value || !messages.value[answerIndex]) return
+      eventSource = reconnectManusRun(chatId.value, answer.runId, lastEventId)
+      attachManusStream(eventSource, answerIndex)
+    }, delay)
+    return
   }
+  activeTurnStart = -1
+  connectionStatus.value = 'error'
+  if (answer && !answer.content) answer.content = '连接异常，正在恢复历史消息...'
+  setTimeout(() => { finishStream().catch(error => console.error(error)) }, 1500)
 }
 const finishStream = async () => {
   connectionStatus.value = 'disconnected'
   eventSource?.close()
   eventSource = null
   activeTurnStart = -1
+  reconnectAttempts = 0
   await refreshConversations()
   const history = await getManusConversationMessages(chatId.value)
   messages.value = history.map(mapMessage)
@@ -173,6 +221,7 @@ const cancelActiveStream = () => {
   eventSource = null
   if (activeTurnStart >= 0) messages.value.splice(activeTurnStart)
   activeTurnStart = -1
+  reconnectAttempts = 0
   connectionStatus.value = 'disconnected'
 }
 const continueMessage = ({ message, index }) => {
@@ -189,27 +238,14 @@ const continueMessage = ({ message, index }) => {
   answer.status = null
   answer.ragTrace = null
   connectionStatus.value = 'connecting'
+  reconnectAttempts = 0
   eventSource = resumeManusRun(chatId.value, message.runId)
-  eventSource.addEventListener('rag-trace', event => {
-    try { answer.ragTrace = JSON.parse(event.data) }
-    catch (error) { console.error('RAG retrieval trace unavailable:', error) }
-  })
-  eventSource.addEventListener('activity', event => {
-    answer.activities.push(parseActivity(event.data || ''))
-  })
-  eventSource.addEventListener('interrupted', () => {
-    answer.status = 'INTERRUPTED'
-  })
-  eventSource.onmessage = event => {
-    if (event.data === '[DONE]') { finishStream(); return }
-    if (event.data) answer.content += event.data
-  }
-  eventSource.onerror = () => {
-    eventSource?.close()
-    eventSource = null
+  const answerIndex = messages.value.indexOf(answer)
+  const originalError = eventSource.onerror
+  attachManusStream(eventSource, answerIndex >= 0 ? answerIndex : index)
+  eventSource.onerror = error => {
     if (!answer.content) answer.content = previousContent
-    connectionStatus.value = 'error'
-    setTimeout(() => { finishStream().catch(error => console.error(error)) }, 1500)
+    if (originalError) originalError(error)
   }
 }
 const resendMessage = ({ content }) => sendMessage(content)

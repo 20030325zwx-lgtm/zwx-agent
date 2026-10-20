@@ -25,22 +25,25 @@
           <div class="server-actions">
             <button type="button" :disabled="testing === server.id" @click="testServer(server)" title="测试连接"><PlugZap :size="16" /></button>
             <button type="button" @click="startEdit(server)" title="编辑服务"><Pencil :size="16" /></button>
-            <button class="danger" type="button" @click="remove(server)" title="删除服务"><Trash2 :size="16" /></button>
+            <button class="danger" type="button" @click="requestDelete(server)" title="删除服务"><Trash2 :size="16" /></button>
           </div>
         </article>
       </section>
     </section>
+    <ConfirmDialog :open="!!pendingDelete" title="删除 MCP 服务" :message="deleteMessage" confirm-text="删除"
+      @confirm="confirmDelete" @cancel="pendingDelete = null" />
   </main>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlertCircle, ArrowLeft, Pencil, PlugZap, Plus, Server, Trash2, X } from 'lucide-vue-next'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { createMcpServer, deleteMcpServer, listMcpServers, testMcpServer, updateMcpServer } from '../api'
 
 const router = useRouter()
-const servers = ref([]); const loading = ref(true); const saving = ref(false); const testing = ref(null); const editing = ref(null); const formError = ref(''); const testResults = ref({})
+const servers = ref([]); const loading = ref(true); const saving = ref(false); const testing = ref(null); const editing = ref(null); const formError = ref(''); const testResults = ref({}); const pendingDelete = ref(null)
 const load = async () => { loading.value = true; try { servers.value = await listMcpServers() } finally { loading.value = false } }
 const startCreate = () => { formError.value = ''; editing.value = { name: '', endpoint: '', enabled: true } }
 const startEdit = server => { formError.value = ''; editing.value = { ...server } }
@@ -51,7 +54,18 @@ const save = async () => {
   finally { saving.value = false }
 }
 const testServer = async server => { testing.value = server.id; try { testResults.value[server.id] = await testMcpServer(server.id) } catch { testResults.value[server.id] = { connected: false, message: '测试请求失败', tools: [] } } finally { testing.value = null } }
-const remove = async server => { if (!window.confirm(`删除 MCP 服务“${server.name}”吗？`)) return; await deleteMcpServer(server.id); delete testResults.value[server.id]; await load() }
+const deleteMessage = computed(() => pendingDelete.value
+  ? `删除 MCP 服务“${pendingDelete.value.name}”吗？删除后超级智能体将无法再调用其工具。`
+  : '')
+const requestDelete = server => { pendingDelete.value = server }
+const confirmDelete = async () => {
+  const server = pendingDelete.value
+  pendingDelete.value = null
+  if (!server) return
+  await deleteMcpServer(server.id)
+  delete testResults.value[server.id]
+  await load()
+}
 onMounted(load)
 </script>
 

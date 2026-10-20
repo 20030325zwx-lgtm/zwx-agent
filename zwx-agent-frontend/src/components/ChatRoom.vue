@@ -39,6 +39,14 @@
               <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ msg.thinking || '正在思考...' }}
             </div>
           </div>
+          <div v-if="!msg.isUser && citedChunks(msg).length" class="citation-preview" aria-label="引用资料">
+            <div class="citation-heading"><BookOpen :size="15" /><span>引用资料</span><small>{{ citedChunks(msg).length }} 个切片</small></div>
+            <button v-for="citation in citedChunks(msg)" :key="citation.key" type="button" class="citation-card" @click="openCitation(citation)">
+              <span class="citation-file">{{ citation.filename }}<em>#{{ citation.chunkIndex }}</em></span>
+              <span class="citation-excerpt">{{ citation.excerpt || (citation.chunkId ? '点击预览切片原文' : '未找到可预览的切片') }}</span>
+              <ChevronRight :size="15" />
+            </button>
+          </div>
           <details v-if="msg.collapsibleActivities && msg.activities?.length" class="activity-trace activity-trace-collapsible" aria-label="AI 执行过程">
             <summary>{{ activitySummary(msg.activities) }}</summary>
             <div class="activity-details">
@@ -141,17 +149,35 @@
         </div>
       </div>
     </footer>
+
+    <Teleport to="body">
+      <div v-if="citationPreview" class="citation-modal-backdrop" @click.self="closeCitation">
+        <section class="citation-modal" role="dialog" aria-modal="true" aria-label="引用切片预览">
+          <header>
+            <div>
+              <span class="citation-kicker">引用切片</span>
+              <strong>{{ citationPreview.filename }}<em>#{{ citationPreview.chunkIndex }}</em></strong>
+            </div>
+            <button type="button" aria-label="关闭引用预览" @click="closeCitation"><X :size="18" /></button>
+          </header>
+          <p v-if="citationLoading" class="citation-state">正在加载切片原文...</p>
+          <p v-else-if="citationError" class="citation-state error">{{ citationError }}</p>
+          <pre v-else class="citation-content">{{ citationPreview.content }}</pre>
+          <footer><span>文档 {{ citationPreview.documentId || '未记录' }}</span><span>切片 #{{ citationPreview.chunkIndex }}</span></footer>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted, nextTick, watch } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
-import { Database, FileText, Globe2, Paperclip } from 'lucide-vue-next'
+import { BookOpen, ChevronRight, Database, FileText, Globe2, Paperclip, X } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
-import { judgeRagCandidate as saveRagJudgment } from '../api'
+import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment } from '../api'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -199,6 +225,72 @@ const hydrateRagJudgments = trace => {
   trace.candidates?.forEach(candidate => { candidate.judgment = trace.judgments[candidate.documentId] || null })
   return trace
 }
+
+const citationPreview = ref(null)
+const citationLoading = ref(false)
+const citationError = ref('')
+const citationCache = new Map()
+const citationPattern = /\[([^\[\]\n]+?)#(\d+)\]/g
+
+const citedChunks = message => {
+  if (!message?.content || !message.ragTrace?.candidates?.length) return []
+  const seen = new Set()
+  const result = []
+  citationPattern.lastIndex = 0
+  let match
+  while ((match = citationPattern.exec(message.content))) {
+    const filename = match[1].trim()
+    const chunkIndex = Number(match[2])
+    const key = `${filename}#${chunkIndex}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const matches = message.ragTrace.candidates.filter(candidate =>
+      Number(candidate.chunkIndex) === chunkIndex
+      && (candidate.filename === filename || String(candidate.filename || '').endsWith(filename)))
+    const candidate = matches.find(item => item.selected) || matches[0]
+    result.push({
+      key,
+      filename: candidate?.filename || filename,
+      chunkIndex,
+      chunkId: candidate?.documentId || null,
+      excerpt: candidate?.excerpt || ''
+    })
+  }
+  return result
+}
+const openCitation = async citation => {
+  citationError.value = ''
+  citationLoading.value = false
+  if (!citation.chunkId) {
+    citationPreview.value = { ...citation, content: '', documentId: null }
+    citationError.value = '本次回答没有保存对应切片，无法预览原文。'
+    return
+  }
+  if (citationCache.has(citation.chunkId)) {
+    citationPreview.value = citationCache.get(citation.chunkId)
+    return
+  }
+  citationPreview.value = { ...citation, content: '', documentId: null }
+  citationLoading.value = true
+  try {
+    const chunk = await getAgentKnowledgeChunk(citation.chunkId, props.aiType)
+    const preview = { ...citation, ...chunk }
+    citationCache.set(citation.chunkId, preview)
+    citationPreview.value = preview
+  } catch (error) {
+    citationError.value = error?.response?.status === 404
+      ? '切片已被删除或重建，无法预览原文。'
+      : '切片加载失败，请稍后重试。'
+  } finally {
+    citationLoading.value = false
+  }
+}
+const closeCitation = () => {
+  citationPreview.value = null
+  citationError.value = ''
+  citationLoading.value = false
+}
+const handleCitationKeydown = event => { if (event.key === 'Escape') closeCitation() }
 
 const renderMarkdown = content => DOMPurify.sanitize(marked.parse(content || '', {
   breaks: true,
@@ -252,7 +344,11 @@ const scrollToBottom = async () => { await nextTick(); if (messagesContainer.val
 watch(() => props.messages.length, scrollToBottom)
 watch(() => props.messages.map(message => message.content).join(''), scrollToBottom)
 watch(() => props.messages.map(message => (message.activities || []).join('|')).join(''), scrollToBottom)
-onMounted(scrollToBottom)
+onMounted(() => {
+  scrollToBottom()
+  window.addEventListener('keydown', handleCitationKeydown)
+})
+onBeforeUnmount(() => window.removeEventListener('keydown', handleCitationKeydown))
 </script>
 
 <style scoped>
@@ -592,6 +688,65 @@ onMounted(scrollToBottom)
 
 .reference-card summary { cursor: pointer; padding: 5px 8px; color: var(--sk-label-2); }
 .reference-card p { margin: 0; border-top: 1px solid var(--sk-separator); padding: 7px 9px; color: var(--sk-label-2); line-height: 1.55; white-space: pre-wrap; }
+
+.citation-preview { display: grid; gap: 8px; max-width: 760px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--sk-separator); }
+.citation-heading { display: flex; align-items: center; gap: 7px; color: var(--sk-label-2); font-size: 12px; }
+.citation-heading small { color: var(--sk-label-3); }
+.citation-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  gap: 2px 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--sk-separator);
+  border-radius: 12px;
+  background: var(--sk-surface);
+  color: var(--sk-label-2);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease;
+}
+.citation-card:hover { border-color: var(--zwx-primary); background: var(--zwx-primary-soft); }
+.citation-file { display: flex; align-items: center; gap: 5px; color: var(--zwx-primary); font-size: 12.5px; font-weight: 650; }
+.citation-file em { font-style: normal; color: var(--sk-label-3); font-weight: 500; }
+.citation-excerpt { grid-column: 1; overflow: hidden; color: var(--sk-label-3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.citation-card > svg { grid-column: 2; grid-row: 1 / span 2; color: var(--sk-label-3); }
+
+.citation-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 24, 40, 0.38);
+  backdrop-filter: blur(8px);
+}
+.citation-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(820px, 100%);
+  max-height: min(78vh, 760px);
+  overflow: hidden;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
+}
+.citation-modal header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid var(--sk-separator); }
+.citation-kicker { display: block; margin-bottom: 4px; color: var(--sk-label-3); font-size: 11px; letter-spacing: .08em; }
+.citation-modal header strong { color: var(--sk-label); font-size: 15px; }
+.citation-modal header strong em { margin-left: 4px; color: var(--zwx-primary); font-style: normal; }
+.citation-modal header button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: var(--sk-fill); color: var(--sk-label-2); cursor: pointer; }
+.citation-content { flex: 1; overflow: auto; margin: 0; padding: 18px 20px; background: #fbfcfe; color: var(--sk-label-2); font: 13px/1.75 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.citation-state { margin: 0; padding: 44px 20px; color: var(--sk-label-3); text-align: center; }
+.citation-state.error { color: #d9382c; }
+.citation-modal footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--sk-separator); color: var(--sk-label-3); font-size: 11px; }
+@media (max-width: 720px) {
+  .citation-excerpt { white-space: normal; }
+  .citation-modal-backdrop { padding: 12px; }
+  .citation-modal { max-height: 86vh; }
+}
 
 .trace-entry { position: relative; display: inline-flex; margin-top: 10px; }
 .rag-inspector { margin-top: 12px; border-top: 1px solid var(--sk-separator); color: var(--sk-label-2); font-size: 12px; }

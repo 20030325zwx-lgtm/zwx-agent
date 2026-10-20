@@ -15,7 +15,7 @@
       <header class="love-header">
         <div class="header-start">
           <button class="history-toggle" type="button" aria-label="打开历史会话" @click="sidebarOpen = true">☰</button>
-          <button class="back-button" type="button" @click="goBack">返回首页</button>
+          <HomeButton />
         </div>
         <h1>情感分析大师</h1>
         <AgentSettingsMenu agent-key="love" default-theme="rose" />
@@ -33,6 +33,7 @@
           @edit-message="cancelActiveStream"
           @resend-message="resendMessage"
           @continue-message="({ message, index }) => continueMessage(message, index)"
+          @stop-generation="stopGeneration"
         />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
@@ -44,10 +45,10 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
+import HomeButton from '../components/HomeButton.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import {
@@ -70,7 +71,6 @@ useHead({
   ]
 })
 
-const router = useRouter()
 const messages = ref([])
 const chatId = ref('')
 const connectionStatus = ref('disconnected')
@@ -368,7 +368,10 @@ const resendMessage = async ({ content, id, index, imageKeys }) => {
   }
 }
 
-const goBack = () => router.push('/')
+const stopGeneration = () => {
+  cancelActiveStream()
+  setTimeout(() => { restoreFromServer().catch(error => console.error('Unable to reload stopped answer:', error)) }, 800)
+}
 
 onMounted(async () => {
   await refreshConversations()
@@ -402,7 +405,7 @@ onBeforeUnmount(cancelActiveStream)
 }
 
 .love-header h1 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
-.header-start { display: flex; width: 190px; align-items: center; gap: 12px; }
+.header-start { display: flex; width: auto; min-width: 0; align-items: center; gap: 10px; }
 
 .back-button, .history-toggle { border: 0; background: transparent; color: var(--zwx-primary); font-size: 13px; }
 

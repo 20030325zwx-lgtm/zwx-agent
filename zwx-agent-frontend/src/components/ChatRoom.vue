@@ -144,8 +144,11 @@
           <button v-if="attachmentsEnabled" class="tool-button" type="button" title="上传图片" aria-label="上传图片" @click="fileInput?.click()"><Paperclip :size="18" /></button>
           <button v-if="webSearchAvailable" class="tool-button web-search-toggle" :class="{ active: webSearch }" type="button" :aria-pressed="webSearch" :title="webSearch ? '本轮允许联网搜索' : '本轮不联网搜索'" aria-label="联网搜索" @click="webSearch = !webSearch"><Globe2 :size="18" /></button>
           <button v-if="knowledgeSearchAvailable" class="tool-button knowledge-search-toggle" :class="{ active: knowledgeSearch }" type="button" :aria-pressed="knowledgeSearch" :title="knowledgeSearch ? '本轮先检索知识库' : '本轮不检索知识库'" aria-label="检索知识库" @click="knowledgeSearch = !knowledgeSearch"><BookOpenCheck :size="18" /></button>
-          <span class="input-hint">Enter 发送</span>
-          <button class="send-button" type="button" :disabled="!inputMessage.trim() && !selectedImages.length" aria-label="发送" @click="sendMessage">↑</button>
+          <span class="input-hint">{{ connectionStatus === 'connecting' ? '正在生成，可随时停止' : 'Enter 发送' }}</span>
+          <button v-if="connectionStatus === 'connecting'" class="stop-button" type="button" title="停止生成" aria-label="停止生成" @click="emit('stop-generation')">
+            <Square :size="15" fill="currentColor" />
+          </button>
+          <button v-else class="send-button" type="button" :disabled="!inputMessage.trim() && !selectedImages.length" aria-label="发送" @click="sendMessage">↑</button>
         </div>
       </div>
     </footer>
@@ -175,7 +178,7 @@ import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
-import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, X } from 'lucide-vue-next'
+import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square, X } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment } from '../api'
 
@@ -188,7 +191,7 @@ const props = defineProps({
   webSearchAvailable: { type: Boolean, default: false },
   knowledgeSearchAvailable: { type: Boolean, default: false }
 })
-const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message', 'continue-message'])
+const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message', 'continue-message', 'stop-generation'])
 const agent = computed(() => getAgent(props.aiType))
 const quickPrompts = computed(() => agent.value.chat.quickPrompts)
 const emptyTitle = computed(() => agent.value.chat.emptyTitle)
@@ -306,6 +309,7 @@ const renderMarkdown = content => DOMPurify.sanitize(marked.parse(stripInlineCit
 }))
 
 const sendMessage = () => {
+  if (props.connectionStatus === 'connecting') return
   if (!inputMessage.value.trim() && !selectedImages.value.length) return
   const payload = { message: inputMessage.value.trim(), files: selectedImages.value.map(item => item.file) }
   if (props.webSearchAvailable) payload.webSearch = webSearch.value
@@ -902,6 +906,32 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleCitationKeydow
 .send-button:hover:not(:disabled) { filter: brightness(1.06); }
 .send-button:active:not(:disabled) { transform: scale(0.94); }
 .send-button:disabled { background: var(--sk-fill-strong); color: var(--sk-label-3); box-shadow: none; }
+
+.stop-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(255, 59, 48, 0.28);
+  border-radius: 50%;
+  padding: 0;
+  background: rgba(255, 59, 48, 0.1);
+  color: var(--sk-red);
+  box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.28);
+  animation: stop-pulse 1.8s ease-out infinite;
+}
+
+.stop-button:hover { background: rgba(255, 59, 48, 0.16); }
+.stop-button:active { transform: scale(0.92); }
+
+@keyframes stop-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.26); }
+  70%, 100% { box-shadow: 0 0 0 7px rgba(255, 59, 48, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stop-button { animation: none; }
+}
 
 .streaming-pulse { display: inline-flex; align-items: center; gap: 3px; margin-left: 7px; color: var(--zwx-primary); vertical-align: middle; }
 

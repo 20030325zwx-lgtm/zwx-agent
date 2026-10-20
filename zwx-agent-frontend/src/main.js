@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import { createHead } from '@vueuse/head'
+import '@file-viewer/vue3/dist/file-viewer3.css'
 import './style.css'
 
 const app = createApp(App)

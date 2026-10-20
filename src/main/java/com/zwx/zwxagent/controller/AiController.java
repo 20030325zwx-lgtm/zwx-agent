@@ -254,9 +254,11 @@ public class AiController {
     }
 
     @PostMapping(value = "/agent-knowledge/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public AgentKnowledgeDocument uploadAgentKnowledgeDocument(CurrentActor actor, @RequestParam String agentKey, @RequestPart("file") MultipartFile file) {
+    public AgentKnowledgeDocument uploadAgentKnowledgeDocument(CurrentActor actor, @RequestParam String agentKey,
+                                                               @RequestPart("file") MultipartFile file,
+                                                               @RequestParam(required = false) String categoryId) {
         actor.requireAdmin();
-        AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(actor.tenantId(), agentKey, file, actor.username());
+        AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(actor.tenantId(), agentKey, file, actor.username(), categoryId);
         agentKnowledgeDocumentService.indexDocument(document.id());
         return document;
     }
@@ -264,6 +266,30 @@ public class AiController {
     @GetMapping("/agent-knowledge/documents")
     public List<AgentKnowledgeDocument> listAgentKnowledgeDocuments(CurrentActor actor, @RequestParam String agentKey) {
         return agentKnowledgeDocumentService.listDocuments(actor.tenantId(), agentKey);
+    }
+
+    @GetMapping("/agent-knowledge/categories")
+    public List<com.zwx.zwxagent.rag.AgentKnowledgeCategory> listAgentKnowledgeCategories(CurrentActor actor,
+                                                                                          @RequestParam String agentKey) {
+        return agentKnowledgeDocumentService.listCategories(actor.tenantId(), agentKey);
+    }
+
+    @PostMapping("/agent-knowledge/categories")
+    public com.zwx.zwxagent.rag.AgentKnowledgeCategory createAgentKnowledgeCategory(
+            CurrentActor actor, @RequestBody CreateKnowledgeCategoryRequest request) {
+        actor.requireAdmin();
+        return agentKnowledgeDocumentService.createCategory(actor.tenantId(), request.agentKey(), request.name(), actor.username());
+    }
+
+    @PostMapping("/agent-knowledge/documents/{documentId}/category")
+    public AgentKnowledgeDocument moveAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
+                                                             @RequestParam String agentKey,
+                                                             @RequestParam String categoryId) {
+        actor.requireAdmin();
+        return agentKnowledgeDocumentService.moveDocument(actor.tenantId(), agentKey, documentId, categoryId);
+    }
+
+    public record CreateKnowledgeCategoryRequest(String agentKey, String name) {
     }
 
     @GetMapping("/agent-knowledge/chunks/{chunkId}")
@@ -278,6 +304,18 @@ public class AiController {
     public AgentKnowledgeDocumentDetail getAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
         actor.requireAdmin();
         return agentKnowledgeDocumentService.getDocument(actor.tenantId(), agentKey, documentId);
+    }
+
+    @GetMapping("/agent-knowledge/documents/{documentId}/content")
+    public ResponseEntity<byte[]> getAgentKnowledgeDocumentContent(CurrentActor actor, @PathVariable String documentId,
+                                                                   @RequestParam String agentKey) {
+        actor.requireAdmin();
+        var content = agentKnowledgeDocumentService.readDocumentFile(actor.tenantId(), agentKey, documentId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(content.contentType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.inline().filename(content.filename(), StandardCharsets.UTF_8).build().toString())
+                .body(content.bytes());
     }
 
     @PostMapping("/agent-knowledge/documents/{documentId}/publish")
@@ -621,6 +659,15 @@ public class AiController {
             manageManusEmitter(result.emitter(), result.stream());
         }
         return result.emitter();
+    }
+
+    @PostMapping("/manus/conversations/{conversationId}/runs/{runId}/cancel")
+    public Map<String, Object> cancelManusRun(CurrentActor actor, @PathVariable String conversationId,
+                                              @PathVariable String runId) {
+        agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        return Map.of("cancelled", manusGraphOrchestrator.cancel(runId));
     }
 
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/resume")

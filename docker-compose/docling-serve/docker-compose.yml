@@ -13,6 +13,8 @@ services:
     environment:
       DOCLING_SERVE_ENABLE_UI: "1"
       DOCLING_SERVE_LOAD_MODELS_AT_BOOT: "0"
+      # 扫描件 OCR 可能超过 120 秒；同步接口最多等待 10 分钟。
+      DOCLING_SERVE_MAX_SYNC_WAIT: "600"
       HF_ENDPOINT: "https://hf-mirror.com"
       HF_HOME: "/root/.cache/huggingface"
       HF_HUB_DISABLE_XET: "1"
@@ -22,3 +24,5 @@ services:
 
 volumes:
   docling-cache:
+    # 复用既有模型缓存卷，避免重建容器后重新下载模型。
+    name: docling-cache

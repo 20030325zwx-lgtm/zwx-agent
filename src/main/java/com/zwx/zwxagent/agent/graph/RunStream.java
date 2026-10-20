@@ -98,6 +98,19 @@ public final class RunStream {
         }
     }
 
+    /** 用户主动停止：立即触发停止回调，不等待断线宽限期。 */
+    public boolean cancel() {
+        if (completed.get()) return false;
+        cancelStop();
+        try {
+            stopTask.run();
+            return true;
+        } catch (Exception exception) {
+            log.warn("run stream cancel failed; runId={}", runId, exception);
+            return false;
+        }
+    }
+
     public void send(String type, String data) {
         if (completed.get()) return;
         Event event;

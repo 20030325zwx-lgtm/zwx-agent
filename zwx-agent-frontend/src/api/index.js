@@ -162,16 +162,22 @@ export const getLoveConversationMessages = async (conversationId) => (await requ
 export const deleteLoveConversation = (conversationId) => request.delete(`/ai/love_app/conversations/${conversationId}`)
 export const deleteLoveAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/love_app/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 
-export const uploadAgentKnowledgeDocument = (agentKey, file) => {
+export const uploadAgentKnowledgeDocument = (agentKey, file, categoryId = null) => {
   const formData = new FormData()
   formData.append('agentKey', agentKey)
+  if (categoryId) formData.append('categoryId', categoryId)
   formData.append('file', file)
   return request.post('/ai/agent-knowledge/documents', formData).then(response => response.data)
 }
+export const listAgentKnowledgeCategories = agentKey => request.get('/ai/agent-knowledge/categories', { params: { agentKey } }).then(response => response.data)
+export const createAgentKnowledgeCategory = (agentKey, name) => request.post('/ai/agent-knowledge/categories', { agentKey, name }).then(response => response.data)
+export const moveAgentKnowledgeDocument = (documentId, agentKey, categoryId) => request.post(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}/category`, null, { params: { agentKey, categoryId } }).then(response => response.data)
 export const publishAgentKnowledgeDocument = (documentId, agentKey) => request.post(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}/publish`, null, { params: { agentKey } }).then(response => response.data)
+export const reindexAgentKnowledgeDocument = (documentId, agentKey) => request.post(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}/reindex`, null, { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeChunk = (chunkId, agentKey) => request.get(`/ai/agent-knowledge/chunks/${encodeURIComponent(chunkId)}`, { params: { agentKey } }).then(response => response.data)
 export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)
+export const getAgentKnowledgeDocumentFile = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}/content`, { params: { agentKey }, responseType: 'blob' }).then(response => response.data)
 export const getSkillCatalog = agentKey => request.get('/ai/skills/catalog', { params: { agentKey } }).then(response => response.data)
 export const saveSkillConfiguration = (agentKey, enabledSkillIds) => request.post('/ai/skills/config', { agentKey, enabledSkillIds }).then(response => response.data)
 export const chatWithTravelPlanner = (conversationId, message, webSearch = false, retryUserMessageId = null, clientRequestId = null) => connectSSE('/ai/travel-planner/chat/sse', { conversationId, message, webSearch, retryUserMessageId, clientRequestId })
@@ -195,6 +201,9 @@ export const resumeManusRun = (conversationId, runId) => connectSSE(`/ai/manus/c
 export const reconnectManusRun = (conversationId, runId, lastEventId = null) => connectSSE(
   `/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/reconnect`,
   { lastEventId })
+export const cancelManusRun = (conversationId, runId) => request.post(
+  `/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/cancel`
+).then(response => response.data)
 export const createManusConversation = () => request.post('/ai/manus/conversations').then(response => response.data)
 export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
@@ -219,6 +228,7 @@ export default {
   chatWithManus,
   resumeManusRun,
   reconnectManusRun,
+  cancelManusRun,
   createManusConversation,
   listManusConversations,
   getManusConversationMessages,

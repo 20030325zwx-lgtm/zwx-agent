@@ -241,15 +241,21 @@ GET  /api/ai/love_app/knowledge/index/jobs/{jobId}
 
 ### 租户私有资料与旅游规划专家
 
-管理端 `/knowledge-admin` 的“上传资料”入口支持 `.md`、`.txt`、PDF、Word、Excel、PPT。`READY` 文档可在顶部点击“发布待发布版本”；已 `ACTIVE` 文档重建索引后会保持生效状态。上传对象存入 `knowledge/{tenantId}/{agentKey}/...`，文档任务记录在 `agent_knowledge_document`，切片带有 `tenantId` 和 `agentKey` 元数据并写入 `agent_knowledge_vector`。问答检索使用二者的过滤条件，因此情感分析大师和旅游规划专家互不可见，两个租户之间也不会互相召回。
+管理端 `/knowledge-admin` 的“上传资料”入口支持 `.md`、`.txt`、PDF、Word、Excel、PPT。文档按智能体维护分类：每个租户/智能体默认拥有“默认分类”，可自定义分类、上传到指定分类并移动已有文档；V14 迁移会把历史文档全部归入默认分类。`READY` 文档可在顶部点击“发布待发布版本”；已 `ACTIVE` 文档重建索引后会保持生效状态。上传对象存入 `knowledge/{tenantId}/{agentKey}/...`，文档任务记录在 `agent_knowledge_document`，切片带有 `tenantId` 和 `agentKey` 元数据并写入 `agent_knowledge_vector`。问答检索使用二者的过滤条件，因此情感分析大师和旅游规划专家互不可见，两个租户之间也不会互相召回。
 
 ```text
-POST /api/ai/agent-knowledge/documents   # multipart: agentKey=love|travel, file
+POST /api/ai/agent-knowledge/documents   # multipart: agentKey=love|travel, file, categoryId(可选)
 GET  /api/ai/agent-knowledge/documents?agentKey=love|travel
+GET  /api/ai/agent-knowledge/documents/{documentId}/content?agentKey=...  # 原始文件，供浏览器内预览
+GET  /api/ai/agent-knowledge/categories?agentKey=love|travel
+POST /api/ai/agent-knowledge/categories  # JSON: {agentKey, name}
+POST /api/ai/agent-knowledge/documents/{documentId}/category?agentKey=...&categoryId=...
 GET  /api/ai/travel-planner/chat/sse?conversationId=...&message=...
 GET  /api/ai/agent-knowledge/chunks/{chunkId}?agentKey=super   # 回答引用切片预览
 POST /api/ai/agent-knowledge/documents/{documentId}/publish?agentKey=super  # 发布待发布版本
 ```
+
+知识库预览区使用 [File Viewer](https://github.com/flyfish-dev/file-viewer) 在浏览器内直接渲染原始文件：前端通过带 JWT 的 content 接口读取字节并构造 `File`，不公开对象存储地址，也不需要服务端转换。支持 PDF、DOC/DOCX、XLS/XLSX、PPT/PPTX 以及 Markdown/TXT；大型文档按需懒加载解析器。运行时 Worker/WASM/字体由 `@file-viewer/vite-plugin` 在 dev/build 时复制到 `public/vendor`，该目录为生成产物，不进入 Git。
 
 租户身份从 JWT 派生，旧版 `X-Tenant-Id` 请求头与 `tenantId` 查询参数已废弃。
 
@@ -268,11 +274,12 @@ docker compose up -d --build
 - UI：`http://127.0.0.1:5001/ui`
 - 切片接口：`POST /v1/chunk/hybrid/file`（multipart，支持 PDF/DOCX/PPTX/XLSX 等）
 - 模型缓存：Docker 卷 `docling-cache`；首次 PDF/Word 转换会下载布局/表格模型。
+- 同步切片最长等待 `DOCLING_SERVE_MAX_SYNC_WAIT=600` 秒，后端读取超时默认 660 秒；扫描件 OCR 超过旧版 120 秒限制时不会再被提前中断。
 - 端口只绑定 `127.0.0.1`，不要直接暴露公网。
 - 后端默认启用 `app.document-parser.docling.enabled=true`，不可用时可通过 `fallback-to-local=true` 回退。
 - 当前项目内预处理会补充 Docling chunk 默认丢弃的页眉/页脚：普通文档生成“文档头部信息”chunk，简历生成“基本信息”chunk，并附加 `resumeSection` 分类；联系方式、姓名等信息不会再被切丢。
 
-后端已接入 Docling Serve：Markdown/TXT 继续本地结构切分；PDF/DOCX/PPTX/XLSX 等调用 `/v1/chunk/hybrid/file`，失败时按配置回退到本地解析。配置项在 `app.document-parser.docling.*`，详细设计见 [接入设计](./design/2026-10-20-docling-serve-integration.md) 和 [部署设计](./design/2026-10-20-docling-serve-deployment.md)。
+后端已接入 Docling Serve：Markdown/TXT 继续本地结构切分；PDF/DOCX/PPTX/XLSX 等调用 `/v1/chunk/hybrid/file`，失败时按配置回退到本地解析。解析后如果 0 个切片，会标记索引失败而不是发布空版本；知识库预览区提供“重新解析”按钮，可对失败或内容过期的文档重建向量。配置项在 `app.document-parser.docling.*`，详细设计见 [接入设计](./design/2026-10-20-docling-serve-integration.md) 和 [部署设计](./design/2026-10-20-docling-serve-deployment.md)。
 
 ## 目录说明
 

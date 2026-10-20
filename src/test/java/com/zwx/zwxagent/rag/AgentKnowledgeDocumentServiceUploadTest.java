@@ -35,6 +35,10 @@ class AgentKnowledgeDocumentServiceUploadTest {
                 .thenReturn(List.of());
         when(jdbcTemplate.queryForObject(contains("COALESCE(MAX(version_no)"), eq(Integer.class), any(), any(), any()))
                 .thenReturn(3);
+        when(jdbcTemplate.queryForObject(contains("FROM agent_knowledge_category"), eq(Integer.class), any(), any(), any()))
+                .thenReturn(1);
+        when(jdbcTemplate.queryForObject(contains("SELECT id FROM agent_knowledge_category"), eq(String.class), any(), any(), any()))
+                .thenReturn("default-category");
         when(jdbcTemplate.queryForObject(contains("SELECT id, tenant_id"), any(RowMapper.class), any(), any(), any()))
                 .thenReturn(new AgentKnowledgeDocument("document-id", "default", "love", "sample.md", "PENDING", 0, null,
                         Instant.now(), null, "sample", 3, "INDEXING", null, null, null, "admin"));

@@ -48,7 +48,7 @@ const routes = [
     component: () => import('../views/KnowledgeAdmin.vue'),
     meta: {
       title: '知识库管理 - ZWX Agent',
-      description: '查看情感分析大师的内置文档和实际向量切片。'
+      description: '查看各智能体的私有知识文档、版本状态与实际向量切片。'
     }
   },
   {

@@ -24,7 +24,9 @@ import java.util.UUID;
 @Service
 public class AgentKnowledgeDocumentService {
 
-    private static final int BATCH_SIZE = 100;
+    // DashScope embedding 单次最多 25 条文本，超过会直接报 "The input texts limit 25"。
+    private static final int BATCH_SIZE = 25;
+    private static final String DEFAULT_CATEGORY_NAME = "默认分类";
     private final OssClientProvider ossClientProvider;
     private final String bucket;
     private final JdbcTemplate jdbcTemplate;
@@ -55,7 +57,13 @@ public class AgentKnowledgeDocumentService {
      * 不再删除同名旧版本。发布在索引成功后自动执行（兼容旧行为，publish 支持后续人工发布）。
      */
     public AgentKnowledgeDocument upload(String tenantId, String agentKey, MultipartFile file, String createdBy) {
+        return upload(tenantId, agentKey, file, createdBy, null);
+    }
+
+    public AgentKnowledgeDocument upload(String tenantId, String agentKey, MultipartFile file, String createdBy,
+                                         String categoryId) {
         validateScope(tenantId, agentKey);
+        String resolvedCategoryId = resolveCategoryId(tenantId, agentKey, categoryId);
         String filename = file.getOriginalFilename() == null ? "document.txt" : file.getOriginalFilename();
         if (!filename.toLowerCase().matches(".*\\.(md|txt|pdf|doc|docx|xls|xlsx|ppt|pptx)$"))
             throw new IllegalArgumentException("Supported knowledge files: md, txt, pdf, doc, docx, xls, xlsx, ppt, pptx");
@@ -89,10 +97,11 @@ public class AgentKnowledgeDocumentService {
         jdbcTemplate.update("""
                 INSERT INTO agent_knowledge_document
                     (id, tenant_id, agent_key, object_key, filename, status,
-                     logical_key, version_no, lifecycle_status, content_sha256, supersedes_document_id, created_by)
-                VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, 'INDEXING', ?, ?, ?)
+                     logical_key, version_no, lifecycle_status, content_sha256, supersedes_document_id, created_by,
+                     category_id)
+                VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, 'INDEXING', ?, ?, ?, ?)
                 """, id, tenantId, agentKey, objectKey, filename, logicalKey, nextVersion,
-                sha256(content), supersedesId, createdBy);
+                sha256(content), supersedesId, createdBy, resolvedCategoryId);
         return getDocumentRecord(tenantId, agentKey, id);
     }
 
@@ -169,6 +178,10 @@ public class AgentKnowledgeDocumentService {
             final List<Document> resolvedChunks = splitChunks;
             List<Document> chunks = java.util.stream.IntStream.range(0, resolvedChunks.size())
                     .mapToObj(index -> toScopedChunk(resolvedChunks.get(index), stored, index + 1)).toList();
+            // 扫描件可能只有页码占位而没有可索引文本；不能把 0 切片当成成功版本发布。
+            if (chunks.isEmpty()) {
+                throw new IllegalStateException("No extractable text after parsing; OCR may have timed out or the document is image-only");
+            }
             List<String> existingChunkIds = jdbcTemplate.queryForList("""
                     SELECT id::text FROM agent_knowledge_vector
                     WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
@@ -177,7 +190,8 @@ public class AgentKnowledgeDocumentService {
             for (int start = 0; start < chunks.size(); start += BATCH_SIZE) vectorStore.add(chunks.subList(start, Math.min(start + BATCH_SIZE, chunks.size())));
             jdbcTemplate.update("""
                     UPDATE agent_knowledge_document SET status = 'READY',
-                        lifecycle_status = CASE WHEN ? = 'INDEXING' THEN 'READY' ELSE ? END,
+                        lifecycle_status = CASE WHEN ? IN ('INDEXING', 'FAILED') THEN 'READY' ELSE ? END,
+                        error_message = NULL, next_retry_at = NULL,
                         chunk_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?
                     """, originalLifecycle, originalLifecycle, chunks.size(), documentId);
         } catch (Exception exception) {
@@ -192,8 +206,8 @@ public class AgentKnowledgeDocumentService {
                     """, originalLifecycle, originalLifecycle, truncate(exception.getMessage()), originalLifecycle, documentId);
             return;
         }
-        // 新版本流程（INDEXING → READY）自动发布，兼容旧上传即生效行为；人工发布接口后续开放
-        if ("INDEXING".equals(originalLifecycle)) {
+        // 新版本或重试成功（INDEXING/FAILED → READY）自动发布；ACTIVE/ARCHIVED 重建索引保持原生命周期
+        if ("INDEXING".equals(originalLifecycle) || "FAILED".equals(originalLifecycle)) {
             try {
                 publish(documentId);
             } catch (Exception exception) {
@@ -266,10 +280,54 @@ public class AgentKnowledgeDocumentService {
         validateScope(tenantId, agentKey);
         return jdbcTemplate.query("""
                 SELECT id, tenant_id, agent_key, filename, status, chunk_count, error_message, created_at, completed_at,
-                       logical_key, version_no, lifecycle_status, content_sha256, published_at, archived_at, created_by
+                       logical_key, version_no, lifecycle_status, content_sha256, published_at, archived_at, created_by,
+                       category_id
                 FROM agent_knowledge_document WHERE tenant_id = ? AND agent_key = ?
                 ORDER BY logical_key, version_no DESC
                 """, (rs, rowNum) -> mapDocument(rs), tenantId, agentKey);
+    }
+
+    public List<AgentKnowledgeCategory> listCategories(String tenantId, String agentKey) {
+        validateScope(tenantId, agentKey);
+        ensureDefaultCategory(tenantId, agentKey);
+        return jdbcTemplate.query("""
+                SELECT id, tenant_id, agent_key, name, created_at, created_by
+                FROM agent_knowledge_category
+                WHERE tenant_id = ? AND agent_key = ?
+                ORDER BY CASE WHEN name = ? THEN 0 ELSE 1 END, created_at, name
+                """, (rs, rowNum) -> new AgentKnowledgeCategory(rs.getString("id"), rs.getString("tenant_id"),
+                rs.getString("agent_key"), rs.getString("name"), rs.getTimestamp("created_at").toInstant(),
+                rs.getString("created_by")), tenantId, agentKey, DEFAULT_CATEGORY_NAME);
+    }
+
+    public AgentKnowledgeCategory createCategory(String tenantId, String agentKey, String name, String createdBy) {
+        validateScope(tenantId, agentKey);
+        String normalized = name == null ? "" : name.trim();
+        if (normalized.isEmpty() || normalized.length() > 40) {
+            throw new IllegalArgumentException("分类名称长度需为 1-40 个字符");
+        }
+        ensureDefaultCategory(tenantId, agentKey);
+        String id = UUID.randomUUID().toString();
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO agent_knowledge_category (id, tenant_id, agent_key, name, created_by)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, id, tenantId, agentKey, normalized, createdBy);
+        } catch (org.springframework.dao.DuplicateKeyException exception) {
+            throw new IllegalArgumentException("分类已存在");
+        }
+        return new AgentKnowledgeCategory(id, tenantId, agentKey, normalized, java.time.Instant.now(), createdBy);
+    }
+
+    public AgentKnowledgeDocument moveDocument(String tenantId, String agentKey, String documentId, String categoryId) {
+        validateScope(tenantId, agentKey);
+        String resolvedCategoryId = resolveCategoryId(tenantId, agentKey, categoryId);
+        int updated = jdbcTemplate.update("""
+                UPDATE agent_knowledge_document SET category_id = ?
+                WHERE id = ? AND tenant_id = ? AND agent_key = ?
+                """, resolvedCategoryId, documentId, tenantId, agentKey);
+        if (updated == 0) throw new IllegalArgumentException("Document does not exist in the current scope");
+        return getDocumentRecord(tenantId, agentKey, documentId);
     }
 
     public AgentKnowledgeDocumentDetail getDocument(String tenantId, String agentKey, String documentId) {
@@ -318,6 +376,38 @@ public class AgentKnowledgeDocumentService {
                 chunkId, tenantId, agentKey).stream().findFirst();
     }
 
+    /** 读取原始文件字节，供前端在浏览器内解析预览。 */
+    public DocumentFile readDocumentFile(String tenantId, String agentKey, String documentId) {
+        validateScope(tenantId, agentKey);
+        StoredDocument stored = queryStoredDocument(documentId, true);
+        if (!tenantId.equals(stored.tenantId()) || !agentKey.equals(stored.agentKey())) {
+            throw new IllegalArgumentException("Document does not exist in the current scope");
+        }
+        try (var object = ossClientProvider.getClient().getObject(bucket, stored.objectKey());
+             var input = object.getObjectContent()) {
+            return new DocumentFile(input.readAllBytes(), stored.filename(), contentType(stored.filename()));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to read knowledge document", exception);
+        }
+    }
+
+    private static String contentType(String filename) {
+        String extension = filename == null || !filename.contains(".")
+                ? "" : filename.substring(filename.lastIndexOf('.') + 1).toLowerCase(java.util.Locale.ROOT);
+        return switch (extension) {
+            case "pdf" -> "application/pdf";
+            case "doc" -> "application/msword";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xls" -> "application/vnd.ms-excel";
+            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case "ppt" -> "application/vnd.ms-powerpoint";
+            case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            case "md" -> "text/markdown; charset=UTF-8";
+            case "txt" -> "text/plain; charset=UTF-8";
+            default -> "application/octet-stream";
+        };
+    }
+
     public AgentKnowledgeDocument getDocumentRecordForScope(String tenantId, String agentKey, String documentId) {
         validateScope(tenantId, agentKey);
         return getDocumentRecord(tenantId, agentKey, documentId);
@@ -326,7 +416,8 @@ public class AgentKnowledgeDocumentService {
     private AgentKnowledgeDocument getDocumentRecord(String tenantId, String agentKey, String id) {
         return jdbcTemplate.queryForObject("""
                 SELECT id, tenant_id, agent_key, filename, status, chunk_count, error_message, created_at, completed_at,
-                       logical_key, version_no, lifecycle_status, content_sha256, published_at, archived_at, created_by
+                       logical_key, version_no, lifecycle_status, content_sha256, published_at, archived_at, created_by,
+                       category_id
                 FROM agent_knowledge_document WHERE id = ? AND tenant_id = ? AND agent_key = ?
                 """, (rs, rowNum) -> mapDocument(rs), id, tenantId, agentKey);
     }
@@ -342,7 +433,7 @@ public class AgentKnowledgeDocumentService {
                 rs.getString("content_sha256"),
                 publishedAt == null ? null : publishedAt.toInstant(),
                 archivedAt == null ? null : archivedAt.toInstant(),
-                rs.getString("created_by"));
+                rs.getString("created_by"), rs.getString("category_id"));
     }
 
     private Document toScopedChunk(Document document, StoredDocument stored, int chunkIndex) {
@@ -376,6 +467,42 @@ public class AgentKnowledgeDocumentService {
         }, documentId);
     }
 
+    private String resolveCategoryId(String tenantId, String agentKey, String categoryId) {
+        if (categoryId != null && !categoryId.isBlank()) {
+            List<String> ids = jdbcTemplate.queryForList("""
+                    SELECT id FROM agent_knowledge_category
+                    WHERE id = ? AND tenant_id = ? AND agent_key = ?
+                    """, String.class, categoryId, tenantId, agentKey);
+            if (ids.isEmpty()) throw new IllegalArgumentException("分类不存在");
+            return ids.get(0);
+        }
+        return defaultCategoryId(tenantId, agentKey);
+    }
+
+    private String defaultCategoryId(String tenantId, String agentKey) {
+        ensureDefaultCategory(tenantId, agentKey);
+        return jdbcTemplate.queryForObject("""
+                SELECT id FROM agent_knowledge_category
+                WHERE tenant_id = ? AND agent_key = ? AND name = ?
+                """, String.class, tenantId, agentKey, DEFAULT_CATEGORY_NAME);
+    }
+
+    private void ensureDefaultCategory(String tenantId, String agentKey) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM agent_knowledge_category
+                WHERE tenant_id = ? AND agent_key = ? AND name = ?
+                """, Integer.class, tenantId, agentKey, DEFAULT_CATEGORY_NAME);
+        if (count != null && count > 0) return;
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO agent_knowledge_category (id, tenant_id, agent_key, name, created_by)
+                    VALUES (?, ?, ?, ?, 'system')
+                    """, UUID.randomUUID().toString(), tenantId, agentKey, DEFAULT_CATEGORY_NAME);
+        } catch (org.springframework.dao.DuplicateKeyException ignored) {
+            // 并发创建时以已存在的行为准
+        }
+    }
+
     private static String sha256(byte[] content) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
@@ -389,6 +516,8 @@ public class AgentKnowledgeDocumentService {
     }
 
     private String truncate(String value) { return value == null ? "Indexing failed" : value.substring(0, Math.min(1000, value.length())); }
+    public record DocumentFile(byte[] bytes, String filename, String contentType) { }
+
     private record StoredDocument(String documentId, String tenantId, String agentKey, String objectKey, String filename,
                                   String logicalKey, Integer versionNo, String lifecycleStatus) { }
 }

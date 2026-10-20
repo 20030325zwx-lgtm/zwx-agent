@@ -48,6 +48,7 @@ docker compose up -d --build
 | 变量 | 值 | 作用 |
 | --- | --- | --- |
 | `DOCLING_SERVE_LOAD_MODELS_AT_BOOT` | `0` | 先启动 API，模型在首次转换时加载 |
+| `DOCLING_SERVE_MAX_SYNC_WAIT` | `600` | 同步切片最长等待 600 秒；扫描件 OCR 可能超过默认 120 秒 |
 | `HF_ENDPOINT` | `https://hf-mirror.com` | HuggingFace 镜像 |
 | `HF_HUB_DISABLE_XET` | `1` | 避免模型下载被重定向到 xet 存储 |
 | `HF_HOME` | `/root/.cache/huggingface` | 模型缓存 |
@@ -115,4 +116,5 @@ curl -X POST http://127.0.0.1:5001/v1/chunk/hybrid/file \
 - 运行时按 OrbStack ARM64 预生成；x86_64 需要替换 `--python-platform`、Python ABI 和 torch wheel。
 - 首次 PDF/Word 转换会下载模型；离线环境需要提前准备 `docling-cache` 卷。
 - 扫描 PDF 的中文 OCR 仍需真实资料评测；表格复杂时建议开启 `selective_ocr` 或调整 table mode。
+- 后端同步读取超时需大于 `DOCLING_SERVE_MAX_SYNC_WAIT`（当前后端默认 660 秒）；超时回退本地且 0 切片时，文档会标记失败而不是发布空版本。
 - 服务升级时需重新运行 `build-runtime.sh` 并重建镜像。

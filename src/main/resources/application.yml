@@ -122,7 +122,8 @@ app:
       # 独立 Docling Serve：PDF/Office 解析与结构感知切片；Markdown/TXT 仍走本地切分
       enabled: ${APP_DOCUMENT_PARSER_DOCLING_ENABLED:true}
       base-url: ${APP_DOCUMENT_PARSER_DOCLING_BASE_URL:http://127.0.0.1:5001}
-      timeout-seconds: ${APP_DOCUMENT_PARSER_DOCLING_TIMEOUT_SECONDS:180}
+      # 需大于 Docling Serve 的 DOCLING_SERVE_MAX_SYNC_WAIT（当前 600s）
+      timeout-seconds: ${APP_DOCUMENT_PARSER_DOCLING_TIMEOUT_SECONDS:660}
       fallback-to-local: ${APP_DOCUMENT_PARSER_DOCLING_FALLBACK_TO_LOCAL:true}
       formats: ${APP_DOCUMENT_PARSER_DOCLING_FORMATS:pdf,doc,docx,xls,xlsx,ppt,pptx}
       do-ocr: ${APP_DOCUMENT_PARSER_DOCLING_DO_OCR:true}

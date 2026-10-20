@@ -5,7 +5,7 @@
       <header class="super-header">
         <div class="header-start">
           <button class="history-toggle" type="button" aria-label="打开历史会话" @click="sidebarOpen = true">☰</button>
-          <button class="back-button" type="button" @click="goBack">智能体目录</button>
+          <HomeButton />
           <button class="back-button" type="button" @click="router.push('/mcp-settings')">MCP 管理</button>
         </div>
         <div class="title">
@@ -21,7 +21,7 @@
       <section class="super-chat" :class="{ loading: messagesLoading }">
         <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" knowledge-search-available
           @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage"
-          @continue-message="continueMessage" />
+          @continue-message="continueMessage" @stop-generation="stopGeneration" />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
     </main>
@@ -43,7 +43,8 @@ import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import { chatWithManus, resumeManusRun, reconnectManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, listManusConversations } from '../api'
+import HomeButton from '../components/HomeButton.vue'
+import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, listManusConversations } from '../api'
 
 useHead({ title: '超级智能体 - ZWX Agent', meta: [{ name: 'description', content: 'ZWX Agent 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -224,6 +225,29 @@ const cancelActiveStream = () => {
   reconnectAttempts = 0
   connectionStatus.value = 'disconnected'
 }
+const stopGeneration = async () => {
+  const answer = messages.value[messages.value.length - 1]
+  const runId = answer?.runId
+  eventSource?.close()
+  eventSource = null
+  activeTurnStart = -1
+  reconnectAttempts = 0
+  connectionStatus.value = 'disconnected'
+  if (answer) {
+    answer.status = 'INTERRUPTED'
+    if (!answer.content) answer.content = '已停止生成。'
+  }
+  if (runId && chatId.value) {
+    try { await cancelManusRun(chatId.value, runId) } catch (error) { console.error('Unable to cancel manus run:', error) }
+  }
+  setTimeout(async () => {
+    if (!chatId.value) return
+    try {
+      messages.value = (await getManusConversationMessages(chatId.value)).map(mapMessage)
+      hydrateFileUrls(chatId.value)
+    } catch (error) { console.error('Unable to reload stopped run:', error) }
+  }, 900)
+}
 const continueMessage = ({ message, index }) => {
   if (!chatId.value || connectionStatus.value === 'connecting') return
   if (!message?.runId) {
@@ -249,7 +273,6 @@ const continueMessage = ({ message, index }) => {
   }
 }
 const resendMessage = ({ content }) => sendMessage(content)
-const goBack = () => router.push('/')
 onMounted(async () => {
   await refreshConversations()
   if (conversations.value.length) await selectConversation(conversations.value[0])
@@ -275,7 +298,7 @@ onBeforeUnmount(cancelActiveStream)
   -webkit-backdrop-filter: var(--sk-blur);
 }
 
-.header-start { display: flex; width: 190px; align-items: center; gap: 6px; }
+.header-start { display: flex; width: auto; min-width: 0; align-items: center; gap: 6px; }
 
 .history-toggle {
   display: grid;
@@ -312,7 +335,7 @@ onBeforeUnmount(cancelActiveStream)
 
 .kind-pill { border: 0; border-radius: 6px; padding: 3px 7px; background: var(--zwx-primary-soft); color: var(--zwx-primary); font-size: 10px; font-style: normal; font-weight: 700; }
 
-.header-end { display: flex; width: 190px; justify-content: flex-end; }
+.header-end { display: flex; width: auto; justify-content: flex-end; }
 
 .status { display: flex; align-items: center; gap: 6px; color: #1f9d4d; font-size: 12px; font-weight: 550; }
 .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }

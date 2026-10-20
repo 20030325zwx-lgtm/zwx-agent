@@ -3,12 +3,12 @@
     <ConversationSidebar title="旅游规划专家" mark="⌖" theme="travel" :conversations="conversations" :active-id="chatId" :loading="historyLoading" :open="sidebarOpen" @create="createConversation" @select="selectConversation" @delete="requestDelete" @close="sidebarOpen = false" />
     <main class="travel-main">
       <header class="travel-header">
-        <div class="header-start"><button class="history-toggle" type="button" aria-label="打开历史会话" @click="sidebarOpen = true">☰</button><button class="back-button" type="button" @click="router.push('/')">智能体目录</button></div>
+        <div class="header-start"><button class="history-toggle" type="button" aria-label="打开历史会话" @click="sidebarOpen = true">☰</button><HomeButton /></div>
         <div class="title"><span>⌖</span><strong>旅游规划专家</strong></div>
         <AgentSettingsMenu agent-key="travel" default-theme="emerald" />
       </header>
       <section class="travel-chat" :class="{ loading: messagesLoading }">
-        <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="travel" attachments-enabled attachment-accept=".md,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" web-search-available @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage" @view-execution="openExecution" />
+        <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="travel" attachments-enabled attachment-accept=".md,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" web-search-available @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage" @view-execution="openExecution" @stop-generation="stopGeneration" />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
     </main>
@@ -31,16 +31,15 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
+import HomeButton from '../components/HomeButton.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { chatWithTravelPlanner, createTravelConversation, deleteTravelAssistantReply, deleteTravelConversation, getTravelConversationMessages, getTravelExecutionEvents, listTravelConversations, uploadAgentKnowledgeDocument } from '../api'
 
 useHead({ title: '旅游规划专家 - ZWX Agent' })
-const router = useRouter()
 const messages = ref([])
 const chatId = ref('')
 const conversations = ref([])
@@ -161,6 +160,17 @@ const cancelActiveStream = () => {
   activeRetry = false
   connectionStatus.value = 'disconnected'
 }
+const stopGeneration = () => {
+  cancelActiveStream()
+  setTimeout(async () => {
+    if (!chatId.value) return
+    try {
+      const history = await getTravelConversationMessages(chatId.value)
+      messages.value = history.map(item => ({ id: item.id, content: item.content, isUser: item.role === 'USER', time: new Date(item.createdAt).getTime(), activities: item.executionRunId ? [{ label: '查看执行过程', runId: item.executionRunId }] : [], ragTrace: parseRagTrace(item.ragRetrievalTrace) }))
+      await refreshConversations()
+    } catch (error) { console.error('Unable to reload stopped answer:', error) }
+  }, 800)
+}
 const resendMessage = async ({ content, id, index }) => {
   if (!id || !chatId.value) return
   cancelActiveStream()
@@ -205,7 +215,7 @@ onBeforeUnmount(cancelActiveStream)
   -webkit-backdrop-filter: var(--sk-blur);
 }
 
-.header-start { display: flex; width: 190px; align-items: center; gap: 12px; }
+.header-start { display: flex; width: auto; min-width: 0; align-items: center; gap: 10px; }
 
 .history-toggle, .back-button { border: 0; background: transparent; color: var(--zwx-primary); font-size: 13px; }
 

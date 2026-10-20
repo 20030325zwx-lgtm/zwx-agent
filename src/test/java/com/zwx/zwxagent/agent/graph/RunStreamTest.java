@@ -55,6 +55,24 @@ class RunStreamTest {
     }
 
     @Test
+    void cancelRunsStopTaskImmediatelyAndOnlyOnceAfterCompletion() {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        try {
+            java.util.concurrent.atomic.AtomicInteger stops = new java.util.concurrent.atomic.AtomicInteger();
+            RunStream stream = new RunStream("run-4", 100, 30, scheduler, stops::incrementAndGet, () -> { });
+
+            Assertions.assertTrue(stream.cancel());
+            Assertions.assertEquals(1, stops.get());
+
+            stream.complete();
+            Assertions.assertFalse(stream.cancel());
+            Assertions.assertEquals(1, stops.get());
+        } finally {
+            scheduler.shutdownNow();
+        }
+    }
+
+    @Test
     void parsesLastEventIdWithRunPrefix() {
         Assertions.assertEquals(42, RunStream.parseSequence("run-1:42"));
         Assertions.assertEquals(42, RunStream.parseSequence("42"));

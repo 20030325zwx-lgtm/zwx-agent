@@ -245,8 +245,20 @@ public class ManusGraphOrchestrator {
         String runId = request.runId() == null || request.runId().isBlank()
                 ? java.util.UUID.randomUUID().toString() : request.runId();
         AtomicBoolean stopped = new AtomicBoolean(false);
+        AtomicBoolean started = new AtomicBoolean(false);
+        AtomicBoolean cancelledBeforeStart = new AtomicBoolean(false);
+        Object startLock = new Object();
         RunStream[] holder = new RunStream[1];
         FutureTask<Void> runTask = new FutureTask<>(() -> {
+            synchronized (startLock) {
+                if (cancelledBeforeStart.get()) {
+                    // 任务在被调度前已被用户停止：释放租约与工具资源，避免会话长时间 409。
+                    if (holder[0] != null) holder[0].cleanup();
+                    scheduleStreamRemoval(runId, holder[0]);
+                    return null;
+                }
+                started.set(true);
+            }
             try {
                 execute(request, holder[0], stopped, runGraph.graph());
             } finally {
@@ -258,7 +270,14 @@ public class ManusGraphOrchestrator {
         RunStream stream = new RunStream(runId, sseHistoryMaxEvents, reconnectGraceSeconds, RECONNECT_SCHEDULER,
                 () -> {
                     stopped.set(true);
+                    synchronized (startLock) {
+                        if (!started.get()) cancelledBeforeStart.set(true);
+                    }
                     runTask.cancel(true);
+                    if (cancelledBeforeStart.get()) {
+                        if (holder[0] != null) holder[0].cleanup();
+                        scheduleStreamRemoval(runId, holder[0]);
+                    }
                     runGraph.workers().stopAll(request.conversationId());
                 },
                 request.cleanup());
@@ -273,6 +292,12 @@ public class ManusGraphOrchestrator {
             throw exception;
         }
         return new ManusRunHandle(emitter, stream);
+    }
+
+    /** 用户主动停止当前实例上的 run；run 已结束或不在本实例时返回 false。 */
+    public boolean cancel(String runId) {
+        RunStream stream = runStreams.get(runId);
+        return stream != null && stream.cancel();
     }
 
     /** 客户端重连：重放 lastEventId 之后的事件，并恢复后续实时推送。 */

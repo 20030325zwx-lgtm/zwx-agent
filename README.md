@@ -252,6 +252,25 @@ GET  /api/ai/agent-knowledge/chunks/{chunkId}?agentKey=super   # 回答引用切
 
 租户身份从 JWT 派生，旧版 `X-Tenant-Id` 请求头与 `tenantId` 查询参数已废弃。
 
+## 独立文档解析与切片服务（Docling Serve）
+
+PDF、Word、Excel 等非 Markdown 文档的解析和切片已拆为独立服务，当前 Spring Boot 进程不再承担重型解析/OCR。
+
+```bash
+cd docker-compose/docling-serve
+./build-runtime.sh          # 首次或升级时生成 linux/arm64 运行时
+docker compose up -d --build
+```
+
+- API：`http://127.0.0.1:5001`
+- Swagger：`http://127.0.0.1:5001/docs`
+- UI：`http://127.0.0.1:5001/ui`
+- 切片接口：`POST /v1/chunk/hybrid/file`（multipart，支持 PDF/DOCX/PPTX/XLSX 等）
+- 模型缓存：Docker 卷 `docling-cache`；首次 PDF/Word 转换会下载布局/表格模型。
+- 端口只绑定 `127.0.0.1`，不要直接暴露公网。
+
+当前后端尚未自动调用 Docling Serve，接入方式见 [部署设计](./design/2026-10-20-docling-serve-deployment.md)。
+
 ## 目录说明
 
 ```text

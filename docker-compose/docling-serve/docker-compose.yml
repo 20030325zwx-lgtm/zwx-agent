@@ -1,0 +1,24 @@
+name: zwx-agent-docling
+
+services:
+  docling-serve:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yu-ai-docling-serve:local
+    container_name: yu-ai-docling-serve
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5001"
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "1"
+      DOCLING_SERVE_LOAD_MODELS_AT_BOOT: "0"
+      HF_ENDPOINT: "https://hf-mirror.com"
+      HF_HOME: "/root/.cache/huggingface"
+      HF_HUB_DISABLE_XET: "1"
+      HF_HUB_ENABLE_HF_TRANSFER: "0"
+    volumes:
+      - docling-cache:/root/.cache
+
+volumes:
+  docling-cache:

@@ -6,6 +6,7 @@
 - [工具调用幂等](./2026-10-20-tool-call-idempotency.md)
 - [会话删除应用内确认](./2026-10-20-in-app-confirm-dialog.md)
 - [回答引用切片预览](./2026-10-20-answer-citation-preview.md)
+- [Docling Serve 本地部署](./2026-10-20-docling-serve-deployment.md)
 - [改造实施方案索引](./plans/README.md)
 
 本目录保存相对稳定的架构、模块边界、数据流和设计决策。实现细节以源码为准。

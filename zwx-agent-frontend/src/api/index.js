@@ -185,7 +185,8 @@ export const deleteTestConversation = conversationId => request.delete(`/ai/test
 export const deleteTestAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/test-agent/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 
 // AI超级智能体聊天
-export const chatWithManus = (conversationId, message, knowledgeSearch = false) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch })
+export const chatWithManus = (conversationId, message, knowledgeSearch = false, clientRequestId = null) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, clientRequestId })
+export const resumeManusRun = (conversationId, runId) => connectSSE(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/resume`, {})
 export const createManusConversation = () => request.post('/ai/manus/conversations').then(response => response.data)
 export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
@@ -208,6 +209,7 @@ export default {
   getLoveConversationMessages,
   deleteLoveConversation,
   chatWithManus,
+  resumeManusRun,
   createManusConversation,
   listManusConversations,
   getManusConversationMessages,

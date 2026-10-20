@@ -1,5 +1,6 @@
 package com.zwx.zwxagent.conversation;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,24 +26,40 @@ public class ConversationLockManager {
 
     private final JdbcTemplate jdbcTemplate;
     private final Duration leaseDuration;
+    private final ApplicationInstanceRegistry instanceRegistry;
 
     public ConversationLockManager(JdbcTemplate jdbcTemplate,
                                    @Value("${app.agent.conversation-lock-lease-seconds:600}") long leaseSeconds) {
+        this(jdbcTemplate, leaseSeconds, null);
+    }
+
+    @Autowired
+    public ConversationLockManager(JdbcTemplate jdbcTemplate,
+                                   @Value("${app.agent.conversation-lock-lease-seconds:600}") long leaseSeconds,
+                                   ApplicationInstanceRegistry instanceRegistry) {
         this.jdbcTemplate = jdbcTemplate;
         this.leaseDuration = Duration.ofSeconds(Math.max(60, leaseSeconds));
+        this.instanceRegistry = instanceRegistry;
     }
 
     public Lease tryAcquire(String conversationId) {
         String token = UUID.randomUUID().toString();
+        String ownerInstance = instanceRegistry == null ? null : instanceRegistry.currentInstanceId();
         try {
             String acquired = jdbcTemplate.queryForObject("""
-                    INSERT INTO agent_conversation_lock (conversation_id, owner_token, expires_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP + (? * INTERVAL '1 second'))
+                    INSERT INTO agent_conversation_lock (conversation_id, owner_token, owner_instance, expires_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP + (? * INTERVAL '1 second'))
                     ON CONFLICT (conversation_id) DO UPDATE
-                    SET owner_token = EXCLUDED.owner_token, expires_at = EXCLUDED.expires_at
+                    SET owner_token = EXCLUDED.owner_token,
+                        owner_instance = EXCLUDED.owner_instance,
+                        expires_at = EXCLUDED.expires_at
                     WHERE agent_conversation_lock.expires_at < CURRENT_TIMESTAMP
+                       OR (EXCLUDED.owner_instance IS NOT NULL AND NOT EXISTS (
+                           SELECT 1 FROM agent_instance i
+                           WHERE i.instance_id = agent_conversation_lock.owner_instance
+                             AND i.heartbeat_at > CURRENT_TIMESTAMP - INTERVAL '15 seconds'))
                     RETURNING owner_token
-                    """, String.class, conversationId, token, leaseDuration.toSeconds());
+                    """, String.class, conversationId, token, ownerInstance, leaseDuration.toSeconds());
             return token.equals(acquired) ? new Lease(conversationId, token) : null;
         } catch (EmptyResultDataAccessException exception) {
             return null;

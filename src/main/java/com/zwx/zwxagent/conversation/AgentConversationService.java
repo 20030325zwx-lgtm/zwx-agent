@@ -74,23 +74,23 @@ public class AgentConversationService {
         requireOwned(tenantId, userId, TRAVEL, conversationId);
         return jdbcTemplate.query("""
                 SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments,
-                       m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at FROM agent_chat_message m
+                       m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at, m.status FROM agent_chat_message m
                 JOIN agent_conversation c ON c.id = m.conversation_id
                 WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC
                 """, (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
-                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, userId, TRAVEL);
+                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status")), conversationId, tenantId, userId, TRAVEL);
     }
 
     public List<AgentConversationMessage> getRecentTravelMessages(String tenantId, String userId, String conversationId, int limit) {
         return jdbcTemplate.query("""
-                SELECT id, role, content, execution_run_id, file_attachments, rag_retrieval_trace, created_at FROM (
+                SELECT id, role, content, execution_run_id, file_attachments, rag_retrieval_trace, created_at, status FROM (
                     SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments,
-                           m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at FROM agent_chat_message m
+                           m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at, m.status FROM agent_chat_message m
                     JOIN agent_conversation c ON c.id = m.conversation_id
                     WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id DESC LIMIT ?
                 ) recent_messages ORDER BY id ASC
                 """, (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
-                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant()), conversationId, tenantId, userId, TRAVEL, limit);
+                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status")), conversationId, tenantId, userId, TRAVEL, limit);
     }
 
     public void deleteTravelConversation(String tenantId, String userId, String conversationId) {
@@ -177,6 +177,7 @@ public class AgentConversationService {
     @Transactional
     public long startUserTurn(String tenantId, String userId, String agentKey, String conversationId, String message, String clientRequestId) {
         ensureConversation(tenantId, userId, agentKey, conversationId, "新的对话", message);
+        markStaleUserTurnsInterrupted(tenantId, userId, agentKey, conversationId);
         requireNoDuplicateRequest(tenantId, userId, clientRequestId);
         Long id = jdbcTemplate.queryForObject("""
                 INSERT INTO agent_chat_message (conversation_id, role, content, status, client_request_id)
@@ -209,7 +210,7 @@ public class AgentConversationService {
                 UPDATE agent_chat_message m SET status = 'COMPLETED'
                 FROM agent_conversation c
                 WHERE m.conversation_id = c.id AND m.id = ? AND c.tenant_id = ? AND c.user_id = ?
-                  AND m.status = 'IN_PROGRESS'
+                  AND m.status IN ('IN_PROGRESS', 'INTERRUPTED')
                 """, userMessageId, tenantId, userId);
     }
 
@@ -222,9 +223,23 @@ public class AgentConversationService {
                 """, userMessageId, tenantId, userId);
     }
 
-    public void appendAssistantReply(String tenantId, String userId, String agentKey, String conversationId, long userMessageId,
+    /**
+     * 会话租约保证同一会话同时最多只有一个执行轮次，因此新轮次开始前仍处于
+     * IN_PROGRESS 的 USER 消息一定是上一个进程异常退出后遗留的，需要显式收口，
+     * 否则它会永久占据“正在处理”状态并被下一轮当成正常历史。
+     */
+    public int markStaleUserTurnsInterrupted(String tenantId, String userId, String agentKey, String conversationId) {
+        return jdbcTemplate.update("""
+                UPDATE agent_chat_message m SET status = 'INTERRUPTED'
+                FROM agent_conversation c
+                WHERE m.conversation_id = c.id AND c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ?
+                  AND m.role = 'USER' AND m.status = 'IN_PROGRESS'
+                """, conversationId, tenantId, userId, agentKey);
+    }
+
+    public long appendAssistantReply(String tenantId, String userId, String agentKey, String conversationId, long userMessageId,
                                      String content, String status, String executionRunId) {
-        appendAssistantReply(tenantId, userId, agentKey, conversationId, userMessageId, content, status, executionRunId, null);
+        return appendAssistantReply(tenantId, userId, agentKey, conversationId, userMessageId, content, status, executionRunId, null, null);
     }
 
     public boolean saveRagJudgment(String tenantId, String userId, String agentKey, long messageId,
@@ -248,16 +263,48 @@ public class AgentConversationService {
                 """, candidateId, judgment, messageId, tenantId, userId, agentKey, candidateId) == 1;
     }
 
-    public void appendAssistantReply(String tenantId, String userId, String agentKey, String conversationId, long userMessageId,
+    public long appendAssistantReply(String tenantId, String userId, String agentKey, String conversationId, long userMessageId,
                                      String content, String status, String executionRunId, String ragRetrievalTrace) {
-        int inserted = jdbcTemplate.update("""
-                INSERT INTO agent_chat_message (conversation_id, role, content, status, execution_run_id, rag_retrieval_trace)
-                SELECT id, 'ASSISTANT', ?, ?, ?, CAST(? AS jsonb) FROM agent_conversation
+        return appendAssistantReply(tenantId, userId, agentKey, conversationId, userMessageId, content, status,
+                executionRunId, ragRetrievalTrace, null);
+    }
+
+    public long appendAssistantReply(String tenantId, String userId, String agentKey, String conversationId, long userMessageId,
+                                     String content, String status, String executionRunId, String ragRetrievalTrace,
+                                     String fileAttachments) {
+        Long id = jdbcTemplate.queryForObject("""
+                INSERT INTO agent_chat_message (conversation_id, role, content, status, execution_run_id,
+                                                rag_retrieval_trace, file_attachments)
+                SELECT id, 'ASSISTANT', ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb) FROM agent_conversation
                 WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?
-                """, content == null ? "" : content, status, executionRunId,
-                ragRetrievalTrace == null ? "{}" : ragRetrievalTrace, conversationId, tenantId, userId, agentKey);
-        if (inserted == 0) throw new IllegalArgumentException("Agent conversation was not found");
+                RETURNING id
+                """, Long.class, content == null ? "" : content, status, executionRunId,
+                ragRetrievalTrace == null ? "{}" : ragRetrievalTrace,
+                fileAttachments == null ? "[]" : fileAttachments, conversationId, tenantId, userId, agentKey);
+        if (id == null) throw new IllegalArgumentException("Agent conversation was not found");
         jdbcTemplate.update("UPDATE agent_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", conversationId);
+        return id;
+    }
+
+    public boolean updateAssistantReply(String tenantId, String userId, String agentKey, String conversationId,
+                                        long assistantMessageId, String content, String status) {
+        return updateAssistantReply(tenantId, userId, agentKey, conversationId, assistantMessageId, content, status, null);
+    }
+
+    public boolean updateAssistantReply(String tenantId, String userId, String agentKey, String conversationId,
+                                        long assistantMessageId, String content, String status, String fileAttachments) {
+        int updated = jdbcTemplate.update("""
+                UPDATE agent_chat_message m SET content = ?, status = ?,
+                    file_attachments = COALESCE(CAST(? AS jsonb), file_attachments)
+                FROM agent_conversation c
+                WHERE m.id = ? AND m.conversation_id = c.id AND c.id = ? AND c.tenant_id = ? AND c.user_id = ?
+                  AND c.agent_key = ? AND m.role = 'ASSISTANT'
+                """, content == null ? "" : content, status, fileAttachments, assistantMessageId, conversationId,
+                tenantId, userId, agentKey);
+        if (updated > 0) {
+            jdbcTemplate.update("UPDATE agent_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", conversationId);
+        }
+        return updated > 0;
     }
 
     public static class DuplicateRequestException extends RuntimeException {
@@ -282,8 +329,8 @@ public class AgentConversationService {
 
     public List<AgentConversationMessage> getMessages(String tenantId, String userId, String agentKey, String conversationId) {
         requireOwned(tenantId, userId, agentKey, conversationId);
-        return jdbcTemplate.query("SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments, m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at FROM agent_chat_message m JOIN agent_conversation c ON c.id = m.conversation_id WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC",
-                (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"), rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant()),
+        return jdbcTemplate.query("SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments, m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at, m.status FROM agent_chat_message m JOIN agent_conversation c ON c.id = m.conversation_id WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC",
+                (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"), rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status")),
                 conversationId, tenantId, userId, agentKey);
     }
 
@@ -296,6 +343,21 @@ public class AgentConversationService {
         requireOwned(tenantId, userId, agentKey, conversationId);
         jdbcTemplate.update("DELETE FROM agent_conversation WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?",
                 conversationId, tenantId, userId, agentKey);
+    }
+
+    public Long findAssistantReplyId(String tenantId, String userId, String agentKey, String conversationId, long userMessageId) {
+        List<Long> replies = jdbcTemplate.query("""
+                SELECT reply.id FROM agent_chat_message reply
+                JOIN agent_conversation c ON c.id = reply.conversation_id
+                WHERE reply.conversation_id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ?
+                  AND reply.role = 'ASSISTANT' AND reply.id > ?
+                  AND NOT EXISTS (SELECT 1 FROM agent_chat_message later_user
+                                  WHERE later_user.conversation_id = reply.conversation_id AND later_user.role = 'USER'
+                                    AND later_user.id > ? AND later_user.id < reply.id)
+                ORDER BY reply.id LIMIT 1
+                """, (rs, rowNum) -> rs.getLong("id"), conversationId, tenantId, userId, agentKey,
+                userMessageId, userMessageId);
+        return replies.isEmpty() ? null : replies.getFirst();
     }
 
     public String deleteAssistantReply(String tenantId, String userId, String agentKey, String conversationId, long userMessageId) {

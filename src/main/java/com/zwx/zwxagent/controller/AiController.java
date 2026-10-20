@@ -165,6 +165,9 @@ public class AiController {
     private com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator manusGraphOrchestrator;
 
     @Resource
+    private com.zwx.zwxagent.execution.AgentRunService agentRunService;
+
+    @Resource
     private BuiltInSkillRegistry builtInSkillRegistry;
 
     @Resource
@@ -490,10 +493,20 @@ public class AiController {
 
     @GetMapping("/manus/chat")
     public SseEmitter doChatWithManus(CurrentActor actor, @RequestParam String conversationId, @RequestParam String message,
-                                      @RequestParam(defaultValue = "false") boolean knowledgeSearch) {
+                                      @RequestParam(defaultValue = "false") boolean knowledgeSearch,
+                                      @RequestParam(required = false) String clientRequestId) {
         agentConversationService.ensureConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
         var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
         if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
+        long userMessageId;
+        try {
+            // 先落 USER 轮次：即使进程随后崩溃，下一轮历史里仍能看到这次提问。
+            userMessageId = agentConversationService.startUserTurn(
+                    actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, message, clientRequestId);
+        } catch (RuntimeException exception) {
+            conversationLease.close();
+            throw exception;
+        }
         AgentKnowledgeRagResult knowledge;
         McpTools mcpTools = null;
         ToolCallback[] availableTools;
@@ -506,30 +519,131 @@ public class AiController {
             availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)), Arrays.stream(mcpTools.callbacks()))
                     .toArray(ToolCallback[]::new);
             historyContext = agentConversationService
-                    .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 20).stream()
-                    .map(historyMessage -> ("USER".equals(historyMessage.role()) ? "用户" : "助手") + ": " + historyMessage.content())
+                    .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
+                    .filter(historyMessage -> historyMessage.id() != userMessageId)
+                    .map(historyMessage -> {
+                        String role = "USER".equals(historyMessage.role()) ? "用户" : "助手";
+                        String status = "INTERRUPTED".equals(historyMessage.status()) ? "（上一轮未完成，仅保留部分内容）" : "";
+                        return role + status + ": " + historyMessage.content();
+                    })
                     .collect(java.util.stream.Collectors.joining("\n"));
+        } catch (RuntimeException exception) {
+            agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
+            if (mcpTools != null) mcpTools.close();
+            conversationLease.close();
+            throw exception;
+        }
+        McpTools activeMcpTools = mcpTools;
+        String ragTraceJson = knowledge.trace() == null ? "{}" : toJson(knowledge.trace());
+        String runId;
+        try {
+            runId = agentRunService.start(conversationId, actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
+                    userMessageId, message, historyContext, knowledge.context(), ragTraceJson);
+        } catch (RuntimeException exception) {
+            agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
+            activeMcpTools.close();
+            conversationLease.close();
+            throw exception;
+        }
+        ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
+                conversationId, actor.tenantId(), message, historyContext, availableTools, knowledge.context(),
+                knowledge.trace() == null ? null : ragTraceJson, runId, null, null,
+                result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result));
+        SseEmitter emitter;
+        try {
+            emitter = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
+        } catch (RuntimeException exception) {
+            agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
+            agentRunService.finish(runId, "FAILED", null, exception.getMessage(), null);
+            activeMcpTools.close();
+            conversationLease.close();
+            throw exception;
+        }
+        manageManusEmitter(emitter, conversationLease, activeMcpTools);
+        return emitter;
+    }
+
+    @GetMapping("/manus/conversations/{conversationId}/runs/{runId}")
+    public Map<String, Object> getManusRun(CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
+        com.zwx.zwxagent.execution.AgentRun run = agentRunService
+                .findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        var checkpoint = run.checkpoint();
+        return Map.of(
+                "id", run.id(),
+                "status", run.status(),
+                "lastNode", checkpoint == null || checkpoint.lastNode() == null ? "" : checkpoint.lastNode(),
+                "nextNode", checkpoint == null || checkpoint.nextNode() == null ? "" : checkpoint.nextNode(),
+                "planSize", checkpoint == null ? 0 : checkpoint.plan().size(),
+                "taskResultCount", checkpoint == null ? 0 : checkpoint.taskResults().size(),
+                "partialAnswerLength", checkpoint == null || checkpoint.partialAnswer() == null ? 0 : checkpoint.partialAnswer().length(),
+                "finalAnswerLength", checkpoint == null || checkpoint.finalAnswer() == null ? 0 : checkpoint.finalAnswer().length(),
+                "resumeCount", run.resumeCount());
+    }
+
+    @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/resume")
+    public SseEmitter resumeManusRun(CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
+        com.zwx.zwxagent.execution.AgentRun run = agentRunService
+                .findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        if (!run.resumable()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "This run has already finished");
+        }
+        var conversationLease = conversationLockManager.tryAcquire(
+                actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
+        if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
+        McpTools mcpTools = null;
+        ToolCallback[] availableTools;
+        try {
+            mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
+            availableTools = Stream.concat(
+                            Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)),
+                            Arrays.stream(mcpTools.callbacks()))
+                    .toArray(ToolCallback[]::new);
         } catch (RuntimeException exception) {
             if (mcpTools != null) mcpTools.close();
             conversationLease.close();
             throw exception;
         }
         McpTools activeMcpTools = mcpTools;
-        ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
-                conversationId, actor.tenantId(), message, historyContext, availableTools, knowledge.context(),
-                knowledge.trace() == null ? null : toJson(knowledge.trace()),
-                result -> agentConversationService.saveCompletedTurn(
-                        actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE,
-                        message, result.answer(), toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId))),
-                        knowledge.trace() == null ? "{}" : toJson(knowledge.trace())));
+        com.zwx.zwxagent.agent.graph.GraphCheckpoint checkpoint = run.checkpoint() == null
+                ? new com.zwx.zwxagent.agent.graph.GraphCheckpoint(
+                        null, null, List.of(), List.of(), List.of(), List.of(), 0, null, null, null, null)
+                : run.checkpoint();
+        String resumeFrom = com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.resumeNode(checkpoint);
+        org.slf4j.LoggerFactory.getLogger(AiController.class).debug(
+                "resume manus run; runId={}, lastNode={}, resumeFrom={}, planSize={}, resultSize={}",
+                runId, checkpoint.lastNode(), resumeFrom, checkpoint.plan().size(), checkpoint.taskResults().size());
+        com.zwx.zwxagent.agent.graph.GraphCheckpoint resumeCheckpoint =
+                com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.prepareResumeCheckpoint(checkpoint, resumeFrom);
+        if (resumeCheckpoint == null) resumeCheckpoint = checkpoint;
+        agentRunService.restart(runId);
+        String ragTraceJson = run.ragTraceJson() == null ? "{}" : run.ragTraceJson();
+        com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest runRequest =
+                new com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest(
+                        conversationId, actor.tenantId(), run.input(),
+                        run.historyContext() == null ? "" : run.historyContext(),
+                        availableTools, run.knowledgeContext() == null ? "" : run.knowledgeContext(),
+                        run.ragTraceJson(), runId, resumeCheckpoint, resumeFrom,
+                        result -> completeManusRun(actor, conversationId, run.userMessageId(), runId,
+                                ragTraceJson, run.assistantMessageId(), result));
         SseEmitter emitter;
         try {
             emitter = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
         } catch (RuntimeException exception) {
+            agentRunService.finish(runId, "FAILED", run.displayAnswer(), exception.getMessage(), run.assistantMessageId());
             activeMcpTools.close();
             conversationLease.close();
             throw exception;
         }
+        manageManusEmitter(emitter, conversationLease, activeMcpTools);
+        return emitter;
+    }
+
+    private void manageManusEmitter(SseEmitter emitter, AutoCloseable lease, McpTools mcpTools) {
         java.util.concurrent.ScheduledFuture<?>[] heartbeatHolder = new java.util.concurrent.ScheduledFuture<?>[1];
         heartbeatHolder[0] = HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {
             try {
@@ -544,13 +658,55 @@ public class AiController {
         Runnable cleanup = () -> {
             if (!cleanedUp.compareAndSet(false, true)) return;
             heartbeat.cancel(false);
-            activeMcpTools.close();
-            conversationLease.close();
+            mcpTools.close();
+            try {
+                lease.close();
+            } catch (Exception exception) {
+                org.slf4j.LoggerFactory.getLogger(AiController.class)
+                        .warn("Failed to release conversation lease", exception);
+            }
         };
         emitter.onCompletion(cleanup);
         emitter.onTimeout(cleanup);
         emitter.onError(error -> cleanup.run());
-        return emitter;
+    }
+
+    private void completeManusRun(CurrentActor actor, String conversationId, long userMessageId, String runId,
+                                  String ragTraceJson, Long assistantMessageId,
+                                  ManusGraphOrchestrator.ManusRunResult result) {
+        try {
+            if (result.completed()) {
+                agentConversationService.completeUserTurn(actor.tenantId(), actor.userId(), userMessageId);
+            } else {
+                agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
+            }
+            String filesJson = toJson(manusAttachments(result.activities(), toolFactoryScope(conversationId)));
+            Long existingMessageId = assistantMessageId;
+            if (existingMessageId == null) {
+                existingMessageId = agentConversationService.findAssistantReplyId(
+                        actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, userMessageId);
+            }
+            long messageId;
+            if (existingMessageId != null) {
+                boolean updated = agentConversationService.updateAssistantReply(
+                        actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId,
+                        existingMessageId, result.answer(), result.status(), filesJson);
+                messageId = existingMessageId;
+                if (!updated) {
+                    messageId = agentConversationService.appendAssistantReply(
+                            actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, userMessageId,
+                            result.answer(), result.status(), runId, ragTraceJson, filesJson);
+                }
+            } else {
+                messageId = agentConversationService.appendAssistantReply(
+                        actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, userMessageId,
+                        result.answer(), result.status(), runId, ragTraceJson, filesJson);
+            }
+            agentRunService.finish(runId, result.status(), result.answer(), result.error(), messageId);
+        } catch (RuntimeException persistenceError) {
+            org.slf4j.LoggerFactory.getLogger(AiController.class)
+                    .error("Failed to persist super agent turn; conversationId={}, runId={}", conversationId, runId, persistenceError);
+        }
     }
 
     @GetMapping("/mcp/servers")

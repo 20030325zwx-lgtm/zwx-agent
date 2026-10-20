@@ -20,7 +20,8 @@
 
       <section class="super-chat" :class="{ loading: messagesLoading }">
         <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" knowledge-search-available
-          @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage" />
+          @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage"
+          @continue-message="continueMessage" />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
     </main>
@@ -33,7 +34,7 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
-import { chatWithManus, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, listManusConversations } from '../api'
+import { chatWithManus, resumeManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, listManusConversations } from '../api'
 
 useHead({ title: '超级智能体 - ZWX Agent', meta: [{ name: 'description', content: 'ZWX Agent 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -86,6 +87,8 @@ const mapMessage = message => ({
   time: new Date(message.createdAt).getTime(),
   activities: [],
   collapsibleActivities: message.role === 'ASSISTANT',
+  status: message.status,
+  runId: message.executionRunId,
   files: mapFiles(chatId.value, message.fileAttachments),
   ragTrace: parseRagTrace(message.ragRetrievalTrace)
 })
@@ -130,8 +133,9 @@ const sendMessage = payload => {
   addMessage(message, true)
   messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], collapsibleActivities: true })
   const answerIndex = messages.value.length - 1
+  const requestId = crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`
   connectionStatus.value = 'connecting'
-  eventSource = chatWithManus(chatId.value, message, knowledgeSearch)
+  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, requestId)
   eventSource.addEventListener('rag-trace', event => {
     try { messages.value[answerIndex].ragTrace = JSON.parse(event.data) }
     catch (error) { console.error('RAG retrieval trace unavailable:', error) }
@@ -170,6 +174,43 @@ const cancelActiveStream = () => {
   if (activeTurnStart >= 0) messages.value.splice(activeTurnStart)
   activeTurnStart = -1
   connectionStatus.value = 'disconnected'
+}
+const continueMessage = ({ message, index }) => {
+  if (!chatId.value || connectionStatus.value === 'connecting') return
+  if (!message?.runId) {
+    sendMessage('请继续完成上一次未完成的回答。')
+    return
+  }
+  const answer = messages.value[index]
+  if (!answer) return
+  const previousContent = answer.content
+  answer.content = ''
+  answer.activities = []
+  answer.status = null
+  answer.ragTrace = null
+  connectionStatus.value = 'connecting'
+  eventSource = resumeManusRun(chatId.value, message.runId)
+  eventSource.addEventListener('rag-trace', event => {
+    try { answer.ragTrace = JSON.parse(event.data) }
+    catch (error) { console.error('RAG retrieval trace unavailable:', error) }
+  })
+  eventSource.addEventListener('activity', event => {
+    answer.activities.push(parseActivity(event.data || ''))
+  })
+  eventSource.addEventListener('interrupted', () => {
+    answer.status = 'INTERRUPTED'
+  })
+  eventSource.onmessage = event => {
+    if (event.data === '[DONE]') { finishStream(); return }
+    if (event.data) answer.content += event.data
+  }
+  eventSource.onerror = () => {
+    eventSource?.close()
+    eventSource = null
+    if (!answer.content) answer.content = previousContent
+    connectionStatus.value = 'error'
+    setTimeout(() => { finishStream().catch(error => console.error(error)) }, 1500)
+  }
 }
 const resendMessage = ({ content }) => sendMessage(content)
 const goBack = () => router.push('/')

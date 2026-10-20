@@ -27,6 +27,10 @@ final class GraphState {
     static final String FINAL_ANSWER = "final_answer";
     /** 每次运行的上下文（工具、知识、停止信号；replace） */
     static final String RUN_CONTEXT = "run_context";
+    /** 恢复时从哪个节点继续执行；普通请求为空（replace） */
+    static final String RESUME_FROM = "resume_from";
+    /** 当前 run 标识（replace） */
+    static final String RUN_ID = "run_id";
 
     private GraphState() {
     }

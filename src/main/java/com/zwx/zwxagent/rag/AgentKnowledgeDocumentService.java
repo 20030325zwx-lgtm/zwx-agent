@@ -31,12 +31,14 @@ public class AgentKnowledgeDocumentService {
     private final VectorStore vectorStore;
     private final MyTokenTextSplitter textSplitter;
     private final DocumentParsingModule documentParsingModule;
+    private final DoclingServeChunkingService doclingChunkingService;
     private final TransactionTemplate txTemplate;
 
     public AgentKnowledgeDocumentService(OssClientProvider ossClientProvider,
                                          @Value("${app.oss.bucket}") String bucket, JdbcTemplate jdbcTemplate,
                                          @Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore,
                                          MyTokenTextSplitter textSplitter, DocumentParsingModule documentParsingModule,
+                                         DoclingServeChunkingService doclingChunkingService,
                                          PlatformTransactionManager transactionManager) {
         this.ossClientProvider = ossClientProvider;
         this.bucket = bucket;
@@ -44,6 +46,7 @@ public class AgentKnowledgeDocumentService {
         this.vectorStore = vectorStore;
         this.textSplitter = textSplitter;
         this.documentParsingModule = documentParsingModule;
+        this.doclingChunkingService = doclingChunkingService;
         this.txTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -140,23 +143,32 @@ public class AgentKnowledgeDocumentService {
                     + "error_message = NULL, next_retry_at = NULL WHERE id = ?", documentId);
             StoredDocument stored = queryStoredDocument(documentId, false);
             originalLifecycle = stored.lifecycleStatus();
-            ParsedDocument parsed;
+            byte[] bytes;
             try (var object = ossClientProvider.getClient().getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
-                parsed = documentParsingModule.parse(input.readAllBytes(), stored.filename());
+                bytes = input.readAllBytes();
             }
-            String content = parsed.content();
-            if (content.isBlank()) throw new IllegalArgumentException("PDF does not contain extractable text; OCR is required for scanned documents");
             Map<String, Object> sourceMetadata = new HashMap<>();
             sourceMetadata.put("tenantId", stored.tenantId());
             sourceMetadata.put("agentKey", stored.agentKey());
             sourceMetadata.put("objectKey", stored.objectKey());
             sourceMetadata.put("filename", stored.filename());
-            sourceMetadata.put("parser", parsed.parser());
-            sourceMetadata.putAll(parsed.metadata());
-            List<Document> splitChunks = textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(content)
-                    .metadata(sourceMetadata).build()));
-            List<Document> chunks = java.util.stream.IntStream.range(0, splitChunks.size())
-                    .mapToObj(index -> toScopedChunk(splitChunks.get(index), stored, index + 1)).toList();
+            List<Document> splitChunks;
+            if (doclingChunkingService.shouldUse(stored.filename())) {
+                try {
+                    splitChunks = doclingChunkingService.chunk(bytes, stored.filename(), sourceMetadata);
+                } catch (DoclingServeException exception) {
+                    if (!doclingChunkingService.fallbackToLocal()) throw exception;
+                    org.slf4j.LoggerFactory.getLogger(AgentKnowledgeDocumentService.class)
+                            .warn("Docling Serve unavailable, falling back to local parser; filename={}, reason={}",
+                                    stored.filename(), exception.getMessage());
+                    splitChunks = localChunks(bytes, stored, sourceMetadata, documentId);
+                }
+            } else {
+                splitChunks = localChunks(bytes, stored, sourceMetadata, documentId);
+            }
+            final List<Document> resolvedChunks = splitChunks;
+            List<Document> chunks = java.util.stream.IntStream.range(0, resolvedChunks.size())
+                    .mapToObj(index -> toScopedChunk(resolvedChunks.get(index), stored, index + 1)).toList();
             List<String> existingChunkIds = jdbcTemplate.queryForList("""
                     SELECT id::text FROM agent_knowledge_vector
                     WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
@@ -188,6 +200,18 @@ public class AgentKnowledgeDocumentService {
                         .warn("Auto publish failed for document {}, stays READY: {}", documentId, exception.getMessage());
             }
         }
+    }
+
+    private List<Document> localChunks(byte[] bytes, StoredDocument stored,
+                                       Map<String, Object> sourceMetadata, String documentId) {
+        ParsedDocument parsed = documentParsingModule.parse(bytes, stored.filename());
+        if (parsed.content() == null || parsed.content().isBlank()) {
+            throw new IllegalArgumentException("PDF does not contain extractable text; OCR is required for scanned documents");
+        }
+        sourceMetadata.put("parser", parsed.parser());
+        sourceMetadata.putAll(parsed.metadata());
+        return textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(parsed.content())
+                .metadata(sourceMetadata).build()));
     }
 
     /**
@@ -250,20 +274,28 @@ public class AgentKnowledgeDocumentService {
     public AgentKnowledgeDocumentDetail getDocument(String tenantId, String agentKey, String documentId) {
         validateScope(tenantId, agentKey);
         StoredDocument stored = queryStoredDocument(documentId, true);
+        String sourceContent = "";
         try (var object = ossClientProvider.getClient().getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
-            ParsedDocument parsed = documentParsingModule.parse(input.readAllBytes(), stored.filename());
-            List<AgentKnowledgeChunk> chunks = jdbcTemplate.query("""
-                    SELECT id::text, content, NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index
-                    FROM agent_knowledge_vector
-                    WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                    ORDER BY chunk_index NULLS LAST, id
-                    """, (rs, rowNum) -> new AgentKnowledgeChunk(rs.getString("id"),
-                    rs.getObject("chunk_index", Integer.class) == null ? rowNum + 1 : rs.getInt("chunk_index"), rs.getString("content")),
-                    documentId, tenantId, agentKey);
-            return new AgentKnowledgeDocumentDetail(documentId, stored.filename(), stored.objectKey(), parsed.content(), chunks);
+            sourceContent = documentParsingModule.parse(input.readAllBytes(), stored.filename()).content();
         } catch (Exception exception) {
-            throw new IllegalStateException("Unable to read knowledge document", exception);
+            org.slf4j.LoggerFactory.getLogger(AgentKnowledgeDocumentService.class)
+                    .warn("Unable to render source content for document detail; filename={}, parser={}, reason={}",
+                            stored.filename(), doclingChunkingService.shouldUse(stored.filename()) ? "docling-serve" : "local",
+                            exception.getMessage());
         }
+        List<AgentKnowledgeChunk> chunks = jdbcTemplate.query("""
+                SELECT id::text, content, NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index
+                FROM agent_knowledge_vector
+                WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
+                ORDER BY chunk_index NULLS LAST, id
+                """, (rs, rowNum) -> new AgentKnowledgeChunk(rs.getString("id"),
+                rs.getObject("chunk_index", Integer.class) == null ? rowNum + 1 : rs.getInt("chunk_index"), rs.getString("content")),
+                documentId, tenantId, agentKey);
+        if (sourceContent.isBlank() && !chunks.isEmpty()) {
+            sourceContent = chunks.stream().map(AgentKnowledgeChunk::content)
+                    .collect(java.util.stream.Collectors.joining("\n\n"));
+        }
+        return new AgentKnowledgeDocumentDetail(documentId, stored.filename(), stored.objectKey(), sourceContent, chunks);
     }
 
     /**

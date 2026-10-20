@@ -268,8 +268,9 @@ docker compose up -d --build
 - 切片接口：`POST /v1/chunk/hybrid/file`（multipart，支持 PDF/DOCX/PPTX/XLSX 等）
 - 模型缓存：Docker 卷 `docling-cache`；首次 PDF/Word 转换会下载布局/表格模型。
 - 端口只绑定 `127.0.0.1`，不要直接暴露公网。
+- 后端默认启用 `app.document-parser.docling.enabled=true`，不可用时可通过 `fallback-to-local=true` 回退。
 
-当前后端尚未自动调用 Docling Serve，接入方式见 [部署设计](./design/2026-10-20-docling-serve-deployment.md)。
+后端已接入 Docling Serve：Markdown/TXT 继续本地结构切分；PDF/DOCX/PPTX/XLSX 等调用 `/v1/chunk/hybrid/file`，失败时按配置回退到本地解析。配置项在 `app.document-parser.docling.*`，详细设计见 [接入设计](./design/2026-10-20-docling-serve-integration.md) 和 [部署设计](./design/2026-10-20-docling-serve-deployment.md)。
 
 ## 目录说明
 

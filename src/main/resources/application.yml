@@ -118,6 +118,16 @@ app:
     tika:
       # Optional Apache Tika Server endpoint, for example http://127.0.0.1:9998
       base-url: ${APP_TIKA_BASE_URL:}
+    docling:
+      # 独立 Docling Serve：PDF/Office 解析与结构感知切片；Markdown/TXT 仍走本地切分
+      enabled: ${APP_DOCUMENT_PARSER_DOCLING_ENABLED:true}
+      base-url: ${APP_DOCUMENT_PARSER_DOCLING_BASE_URL:http://127.0.0.1:5001}
+      timeout-seconds: ${APP_DOCUMENT_PARSER_DOCLING_TIMEOUT_SECONDS:180}
+      fallback-to-local: ${APP_DOCUMENT_PARSER_DOCLING_FALLBACK_TO_LOCAL:true}
+      formats: ${APP_DOCUMENT_PARSER_DOCLING_FORMATS:pdf,doc,docx,xls,xlsx,ppt,pptx}
+      do-ocr: ${APP_DOCUMENT_PARSER_DOCLING_DO_OCR:true}
+      do-table-structure: ${APP_DOCUMENT_PARSER_DOCLING_DO_TABLE_STRUCTURE:true}
+      table-mode: ${APP_DOCUMENT_PARSER_DOCLING_TABLE_MODE:accurate}
 # springdoc-openapi config
 springdoc:
   swagger-ui:

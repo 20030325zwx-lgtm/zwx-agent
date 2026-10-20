@@ -41,7 +41,7 @@ class AgentKnowledgeDocumentServiceUploadTest {
 
         AgentKnowledgeDocumentService service = new AgentKnowledgeDocumentService(
                 ossClientProvider, "zwx-agent", jdbcTemplate, mock(VectorStore.class), new MyTokenTextSplitter(),
-                mock(DocumentParsingModule.class), mock(PlatformTransactionManager.class));
+                mock(DocumentParsingModule.class), mock(DoclingServeChunkingService.class), mock(PlatformTransactionManager.class));
 
         service.upload("default", "love", new MockMultipartFile("file", "sample.md", "text/markdown", "# Test\nKnowledge content".getBytes()), "admin");
 

@@ -280,6 +280,15 @@ public class AiController {
         return agentKnowledgeDocumentService.getDocument(actor.tenantId(), agentKey, documentId);
     }
 
+    @PostMapping("/agent-knowledge/documents/{documentId}/publish")
+    public AgentKnowledgeDocument publishAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
+                                                                 @RequestParam String agentKey) {
+        actor.requireAdmin();
+        agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+        agentKnowledgeDocumentService.publish(documentId);
+        return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+    }
+
     @PostMapping("/agent-knowledge/documents/{documentId}/reindex")
     public AgentKnowledgeDocument reindexAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
         actor.requireAdmin();

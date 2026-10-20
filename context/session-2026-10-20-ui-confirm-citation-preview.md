@@ -58,3 +58,10 @@
 - `src/main/resources/application-local.yml` 未读取、编辑、复制或加入 Git。
 - 后端由 launchctl 管理；本轮已重新打包并重启。
 - 本地 PostgreSQL 已应用 V11、V12、V13。
+
+## 追加：行内引用标记隐藏（2026-10-20）
+
+- 前端 `renderMarkdown` 与复制逻辑剥离 `[文件名#切片号]`，回答正文只保留自然语言。
+- 引用卡片仍从原始 `msg.content` 解析，因此下方“引用资料”不受影响。
+- 设计文档 `2026-10-20-answer-citation-preview.md` 与 README 已同步。
+- `npm run build` 通过；本轮改动尚未提交。

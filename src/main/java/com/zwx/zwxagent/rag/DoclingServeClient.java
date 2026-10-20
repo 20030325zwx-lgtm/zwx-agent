@@ -24,6 +24,7 @@ public class DoclingServeClient {
     private final Set<String> formats;
     private final boolean doOcr;
     private final boolean doTableStructure;
+    private final boolean includeConvertedDoc;
     private final String tableMode;
     private final RestClient restClient;
 
@@ -33,6 +34,7 @@ public class DoclingServeClient {
                               @Value("${app.document-parser.docling.formats:pdf,doc,docx,xls,xlsx,ppt,pptx}") String formats,
                               @Value("${app.document-parser.docling.do-ocr:true}") boolean doOcr,
                               @Value("${app.document-parser.docling.do-table-structure:true}") boolean doTableStructure,
+                              @Value("${app.document-parser.docling.include-converted-doc:true}") boolean includeConvertedDoc,
                               @Value("${app.document-parser.docling.table-mode:accurate}") String tableMode) {
         this.enabled = enabled;
         this.baseUrl = baseUrl == null ? "" : baseUrl.trim();
@@ -42,6 +44,7 @@ public class DoclingServeClient {
                 .collect(Collectors.toUnmodifiableSet());
         this.doOcr = doOcr;
         this.doTableStructure = doTableStructure;
+        this.includeConvertedDoc = includeConvertedDoc;
         this.tableMode = tableMode == null || tableMode.isBlank() ? "accurate" : tableMode;
         if (enabled && !this.baseUrl.isBlank()) {
             SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -76,6 +79,7 @@ public class DoclingServeClient {
             body.part("convert_do_ocr", String.valueOf(doOcr));
             body.part("convert_do_table_structure", String.valueOf(doTableStructure));
             body.part("convert_table_mode", tableMode);
+            body.part("include_converted_doc", String.valueOf(includeConvertedDoc));
             DoclingChunkResponse response = restClient.post()
                     .uri("/v1/chunk/hybrid/file")
                     .contentType(MediaType.MULTIPART_FORM_DATA)

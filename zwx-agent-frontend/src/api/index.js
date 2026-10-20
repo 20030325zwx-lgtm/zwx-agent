@@ -168,6 +168,7 @@ export const uploadAgentKnowledgeDocument = (agentKey, file) => {
   formData.append('file', file)
   return request.post('/ai/agent-knowledge/documents', formData).then(response => response.data)
 }
+export const publishAgentKnowledgeDocument = (documentId, agentKey) => request.post(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}/publish`, null, { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeChunk = (chunkId, agentKey) => request.get(`/ai/agent-knowledge/chunks/${encodeURIComponent(chunkId)}`, { params: { agentKey } }).then(response => response.data)
 export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)

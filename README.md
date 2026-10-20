@@ -18,7 +18,7 @@ ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 应用项目�
 - **跨重启续跑**：每次超级智能体执行写入 `agent_run` 检查点（plan、任务结果、质检状态、部分回答）；服务崩溃或重启后，可从最近完成节点继续，而不是从 planner 重做。未完成的助手消息以 `INTERRUPTED` 保留，前端提供“继续生成”。
 - **SSE 断线重连**：事件带 `id`，连接断开后前端带 `Last-Event-ID` 重连，服务端补发缺失事件；客户端断开后保留宽限期继续执行，避免弱网导致任务白跑。
 - **工具调用幂等**：`agent_tool_call` 账本记录每次工具调用的参数哈希、状态和结果；恢复时复用成功结果，结果未知的副作用调用会被阻止重放。
-- **引用切片预览**：回答中的 `[文件名#切片号]` 会在消息下方生成“引用资料”卡片，点击可预览该切片的完整原文。
+- **引用切片预览**：回答正文不显示 `[文件名#切片号]` 行内标记，消息下方统一生成“引用资料”卡片，点击可预览该切片的完整原文。
 - **应用内确认弹窗**：删除会话和 MCP 服务使用统一的应用内确认弹窗，支持 Esc 取消、Enter 确认和移动端布局。
 - **只读 SQL 工具**：智能体可查询本应用数据库（黑名单保护 `app_user` 等敏感表），或按用户提供的连接信息查询外部 PostgreSQL/MySQL 数据库；仅允许单条 SELECT，带表白名单、行数与超时限制（`app.tools.db-query-enabled`、`app.tools.db-query-external-enabled`，默认关闭）。
 - 情感分析大师：提供针对情感问题的对话引导、关系分析与建议。
@@ -241,13 +241,14 @@ GET  /api/ai/love_app/knowledge/index/jobs/{jobId}
 
 ### 租户私有资料与旅游规划专家
 
-管理端 `/knowledge-admin` 的“上传资料”入口只接受 `.md` 与 `.txt`。上传对象存入 `knowledge/{tenantId}/{agentKey}/...`，文档任务记录在 `agent_knowledge_document`，切片带有 `tenantId` 和 `agentKey` 元数据并写入 `agent_knowledge_vector`。问答检索使用二者的过滤条件，因此情感分析大师和旅游规划专家互不可见，两个租户之间也不会互相召回。
+管理端 `/knowledge-admin` 的“上传资料”入口支持 `.md`、`.txt`、PDF、Word、Excel、PPT。`READY` 文档可在顶部点击“发布待发布版本”；已 `ACTIVE` 文档重建索引后会保持生效状态。上传对象存入 `knowledge/{tenantId}/{agentKey}/...`，文档任务记录在 `agent_knowledge_document`，切片带有 `tenantId` 和 `agentKey` 元数据并写入 `agent_knowledge_vector`。问答检索使用二者的过滤条件，因此情感分析大师和旅游规划专家互不可见，两个租户之间也不会互相召回。
 
 ```text
 POST /api/ai/agent-knowledge/documents   # multipart: agentKey=love|travel, file
 GET  /api/ai/agent-knowledge/documents?agentKey=love|travel
 GET  /api/ai/travel-planner/chat/sse?conversationId=...&message=...
 GET  /api/ai/agent-knowledge/chunks/{chunkId}?agentKey=super   # 回答引用切片预览
+POST /api/ai/agent-knowledge/documents/{documentId}/publish?agentKey=super  # 发布待发布版本
 ```
 
 租户身份从 JWT 派生，旧版 `X-Tenant-Id` 请求头与 `tenantId` 查询参数已废弃。
@@ -269,6 +270,7 @@ docker compose up -d --build
 - 模型缓存：Docker 卷 `docling-cache`；首次 PDF/Word 转换会下载布局/表格模型。
 - 端口只绑定 `127.0.0.1`，不要直接暴露公网。
 - 后端默认启用 `app.document-parser.docling.enabled=true`，不可用时可通过 `fallback-to-local=true` 回退。
+- 当前项目内预处理会补充 Docling chunk 默认丢弃的页眉/页脚：普通文档生成“文档头部信息”chunk，简历生成“基本信息”chunk，并附加 `resumeSection` 分类；联系方式、姓名等信息不会再被切丢。
 
 后端已接入 Docling Serve：Markdown/TXT 继续本地结构切分；PDF/DOCX/PPTX/XLSX 等调用 `/v1/chunk/hybrid/file`，失败时按配置回退到本地解析。配置项在 `app.document-parser.docling.*`，详细设计见 [接入设计](./design/2026-10-20-docling-serve-integration.md) 和 [部署设计](./design/2026-10-20-docling-serve-deployment.md)。
 

@@ -18,6 +18,7 @@
             </select>
           </label>
           <input ref="knowledgeFileInput" class="knowledge-file-input" type="file" accept=".md,.txt,.pdf,text/plain,text/markdown,application/pdf" @change="uploadPrivateDocument" />
+          <button v-if="canPublish" type="button" class="publish-button" :disabled="publishing" @click="publishSelected">{{ publishing ? '发布中...' : '发布待发布版本' }}</button>
           <button type="button" class="upload-button" :disabled="uploading" @click="knowledgeFileInput?.click()"><Plus :size="15" />{{ uploading ? '上传中...' : '上传资料' }}</button>
           <AgentSettingsMenu :agent-key="agentKey" default-theme="rose" />
         </div>
@@ -116,7 +117,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import { ArrowLeft, BookOpen, FileText, FileWarning, Layers, Plus, Sparkles } from 'lucide-vue-next'
-import { getAgentKnowledgeDocument, listAgentKnowledgeDocuments, uploadAgentKnowledgeDocument } from '../api'
+import { getAgentKnowledgeDocument, listAgentKnowledgeDocuments, publishAgentKnowledgeDocument, uploadAgentKnowledgeDocument } from '../api'
 import { KNOWLEDGE_AGENTS, getAgent } from '../config/agents'
 import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
 
@@ -135,9 +136,12 @@ const currentAgent = computed(() => getAgent(agentKey.value))
 const privateDocuments = ref([])
 const loadingPrivateDocuments = ref(false)
 const uploading = ref(false)
+const publishing = ref(false)
 const knowledgeFileInput = ref(null)
 const documentQuery = ref('')
 const chunkPanelWidth = ref(380)
+const selectedDocument = computed(() => privateDocuments.value.find(document => document.id === selectedDocumentId.value))
+const canPublish = computed(() => selectedDocument.value?.lifecycleStatus === 'READY')
 let removeResizeListeners = () => {}
 let privateRefreshTimer = null
 
@@ -168,6 +172,21 @@ const loadPrivateDocuments = async () => {
     console.error(requestError)
   } finally {
     loadingPrivateDocuments.value = false
+  }
+}
+const publishSelected = async () => {
+  const document = selectedDocument.value
+  if (!document || document.lifecycleStatus !== 'READY' || publishing.value) return
+  publishing.value = true
+  try {
+    await publishAgentKnowledgeDocument(document.id, agentKey.value)
+    await loadPrivateDocuments()
+    await selectDocument(document.id)
+  } catch (requestError) {
+    error.value = '发布文档失败，请检查文档状态后重试。'
+    console.error(requestError)
+  } finally {
+    publishing.value = false
   }
 }
 const uploadPrivateDocument = async event => {
@@ -314,6 +333,19 @@ onBeforeUnmount(() => {
   font-weight: 650;
   box-shadow: 0 4px 10px var(--zwx-primary-ring);
 }
+
+.publish-button {
+  border: 1px solid rgba(255, 149, 0, 0.32);
+  border-radius: 9px;
+  padding: 8px 12px;
+  background: #fff7e8;
+  color: #a35a00;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.publish-button:hover:not(:disabled) { background: #ffefd1; }
+.publish-button:disabled { opacity: 0.6; cursor: default; }
 
 .upload-button:hover:not(:disabled) { filter: brightness(1.06); }
 .upload-button:active:not(:disabled) { transform: scale(0.98); }

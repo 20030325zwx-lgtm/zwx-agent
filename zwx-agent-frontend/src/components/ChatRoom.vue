@@ -240,17 +240,20 @@ const citedChunks = message => {
   let match
   while ((match = citationPattern.exec(message.content))) {
     const filename = match[1].trim()
+    const normalizedFilename = filename.toLowerCase() === 'null' ? '' : filename
     const chunkIndex = Number(match[2])
-    const key = `${filename}#${chunkIndex}`
+    const key = `${normalizedFilename || 'unknown'}#${chunkIndex}`
     if (seen.has(key)) continue
     seen.add(key)
     const matches = message.ragTrace.candidates.filter(candidate =>
       Number(candidate.chunkIndex) === chunkIndex
-      && (candidate.filename === filename || String(candidate.filename || '').endsWith(filename)))
+      && (!normalizedFilename
+        || candidate.filename === normalizedFilename
+        || String(candidate.filename || '').endsWith(normalizedFilename)))
     const candidate = matches.find(item => item.selected) || matches[0]
     result.push({
       key,
-      filename: candidate?.filename || filename,
+      filename: candidate?.filename || normalizedFilename || '未知文档',
       chunkIndex,
       chunkId: candidate?.documentId || null,
       excerpt: candidate?.excerpt || ''
@@ -292,7 +295,12 @@ const closeCitation = () => {
 }
 const handleCitationKeydown = event => { if (event.key === 'Escape') closeCitation() }
 
-const renderMarkdown = content => DOMPurify.sanitize(marked.parse(content || '', {
+const stripInlineCitations = content => (content || '')
+  .replace(/\[([^\[\]\n]+?)#(\d+)\]/g, '')
+  .replace(/[ \t]+(?=[。，；：！？、.,;:!?])/g, '')
+  .replace(/[ \t]{2,}/g, ' ')
+
+const renderMarkdown = content => DOMPurify.sanitize(marked.parse(stripInlineCitations(content), {
   breaks: true,
   gfm: true
 }))
@@ -312,7 +320,7 @@ const openActivity = (activity, message) => {
 }
 const activitySummary = activities => activities.at(-1)?.label || `已完成 ${activities.length} 项操作`
 const copyMessage = async content => {
-  try { await navigator.clipboard.writeText(content || '') }
+  try { await navigator.clipboard.writeText(stripInlineCitations(content)) }
   catch (error) { console.error('Copy message failed:', error) }
 }
 const editMessage = (content, index) => {

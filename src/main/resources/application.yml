@@ -127,6 +127,10 @@ app:
       formats: ${APP_DOCUMENT_PARSER_DOCLING_FORMATS:pdf,doc,docx,xls,xlsx,ppt,pptx}
       do-ocr: ${APP_DOCUMENT_PARSER_DOCLING_DO_OCR:true}
       do-table-structure: ${APP_DOCUMENT_PARSER_DOCLING_DO_TABLE_STRUCTURE:true}
+      include-converted-doc: ${APP_DOCUMENT_PARSER_DOCLING_INCLUDE_CONVERTED_DOC:true}
+      furniture-chunk-enabled: ${APP_DOCUMENT_PARSER_DOCLING_FURNITURE_CHUNK_ENABLED:true}
+      furniture-max-lines: ${APP_DOCUMENT_PARSER_DOCLING_FURNITURE_MAX_LINES:10}
+      furniture-max-chars: ${APP_DOCUMENT_PARSER_DOCLING_FURNITURE_MAX_CHARS:1000}
       table-mode: ${APP_DOCUMENT_PARSER_DOCLING_TABLE_MODE:accurate}
 # springdoc-openapi config
 springdoc:

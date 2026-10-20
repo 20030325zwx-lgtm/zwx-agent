@@ -176,9 +176,10 @@ public class AgentKnowledgeDocumentService {
             if (!existingChunkIds.isEmpty()) vectorStore.delete(existingChunkIds);
             for (int start = 0; start < chunks.size(); start += BATCH_SIZE) vectorStore.add(chunks.subList(start, Math.min(start + BATCH_SIZE, chunks.size())));
             jdbcTemplate.update("""
-                    UPDATE agent_knowledge_document SET status = 'READY', lifecycle_status = 'READY',
+                    UPDATE agent_knowledge_document SET status = 'READY',
+                        lifecycle_status = CASE WHEN ? = 'INDEXING' THEN 'READY' ELSE ? END,
                         chunk_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?
-                    """, chunks.size(), documentId);
+                    """, originalLifecycle, originalLifecycle, chunks.size(), documentId);
         } catch (Exception exception) {
             // 新版本索引失败标记 FAILED；已发布版本（ACTIVE/ARCHIVED）重建索引失败保持原状态，避免误下线
             jdbcTemplate.update("""
@@ -347,6 +348,7 @@ public class AgentKnowledgeDocumentService {
     private Document toScopedChunk(Document document, StoredDocument stored, int chunkIndex) {
         Map<String, Object> metadata = new HashMap<>(document.getMetadata());
         metadata.put("documentId", stored.documentId());
+        metadata.putIfAbsent("filename", stored.filename());
         metadata.put("tenantId", stored.tenantId());
         metadata.put("agentKey", stored.agentKey());
         metadata.put("logicalKey", stored.logicalKey());

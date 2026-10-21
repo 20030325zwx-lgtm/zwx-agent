@@ -11,7 +11,7 @@ temp/*
 HELP.md
 target/
 !.mvn/wrapper/maven-wrapper.jar
-!zwx-image-search-mcp-server/.env.example
+!services/image-search-mcp/.env.example
 !**/src/main/**/target/
 !**/src/test/**/target/
 

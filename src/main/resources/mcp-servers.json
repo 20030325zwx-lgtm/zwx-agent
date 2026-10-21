@@ -17,7 +17,7 @@
         "-Dspring.main.web-application-type=none",
         "-Dlogging.pattern.console=",
         "-jar",
-        "zwx-image-search-mcp-server/target/zwx-image-search-mcp-server-0.0.1-SNAPSHOT.jar"
+        "services/image-search-mcp/target/zwx-image-search-mcp-server-0.0.1-SNAPSHOT.jar"
       ],
       "env": {}
     }

@@ -80,7 +80,7 @@ java -jar target/zwx-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ### 5. 启动前端
 
 ```bash
-cd zwx-agent-frontend
+cd frontend
 npm install
 npm run dev -- --host 127.0.0.1
 ```
@@ -94,7 +94,7 @@ npm run dev -- --host 127.0.0.1
 ### 1. 构建安装包
 
 ```bash
-VERSION=0.0.1 TARGET_PLATFORM=linux/amd64 sh scripts/package.sh
+VERSION=0.0.1 TARGET_PLATFORM=linux/amd64 sh deploy/scripts/package.sh
 ```
 
 产物位于 `release/zwx-agent-0.0.1-linux-amd64.tar.gz`。
@@ -127,7 +127,7 @@ cp globe.conf.example /home/globe.conf
 ### Docling Serve（PDF / Office 解析）
 
 ```bash
-cd docker-compose/docling-serve
+cd deploy/docker-compose/docling-serve
 ./build-runtime.sh
 docker compose up -d --build
 ```
@@ -137,7 +137,7 @@ docker compose up -d --build
 ### 图片搜索 / 理解 MCP
 
 ```bash
-cd zwx-image-search-mcp-server
+cd services/image-search-mcp
 cp .env.example .env
 # 编辑 .env，填写 DASHSCOPE_API_KEY
 docker compose up -d --build
@@ -157,7 +157,7 @@ docker compose up -d --build
 
 ## 文档
 
-- 架构与设计：[design/README.md](design/README.md)
-- 功能进度：[doc/ROADMAP.md](doc/ROADMAP.md)
-- 会话交接：[context/README.md](context/README.md)
+- 架构与设计：[docs/design/README.md](docs/design/README.md)
+- 功能进度：[docs/ROADMAP.md](docs/ROADMAP.md)
+- 会话交接：[docs/context/README.md](docs/context/README.md)
 - 原项目：[liyupi/yu-ai-agent](https://github.com/liyupi/yu-ai-agent)

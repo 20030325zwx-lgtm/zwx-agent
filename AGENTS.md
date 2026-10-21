@@ -2,12 +2,12 @@
 
 ## Session Context Protocol
 
-- `context/` 目录保存跨会话的工作上下文（会话交接摘要、当前状态快照）；稳定的架构与实施方案在 `design/`，两者不要混放。
-- **设计文档命名规范**：`design/` 下新建设计文档，文件名必须为 `YYYY-MM-DD-<设计主题>.md`（日期 + 主题），例如 `2026-09-08-memory-skills-workspace.md`。早期 01~08 编号文档为历史档案保留原名。
-- **会话开始时**：先读取 `context/` 下最新的一份 `session-*.md` 摘要，恢复前置状态（已改了什么、验证到哪、遗留什么）后再动代码。
-- **完成一批重要改动或会话收尾时**：在 `context/` 写入或更新一份压缩摘要，命名 `session-YYYY-MM-DD-<主题>.md`，必须包含：改动内容、验证结果、遗留事项、环境注意事项。
+- `docs/context/` 目录保存跨会话的工作上下文（会话交接摘要、当前状态快照）；稳定的架构与实施方案在 `docs/design/`，两者不要混放。
+- **设计文档命名规范**：`docs/design/` 下新建设计文档，文件名必须为 `YYYY-MM-DD-<设计主题>.md`（日期 + 主题），例如 `2026-09-08-memory-skills-workspace.md`。早期 01~08 编号文档为历史档案保留原名。
+- **会话开始时**：先读取 `docs/context/` 下最新的一份 `session-*.md` 摘要，恢复前置状态（已改了什么、验证到哪、遗留什么）后再动代码。
+- **完成一批重要改动或会话收尾时**：在 `docs/context/` 写入或更新一份压缩摘要，命名 `session-YYYY-MM-DD-<主题>.md`，必须包含：改动内容、验证结果、遗留事项、环境注意事项。
 - 旧摘要不删除；被取代时在文件头部标注「已被 `<新文件>` 取代」。
-- 交接期间若发现 `context/` 与实际代码不符，以源码为准，并在摘要中修正差异。
+- 交接期间若发现 `docs/context/` 与实际代码不符，以源码为准，并在摘要中修正差异。
 
 ## Non-Negotiable: Preserve Local Configuration
 
@@ -33,7 +33,7 @@
    ```sh
    java -jar target/zwx-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
    ```
-4. Start the frontend from `zwx-agent-frontend` with:
+4. Start the frontend from `frontend` with:
    ```sh
    npm run dev -- --host 127.0.0.1
    ```
@@ -47,7 +47,7 @@ When a shell-launched background process does not survive after the terminal com
 
 ```sh
 launchctl submit -l com.zwx.yu-ai-agent.backend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/yu-ai-agent && exec /usr/bin/java -jar target/zwx-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local > /tmp/yu-ai-agent-backend.log 2>&1'
-launchctl submit -l com.zwx.yu-ai-agent.frontend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/yu-ai-agent/zwx-agent-frontend && exec /usr/local/bin/node node_modules/vite/bin/vite.js --host 127.0.0.1 > /tmp/yu-ai-agent-frontend.log 2>&1'
+launchctl submit -l com.zwx.yu-ai-agent.frontend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/yu-ai-agent/frontend && exec /usr/local/bin/node node_modules/vite/bin/vite.js --host 127.0.0.1 > /tmp/yu-ai-agent-frontend.log 2>&1'
 ```
 
 Restart or stop them with:

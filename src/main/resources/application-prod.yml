@@ -2,7 +2,7 @@
 #
 # 服务器密钥配置约定：启动时程序会读取 /home/globe.conf（properties 格式）并以最高优先级注入，
 # 用户在服务器上自行维护 DashScope API Key、JWT 签名密钥等，无需打进镜像。
-# 详见 docker-compose/globe.conf.example 与 README「Docker 部署与离线安装包」。
+# 详见 deploy/docker-compose/globe.conf.example 与 README「Docker 部署与离线安装包」。
 #
 # 仅关闭生产环境的 API 文档与调试日志；业务密钥不在此文件维护。
 springdoc:

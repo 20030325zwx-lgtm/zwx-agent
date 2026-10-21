@@ -31,8 +31,7 @@ public class ApiExceptionHandler {
                 .body(Map.of("error", exception.getMessage() == null ? "Invalid request" : exception.getMessage()));
     }
 
-    @ExceptionHandler({com.zwx.zwxagent.conversation.LoveConversationService.DuplicateRequestException.class,
-            com.zwx.zwxagent.conversation.AgentConversationService.DuplicateRequestException.class,
+    @ExceptionHandler({com.zwx.zwxagent.conversation.AgentConversationService.DuplicateRequestException.class,
             com.zwx.zwxagent.conversation.ConversationBusyException.class})
     public ResponseEntity<Map<String, String>> handleDuplicateRequest(Exception exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", exception.getMessage()));

@@ -52,15 +52,6 @@ const routes = [
     ]
   },
   {
-    path: '/love-master',
-    name: 'LoveMaster',
-    component: () => import('../views/LoveMaster.vue'),
-    meta: {
-      title: '情感分析大师 - ZWX Agent',
-      description: '情感分析大师协助分析关系与沟通问题，提供可追溯的知识库引用。'
-    }
-  },
-  {
     path: '/super-agent',
     name: 'SuperAgent',
     component: () => import('../views/SuperAgent.vue'),
@@ -69,13 +60,6 @@ const routes = [
       description: '超级智能体是 ZWX Agent 的通用任务协作助手。'
     }
   },
-  {
-    path: '/travel-planner',
-    name: 'TravelPlanner',
-    component: () => import('../views/TravelPlanner.vue'),
-    meta: { title: '旅游规划专家 - ZWX Agent', description: '旅游规划专家提供行程建议并按需查询实时信息。' }
-  },
-  { path: '/test-agent', name: 'TestAgent', component: () => import('../views/TestAgent.vue'), meta: { title: '功能测试助手 - ZWX Agent', description: '用于验证 ZWX Agent 对话与知识库功能的隔离测试空间。' } },
 ]
 
 const router = createRouter({

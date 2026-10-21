@@ -37,8 +37,8 @@ import { getSkillCatalog, saveSkillConfiguration } from '../api'
 import { AGENT_LIST } from '../config/agents'
 
 const route = useRoute()
-const configurableAgents = AGENT_LIST.filter(agent => ['love', 'travel', 'test'].includes(agent.key))
-const agentKey = ref(configurableAgents.some(agent => agent.key === route.query.agentKey) ? route.query.agentKey : 'love')
+const configurableAgents = AGENT_LIST
+const agentKey = ref(configurableAgents.some(agent => agent.key === route.query.agentKey) ? route.query.agentKey : 'super')
 const skills = ref([]); const loading = ref(true); const saving = ref(false); const saved = ref(false); const error = ref('')
 const load = async () => { loading.value = true; error.value = ''; saved.value = false; try { skills.value = await getSkillCatalog(agentKey.value) } catch (cause) { error.value = cause?.response?.data?.message || '暂时无法读取服务端配置，当前显示空列表。'; skills.value = [] } finally { loading.value = false } }
 const selectAgent = key => { agentKey.value = key; load() }

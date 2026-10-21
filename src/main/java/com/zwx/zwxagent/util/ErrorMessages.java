@@ -23,7 +23,6 @@ public final class ErrorMessages {
             return "模型响应超时，请稍后重试。已保留已生成内容。";
         }
         if (error instanceof com.zwx.zwxagent.conversation.ConversationBusyException
-                || error instanceof com.zwx.zwxagent.conversation.LoveConversationService.DuplicateRequestException
                 || error instanceof com.zwx.zwxagent.conversation.AgentConversationService.DuplicateRequestException) {
             return raw;
         }

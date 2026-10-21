@@ -1,45 +1,5 @@
 // kind 区分能力形态：qa = 单轮对话问答（专注对话/检索/生成）；agent = 真正的自主智能体（自主规划、调用工具、多步执行）
 const registry = {
-  love: {
-    key: 'love',
-    name: '情感分析大师',
-    kind: 'qa',
-    category: '情感关系',
-    path: '/love-master',
-    icon: '♡',
-    iconClass: 'emotion-icon',
-    description: '基于对话、图片与知识库，梳理关系信号并给出建议',
-    capabilities: { attachments: true, conversations: true, executionTrace: false, privateKnowledge: true },
-    chat: {
-      emptyTitle: '想从哪段关系开始分析？',
-      emptyDescription: '可以描述经历、粘贴聊天记录，或上传截图。',
-      inputPlaceholder: '描述你的困扰，或上传聊天截图...',
-      quickPrompts: ['帮我分析这段关系是否健康', '聊天总是冷场，该怎么改善？', '他/她的这句话是什么意思？']
-    }
-  },
-  travel: {
-    key: 'travel',
-    name: '旅游规划专家',
-    kind: 'qa',
-    category: '旅行规划',
-    path: '/travel-planner',
-    icon: '⌖',
-    iconClass: 'travel-icon',
-    description: '基于偏好、私有资料与联网搜索，生成可执行的旅行方案',
-    capabilities: { attachments: false, conversations: true, executionTrace: true, privateKnowledge: true },
-    chat: {
-      emptyTitle: '从一段旅行开始规划。',
-      emptyDescription: '告诉我出发地、目的地、日期、预算和偏好，我会结合你的资料与联网信息规划行程。',
-      inputPlaceholder: '例如：上海出发，国庆去云南 5 天游，预算 6000 元...',
-      quickPrompts: ['帮我规划一个周末短途旅行', '按预算做一份三日行程', '帮我比较两个旅行目的地']
-    }
-  },
-  test: {
-    key: 'test', name: '功能测试助手', kind: 'qa', category: '开发测试', path: '/test-agent', icon: '✓', iconClass: 'test-icon',
-    description: '隔离的对话、历史会话与私有知识库测试空间',
-    capabilities: { attachments: false, conversations: true, executionTrace: false, privateKnowledge: true },
-    chat: { emptyTitle: '开始验证一个功能。', emptyDescription: '此处的会话与资料均独立于其他智能体。', inputPlaceholder: '输入测试问题，验证流式回复、历史记录或知识库召回...', quickPrompts: ['验证流式输出是否正常', '测试私有知识库召回', '创建一条测试会话'] }
-  },
   super: {
     key: 'super',
     name: '超级智能体',
@@ -48,8 +8,8 @@ const registry = {
     path: '/super-agent',
     icon: '✦',
     iconClass: 'super-icon',
-    description: '真正的自主智能体：可规划任务、调用工具并多步执行',
-    capabilities: { attachments: false, conversations: false, executionTrace: false, privateKnowledge: true },
+    description: '统一入口：可规划任务、调用工具、联网检索、处理图片并多步执行',
+    capabilities: { attachments: true, conversations: false, executionTrace: false, privateKnowledge: true },
     chat: {
       emptyTitle: '从一个目标开始。',
       emptyDescription: '描述目标、约束或卡点，我会帮你理清下一步。',
@@ -62,4 +22,4 @@ const registry = {
 export const AGENTS = Object.freeze(registry)
 export const AGENT_LIST = Object.freeze(Object.values(registry))
 export const KNOWLEDGE_AGENTS = Object.freeze(AGENT_LIST.filter(agent => agent.capabilities.privateKnowledge))
-export const getAgent = key => AGENTS[key] || AGENTS.love
+export const getAgent = key => AGENTS[key] || AGENTS.super

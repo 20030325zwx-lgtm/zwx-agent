@@ -17,7 +17,7 @@
             </button>
           </nav>
           <span class="topbar-divider" aria-hidden="true"></span>
-          <AgentSettingsMenu agent-key="love" default-theme="blue" trigger-label="本机服务设置" />
+          <AgentSettingsMenu agent-key="super" default-theme="blue" trigger-label="本机服务设置" />
           <div ref="userMenuRoot" class="user-menu">
             <button class="user-trigger" type="button" :aria-expanded="userMenuOpen" aria-label="账号菜单" @click="userMenuOpen = !userMenuOpen">
               <span class="user-avatar">{{ userInitial }}</span>

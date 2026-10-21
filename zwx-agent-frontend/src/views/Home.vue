@@ -24,11 +24,11 @@
           </span>
         </span>
       </h1>
-      <p class="hero-sub">自主智能体规划任务、调用工具并多步执行；对话问答提供专注的深度沟通与资料检索。</p>
+      <p class="hero-sub">超级智能体统一规划任务、调用工具并多步执行；图片、知识库、联网检索与文件处理都在同一个工作区完成。</p>
 
       <label class="search-box">
         <svg class="search-glyph" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.75" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M13 13 L17.5 17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-        <input ref="searchInput" v-model="query" type="search" placeholder="搜索智能体，如「旅游」「超级智能体」..." />
+        <input ref="searchInput" v-model="query" type="search" placeholder="搜索智能体，如「超级智能体」..." />
         <kbd v-if="!query" class="search-shortcut">{{ shortcutLabel }}</kbd>
         <button v-if="query" class="search-clear" type="button" aria-label="清除搜索" @click="query = ''">×</button>
       </label>
@@ -36,68 +36,50 @@
       <div class="hero-meta">
         <span class="meta-pill meta-pill-count"><strong>{{ agents.length }}</strong>个智能体已就绪</span>
         <span class="meta-pill meta-pill-dot">支持多步任务执行</span>
-        <span class="meta-pill meta-pill-dot">私有知识库检索</span>
+        <span class="meta-pill meta-pill-dot">图片与知识库检索</span>
       </div>
     </section>
 
-    <!-- 目录 -->
-    <section class="catalog-shell" aria-label="智能体目录">
-      <section v-if="agentAgents.length" class="agent-section" aria-labelledby="agent-heading">
-        <div class="section-heading">
-          <div class="heading-copy"><span class="group-badge agent-badge">Agent</span><h2 id="agent-heading">自主智能体</h2></div>
-          <span class="heading-rule" aria-hidden="true"></span>
-          <span class="group-note">可自主规划任务、调用工具并多步执行 · {{ agentAgents.length }}</span>
-        </div>
-        <div class="featured-grid">
-          <button v-for="(agent, index) in agentAgents" :key="agent.name" type="button" class="agent-item featured"
-            :style="{ '--i': index }" @pointermove="trackSpotlight" @click="navigateTo(agent.path)">
-            <span class="featured-glow" :class="agent.iconClass" aria-hidden="true"></span>
-            <span class="agent-icon" :class="agent.iconClass" aria-hidden="true">{{ agent.icon }}</span>
-            <span class="agent-copy">
-              <span class="agent-title-row">
-                <strong>{{ agent.name }}</strong>
-                <em class="kind-tag kind-tag-agent">Agent</em>
-              </span>
-              <small>{{ agent.description }}</small>
-              <span class="featured-cta">开始任务<span aria-hidden="true">›</span></span>
-            </span>
-            <span v-if="agent.kind === 'agent'" class="featured-visual" aria-hidden="true">
-              <span class="flow-node"><i></i>规划</span>
-              <span class="flow-link"></span>
-              <span class="flow-node"><i></i>执行</span>
-              <span class="flow-link"></span>
-              <span class="flow-node"><i></i>验收</span>
-              <span class="flow-link"></span>
-              <span class="flow-node"><i></i>交付</span>
-            </span>
-            <span class="open-agent" aria-hidden="true"><ChevronRight :size="17" /></span>
-          </button>
-        </div>
-      </section>
-      <p v-else-if="query" class="empty-result">没有匹配的自主智能体</p>
+    <!-- 工作区入口：bento 式展示，避免传统列表 -->
+    <section class="launchpad-shell" aria-label="智能体工作区">
+      <div v-if="featuredAgent" class="launchpad">
+        <article class="launch-main" @pointermove="trackSpotlight">
+          <span class="launch-glow" aria-hidden="true"></span>
+          <header class="launch-top">
+            <span class="launch-badge"><Sparkles :size="12" />Agent</span>
+            <span class="launch-ready"><i aria-hidden="true"></i>已就绪</span>
+          </header>
+          <div class="launch-body">
+            <span class="launch-icon" :class="featuredAgent.iconClass" aria-hidden="true">{{ featuredAgent.icon }}</span>
+            <div class="launch-copy">
+              <h2>{{ featuredAgent.name }}</h2>
+              <p>{{ featuredAgent.description }}</p>
+            </div>
+          </div>
+          <div class="launch-flow" aria-hidden="true">
+            <span class="flow-node"><i></i>规划</span>
+            <span class="flow-link"></span>
+            <span class="flow-node"><i></i>执行</span>
+            <span class="flow-link"></span>
+            <span class="flow-node"><i></i>验收</span>
+            <span class="flow-link"></span>
+            <span class="flow-node"><i></i>交付</span>
+          </div>
+          <footer class="launch-footer">
+            <button class="launch-cta" type="button" @click="navigateTo(featuredAgent.path)">进入工作台<ArrowRight :size="16" /></button>
+            <span class="launch-hint">规划、执行、质检与交付在同一条链路完成</span>
+          </footer>
+        </article>
 
-      <section v-if="qaAgents.length" class="agent-section qa-section" aria-labelledby="qa-heading">
-        <div class="section-heading">
-          <div class="heading-copy"><span class="group-badge qa-badge">Chat</span><h2 id="qa-heading">对话问答</h2></div>
-          <span class="heading-rule" aria-hidden="true"></span>
-          <span class="group-note">专注单轮对话、资料检索与方案生成 · {{ qaAgents.length }}</span>
+        <div class="cap-grid">
+          <article v-for="(cap, index) in capabilities" :key="cap.title" class="cap-card" :class="cap.tone"
+            :style="{ '--i': index + 1 }" @pointermove="trackSpotlight">
+            <span class="cap-icon"><component :is="cap.icon" :size="18" /></span>
+            <strong>{{ cap.title }}</strong>
+            <span>{{ cap.desc }}</span>
+          </article>
         </div>
-        <div class="agent-grid">
-          <button v-for="(agent, index) in qaAgents" :key="agent.name" type="button" class="agent-item"
-            :style="{ '--i': index }" @pointermove="trackSpotlight" @click="navigateTo(agent.path)">
-            <span class="agent-icon" :class="agent.iconClass" aria-hidden="true">{{ agent.icon }}</span>
-            <span class="agent-copy">
-              <span class="agent-title-row">
-                <strong>{{ agent.name }}</strong>
-                <em class="kind-tag kind-tag-qa">{{ agent.category }}</em>
-              </span>
-              <small>{{ agent.description }}</small>
-            </span>
-            <span class="open-agent" aria-hidden="true"><ChevronRight :size="17" /></span>
-          </button>
-        </div>
-      </section>
-      <p v-else-if="query" class="empty-result">没有匹配的对话问答</p>
+      </div>
 
       <div v-if="query && !filteredAgents.length" class="empty-state">
         <span class="empty-glyph">⌕</span>
@@ -115,14 +97,14 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { ChevronRight } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Image as ImageIcon, Sparkles, Workflow, Wrench } from 'lucide-vue-next'
 import { AGENT_LIST } from '../config/agents'
 
 useHead({
   title: 'ZWX Agent - 智能体目录',
   meta: [
-    { name: 'description', content: 'ZWX Agent 智能体目录，区分自主智能体与对话问答能力。' },
-    { name: 'keywords', content: 'ZWX Agent,情感分析大师,超级智能体,旅游规划专家,AI 智能体' }
+    { name: 'description', content: 'ZWX Agent 超级智能体工作区，统一规划任务、调用工具并检索私有知识库。' },
+    { name: 'keywords', content: 'ZWX Agent,超级智能体,AI 工作区,知识库,MCP' }
   ]
 })
 
@@ -145,7 +127,13 @@ const filteredAgents = computed(() => {
   )
 })
 const agentAgents = computed(() => filteredAgents.value.filter(agent => agent.kind === 'agent'))
-const qaAgents = computed(() => filteredAgents.value.filter(agent => agent.kind !== 'agent'))
+const featuredAgent = computed(() => agentAgents.value[0] || null)
+const capabilities = [
+  { title: '多步规划', desc: '把目标拆成可执行步骤', icon: Workflow, tone: 'blue' },
+  { title: '工具调用', desc: '搜索、文件、数据库与终端', icon: Wrench, tone: 'mint' },
+  { title: '私有知识库', desc: '引用切片并可回看原文', icon: BookOpen, tone: 'amber' },
+  { title: '图片理解', desc: '截图与图片内容分析', icon: ImageIcon, tone: 'rose' }
+]
 
 const navigateTo = path => router.push(path)
 const clearFilter = () => {
@@ -481,6 +469,186 @@ onBeforeUnmount(() => {
   background: var(--sk-green);
 }
 
+/* ── 工作区入口（bento） ───────────────────────────── */
+.launchpad-shell { max-width: 1120px; margin: 18px auto 48px; padding: 0 24px; }
+
+.launchpad {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.9fr);
+  gap: 14px;
+}
+
+.launch-main {
+  position: relative;
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 24px;
+  padding: 24px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(232, 242, 255, 0.76));
+  box-shadow: 0 22px 60px rgba(53, 86, 145, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  isolation: isolate;
+}
+
+.launch-main::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 35%), rgba(0, 122, 255, 0.12), transparent 68%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.launch-main:hover::before { opacity: 1; }
+
+.launch-main::after {
+  content: "✦";
+  position: absolute;
+  right: 18px;
+  bottom: -54px;
+  z-index: 0;
+  color: rgba(0, 122, 255, 0.06);
+  font-size: 220px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.launch-glow {
+  position: absolute;
+  inset: -40% -20% auto 25%;
+  z-index: 0;
+  height: 360px;
+  pointer-events: none;
+  background:
+    radial-gradient(closest-side, rgba(62, 124, 255, 0.2), transparent 70%),
+    radial-gradient(closest-side at 70% 60%, rgba(72, 210, 184, 0.14), transparent 70%);
+  filter: blur(6px);
+  animation: launch-drift 12s ease-in-out infinite alternate;
+}
+
+@keyframes launch-drift {
+  from { transform: translate3d(-10px, -6px, 0) scale(1); }
+  to { transform: translate3d(16px, 12px, 0) scale(1.08); }
+}
+
+.launch-top, .launch-body, .launch-flow, .launch-footer { position: relative; z-index: 1; }
+
+.launch-top { display: flex; align-items: center; justify-content: space-between; }
+.launch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(0, 122, 255, 0.16);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--zwx-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.launch-ready { display: inline-flex; align-items: center; gap: 6px; color: #1f9d4d; font-size: 11px; font-weight: 600; }
+.launch-ready i { width: 6px; height: 6px; border-radius: 50%; background: #34c759; box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.12); animation: live-pulse 2.4s ease-in-out infinite; }
+
+.launch-body { display: flex; align-items: center; gap: 18px; margin-top: 26px; }
+
+.launch-icon {
+  display: grid;
+  width: 78px;
+  height: 78px;
+  flex: 0 0 78px;
+  place-items: center;
+  border-radius: 23px;
+  color: #fff;
+  font-size: 36px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 14px 26px rgba(0, 88, 210, 0.22);
+}
+
+.launch-copy h2 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.03em; }
+.launch-copy p { margin: 8px 0 0; max-width: 520px; color: var(--sk-label-2); font-size: 14px; line-height: 1.6; }
+
+.launch-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: auto; padding-top: 28px; }
+
+.launch-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; }
+
+.launch-cta {
+  display: inline-flex;
+  height: 42px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 17px;
+  background: linear-gradient(180deg, #2590ff, var(--zwx-primary));
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px var(--zwx-primary-ring);
+  transition: transform 0.18s ease, filter 0.18s ease;
+}
+
+.launch-cta:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.launch-cta:active { transform: translateY(0) scale(0.98); }
+.launch-hint { color: var(--sk-label-3); font-size: 11px; text-align: right; }
+
+.cap-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+.cap-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 10px 28px rgba(53, 86, 145, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.cap-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(180px circle at var(--mx, 50%) var(--my, 50%), var(--cap-soft, rgba(0, 122, 255, 0.14)), transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.cap-card:hover { transform: translateY(-3px); border-color: transparent; box-shadow: var(--sk-shadow-raised); }
+.cap-card:hover::before { opacity: 1; }
+
+.cap-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--cap-soft, var(--zwx-primary-soft));
+  color: var(--cap-color, var(--zwx-primary));
+}
+
+.cap-card strong { position: relative; z-index: 1; font-size: 13px; font-weight: 750; }
+.cap-card > span:last-child { position: relative; z-index: 1; color: var(--sk-label-3); font-size: 11px; line-height: 1.45; }
+
+.cap-card.blue { --cap-color: #007aff; --cap-soft: rgba(0, 122, 255, 0.12); }
+.cap-card.mint { --cap-color: #1f9d4d; --cap-soft: rgba(52, 199, 89, 0.13); }
+.cap-card.amber { --cap-color: #b56a00; --cap-soft: rgba(255, 159, 10, 0.15); }
+.cap-card.rose { --cap-color: #d6336c; --cap-soft: rgba(255, 45, 85, 0.12); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .launch-main, .cap-card { animation: card-rise 0.55s cubic-bezier(0.22, 0.8, 0.3, 1) both; }
+  .launch-main { animation-delay: 0.05s; }
+  .cap-card { animation-delay: calc(0.12s + var(--i, 0) * 60ms); }
+}
+
 /* ── 目录 ───────────────────────────────────────────── */
 .catalog-shell {
   position: relative;
@@ -813,12 +981,25 @@ onBeforeUnmount(() => {
   .word-stack em { transition: none; }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 980px) {
+  .launchpad { grid-template-columns: 1fr; }
+  .launch-main { min-height: 320px; }
   .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 
 @media (max-width: 720px) {
+  .launchpad-shell { padding: 0 14px; }
+  .launch-main { min-height: 0; padding: 18px; border-radius: 20px; }
+  .launch-body { align-items: flex-start; gap: 12px; margin-top: 18px; }
+  .launch-icon { width: 56px; height: 56px; flex-basis: 56px; border-radius: 17px; font-size: 27px; }
+  .launch-copy h2 { font-size: 23px; }
+  .launch-copy p { font-size: 13px; }
+  .launch-flow { padding-top: 20px; }
+  .launch-footer { flex-direction: column; align-items: stretch; gap: 10px; }
+  .launch-hint { text-align: left; }
+  .cap-grid { grid-template-columns: 1fr 1fr; }
+  .cap-card { padding: 14px; }
   .hero { padding-top: 54px; }
   .hero h1 { font-size: 36px; }
   .hero br { display: none; }

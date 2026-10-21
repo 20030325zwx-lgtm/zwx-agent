@@ -148,7 +148,7 @@
               <span class="chunk-index">切片 {{ chunk.chunkIndex }}</span>
               <span v-if="chunk.section" class="section-chip">第 {{ chunk.section }} 节</span>
             </span>
-            <p>{{ excerpt(chunk.content) }}</p>
+            <p>{{ chunk.id === selectedChunkId ? chunk.content : excerpt(chunk.content) }}</p>
           </button>
           <div v-if="detail && !detail.chunks.length" class="panel-empty">
             <Sparkles :size="22" />
@@ -282,7 +282,10 @@ const filteredDocuments = computed(() => {
   })
 })
 
-const excerpt = content => content.replace(/\s+/g, ' ').slice(0, 88)
+const excerpt = content => {
+  const normalized = content.replace(/\s+/g, ' ').trim()
+  return normalized.length > 88 ? `${normalized.slice(0, 88)}…` : normalized
+}
 const fileExtension = filename => (filename?.split('.').pop() || 'FILE').toUpperCase().slice(0, 4)
 const documentTone = filename => {
   const extension = (filename?.split('.').pop() || '').toLowerCase()
@@ -822,7 +825,7 @@ onBeforeUnmount(() => {
 .chunk-row p { margin: 0; color: var(--sk-label-2); font-size: 11.5px; line-height: 1.55; }
 .chunk-row:hover { background: var(--sk-fill); }
 .chunk-row.active { background: var(--zwx-primary-soft); }
-.chunk-row.active p { color: var(--sk-label); }
+.chunk-row.active p { max-height: 260px; overflow: auto; color: var(--sk-label); white-space: pre-wrap; overflow-wrap: anywhere; }
 .chunk-row.active .section-chip { background: var(--sk-surface); color: var(--zwx-primary); }
 
 /* ── 拖拽分隔条 ─────────────────────────────────────── */

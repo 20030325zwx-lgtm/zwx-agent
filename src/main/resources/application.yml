@@ -132,6 +132,8 @@ app:
       furniture-chunk-enabled: ${APP_DOCUMENT_PARSER_DOCLING_FURNITURE_CHUNK_ENABLED:true}
       furniture-max-lines: ${APP_DOCUMENT_PARSER_DOCLING_FURNITURE_MAX_LINES:10}
       furniture-max-chars: ${APP_DOCUMENT_PARSER_DOCLING_FURNITURE_MAX_CHARS:1000}
+      # 目录切片后处理：merge（合并清洗）、drop（丢弃）、keep（保留 Docling 原样）
+      toc-handling: ${APP_DOCUMENT_PARSER_DOCLING_TOC_HANDLING:merge}
       table-mode: ${APP_DOCUMENT_PARSER_DOCLING_TABLE_MODE:accurate}
 # springdoc-openapi config
 springdoc:

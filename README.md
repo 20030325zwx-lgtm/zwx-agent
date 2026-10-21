@@ -278,6 +278,7 @@ docker compose up -d --build
 - 端口只绑定 `127.0.0.1`，不要直接暴露公网。
 - 后端默认启用 `app.document-parser.docling.enabled=true`，不可用时可通过 `fallback-to-local=true` 回退。
 - 当前项目内预处理会补充 Docling chunk 默认丢弃的页眉/页脚：普通文档生成“文档头部信息”chunk，简历生成“基本信息”chunk，并附加 `resumeSection` 分类；联系方式、姓名等信息不会再被切丢。
+- 目录切片会被合并清洗：Docling 默认 256 token 上限会被目录省略号迅速触发，导致同一目录被切成多块。现在连续 TOC 合并为一个 `[目录]` 切片，并优先从 Docling 的 `table_cells` 重建条目（避免 triplet 文本丢失/错序），标记 `contentLayer=toc`；可通过 `app.document-parser.docling.toc-handling=merge|drop|keep` 调整。
 
 后端已接入 Docling Serve：Markdown/TXT 继续本地结构切分；PDF/DOCX/PPTX/XLSX 等调用 `/v1/chunk/hybrid/file`，失败时按配置回退到本地解析。解析后如果 0 个切片，会标记索引失败而不是发布空版本；知识库预览区提供“重新解析”按钮，可对失败或内容过期的文档重建向量。配置项在 `app.document-parser.docling.*`，详细设计见 [接入设计](./design/2026-10-20-docling-serve-integration.md) 和 [部署设计](./design/2026-10-20-docling-serve-deployment.md)。
 

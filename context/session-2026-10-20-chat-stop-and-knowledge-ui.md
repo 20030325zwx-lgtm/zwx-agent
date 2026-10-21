@@ -65,6 +65,24 @@
 - 前端 Vite 从 4.5 升级到 5.4，接入 `@file-viewer/vite-plugin` 的 `fileViewerRenderers({ copyAssets: true })`；dev/build 自动复制 18 类 Worker/WASM/字体资产到 `public/vendor`。
 - `public/vendor/` 与 `public/flyfish-viewer-assets.json` 已加入 `.gitignore`，属于生成产物。
 
+### 目录切片后处理（追加）
+
+- 设计文档：`design/2026-10-20-toc-chunk-postprocessing.md`。
+- 根因有两层：
+  - Docling HybridChunker 默认 tokenizer 上限 256，目录省略号被计为大量 token，导致每 3 行左右切一块并重复“目 次”标题；
+  - Docling 把目录误判为表格，triplet 文本会丢失/错序单元格，例如安全标准的“前言”条目在 chunk 文本中消失。
+- 实现：`DoclingServeChunkingService` 检测连续 TOC 切片并合并：
+  - 优先从 `json_content.tables[].data.table_cells` 按阅读顺序重建条目，再补充 TOC 切片引用的 `#/texts/*`（如“参考文献”）；
+  - 表格重建失败时回退到去省略号、去重复标题的 chunk 文本；
+  - 合并 `pageNumbers`；
+  - metadata 增加 `chunking=docling-toc`、`contentLayer=toc`、`originalChunkCount`、`tocSource`。
+- 新配置：`app.document-parser.docling.toc-handling=merge|drop|keep`，默认 `merge`。
+- 单元测试新增 TOC 合并、清洗与 `drop` 模式覆盖。
+- 三篇真实文档已重新解析：
+  - 生产安全 263 → 243 切片（21 个 TOC 碎片合并为 1）；
+  - 铝工业 109 → 106（4 → 1）；
+  - 员工手册 86 → 84（3 → 1）。
+
 ## 验证
 
 - 后端 `mvn -q -DskipTests package` 成功，launchctl 重启后 `/api/health` 返回 `ok`。
@@ -78,6 +96,8 @@
 - 后端、前端开发服务分别返回健康状态和 HTTP 200。
 - File Viewer 前端构建成功，插件复制 18/18 渲染器资产；dev 服务返回 `/flyfish-viewer-assets.json` 和 `/vendor/pdf/pdf.worker.mjs` 均为 200。
 - 后端 content 接口随 `mvn -DskipTests package` 编译通过，服务重启后 `/api/health` 正常。
+- `DoclingServeChunkingServiceTest` 通过；三篇真实文档重新解析后均为 `READY/ACTIVE`，铝工业目录切片为单个 `[目录]` 且 metadata 为 `contentLayer=toc`。
+- 安全标准目录已从 `table_cells` 重建为完整顺序条目（前言、1–7、附录 A–U、参考文献 40），不再出现 `| - |`、`III =` 等 triplet 串行噪声。
 
 ## 遗留事项
 

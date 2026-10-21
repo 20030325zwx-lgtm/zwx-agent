@@ -1,327 +1,58 @@
 # ZWX Agent
 
-ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 应用项目，当前产品收敛为单一入口的**超级智能体（Manus）**——由规划器拆解任务、多个子智能体并行执行、质检员验收返工、交付器统一汇总。项目同时具备 RAG、工具调用、MCP、图片理解、私有知识库与执行链路可视化能力。
+ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 工作区，当前以**超级智能体**为唯一入口：由规划器拆解任务、多个子智能体并行执行、质检员验收、交付器统一汇总，并在执行过程中调用工具、检索私有知识库、处理图片和文件。
 
-## 原项目与作者
+## 功能
 
-本项目基于 [程序员鱼皮（liyupi）的 yu-ai-agent](https://github.com/liyupi/yu-ai-agent) 二次开发。
-
-- 原作者：程序员鱼皮（liyupi）
-- 原项目仓库：[github.com/liyupi/yu-ai-agent](https://github.com/liyupi/yu-ai-agent)
-- 本仓库在保留原项目技术基础上进行了品牌、情感分析流程、图片多模态、会话持久化、PGVector RAG、引用与调用链可视化等改造。
-
-## 当前能力
-
-- 认证与多用户隔离：全部业务接口需要 JWT 登录（`POST /api/auth/register`、`POST /api/auth/login`）；会话、消息、图片与生成文件按用户强归属，管理接口需要 ADMIN 角色。
-- 多轮 AI 对话：默认使用阿里云 DashScope 的 `qwen-plus`。
-- **超级智能体（多智能体协作）**：基于 Spring AI Alibaba Graph 的图状态机——规划器拆解任务（≤4 个子任务）、按角色（调研员/撰写员/分析员/通用助理）并行执行、质检员验收（最多返工一轮）、交付器汇总；执行过程以结构化事件（阶段/角色/摘要）实时推送。
-- **跨重启续跑**：每次超级智能体执行写入 `agent_run` 检查点（plan、任务结果、质检状态、部分回答）；服务崩溃或重启后，可从最近完成节点继续，而不是从 planner 重做。未完成的助手消息以 `INTERRUPTED` 保留，前端提供“继续生成”。
-- **SSE 断线重连**：事件带 `id`，连接断开后前端带 `Last-Event-ID` 重连，服务端补发缺失事件；客户端断开后保留宽限期继续执行，避免弱网导致任务白跑。
-- **工具调用幂等**：`agent_tool_call` 账本记录每次工具调用的参数哈希、状态和结果；恢复时复用成功结果，结果未知的副作用调用会被阻止重放。
-- **引用切片预览**：回答正文不显示 `[文件名#切片号]` 行内标记，消息下方统一生成“引用资料”卡片，点击可预览该切片的完整原文。
-- **应用内确认弹窗**：删除会话和 MCP 服务使用统一的应用内确认弹窗，支持 Esc 取消、Enter 确认和移动端布局。
-- **只读 SQL 工具**：智能体可查询本应用数据库（黑名单保护 `app_user` 等敏感表），或按用户提供的连接信息查询外部 PostgreSQL/MySQL 数据库；仅允许单条 SELECT，带表白名单、行数与超时限制（`app.tools.db-query-enabled`、`app.tools.db-query-external-enabled`，默认关闭）。
-- 会话持久化：超级智能体的会话和消息保存在 PostgreSQL；模型请求采用最近 20 条消息作为上下文窗口，并对历史长度做 token 预算截断；流中断时部分回答以 INTERRUPTED 状态落库，不丢轮次。
-- 图片多模态：支持选择文件和粘贴图片，使用 `qwen-vl-plus` 理解图片内容。
-- 私有图片存储：图片上传至阿里云 OSS，后端生成短时签名读取地址供视觉模型访问；聊天历史通过受控接口读取图片（校验会话归属）。
-- 多租户私有知识库：管理端可为智能体上传 `.md`、`.txt` 等文档，同名文档幂等替换，支持删除；异步切片并写入 PGVector；检索始终限定为当前租户和智能体，且带超时降级与 degraded 标记。
-- 工具安全边界：LLM 工具运行在会话级沙箱目录内，路径穿越与内网地址（SSRF）被拦截；终端工具默认关闭，可用 `app.tools.terminal-enabled=true` 开启白名单版本。
-- 并发防护：会话级互斥（同一会话并发发送返回 409）；智能体执行、RAG 检索与图工作者使用专用线程池；客户端断开后进入可重连宽限期，超时仍无连接才停止主图与全部子智能体。
-- 扩展能力：MCP 动态注册（仅接受可解析的公网 HTTP(S) 地址）、Skill 提示词与工具授权、执行链路（run/event）持久化与前端可视化。
-- **分层模型配置**：`/model-settings` 页面支持个人覆盖、管理员系统默认与环境变量回退；支持 DashScope 和 OpenAI 兼容接口，密钥 AES-GCM 加密存储且只显示掩码。生效顺序为“个人 > 系统 > 环境变量”。
-
-## 功能路线图
-
-每个模块的已完成能力、待办项、进度和近期优先级见 [doc/ROADMAP.md](doc/ROADMAP.md)。该清单以仓库实现为准：未实现的能力会明确标注为待做，不会按设想计入完成度。
-
-项目内置 Skill 的授权、提示词触发和工具执行链路见 [doc/skills.md](doc/skills.md)。
+- **超级智能体**：Planner → Workers → Verifier → Aggregator 多智能体协作，支持多步任务与并行执行。
+- **流式对话与续跑**：SSE 实时输出；支持断线重连、事件回放和跨重启检查点续跑。
+- **工具调用**：联网搜索、网页抓取、文件读写、PDF 生成、只读 SQL、终端白名单等。
+- **私有知识库**：上传 Markdown、TXT、PDF、Word、Excel、PPT，自动解析切片并写入 PGVector；回答带引用和切片预览。
+- **图片理解**：图片上传到私有 OSS，通过视觉模型或图片 MCP 分析图片内容。
+- **模型配置**：`/model-settings` 支持个人配置、管理员系统默认和环境变量回退；兼容 DashScope 与 OpenAI 兼容接口，密钥加密存储。
+- **MCP 与 Skill**：动态注册 MCP SSE 服务；支持 Skill 配置和工具授权。
+- **安全与多用户**：JWT 登录、租户/用户数据隔离、工具沙箱、SSRF 与路径校验。
 
 ## 技术栈
 
-- Java 21、Spring Boot 3.4、Spring AI、Spring AI Alibaba Graph（多智能体图编排）
-- 阿里云 DashScope SDK、阿里云 OSS SDK
-- PostgreSQL、PGVector
-- Vue 3、Vite、Vue Router
+- 后端：Java 21、Spring Boot 3.4、Spring AI、Spring AI Alibaba Graph
+- 数据库：PostgreSQL + pgvector（Flyway 自动迁移）
+- 前端：Vue 3、Vite、Vue Router
+- 对象存储：阿里云 OSS 或 MinIO
+- 可选服务：Docling Serve（文档解析）、图片搜索/理解 MCP
 
-## 整体架构
+## 本地启动
 
-系统整体架构（架构图与分层说明）统一维护在 [design/agent-architecture.md](design/agent-architecture.md)，本文件只保留使用说明与功能介绍。
-
-## 超级智能体：多智能体协作
-
-详细设计见 [design/plans/06-multi-agent-graph.md](design/plans/06-multi-agent-graph.md)。
-
-```mermaid
-flowchart TD
-    S((start)) --> P["planner 规划器<br/>拆解子任务 → 指派角色"]
-    P --> W["workers 执行器<br/>并行运行多个子 agent"]
-    W --> V{"verifier 质检员"}
-    V -.->|pass / 达返工上限| A["aggregator 交付器<br/>汇总为最终回答"]
-    V -.->|revise + 反馈| W
-    A --> E((stop))
-```
-
-- **角色与工具白名单**：调研员（搜索/抓取/下载）、撰写员（读写文件/生成 PDF）、分析员（只读 SQL/白名单命令）、通用助理（全部工具含 MCP）；每个子智能体只能看到自己角色需要的工具。
-- **受控返工**：质检员对照用户请求验收，不合格携带反馈回流 workers，最多返工一轮，`maxIterations=16` 兜底防死循环。
-- **执行过程可视化**：后端推送结构化事件 `{"phase":"work","agent":"分析员","summary":"查询数据库 → 5"}`，前端按"角色 · 摘要"渲染；生成的文件自动提取为可预览附件。
-- **安全与停止**：子智能体复用沙箱与白名单；客户端断开后进入 SSE 重连宽限期，超时仍无连接才停止主图与全部子智能体；运行检查点持久化到 PostgreSQL `agent_run`，支持跨重启续跑。
-
-## 超级智能体执行恢复与接口
-
-```text
-GET /api/ai/manus/chat?conversationId=...&message=...
-GET /api/ai/manus/conversations/{conversationId}/runs/{runId}
-GET /api/ai/manus/conversations/{conversationId}/runs/{runId}/reconnect?lastEventId=...
-GET /api/ai/manus/conversations/{conversationId}/runs/{runId}/resume
-```
-
-- `runs/{runId}` 返回 run 状态、最近完成节点、下一节点、检查点规模和续跑次数。
-- `reconnect` 仅适用于仍在当前实例执行的 run；通过 `Last-Event-ID` 补发缺失事件。
-- `resume` 用于进程重启或宽限期结束后的检查点续跑。
-- 迁移 V11 增加 `agent_run`，V12 增加实例心跳与租约归属，V13 增加工具调用幂等账本。
-
-相关设计：
-- [跨重启续跑](./design/2026-10-20-super-agent-run-resume.md)
-- [SSE 断线重连](./design/2026-10-20-sse-reconnect-replay.md)
-- [工具调用幂等](./design/2026-10-20-tool-call-idempotency.md)
-- [回答引用切片预览](./design/2026-10-20-answer-citation-preview.md)
-- [会话删除应用内确认](./design/2026-10-20-in-app-confirm-dialog.md)
-
-## 历史架构：情感分析大师（已下线）
-
-> 2026-10-21 起产品收敛为超级智能体单入口；本节及以下情感分析大师相关内容仅作历史参考。
-
-### 系统总览
-
-```mermaid
-flowchart LR
-    User[用户] --> Browser[Vue 3 前端]
-
-    subgraph Frontend[zwx-agent-frontend]
-        Home[Home.vue<br/>智能体目录]
-        LoveMaster[LoveMaster.vue<br/>会话编排与 SSE]
-        ChatRoom[ChatRoom.vue<br/>消息、Thinking、图片与引用]
-        Sidebar[ConversationSidebar.vue<br/>会话列表]
-        KnowledgeAdmin[KnowledgeAdmin.vue<br/>知识库只读管理]
-        Api[api/index.js<br/>HTTP / EventSource]
-        Home --> LoveMaster
-        LoveMaster --> ChatRoom
-        LoveMaster --> Sidebar
-        LoveMaster --> Api
-        KnowledgeAdmin --> Api
-    end
-
-    Api -->|REST / SSE| Controller
-
-    subgraph Backend[Spring Boot: com.zwx.zwxagent]
-        Controller[AiController<br/>会话、图片、知识库、SSE]
-        Conversation[LoveConversationService<br/>会话与消息 JSONB 持久化]
-        LoveApp[LoveApp<br/>文本 / 图片对话编排]
-        Vision[LoveVisionChatService<br/>视觉摘要与原生增量流]
-        Rag[LoveRagService<br/>检索、引用与调用链]
-        Storage[LoveImageStorageService<br/>图片校验与签名 URL]
-        Admin[LoveKnowledgeAdminService<br/>文档与切片查询]
-        Controller --> Conversation
-        Controller --> LoveApp
-        Controller --> Admin
-        LoveApp --> Vision
-        LoveApp --> Rag
-        LoveApp --> Conversation
-        Controller --> Storage
-    end
-
-    Storage <-->|私有对象| Oss[阿里云 OSS / MinIO]
-    Vision <-->|多模态请求| Vl[DashScope qwen-vl-plus]
-    LoveApp <-->|文本对话| Chat[DashScope qwen-plus]
-    Rag <-->|向量检索| Pg
-    Conversation <-->|会话与消息| Pg
-    Admin <-->|文档与切片| Pg
-
-    subgraph Data[PostgreSQL + pgvector]
-        Pg[(love_conversation<br/>love_chat_message<br/>love_knowledge_vector)]
-    end
-
-    classDef client fill:#eaf3ff,stroke:#006fee,color:#111827;
-    classDef service fill:#ffffff,stroke:#334155,color:#111827;
-    classDef focal fill:#fff1f4,stroke:#d65070,color:#111827;
-    classDef store fill:#f4f4f5,stroke:#6b7280,color:#111827;
-    class Home,LoveMaster,ChatRoom,Sidebar,KnowledgeAdmin,Api client;
-    class Controller,Conversation,LoveApp,Vision,Rag,Storage,Admin service;
-    class LoveApp,Vision focal;
-    class Pg,Oss,Vl,Chat store;
-```
-
-### 对话与图片 RAG 流程
-
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant FE as LoveMaster + ChatRoom
-    participant API as AiController
-    participant App as LoveApp
-    participant OSS as 私有 OSS
-    participant VL as qwen-vl-plus
-    participant RAG as LoveRagService + pgvector
-    participant DB as PostgreSQL
-
-    U->>FE: 输入文本，可选图片
-    opt 图片上传
-        FE->>API: POST /love_app/images
-        API->>OSS: 校验并保存图片
-        OSS-->>API: objectKey
-        API-->>FE: objectKey
-    end
-    FE->>API: GET /love_app/chat/sse: message, chatId, imageKey[]
-
-    alt 纯文本对话
-        API->>RAG: 使用用户文本检索 Top K
-        RAG-->>API: references + rag_trace
-        API->>App: 流式文本对话
-        App-->>API: 文本 token
-        API-->>FE: SSE message token
-    else 图片对话
-        API-->>FE: SSE thinking: 正在理解图片内容
-        API->>App: prepareVisionChat
-        App->>DB: 保存用户消息与 image_object_keys
-        App->>OSS: 生成短时签名读取 URL
-        App->>VL: 第一次调用：结构化视觉摘要
-        VL-->>App: vision_analysis: 摘要、信号、不确定项、retrievalQuery
-        App->>DB: 保存 vision_analysis JSONB
-        App->>RAG: 使用 retrievalQuery 检索知识库
-        RAG-->>App: 资料片段 + references + rag_trace
-        API-->>FE: SSE vision + thinking
-        App->>VL: 第二次调用：图片 + 历史 + RAG 片段
-        VL-->>App: 原生增量 token
-        App-->>API: 流式 token
-        API-->>FE: SSE message token
-        App->>DB: 流结束后保存完整助手回答
-    end
-
-    API->>DB: 保存 knowledge_references + rag_trace
-    API-->>FE: SSE trace, references, [DONE]
-    FE->>API: 刷新会话与历史消息
-    API-->>FE: 恢复图片、visionAnalysis、引用与调用链
-```
-
-### 模块职责与数据契约
-
-| 层级 | 组件 / 类 | 作用 | 关键数据或事件 |
-| --- | --- | --- | --- |
-| 页面 | `Home.vue` | 展示并筛选智能体目录 | 路由跳转 |
-| 页面 | `LoveMaster.vue` | 管理会话、上传图片、监听 EventSource | `thinking`、`vision`、`trace`、`references`、`[DONE]` |
-| 组件 | `ChatRoom.vue` | 安全 Markdown、thinking 状态、图片预览、视觉摘要和引用展示 | `messages[]`、`visionAnalysis`、`ragTrace` |
-| 组件 | `ConversationSidebar.vue` | 创建、切换和删除历史会话 | `love_conversation` |
-| 页面 | `KnowledgeAdmin.vue` | 搜索文档、查看 pgvector 切片和原文 | 知识库管理接口 |
-| API | `AiController` | REST/SSE 边界；按是否带图片选择文本或视觉分支 | `/love_app/chat/sse` |
-| 编排 | `LoveApp` | 组合系统提示词、会话历史、RAG 和模型调用 | 最近 20 条消息 |
-| 视觉 | `LoveVisionChatService` | 生成结构化视觉摘要，并使用 `streamCall` 流式回答 | `LoveVisionAnalysis` |
-| RAG | `LoveRagService` | 对 `love_knowledge_vector` 检索、生成引用和 trace、限制片段长度 | `LoveRagResult`、`LoveRagTrace` |
-| 存储 | `LoveImageStorageService` | 校验图片、保存私有对象、生成短时签名 URL | `image_object_keys` |
-| 会话 | `LoveConversationService` | 读写会话和消息；恢复历史展示所需元数据 | `vision_analysis`、`knowledge_references`、`rag_trace` JSONB |
-| 数据 | PostgreSQL + pgvector | 保存会话、消息、向量文档及切片 | `love_conversation`、`love_chat_message`、`love_knowledge_vector` |
-
-#### 图片消息持久化字段
-
-`love_chat_message` 通过以下字段支持历史恢复与可追溯性：
-
-- `image_object_keys`：私有对象存储键，不保存公开 URL。
-- `vision_analysis`：裁剪后的视觉摘要、关系信号、不确定项和检索 query；不保存完整 OCR 原文。
-- `knowledge_references`：实际命中的知识文档及章节。
-- `rag_trace`：检索 query、Top K、相似度阈值、候选片段和调用决策。
-
-### 大规模知识库运行方式
-
-向量表初始化与文档索引已解耦：应用启动时仅创建/校验 `love_knowledge_vector`，不会扫描、切片或重建全部文档。内置知识文档需要通过任务接口索引：
-
-```text
-POST /api/ai/love_app/knowledge/index/built-in
-GET  /api/ai/love_app/knowledge/index/jobs/{jobId}
-```
-
-任务按 100 个切片分批写入，单线程执行并将状态保存为 `PENDING`、`INDEXING`、`READY` 或 `FAILED`。检索默认预算为 800ms；超时或异常时返回空 RAG 上下文并继续模型回答，调用链会记录降级原因。生产环境面对百万级切片时，应继续按知识库/租户拆分向量表或数据库分区，并在摄取服务之外部署专用队列与 worker。
-
-### 租户私有资料与旅游规划专家
-
-管理端 `/knowledge-admin` 的“上传资料”入口支持 `.md`、`.txt`、PDF、Word、Excel、PPT。文档按智能体维护分类：每个租户/智能体默认拥有“默认分类”，可自定义分类、上传到指定分类并移动已有文档；V14 迁移会把历史文档全部归入默认分类。`READY` 文档可在顶部点击“发布待发布版本”；已 `ACTIVE` 文档重建索引后会保持生效状态。上传对象存入 `knowledge/{tenantId}/{agentKey}/...`，文档任务记录在 `agent_knowledge_document`，切片带有 `tenantId` 和 `agentKey` 元数据并写入 `agent_knowledge_vector`。问答检索使用二者的过滤条件，因此情感分析大师和旅游规划专家互不可见，两个租户之间也不会互相召回。
-
-```text
-POST /api/ai/agent-knowledge/documents   # multipart: agentKey=love|travel, file, categoryId(可选)
-GET  /api/ai/agent-knowledge/documents?agentKey=love|travel
-GET  /api/ai/agent-knowledge/documents/{documentId}/content?agentKey=...  # 原始文件，供浏览器内预览
-GET  /api/ai/agent-knowledge/categories?agentKey=love|travel
-POST /api/ai/agent-knowledge/categories  # JSON: {agentKey, name}
-POST /api/ai/agent-knowledge/documents/{documentId}/category?agentKey=...&categoryId=...
-GET  /api/ai/travel-planner/chat/sse?conversationId=...&message=...
-GET  /api/ai/agent-knowledge/chunks/{chunkId}?agentKey=super   # 回答引用切片预览
-POST /api/ai/agent-knowledge/documents/{documentId}/publish?agentKey=super  # 发布待发布版本
-```
-
-知识库预览区使用 [File Viewer](https://github.com/flyfish-dev/file-viewer) 在浏览器内直接渲染原始文件：前端通过带 JWT 的 content 接口读取字节并构造 `File`，不公开对象存储地址，也不需要服务端转换。支持 PDF、DOC/DOCX、XLS/XLSX、PPT/PPTX 以及 Markdown/TXT；大型文档按需懒加载解析器。运行时 Worker/WASM/字体由 `@file-viewer/vite-plugin` 在 dev/build 时复制到 `public/vendor`，该目录为生成产物，不进入 Git。
-
-租户身份从 JWT 派生，旧版 `X-Tenant-Id` 请求头与 `tenantId` 查询参数已废弃。
-
-## 独立文档解析与切片服务（Docling Serve）
-
-PDF、Word、Excel 等非 Markdown 文档的解析和切片已拆为独立服务，当前 Spring Boot 进程不再承担重型解析/OCR。
-
-```bash
-cd docker-compose/docling-serve
-./build-runtime.sh          # 首次或升级时生成 linux/arm64 运行时
-docker compose up -d --build
-```
-
-- API：`http://127.0.0.1:5001`
-- Swagger：`http://127.0.0.1:5001/docs`
-- UI：`http://127.0.0.1:5001/ui`
-- 切片接口：`POST /v1/chunk/hybrid/file`（multipart，支持 PDF/DOCX/PPTX/XLSX 等）
-- 模型缓存：Docker 卷 `docling-cache`；首次 PDF/Word 转换会下载布局/表格模型。
-- 同步切片最长等待 `DOCLING_SERVE_MAX_SYNC_WAIT=600` 秒，后端读取超时默认 660 秒；扫描件 OCR 超过旧版 120 秒限制时不会再被提前中断。
-- 端口只绑定 `127.0.0.1`，不要直接暴露公网。
-- 后端默认启用 `app.document-parser.docling.enabled=true`，不可用时可通过 `fallback-to-local=true` 回退。
-- 当前项目内预处理会补充 Docling chunk 默认丢弃的页眉/页脚：普通文档生成“文档头部信息”chunk，简历生成“基本信息”chunk，并附加 `resumeSection` 分类；联系方式、姓名等信息不会再被切丢。
-- 目录切片会被合并清洗：Docling 默认 256 token 上限会被目录省略号迅速触发，导致同一目录被切成多块。现在连续 TOC 合并为一个 `[目录]` 切片，并优先从 Docling 的 `table_cells` 重建条目（避免 triplet 文本丢失/错序），标记 `contentLayer=toc`；可通过 `app.document-parser.docling.toc-handling=merge|drop|keep` 调整。
-
-后端已接入 Docling Serve：Markdown/TXT 继续本地结构切分；PDF/DOCX/PPTX/XLSX 等调用 `/v1/chunk/hybrid/file`，失败时按配置回退到本地解析。解析后如果 0 个切片，会标记索引失败而不是发布空版本；知识库预览区提供“重新解析”按钮，可对失败或内容过期的文档重建向量。配置项在 `app.document-parser.docling.*`，详细设计见 [接入设计](./design/2026-10-20-docling-serve-integration.md) 和 [部署设计](./design/2026-10-20-docling-serve-deployment.md)。
-
-## 目录说明
-
-```text
-.
-├── src/                              # Spring Boot 后端
-│   └── main/java/com/zwx/zwxagent/
-│       ├── agent/                    # 智能体核心（BaseAgent/ToolCallAgent 等）
-│       │   └── graph/                # 多智能体图编排（planner/workers/verifier/aggregator）
-│       ├── tools/                    # 内置工具（沙箱文件、搜索、只读 SQL、PDF 等）
-│       ├── rag/                      # PGVector 检索与知识文档
-│       ├── conversation/             # 会话持久化与互斥
-│       └── ...
-├── design/                           # 架构文档与实施方案（plans/01~06）
-├── context/                          # 跨会话工作交接摘要
-├── zwx-agent-frontend/               # Vue 3 前端
-└── zwx-image-search-mcp-server/      # 可选的图片搜索 MCP 服务
-```
-
-## 前置条件
+### 1. 前置条件
 
 - JDK 21
 - Maven 3.9+
 - Node.js 18+
-- PostgreSQL 及 PGVector（使用会话持久化和 RAG 时需要）
-- DashScope API Key
-- 阿里云 OSS Bucket 与具备对象读写权限的 RAM AccessKey（使用图片功能时需要）
+- Docker（用于 PostgreSQL，可选）
+- 阿里云 DashScope API Key
 
-## 本地配置
+### 2. 启动 PostgreSQL + pgvector
 
-默认配置位于 `src/main/resources/application.yml`，本地敏感配置放入同目录的 `application-local.yml`。后者已被 Git 忽略，禁止提交。
+```bash
+docker run -d --name zwx-agent-postgres \
+  -e POSTGRES_DB=zwx_agent \
+  -e POSTGRES_USER=zwx_agent \
+  -e POSTGRES_PASSWORD=zwx_agent_password \
+  -p 5432:5432 \
+  -v zwx-agent-pgdata:/var/lib/postgresql/data \
+  pgvector/pgvector:pg16
+```
 
-可按实际环境创建以下配置，所有值仅作占位示例：
+### 3. 配置本地参数
+
+在 `src/main/resources/` 下新建 `application-local.yml`（该文件已被 Git 忽略，不要提交）：
 
 ```yaml
 spring:
   datasource:
     url: jdbc:postgresql://127.0.0.1:5432/zwx_agent
-    username: YOUR_DB_USER
-    password: YOUR_DB_PASSWORD
+    username: zwx_agent
+    password: zwx_agent_password
   ai:
     dashscope:
       api-key: YOUR_DASHSCOPE_API_KEY
@@ -329,153 +60,24 @@ spring:
 app:
   oss:
     endpoint: https://oss-cn-hangzhou.aliyuncs.com
-    bucket: YOUR_OSS_BUCKET
-    access-key-id: YOUR_OSS_ACCESS_KEY_ID
-    access-key-secret: YOUR_OSS_ACCESS_KEY_SECRET
+    bucket: YOUR_BUCKET
+    access-key-id: YOUR_ACCESS_KEY_ID
+    access-key-secret: YOUR_ACCESS_KEY_SECRET
 ```
 
-图片功能使用的 RAM 权限至少应包括：
+OSS 仅在使用图片上传和知识库文档上传时需要；不配置也可以正常对话。
 
-- `oss:PutObject`
-- `oss:GetObject`
-- `oss:DeleteObject`
-- `oss:ListObjects`
-
-建议将权限限制在目标 Bucket 和图片对象前缀内。OSS Bucket 保持私有访问，应用会生成临时签名 URL，不需要将 Bucket 公开。
-
-## 启动后端
+### 4. 启动后端
 
 ```bash
-mvn spring-boot:run
+mvn -DskipTests package
+java -jar target/zwx-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
-后端默认地址为 `http://127.0.0.1:8123/api`，健康检查为：
+后端地址：`http://127.0.0.1:8123/api`  
+健康检查：`GET http://127.0.0.1:8123/api/health`
 
-```text
-GET http://127.0.0.1:8123/api/health
-```
-
-### 登录与角色
-
-除 `/health` 与 `/auth/**` 外，所有接口都需要 JWT：前端访问 `/login` 页面注册或登录。首次启动且用户表为空时会自动创建管理员 `admin`（默认密码 `admin123`），生产部署务必通过环境变量 `APP_SECURITY_ADMIN_PASSWORD` 覆盖，并通过 `JWT_SECRET` 设置稳定的签名密钥。知识库管理、Skill 启停保存、MCP 管理为 ADMIN 专属。
-
-会话、消息与生成文件按用户归属隔离：请求中的 `chatId`/`conversationId` 必须属于当前用户；旧版 `X-Tenant-Id` 请求头与 `tenantId` 查询参数已废弃，租户身份从 JWT 派生。SSE 使用 fetch 流式读取以携带认证头。
-
-接口文档地址：`http://127.0.0.1:8123/api/swagger-ui.html`（仅本地/开发 profile；生产 profile 已关闭）。
-
-## Docker 部署与离线安装包
-
-发布脚本参考模块化打包方式，但针对本项目采用了更轻的三服务部署：前端 Nginx、Spring Boot 后端和 PostgreSQL + pgvector。镜像是运行时镜像，服务器不会重新下载 Maven 或 NPM 依赖。
-
-### 标准发布流程（速查）
-
-1. **定版本**：发布版本号只通过 `VERSION` 环境变量传入（驱动镜像标签与安装包命名），`pom.xml` 保持 `0.0.1-SNAPSHOT` 不动——它与 `Dockerfile` 的 `JAR_FILE` 及桌面端 `prepare-backend.sh` 的 JAR 文件名联动，改动需三处同步，日常发版不建议动。
-2. **构建前自检**（构建机）：后端 `mvn -q -DskipTests package` 通过、前端 `cd zwx-agent-frontend && npm run build` 通过。
-3. **打包**：
-   ```bash
-   VERSION=0.0.2 TARGET_PLATFORM=linux/amd64 sh scripts/package.sh
-   # 产物：release/zwx-agent-0.0.2-linux-amd64.tar.gz（离线镜像 + 编排 + 安装脚本 + 配置模板）
-   ```
-4. **传输**：`scp release/zwx-agent-0.0.2-linux-amd64.tar.gz user@server:/tmp/`，并保留本仓库与该 tar.gz 归档，作为回滚依据。
-5. **服务器安装/升级**：解压 → 首次 `cp .env.example .env` 并填写 → `sudo ./install.sh` → 首次会自动创建 `/home/globe.conf`，填入 DashScope 密钥与 JWT 密钥后再执行一次 `sudo ./install.sh`。升级时跳过填写步骤，直接执行即可（`.env`、`globe.conf`、数据卷均保留）。
-6. **部署验证**：
-   ```bash
-   cd /opt/zwx-agent
-   docker compose --env-file .env ps            # 三个服务均为 Up/running
-   curl -fsS http://127.0.0.1:8080/api/health   # 返回 ok
-   docker compose --env-file .env logs -f backend   # 异常时看日志
-   ```
-   然后浏览器访问 `http://<服务器地址>:8080`，用管理员账号登录确认核心链路。
-7. **升级到新版本**：用新版本号重复步骤 3-6；Flyway 迁移自动执行，数据不丢。
-8. **回滚**：把上一版的 tar.gz 重新解压，在其中执行 `sudo ./install.sh` 即回到旧镜像（注意：若新版包含数据库迁移，回滚后可能需手工处理表结构，因此升级前建议先备份：
-   ```bash
-   cd /opt/zwx-agent
-   set -a; source .env; set +a
-   docker compose --env-file .env exec -T postgres \
-     pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > "backup-$(date +%F).sql"
-   ```）。
-
-以下小节是上述流程中各环节的详细说明。
-
-### 构建镜像与安装包
-
-构建机需要 Docker、JDK 21、Node.js 20+。默认构建 Linux x86_64 镜像，并将应用镜像和 pgvector 基础镜像一同导出，因此服务器可离线安装：
-
-```bash
-VERSION=0.0.1 TARGET_PLATFORM=linux/amd64 sh scripts/package.sh
-```
-
-产物为 `release/zwx-agent-<版本>-linux-amd64.tar.gz`，内容包括：
-
-- `images/`：后端、前端和 pgvector 离线镜像。
-- `docker-compose.yml`：前端、后端、PostgreSQL + pgvector 编排。
-- `.env.example`：全部服务器配置项的无密钥模板。
-- `globe.conf.example`：服务器外部配置模板（API Key、JWT 密钥等）。
-- `install.sh`、`stop.sh`：安装、升级与停止脚本。
-
-ARM 服务器可通过 `TARGET_PLATFORM=linux/arm64` 构建对应安装包。构建机需要具备该平台的 Docker 构建能力。
-
-### 在服务器安装或升级
-
-服务器只需 Docker Engine 与 Docker Compose v2。解压安装包，复制并填写环境文件后执行脚本：
-
-```bash
-tar -xzf zwx-agent-0.0.1-linux-amd64.tar.gz
-cd zwx-agent-0.0.1-linux-amd64
-cp .env.example .env
-chmod 600 .env
-# 编辑 .env，至少填写 POSTGRES_PASSWORD（DASHSCOPE_API_KEY 也可改填 /home/globe.conf）
-sudo ./install.sh
-# 首次执行会创建 /home/globe.conf，填写 DashScope 密钥与 JWT 密钥后重新执行
-```
-
-脚本默认部署到 `/opt/zwx-agent`；可以通过 `ZWX_AGENT_INSTALL_DIR=/srv/zwx-agent sudo -E ./install.sh` 改为其它固定目录。后续版本执行同一安装流程时会保留该目录已有的 `.env`、`temp/` 和 PostgreSQL 数据卷，只更新镜像与编排文件。
-
-服务默认访问地址为 `http://<服务器地址>:8080`，可以通过 `.env` 的 `ZWX_AGENT_PORT` 修改。停止服务：
-
-```bash
-cd /opt/zwx-agent
-sudo ./stop.sh
-```
-
-### 服务器外部配置 globe.conf
-
-生产环境的密钥类配置（DashScope API Key、JWT 签名密钥、OSS/MinIO、搜索 API 等）维护在服务器的 `/home/globe.conf` 中，程序启动时自动读取，与本地环境的 `application-local.yml` 完全分离，不会打进镜像：
-
-- 首次执行 `install.sh` 时，若 `/home/globe.conf` 不存在会自动从模板创建，填好后重新执行安装脚本即可。
-- 格式为标准 properties（`key=value`，`#` 注释），UTF-8；可配置项见 `globe.conf.example`。
-- 优先级最高：覆盖 `.env` 与 `application*.yml`。值为空或仍是 `YOUR_*`/`CHANGE_ME_*` 占位符时视为未配置，不会覆盖其它来源。
-- 路径可通过 `.env` 的 `APP_GLOBE_CONF` 修改，容器内只读挂载，权限为 600。
-- DashScope 密钥二选一：填 `.env` 的 `DASHSCOPE_API_KEY`，或填 `globe.conf` 的 `spring.ai.dashscope.api-key`，安装脚本两者都认。
-
-管理员账号首次启动自动写入数据库（默认 `admin`/`admin123`，控制台会打印提醒），密码以 BCrypt 哈希保存在 PostgreSQL 中，不依赖环境变量；生产环境应在首次登录后尽快修改。
-
-### 环境变量与持久化
-
-`POSTGRES_PASSWORD` 是安装脚本校验的必填项；`DASHSCOPE_API_KEY` 在 `.env` 与 `globe.conf` 至少填写一处（见上节）。`SEARCH_API_API_KEY` 用于联网搜索；阿里云 OSS 四项用于图片与私有知识文档上传。它们只存在于服务器 `.env` 与 `globe.conf`，不会写进 Git、镜像或安装包。
-
-应用临时目录由 `APP_TEMP_DIR` 控制，容器中固定为 `/app/temp`，映射到安装目录的 `temp/`。PDF 生成、下载和文件工具都使用该目录；应用未写入临时文件时目录保持为空。
-
-## macOS 桌面版
-
-桌面端位于 `zwx-agent-desktop/`，使用 Electron 封装同一份 Vue 前端，不复制后端逻辑。桌面版默认请求 `http://127.0.0.1:8123/api`；在任一智能体页面右上角设置菜单中可修改为部署服务器的完整 API 地址，例如 `https://agent.example.com/api`。地址保存在 macOS 应用数据目录，不会写入前端代码或安装包。
-
-构建 Apple Silicon（M 系列）安装包：
-
-```bash
-cd zwx-agent-desktop
-npm install
-npm run dist:mac
-```
-
-生成的安装包在 `zwx-agent-desktop/release/`：
-
-- `ZWX Agent-<版本>-arm64.dmg`：常规拖拽安装包。
-- `ZWX Agent-<版本>-arm64-mac.zip`：便携分发包。
-
-当前构建机未配置 Apple Developer ID，因此产物未公证。正式对外分发前，应配置 Developer ID Application 证书与 Apple notarization；否则首次打开时 macOS 可能需要在“隐私与安全性”中手动允许。
-
-## 启动前端
+### 5. 启动前端
 
 ```bash
 cd zwx-agent-frontend
@@ -483,49 +85,79 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-前端默认访问地址：`http://127.0.0.1:3000/`。超级智能体 `/super-agent`；工作区页面：模型 `/model-settings`、Skill `/skill-settings`、MCP `/mcp-settings`、知识库 `/knowledge-admin`。
+访问 `http://127.0.0.1:3000/`。首次启动且用户表为空时，会自动创建管理员 `admin`，默认密码 `admin123`。生产环境请通过 `APP_SECURITY_ADMIN_PASSWORD` 覆盖，并设置稳定的 `JWT_SECRET`。
 
-## 验证构建
+## Docker 部署
+
+推荐使用离线安装包部署到服务器。构建机需要 JDK 21、Maven、Node.js 和 Docker。
+
+### 1. 构建安装包
 
 ```bash
-# 后端
-mvn -DskipTests clean compile
-
-# MCP 子服务
-cd zwx-image-search-mcp-server
-mvn -DskipTests clean compile
-
-# 前端
-cd ../zwx-agent-frontend
-npm run build
+VERSION=0.0.1 TARGET_PLATFORM=linux/amd64 sh scripts/package.sh
 ```
 
-## 图片对话与图片 MCP
+产物位于 `release/zwx-agent-0.0.1-linux-amd64.tar.gz`。
 
-超级智能体使用图片理解链路：图片上传 → 私有 OSS → 15 分钟签名 URL → 视觉模型/MCP 描述。
+### 2. 服务器安装
 
-超级智能体使用图片 MCP 链路：
+```bash
+tar -xzf zwx-agent-0.0.1-linux-amd64.tar.gz
+cd zwx-agent-0.0.1-linux-amd64
 
-1. 前端上传图片，后端校验 JPEG/PNG/GIF/WebP 和大小限制。
-2. 图片保存到 `super/{conversationId}/...`，后端生成短时签名 URL。
-3. 主应用调用 MCP 工具 `describe_image(image_url, question)`；MCP 只接收 URL，不接收图片二进制。
-4. MCP 把签名 URL 交给 `qwen3-vl-plus`，返回摘要、相关文字、待确认项和 `retrieval_query`。
-5. 主应用用 `retrieval_query` 检索知识库，并把图片分析结果作为不可信资料加入上下文。
-6. 用户消息的图片对象键持久化到 `agent_chat_message.image_object_keys`，刷新或切换会话后会重新加载图片。
+cp .env.example .env
+# 编辑 .env，至少填写 POSTGRES_PASSWORD 和 DASHSCOPE_API_KEY
 
-图片 MCP 服务可独立 Docker 部署（代码仍在当前仓库）：
+cp globe.conf.example /home/globe.conf
+# 编辑 /home/globe.conf，填写 spring.ai.dashscope.api-key 和 app.security.jwt-secret
+
+./install.sh
+```
+
+启动后访问 `http://<服务器地址>:8080`。停止服务：
+
+```bash
+./stop.sh
+```
+
+服务器需要 Docker 和 Docker Compose v2。`install.sh` 会加载镜像、启动 PostgreSQL、后端与前端，并把外部配置挂载到容器。
+
+## 可选服务
+
+### Docling Serve（PDF / Office 解析）
+
+```bash
+cd docker-compose/docling-serve
+./build-runtime.sh
+docker compose up -d --build
+```
+
+默认地址 `http://127.0.0.1:5001`。未启动时后端会按配置回退到本地解析。
+
+### 图片搜索 / 理解 MCP
 
 ```bash
 cd zwx-image-search-mcp-server
 cp .env.example .env
-# 编辑 .env，填入 DASHSCOPE_API_KEY
+# 编辑 .env，填写 DASHSCOPE_API_KEY
 docker compose up -d --build
 ```
 
-默认只绑定 `127.0.0.1:8127`，健康检查 `GET /health`。在 MCP 管理中配置 `http://127.0.0.1:8127` 后会暴露 `describe_image`、`ocr_image` 和 `searchImage`；当前时间已改为主应用内置工具，不走 MCP。主应用与 MCP 都在 Docker 时，可使用 `http://host.docker.internal:8127` 或同一 Docker network 的容器名。
+默认地址 `http://127.0.0.1:8127`，只绑定本机。
 
-## 安全说明
+## 常用地址
 
-- 不要在 `application.yml`、README、提交记录或前端代码中写入 API Key、AccessKey、密码或 Token。
-- `application-local.yml`、`.env*` 和 `.DS_Store` 已被 Git 忽略；提交前仍应使用 `git status` 检查暂存内容。
-- 已暴露的 GitHub Token、云端 AccessKey 或模型 API Key 应立即撤销并重新生成。
+- 前端：`http://127.0.0.1:3000/`
+- 后端 API：`http://127.0.0.1:8123/api`
+- 健康检查：`http://127.0.0.1:8123/api/health`
+- Swagger：`http://127.0.0.1:8123/api/swagger-ui.html`（开发环境）
+- 模型设置：`/model-settings`
+- 知识库：`/knowledge-admin`
+- MCP 管理：`/mcp-settings`
+
+## 文档
+
+- 架构与设计：[design/README.md](design/README.md)
+- 功能进度：[doc/ROADMAP.md](doc/ROADMAP.md)
+- 会话交接：[context/README.md](context/README.md)
+- 原项目：[liyupi/yu-ai-agent](https://github.com/liyupi/yu-ai-agent)

@@ -11,7 +11,22 @@
       <form v-if="editing" class="editor" @submit.prevent="save">
         <div class="editor-heading"><strong>{{ editing.id ? '编辑 MCP 服务' : '添加 MCP 服务' }}</strong><button type="button" aria-label="关闭编辑器" @click="editing = null"><X :size="16" /></button></div>
         <label>名称<input v-model.trim="editing.name" required maxlength="80" placeholder="例如：图片搜索" /></label>
-        <label>SSE 服务地址<input v-model.trim="editing.endpoint" required type="url" placeholder="http://127.0.0.1:8127" /></label>
+        <label>传输方式<input value="SSE（当前版本支持）" disabled /></label>
+        <label>MCP 服务地址<input v-model.trim="editing.endpoint" required type="url" placeholder="https://mcp.example.com/sse" /></label>
+        <label>认证方式<select v-model="editing.authType"><option value="NONE">无需认证</option><option value="BEARER">Bearer Token</option><option value="HEADER">自定义 Header</option></select></label>
+        <label v-if="editing.authType === 'HEADER'">Header 名称<input v-model.trim="editing.authHeaderName" placeholder="例如：X-API-Key" /></label>
+        <label v-if="editing.authType !== 'NONE'">{{ editing.hasSecret && !editing.authSecret ? '认证密钥（已保存，留空保持不变）' : '认证密钥' }}<input v-model="editing.authSecret" type="password" autocomplete="new-password" :placeholder="editing.hasSecret ? editing.secretHint : '输入 Token 或 Header 值'" /></label>
+        <label v-if="editing.hasSecret && editing.authType !== 'NONE'" class="switch"><input v-model="editing.clearAuthSecret" type="checkbox" /><span aria-hidden="true"></span><em>清除已保存密钥</em></label>
+        <div class="discovery">
+          <div class="discovery-heading"><strong>工具发现与授权</strong><button type="button" :disabled="testing === 'editing' || saving" @click="saveAndTest"><PlugZap :size="15" />{{ testing === 'editing' ? '连接中...' : '保存并测试连接' }}</button></div>
+          <p v-if="!editing.id" class="hint">先保存连接配置，再测试并发现服务端提供的工具。</p>
+          <p v-else-if="!editing.foundTools?.length" class="hint">发现的工具不会自动开放给智能体；测试连接后选择允许调用的工具。</p>
+          <label v-for="tool in editing.foundTools || []" :key="tool.name" class="tool-choice">
+            <input v-model="editing.allowedTools" type="checkbox" :value="tool.name" />
+            <span><strong>{{ tool.name }}</strong><small>{{ tool.description || '服务端未提供说明' }} · 参数：{{ (tool.parameters || []).join('、') || '无' }}<template v-if="tool.requiredParameters?.length"> · 必填：{{ tool.requiredParameters.join('、') }}</template></small><details><summary>查看输入 Schema</summary><pre>{{ tool.inputSchema }}</pre></details></span>
+          </label>
+          <p v-if="editing.discoveryMessage" class="hint">{{ editing.discoveryMessage }}</p>
+        </div>
         <label class="switch"><input v-model="editing.enabled" type="checkbox" /><span aria-hidden="true"></span><em>{{ editing.enabled ? '保存后启用' : '保存后停用' }}</em></label>
         <p v-if="formError" class="error"><AlertCircle :size="15" />{{ formError }}</p>
         <div class="editor-actions"><button type="button" @click="editing = null">取消</button><button class="primary-button" :disabled="saving" type="submit">{{ saving ? '保存中...' : '保存' }}</button></div>
@@ -22,7 +37,7 @@
       <section v-else class="server-list">
         <article v-for="server in servers" :key="server.id" class="server-row">
           <div class="server-icon"><Server :size="19" /></div>
-          <div class="server-copy"><div><strong>{{ server.name }}</strong><span :class="server.enabled ? 'enabled' : 'disabled'">{{ server.enabled ? '已启用' : '已停用' }}</span></div><code>{{ server.endpoint }}</code><small v-if="testResults[server.id]">{{ testResults[server.id].message }}<template v-if="testResults[server.id].tools?.length">：{{ testResults[server.id].tools.join('、') }}</template></small></div>
+          <div class="server-copy"><div><strong>{{ server.name }}</strong><span :class="server.enabled ? 'enabled' : 'disabled'">{{ server.enabled ? '已启用' : '已停用' }}</span><span class="auth-badge">{{ server.authType === 'NONE' ? '无认证' : server.authType === 'BEARER' ? 'Bearer' : 'Header' }}</span></div><code>{{ server.endpoint }}</code><small>{{ server.allowedTools === null ? '兼容旧配置：当前全部工具可用' : `已授权 ${server.allowedTools.length} 个工具` }}</small><small v-if="testResults[server.id]">{{ testResults[server.id].message }}<template v-if="testResults[server.id].tools?.length">：{{ testResults[server.id].tools.map(tool => tool.name).join('、') }}</template></small></div>
           <div class="server-actions">
             <button type="button" :disabled="testing === server.id" @click="testServer(server)" title="测试连接"><PlugZap :size="16" /></button>
             <button type="button" @click="startEdit(server)" title="编辑服务"><Pencil :size="16" /></button>
@@ -44,15 +59,38 @@ import { createMcpServer, deleteMcpServer, listMcpServers, testMcpServer, update
 
 const servers = ref([]); const loading = ref(true); const saving = ref(false); const testing = ref(null); const editing = ref(null); const formError = ref(''); const testResults = ref({}); const pendingDelete = ref(null)
 const load = async () => { loading.value = true; try { servers.value = await listMcpServers() } finally { loading.value = false } }
-const startCreate = () => { formError.value = ''; editing.value = { name: '', endpoint: '', enabled: true } }
-const startEdit = server => { formError.value = ''; editing.value = { ...server } }
-const save = async () => {
+const startCreate = () => { formError.value = ''; editing.value = { name: '', endpoint: '', enabled: true, authType: 'NONE', authHeaderName: '', authSecret: '', clearAuthSecret: false, allowedTools: [], foundTools: [] } }
+const startEdit = server => { formError.value = ''; editing.value = { ...server, authSecret: '', clearAuthSecret: false, allowedTools: server.allowedTools || [], foundTools: testResults.value[server.id]?.tools || [] } }
+const save = async (keepOpen = false) => {
   saving.value = true; formError.value = ''
-  try { if (editing.value.id) await updateMcpServer(editing.value.id, editing.value); else await createMcpServer(editing.value); editing.value = null; await load() }
-  catch (cause) { formError.value = cause?.response?.data?.message || '保存失败，请检查名称和服务地址。' }
+  try {
+    if (editing.value.authType !== 'NONE' && !editing.value.hasSecret && !editing.value.authSecret) throw new Error('请填写认证密钥。')
+    const saved = editing.value.id ? await updateMcpServer(editing.value.id, editing.value) : await createMcpServer(editing.value)
+    if (!editing.value.id) { await load(); startEdit(saved) }
+    else if (keepOpen) { editing.value = { ...editing.value, ...saved }; await load() }
+    else { editing.value = null; await load() }
+    return true
+  }
+  catch (cause) { formError.value = cause?.message || cause?.response?.data?.message || '保存失败，请检查名称和服务地址。'; return false }
   finally { saving.value = false }
 }
+const saveAndTest = async () => {
+  if (await save(true) && editing.value?.id) await testEditing()
+}
 const testServer = async server => { testing.value = server.id; try { testResults.value[server.id] = await testMcpServer(server.id) } catch { testResults.value[server.id] = { connected: false, message: '测试请求失败', tools: [] } } finally { testing.value = null } }
+const testEditing = async () => {
+  testing.value = 'editing'
+  try {
+    const result = await testMcpServer(editing.value.id)
+    editing.value.foundTools = result.tools || []
+    editing.value.discoveryMessage = result.message
+    if (result.connected) {
+      const names = new Set(result.tools.map(tool => tool.name))
+      editing.value.allowedTools = editing.value.allowedTools.filter(name => names.has(name))
+    }
+  } catch { editing.value.discoveryMessage = '测试请求失败，请确认地址和认证配置。' }
+  finally { testing.value = null }
+}
 const deleteMessage = computed(() => pendingDelete.value
   ? `删除 MCP 服务“${pendingDelete.value.name}”吗？删除后超级智能体将无法再调用其工具。`
   : '')
@@ -143,6 +181,20 @@ onMounted(load)
   outline: none;
 }
 
+.editor select { height: 40px; border: 0; border-radius: 11px; padding: 0 12px; background: var(--sk-fill); color: var(--sk-label); font-size: 14px; }
+.discovery { display: grid; gap: 9px; border-top: 1px solid var(--sk-separator); padding-top: 14px; }
+.discovery-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.discovery-heading button { display: flex; align-items: center; gap: 6px; min-height: 34px; border: 0; border-radius: 9px; padding: 0 11px; background: var(--zwx-primary-soft); color: var(--zwx-primary); font-size: 12px; font-weight: 650; }
+.discovery-heading button:disabled { opacity: .5; }
+.hint { margin: 0; color: var(--sk-label-3); font-size: 12px; }
+.tool-choice { display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--sk-separator); border-radius: 9px; padding: 10px; }
+.tool-choice input { margin-top: 3px; accent-color: var(--zwx-primary); }
+.tool-choice span { display: grid; gap: 4px; min-width: 0; }
+.tool-choice strong { font-size: 12px; }
+.tool-choice small { color: var(--sk-label-2); font-size: 11px; overflow-wrap: anywhere; }
+.tool-choice details { color: var(--sk-label-2); font-size: 11px; }
+.tool-choice pre { max-height: 180px; overflow: auto; border-radius: 6px; padding: 8px; background: var(--sk-fill); white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .editor input:not([type=checkbox]):focus { background: var(--sk-surface); box-shadow: 0 0 0 3px var(--zwx-primary-ring); }
 
 /* iOS 开关 */
@@ -188,6 +240,7 @@ onMounted(load)
 .server-copy span { border-radius: 6px; padding: 2px 7px; font-size: 10px; font-weight: 700; }
 .server-copy span.enabled { background: rgba(52, 199, 89, 0.14); color: #1f9d4d; }
 .server-copy span.disabled { background: var(--sk-fill); color: var(--sk-label-2); }
+.server-copy span.auth-badge { background: rgba(0, 122, 255, .1); color: var(--zwx-primary); }
 .server-copy code { width: max-content; max-width: 100%; overflow: hidden; border-radius: 6px; padding: 2px 6px; background: var(--sk-fill); color: var(--sk-label-2); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .server-copy small { color: var(--sk-label-3); font-size: 11px; }
 

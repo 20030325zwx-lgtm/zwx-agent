@@ -55,7 +55,7 @@
       <p v-if="error" class="workspace-notice">{{ error }} <button type="button" @click="loadPrivateDocuments({ preserveSelection: true })">重新加载</button></p>
     </transition>
 
-    <section class="knowledge-workspace" :style="{ '--chunk-panel-width': `${chunkPanelWidth}px` }">
+    <section class="knowledge-workspace">
       <aside class="panel document-panel">
         <div class="panel-heading">
           <div class="panel-title">
@@ -131,40 +131,30 @@
         </div>
       </aside>
 
-      <aside class="panel chunk-panel">
-        <div class="panel-heading">
-          <div class="panel-title">
-            <span>实际切片</span>
-            <small>{{ detail?.filename || '选择文档后查看' }}</small>
-          </div>
-          <span class="panel-count">{{ detail?.chunks.length || 0 }} 个</span>
+      <section class="detail-column">
+        <div class="detail-tabs" role="tablist" aria-label="文档详情视图">
+          <button type="button" role="tab" :aria-selected="detailView === 'preview'" :class="{ active: detailView === 'preview' }" @click="detailView = 'preview'"><FileText :size="14" />原文预览</button>
+          <button type="button" role="tab" :aria-selected="detailView === 'chunks'" :class="{ active: detailView === 'chunks' }" @click="detailView = 'chunks'"><Layers :size="14" />实际切片<span v-if="detail">{{ detail.chunks.length }}</span></button>
         </div>
-        <div class="chunk-list">
-          <div v-if="loadingDetail" class="panel-state">正在读取切片...</div>
-          <button v-for="chunk in detail?.chunks" :key="chunk.id" type="button" class="chunk-row"
-            :class="{ active: chunk.id === selectedChunkId }" @click="selectedChunkId = chunk.id">
-            <span class="chunk-top">
-              <span class="chunk-index">切片 {{ chunk.chunkIndex }}</span>
-              <span v-if="chunk.section" class="section-chip">第 {{ chunk.section }} 节</span>
-            </span>
-            <p>{{ chunk.id === selectedChunkId ? chunk.content : excerpt(chunk.content) }}</p>
-          </button>
-          <div v-if="detail && !detail.chunks.length" class="panel-empty">
-            <Sparkles :size="22" />
-            <strong>该文档尚未写入向量库</strong>
-            <span>等待索引完成后再来查看。</span>
-          </div>
-          <div v-else-if="!detail && !loadingDetail" class="panel-empty">
-            <Layers :size="22" />
-            <strong>选择一个文档</strong>
-            <span>左侧选择文档后，这里展示它的实际向量切片。</span>
-          </div>
-        </div>
-      </aside>
 
-      <div class="chunk-resizer" role="separator" aria-orientation="vertical" aria-label="调整切片列宽度" @pointerdown="startResize"><i></i></div>
+        <aside v-if="detailView === 'chunks'" class="panel chunk-panel">
+          <div class="panel-heading">
+            <div class="panel-title"><span>实际切片</span><small>{{ detail?.filename || '选择文档后查看' }}</small></div>
+            <span class="panel-count">{{ detail?.chunks.length || 0 }} 个</span>
+          </div>
+          <div class="chunk-list">
+            <div v-if="loadingDetail" class="panel-state">正在读取切片...</div>
+            <button v-for="chunk in detail?.chunks" :key="chunk.id" type="button" class="chunk-row"
+              :class="{ active: chunk.id === selectedChunkId }" @click="selectedChunkId = chunk.id">
+              <span class="chunk-top"><span class="chunk-index">切片 {{ chunk.chunkIndex }}</span><span v-if="chunk.section" class="section-chip">第 {{ chunk.section }} 节</span></span>
+              <p>{{ chunk.id === selectedChunkId ? chunk.content : excerpt(chunk.content) }}</p>
+            </button>
+            <div v-if="detail && !detail.chunks.length" class="panel-empty"><Sparkles :size="22" /><strong>该文档尚未写入向量库</strong><span>等待索引完成后再来查看。</span></div>
+            <div v-else-if="!detail && !loadingDetail" class="panel-empty"><Layers :size="22" /><strong>选择一个文档</strong><span>左侧选择文档后，这里展示它的实际向量切片。</span></div>
+          </div>
+        </aside>
 
-      <section class="panel preview-panel">
+        <section v-else class="panel preview-panel">
         <div class="preview-heading">
           <div class="panel-title">
             <span>原始文档预览</span>
@@ -197,6 +187,7 @@
             <span>这里会直接渲染 PDF、Word、Excel 和 PPT 原文。</span>
           </div>
         </div>
+        </section>
       </section>
     </section>
   </main>
@@ -236,7 +227,7 @@ const reindexing = ref(false)
 const knowledgeFileInput = ref(null)
 const documentQuery = ref('')
 const lifecycleFilter = ref('ALL')
-const chunkPanelWidth = ref(380)
+const detailView = ref('preview')
 const selectedDocument = computed(() => privateDocuments.value.find(document => document.id === selectedDocumentId.value))
 const canPublish = computed(() => selectedDocument.value?.lifecycleStatus === 'READY')
 const defaultCategory = computed(() => categories.value.find(category => category.name === '默认分类') || categories.value[0])
@@ -244,7 +235,6 @@ const targetUploadCategoryId = computed(() => selectedCategoryId.value === 'ALL'
 const targetUploadCategoryName = computed(() => categories.value.find(category => category.id === targetUploadCategoryId.value)?.name || '默认分类')
 const categoryName = categoryId => categories.value.find(category => category.id === categoryId)?.name || '未分类'
 const categoryCount = categoryId => privateDocuments.value.filter(document => document.categoryId === categoryId).length
-let removeResizeListeners = () => {}
 let privateRefreshTimer = null
 
 const lifecycleValue = document => {
@@ -457,24 +447,6 @@ const selectDocument = async documentId => {
   }
 }
 
-const startResize = event => {
-  if (event.button !== 0) return
-  removeResizeListeners()
-  const startX = event.clientX
-  const startWidth = chunkPanelWidth.value
-  const resize = moveEvent => {
-    chunkPanelWidth.value = Math.max(260, Math.min(680, startWidth + moveEvent.clientX - startX))
-  }
-  const stopResize = () => {
-    window.removeEventListener('pointermove', resize)
-    window.removeEventListener('pointerup', stopResize)
-    removeResizeListeners = () => {}
-  }
-  window.addEventListener('pointermove', resize)
-  window.addEventListener('pointerup', stopResize)
-  removeResizeListeners = stopResize
-}
-
 onMounted(async () => {
   try {
     await loadCategories()
@@ -490,7 +462,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  removeResizeListeners()
   if (privateRefreshTimer) window.clearInterval(privateRefreshTimer)
 })
 </script>
@@ -511,7 +482,7 @@ onBeforeUnmount(() => {
 }
 
 /* ── 内容标题与操作区 ───────────────────────────────── */
-.admin-header { flex: 0 0 auto; }
+.admin-header { width: 100%; flex: 0 0 auto; }
 
 .header-inner {
   display: flex;
@@ -627,6 +598,7 @@ onBeforeUnmount(() => {
 /* ── 概览指标 ───────────────────────────────────────── */
 .knowledge-overview {
   display: grid;
+  width: 100%;
   flex: 0 0 auto;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
@@ -679,15 +651,23 @@ onBeforeUnmount(() => {
 .notice-enter-active, .notice-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .notice-enter-from, .notice-leave-to { opacity: 0; transform: translateY(-6px); }
 
-/* ── 三栏工作区 ─────────────────────────────────────── */
+/* ── 资料列表与详情工作区 ───────────────────────────── */
 .knowledge-workspace {
   display: grid;
+  width: 100%;
   min-height: 0;
   flex: 1;
   gap: 14px;
-  grid-template-columns: 310px minmax(250px, var(--chunk-panel-width)) 10px minmax(0, 1fr);
-  padding: 14px 22px 20px;
+  grid-template-columns: minmax(320px, min(28vw, 520px)) minmax(0, 1fr);
+  padding: 10px 22px 20px;
 }
+
+.detail-column { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
+.detail-tabs { display: flex; width: max-content; align-items: center; gap: 3px; border: 1px solid var(--sk-separator); border-radius: 10px; padding: 3px; background: var(--sk-surface); }
+.detail-tabs button { display: flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: 7px; padding: 0 11px; background: transparent; color: var(--sk-label-2); font-size: 12px; font-weight: 600; }
+.detail-tabs button.active { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+.detail-tabs button span { min-width: 18px; border-radius: 999px; padding: 1px 5px; background: var(--sk-fill); color: var(--sk-label-2); font-size: 10px; text-align: center; }
+.detail-column > .panel { min-height: 0; }
 
 .panel {
   display: flex;
@@ -846,11 +826,6 @@ onBeforeUnmount(() => {
 .chunk-row.active p { max-height: 260px; overflow: auto; color: var(--sk-label); white-space: pre-wrap; overflow-wrap: anywhere; }
 .chunk-row.active .section-chip { background: var(--sk-surface); color: var(--zwx-primary); }
 
-/* ── 拖拽分隔条 ─────────────────────────────────────── */
-.chunk-resizer { position: relative; cursor: col-resize; }
-.chunk-resizer i { position: absolute; top: 50%; left: 50%; width: 4px; height: 44px; border-radius: 999px; background: var(--sk-separator-strong); transform: translate(-50%, -50%); transition: background-color 0.15s ease, height 0.15s ease; }
-.chunk-resizer:hover i, .chunk-resizer:active i { height: 64px; background: var(--zwx-primary); }
-
 /* ── 原文预览 ───────────────────────────────────────── */
 .preview-heading { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--sk-separator); padding: 14px 18px 12px; }
 .preview-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
@@ -885,7 +860,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 960px) {
   .knowledge-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 16px 0; }
-  .knowledge-workspace { grid-template-columns: 260px minmax(230px, var(--chunk-panel-width)) 10px minmax(0, 1fr); gap: 12px; padding: 12px 16px 16px; }
+  .knowledge-workspace { grid-template-columns: minmax(260px, 32vw) minmax(0, 1fr); gap: 12px; padding: 10px 16px 16px; }
   .header-actions { gap: 6px; }
   .header-actions .icon-button { display: none; }
 }
@@ -899,10 +874,11 @@ onBeforeUnmount(() => {
   .knowledge-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px 14px 0; }
   .stat-card { padding: 10px; }
   .stat-copy strong { font-size: 18px; }
-  .knowledge-workspace { display: flex; flex-direction: column; gap: 12px; overflow: visible; padding: 12px 14px 16px; }
+  .knowledge-workspace { display: flex; flex-direction: column; gap: 12px; overflow: visible; padding: 10px 14px 16px; }
   .panel { flex: 0 0 auto; max-height: none; }
+  .detail-column { display: flex; min-height: 560px; flex: 0 0 auto; flex-direction: column; }
+  .detail-column > .panel { min-height: 500px; }
   .document-list, .chunk-list { max-height: 320px; }
-  .chunk-resizer { display: none; }
   .source-preview, .preview-placeholder { min-height: 260px; }
   .workspace-notice { top: 96px; right: 14px; left: 14px; }
 }

@@ -211,34 +211,49 @@ public class AgentKnowledgeRagService {
         if (jdbcTemplate == null || objectMapper == null || query == null || query.isBlank()) return List.of();
         List<String> terms = lexicalTerms(query);
         if (terms.isEmpty()) return List.of();
-        List<Document> candidates = jdbcTemplate.query("""
-                        SELECT id::text, content, metadata FROM agent_knowledge_vector
-                        WHERE metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                          AND metadata ->> 'lifecycleStatus' = 'ACTIVE'
-                        LIMIT 300
-                        """, (rs, row) -> {
-                    try {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> metadata = objectMapper.readValue(rs.getString("metadata"), Map.class);
-                        return Document.builder().id(rs.getString("id")).text(rs.getString("content")).metadata(metadata).build();
-                    } catch (Exception exception) {
-                        return null;
-                    }
-                }, tenantId, agentKey);
-        return candidates.stream().filter(java.util.Objects::nonNull)
-                .map(document -> Map.entry(document, lexicalScore(document.getText(), terms)))
-                .filter(entry -> entry.getValue() > 0)
-                .sorted(Map.Entry.<Document, Integer>comparingByValue().reversed())
-                .limit(limit).map(Map.Entry::getKey).toList();
+        StringBuilder scoreExpression = new StringBuilder();
+        List<Object> arguments = new ArrayList<>();
+        for (String term : terms) {
+            if (!scoreExpression.isEmpty()) scoreExpression.append(" + ");
+            scoreExpression.append("(CASE WHEN content ILIKE ? THEN 1 ELSE 0 END)");
+            arguments.add("%" + term + "%");
+        }
+        arguments.add(tenantId);
+        arguments.add(agentKey);
+        arguments.add(limit);
+        String sql = """
+                SELECT id::text, content, metadata FROM (
+                    SELECT id, content, metadata, %s AS lexical_score
+                    FROM agent_knowledge_vector
+                    WHERE metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
+                      AND metadata ->> 'lifecycleStatus' = 'ACTIVE'
+                ) scored
+                WHERE lexical_score > 0
+                ORDER BY lexical_score DESC, id
+                LIMIT ?
+                """.formatted(scoreExpression);
+        return jdbcTemplate.query(sql, (rs, row) -> {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> metadata = objectMapper.readValue(rs.getString("metadata"), Map.class);
+                return Document.builder().id(rs.getString("id")).text(rs.getString("content")).metadata(metadata).build();
+            } catch (Exception exception) {
+                return null;
+            }
+        }, arguments.toArray()).stream().filter(java.util.Objects::nonNull).toList();
     }
 
-    private List<String> lexicalTerms(String query) {
+    static List<String> lexicalTerms(String query) {
         String normalized = query.toLowerCase(Locale.ROOT).replaceAll("[^\\p{IsHan}a-z0-9]+", " ").trim();
         java.util.LinkedHashSet<String> terms = new java.util.LinkedHashSet<>();
-        for (String word : normalized.split("\\s+")) if (word.length() >= 2) terms.add(word);
+        for (String word : normalized.split("\\s+")) {
+            if (word.isBlank()) continue;
+            boolean han = word.codePoints().anyMatch(code -> Character.UnicodeScript.of(code) == Character.UnicodeScript.HAN);
+            if (!han && word.length() >= 2) terms.add(word);
+        }
         String han = normalized.replaceAll("[^\\p{IsHan}]", "");
         for (int i = 0; i + 1 < han.length(); i++) terms.add(han.substring(i, i + 2));
-        return terms.stream().limit(12).toList();
+        return terms.stream().limit(20).toList();
     }
 
     private int lexicalScore(String content, List<String> terms) {

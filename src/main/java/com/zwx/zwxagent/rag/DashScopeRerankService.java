@@ -3,7 +3,9 @@ package com.zwx.zwxagent.rag;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -33,20 +35,27 @@ public class DashScopeRerankService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RestClient restClient;
     private final String model;
+    private final String apiKey;
     private final boolean enabled;
 
+    @Autowired
     public DashScopeRerankService(@Value("${spring.ai.dashscope.api-key:}") String apiKey,
                                   @Value("${app.rag.rerank.enabled:true}") boolean enabled,
                                   @Value("${app.rag.rerank.model:gte-rerank-v2}") String model,
                                   @Value("${app.rag.rerank.timeout-ms:1200}") long timeoutMs) {
+        this(apiKey, enabled, model, timeoutMs, DEFAULT_ENDPOINT);
+    }
+
+    DashScopeRerankService(String apiKey, boolean enabled, String model, long timeoutMs, String endpoint) {
         boolean keyPresent = apiKey != null && !apiKey.isBlank() && !"your-api-key".equals(apiKey.trim());
         this.enabled = enabled && keyPresent;
         this.model = model;
+        this.apiKey = keyPresent ? apiKey.trim() : null;
         if (this.enabled) {
             SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
             factory.setConnectTimeout(500);
             factory.setReadTimeout((int) Math.max(200, timeoutMs));
-            this.restClient = RestClient.builder().baseUrl(DEFAULT_ENDPOINT).requestFactory(factory).build();
+            this.restClient = RestClient.builder().baseUrl(endpoint).requestFactory(factory).build();
             log.info("[rerank] 已启用 DashScope 重排序，model={}，timeout-ms={}", model, timeoutMs);
         } else {
             this.restClient = null;
@@ -71,6 +80,7 @@ public class DashScopeRerankService {
             String json = restClient.post().uri("")
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                     .body(body)
                     .retrieve()
                     .body(String.class);

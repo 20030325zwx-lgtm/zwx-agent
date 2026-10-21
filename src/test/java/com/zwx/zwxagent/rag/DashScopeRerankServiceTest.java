@@ -1,10 +1,14 @@
 package com.zwx.zwxagent.rag;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 class DashScopeRerankServiceTest {
 
@@ -47,6 +51,34 @@ class DashScopeRerankServiceTest {
 
         Assertions.assertTrue(disabled.rerank("query", List.of("only")).isEmpty());
         Assertions.assertTrue(disabled.rerank(" ", List.of("a", "b")).isEmpty());
+    }
+
+    @Test
+    void sendsBearerTokenAndParsesLiveResponse() throws Exception {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            byte[] response = """
+                    {"output":{"results":[{"index":0,"relevance_score":0.9},{"index":1,"relevance_score":0.1}]}}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
+        server.start();
+        try {
+            String endpoint = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+            DashScopeRerankService service = new DashScopeRerankService("sk-test-key", true, "gte-rerank-v2", 2000, endpoint);
+            Optional<List<DashScopeRerankService.RerankHit>> hits = service.rerank("query", List.of("doc-1", "doc-2"));
+            Assertions.assertTrue(hits.isPresent());
+            Assertions.assertEquals(2, hits.get().size());
+            Assertions.assertEquals("Bearer sk-test-key", authorization.get());
+        } finally {
+            server.stop(0);
+        }
     }
 
     private DashScopeRerankService disabledService() {

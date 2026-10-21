@@ -50,6 +50,18 @@
   - `PgVectorVectorStoreConfigTest` 注入 `VectorStore` 时存在两个 Bean，类型不唯一。
   本轮新增测试均通过。
 
+## RAG 回归修复（追加）
+
+- 现象：同一“先维员工迟到几次不扣钱”问题，昨天能命中 `员工手册#14`，今天回答“未载明”。
+- 根因：
+  - 超级智能体知识库新增 676 个地理切片后，`lexicalRecall` 仍使用无排序的 `LIMIT 300`，员工手册切片不在前 300 行，词法召回整体漏掉。
+  - DashScope rerank 请求没有带 `Authorization` 头，一直 401 失败并降级；失去重排后按融合顺序取前 3，把向量第 3 的相关切片挤出。
+- 修复：
+  - 词法召回改为 SQL 内按关键词命中数打分、排序后再截断；中文 bigram 词项不再被整句占用，确保“迟到/扣钱”进入检索。
+  - rerank 请求补 `Authorization: Bearer <key>`；新增本地 HTTP 测试验证请求头。
+  - 新增词法词项单测，防止长中文句吞掉关键词名额。
+- 验证：同一问题现在命中 `员工手册#14`，trace 显示 `reranked=true`、vectorRank=3、lexicalRank=1、rerankRank=1，回答“每月不超过3次且每次超时15分钟内不扣钱”。本轮修复尚未提交。
+
 ## 遗留事项
 
 - 外部服务（Docling、Tika、OSS、MinIO、搜索、MCP）尚未接入运行时热读取；表结构已预留 `config_type=SERVICE`。

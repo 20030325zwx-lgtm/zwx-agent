@@ -196,7 +196,15 @@ export const deleteTestConversation = conversationId => request.delete(`/ai/test
 export const deleteTestAssistantReply = (conversationId, userMessageId) => request.delete(`/ai/test-agent/conversations/${conversationId}/messages/${userMessageId}/assistant`).then(response => response.data)
 
 // AI超级智能体聊天
-export const chatWithManus = (conversationId, message, knowledgeSearch = false, clientRequestId = null) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, clientRequestId })
+export const chatWithManus = (conversationId, message, knowledgeSearch = false, clientRequestId = null, imageObjectKey = null) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, clientRequestId, imageObjectKey })
+export const uploadManusImage = async (conversationId, file) => {
+  const formData = new FormData()
+  formData.append('conversationId', conversationId)
+  formData.append('file', file)
+  return (await request.post('/ai/manus/images', formData)).data
+}
+export const getManusImageUrl = (conversationId, objectKey) =>
+  fetchAuthBlobUrl(`/ai/manus/images?conversationId=${encodeURIComponent(conversationId)}&objectKey=${encodeURIComponent(objectKey)}`)
 export const resumeManusRun = (conversationId, runId) => connectSSE(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/resume`, {})
 export const reconnectManusRun = (conversationId, runId, lastEventId = null) => connectSSE(
   `/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/reconnect`,

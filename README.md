@@ -499,15 +499,29 @@ cd ../zwx-agent-frontend
 npm run build
 ```
 
-## 图片对话流程
+## 图片对话与图片 MCP
 
-1. 前端通过文件选择或剪贴板粘贴图片。
-2. 前端将图片上传到后端，后端校验 JPEG、PNG、GIF 格式及 10 MB 大小限制。
-3. 后端将图片保存到私有 OSS，并仅在视觉模型请求时生成 15 分钟有效的签名 GET URL。
-4. 后端将文本和图片 URL 作为多模态消息传给 `qwen-vl-plus`。
-5. 消息记录保存图片对象键；恢复历史会话时，前端通过后端受控图片接口显示图片。
+情感分析大师使用内置视觉链路：图片上传 → 私有 OSS → 15 分钟签名 URL → `qwen3-vl-plus`。
 
-请避免上传宽或高不大于 10 像素的图片，视觉模型会拒绝此类图片。
+超级智能体使用图片 MCP 链路：
+
+1. 前端上传图片，后端校验 JPEG/PNG/GIF/WebP 和大小限制。
+2. 图片保存到 `super/{conversationId}/...`，后端生成短时签名 URL。
+3. 主应用调用 MCP 工具 `describe_image(image_url, question)`；MCP 只接收 URL，不接收图片二进制。
+4. MCP 把签名 URL 交给 `qwen3-vl-plus`，返回摘要、相关文字、待确认项和 `retrieval_query`。
+5. 主应用用 `retrieval_query` 检索知识库，并把图片分析结果作为不可信资料加入上下文。
+6. 用户消息的图片对象键持久化到 `agent_chat_message.image_object_keys`，刷新或切换会话后会重新加载图片。
+
+图片 MCP 服务可独立 Docker 部署（代码仍在当前仓库）：
+
+```bash
+cd zwx-image-search-mcp-server
+cp .env.example .env
+# 编辑 .env，填入 DASHSCOPE_API_KEY
+docker compose up -d --build
+```
+
+默认只绑定 `127.0.0.1:8127`，健康检查 `GET /health`。在 MCP 管理中配置 `http://127.0.0.1:8127` 后会暴露 `describe_image`、`ocr_image` 和 `searchImage`；当前时间已改为主应用内置工具，不走 MCP。主应用与 MCP 都在 Docker 时，可使用 `http://host.docker.internal:8127` 或同一 Docker network 的容器名。
 
 ## 安全说明
 

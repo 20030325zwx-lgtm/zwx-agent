@@ -1,5 +1,6 @@
 package com.zwx.zwxagent.conversation;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -14,9 +15,11 @@ public class AgentConversationService {
     private static final String TRAVEL = "travel";
     private static final String DEFAULT_TITLE = "新的旅行规划";
     private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
 
-    public AgentConversationService(JdbcTemplate jdbcTemplate) {
+    public AgentConversationService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
     }
 
     public AgentConversationSummary createTravelConversation(String tenantId, String userId) {
@@ -74,23 +77,27 @@ public class AgentConversationService {
         requireOwned(tenantId, userId, TRAVEL, conversationId);
         return jdbcTemplate.query("""
                 SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments,
-                       m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at, m.status FROM agent_chat_message m
+                       m.rag_retrieval_trace::text AS rag_retrieval_trace, m.image_object_keys::text AS image_object_keys,
+                       m.created_at, m.status FROM agent_chat_message m
                 JOIN agent_conversation c ON c.id = m.conversation_id
                 WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC
                 """, (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
-                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status")), conversationId, tenantId, userId, TRAVEL);
+                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status"),
+                rs.getString("image_object_keys")), conversationId, tenantId, userId, TRAVEL);
     }
 
     public List<AgentConversationMessage> getRecentTravelMessages(String tenantId, String userId, String conversationId, int limit) {
         return jdbcTemplate.query("""
                 SELECT id, role, content, execution_run_id, file_attachments, rag_retrieval_trace, created_at, status FROM (
                     SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments,
-                           m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at, m.status FROM agent_chat_message m
+                           m.rag_retrieval_trace::text AS rag_retrieval_trace, m.image_object_keys::text AS image_object_keys,
+                           m.created_at, m.status FROM agent_chat_message m
                     JOIN agent_conversation c ON c.id = m.conversation_id
                     WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id DESC LIMIT ?
                 ) recent_messages ORDER BY id ASC
                 """, (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"),
-                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status")), conversationId, tenantId, userId, TRAVEL, limit);
+                rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status"),
+                rs.getString("image_object_keys")), conversationId, tenantId, userId, TRAVEL, limit);
     }
 
     public void deleteTravelConversation(String tenantId, String userId, String conversationId) {
@@ -176,15 +183,29 @@ public class AgentConversationService {
 
     @Transactional
     public long startUserTurn(String tenantId, String userId, String agentKey, String conversationId, String message, String clientRequestId) {
+        return startUserTurn(tenantId, userId, agentKey, conversationId, message, List.of(), clientRequestId);
+    }
+
+    @Transactional
+    public long startUserTurn(String tenantId, String userId, String agentKey, String conversationId, String message,
+                              List<String> imageObjectKeys, String clientRequestId) {
         ensureConversation(tenantId, userId, agentKey, conversationId, "新的对话", message);
         markStaleUserTurnsInterrupted(tenantId, userId, agentKey, conversationId);
         requireNoDuplicateRequest(tenantId, userId, clientRequestId);
+        String imageKeysJson = "[]";
+        if (imageObjectKeys != null && !imageObjectKeys.isEmpty()) {
+            try {
+                imageKeysJson = objectMapper.writeValueAsString(imageObjectKeys);
+            } catch (Exception exception) {
+                throw new IllegalArgumentException("Unable to serialize image keys", exception);
+            }
+        }
         Long id = jdbcTemplate.queryForObject("""
-                INSERT INTO agent_chat_message (conversation_id, role, content, status, client_request_id)
-                SELECT id, 'USER', ?, 'IN_PROGRESS', ? FROM agent_conversation
+                INSERT INTO agent_chat_message (conversation_id, role, content, status, client_request_id, image_object_keys)
+                SELECT id, 'USER', ?, 'IN_PROGRESS', ?, CAST(? AS jsonb) FROM agent_conversation
                 WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?
                 RETURNING id
-                """, Long.class, message == null ? "" : message, clientRequestId, conversationId, tenantId, userId, agentKey);
+                """, Long.class, message == null ? "" : message, clientRequestId, imageKeysJson, conversationId, tenantId, userId, agentKey);
         jdbcTemplate.update("UPDATE agent_conversation SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", conversationId);
         if (id == null) throw new IllegalArgumentException("Agent conversation was not found");
         return id;
@@ -329,8 +350,8 @@ public class AgentConversationService {
 
     public List<AgentConversationMessage> getMessages(String tenantId, String userId, String agentKey, String conversationId) {
         requireOwned(tenantId, userId, agentKey, conversationId);
-        return jdbcTemplate.query("SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments, m.rag_retrieval_trace::text AS rag_retrieval_trace, m.created_at, m.status FROM agent_chat_message m JOIN agent_conversation c ON c.id = m.conversation_id WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC",
-                (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"), rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status")),
+        return jdbcTemplate.query("SELECT m.id, m.role, m.content, m.execution_run_id, m.file_attachments::text AS file_attachments, m.rag_retrieval_trace::text AS rag_retrieval_trace, m.image_object_keys::text AS image_object_keys, m.created_at, m.status FROM agent_chat_message m JOIN agent_conversation c ON c.id = m.conversation_id WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ? ORDER BY m.id ASC",
+                (rs, rowNum) -> new AgentConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getString("execution_run_id"), rs.getString("file_attachments"), rs.getString("rag_retrieval_trace"), rs.getTimestamp("created_at").toInstant(), rs.getString("status"), rs.getString("image_object_keys")),
                 conversationId, tenantId, userId, agentKey);
     }
 

@@ -20,6 +20,7 @@
 
       <section class="super-chat" :class="{ loading: messagesLoading }">
         <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" knowledge-search-available
+          attachments-enabled attachment-accept="image/jpeg,image/png,image/gif,image/webp"
           @send-message="sendMessage" @edit-message="cancelActiveStream" @resend-message="resendMessage"
           @continue-message="continueMessage" @stop-generation="stopGeneration" />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
@@ -44,7 +45,7 @@ import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import HomeButton from '../components/HomeButton.vue'
-import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, listManusConversations } from '../api'
+import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, uploadManusImage, listManusConversations } from '../api'
 
 useHead({ title: '超级智能体 - ZWX Agent', meta: [{ name: 'description', content: 'ZWX Agent 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -60,7 +61,16 @@ let eventSource = null
 let activeTurnStart = -1
 let reconnectAttempts = 0
 const statusText = computed(() => connectionStatus.value === 'connecting' ? '正在执行' : connectionStatus.value === 'error' ? '连接异常' : '就绪')
-const addMessage = (content, isUser) => messages.value.push({ content, isUser, time: Date.now() })
+const addMessage = (content, isUser, imageObjectKey = null) => {
+  const message = { content, isUser, time: Date.now(), imageKeys: imageObjectKey ? [imageObjectKey] : [], imageUrls: [] }
+  messages.value.push(message)
+  if (imageObjectKey && chatId.value) {
+    getManusImageUrl(chatId.value, imageObjectKey)
+      .then(url => { message.imageUrls = [url] })
+      .catch(error => console.error('Unable to load uploaded image:', error))
+  }
+  return message
+}
 const toolLabels = { searchWeb: '搜索网页', generatePDF: '生成 PDF', writeFile: '写入文件', readFile: '读取文件', downloadResource: '下载资源' }
 const activityLabel = detail => {
   const tool = detail.match(/工具\s+([A-Za-z0-9_]+)\s+返回/)?.[1]
@@ -90,7 +100,16 @@ const hydrateFileUrls = conversationId => {
         .then(url => { message.files[index] = { ...file, url } })
         .catch(() => { message.files[index] = { ...file, broken: true } })
     })
+    ;(message.imageKeys || []).forEach((key, index) => {
+      if (message.imageUrls[index]) return
+      getManusImageUrl(conversationId, key)
+        .then(url => { message.imageUrls[index] = url })
+        .catch(error => console.error('Unable to restore message image:', error))
+    })
   })
+}
+const parseImageKeys = value => {
+  try { return JSON.parse(value || '[]') } catch { return [] }
 }
 const mapMessage = message => ({
   id: message.id,
@@ -102,6 +121,8 @@ const mapMessage = message => ({
   status: message.status,
   runId: message.executionRunId,
   files: mapFiles(chatId.value, message.fileAttachments),
+  imageKeys: parseImageKeys(message.imageObjectKeys),
+  imageUrls: [],
   ragTrace: parseRagTrace(message.ragRetrievalTrace)
 })
 const parseRagTrace = value => { try { const trace = JSON.parse(value || 'null'); if (!trace?.traceId) return null; trace.candidates?.forEach(candidate => { candidate.judgment = trace.judgments?.[candidate.documentId] || null }); return trace } catch { return null } }
@@ -145,19 +166,30 @@ const confirmDelete = async () => {
   await refreshConversations()
   if (wasActive) conversations.value.length ? await selectConversation(conversations.value[0]) : await createConversation()
 }
-const sendMessage = payload => {
+const sendMessage = async payload => {
   if (!chatId.value) return
   const message = typeof payload === 'string' ? payload : payload.message
   const knowledgeSearch = typeof payload === 'string' ? false : payload.knowledgeSearch === true
+  const files = typeof payload === 'string' ? [] : payload.files || []
+  let imageObjectKey = null
+  if (files.length) {
+    try {
+      imageObjectKey = (await uploadManusImage(chatId.value, files[0])).objectKey
+    } catch (error) {
+      console.error('Unable to upload image:', error)
+      addMessage('图片上传失败，请检查文件格式和大小后重试。', false)
+      return
+    }
+  }
   cancelActiveStream()
   activeTurnStart = messages.value.length
-  addMessage(message, true)
+  addMessage(message, true, imageObjectKey)
   messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], collapsibleActivities: true })
   const answerIndex = messages.value.length - 1
   const requestId = crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`
   connectionStatus.value = 'connecting'
   reconnectAttempts = 0
-  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, requestId)
+  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, requestId, imageObjectKey)
   attachManusStream(eventSource, answerIndex)
 }
 const attachManusStream = (stream, answerIndex) => {

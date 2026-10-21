@@ -17,7 +17,7 @@ import java.util.List;
 @Service
 public class McpServerConfigurationService {
     private static final Duration INITIALIZATION_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(90);
     private final JdbcTemplate jdbcTemplate;
     private final com.zwx.zwxagent.tools.UrlAccessPolicy urlAccessPolicy;
 

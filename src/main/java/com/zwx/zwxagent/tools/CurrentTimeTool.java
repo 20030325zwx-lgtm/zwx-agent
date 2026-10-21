@@ -1,4 +1,4 @@
-package com.zwx.zwximagesearchmcpserver.tools;
+package com.zwx.zwxagent.tools;
 
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;

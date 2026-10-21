@@ -120,6 +120,12 @@ public class AiController {
     private LoveImageStorageService imageStorageService;
 
     @Resource
+    private com.zwx.zwxagent.storage.AgentImageStorageService agentImageStorageService;
+
+    @Resource
+    private com.zwx.zwxagent.rag.ImageAnalysisService imageAnalysisService;
+
+    @Resource
     private LoveKnowledgeDocumentStorageService knowledgeDocumentStorageService;
 
     @Resource
@@ -546,18 +552,47 @@ public class AiController {
         return new ArrayList<>(attachments.values());
     }
 
+    @PostMapping(value = "/manus/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public com.zwx.zwxagent.storage.AgentImageUpload uploadManusImage(CurrentActor actor,
+                                                                      @RequestParam String conversationId,
+                                                                      @RequestPart("file") MultipartFile file) {
+        if (!agentConversationService.hasConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Conversation not found");
+        }
+        return agentImageStorageService.upload(SUPER_AGENT_KEY, conversationId, file);
+    }
+
+    @GetMapping("/manus/images")
+    public ResponseEntity<org.springframework.core.io.InputStreamResource> getManusImage(
+            CurrentActor actor, @RequestParam String conversationId, @RequestParam String objectKey) {
+        if (!agentConversationService.hasConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId)) {
+            return ResponseEntity.notFound().build();
+        }
+        var response = agentImageStorageService.getImage(SUPER_AGENT_KEY, conversationId, objectKey);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(response.contentType()))
+                .body(new org.springframework.core.io.InputStreamResource(response.inputStream()));
+    }
+
     @GetMapping("/manus/chat")
     public SseEmitter doChatWithManus(CurrentActor actor, @RequestParam String conversationId, @RequestParam String message,
                                       @RequestParam(defaultValue = "false") boolean knowledgeSearch,
+                                      @RequestParam(required = false) String imageObjectKey,
                                       @RequestParam(required = false) String clientRequestId) {
         agentConversationService.ensureConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
         var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
         if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
         long userMessageId;
+        List<String> imageObjectKeys = imageObjectKey == null || imageObjectKey.isBlank()
+                ? List.of() : List.of(imageObjectKey);
         try {
-            // 先落 USER 轮次：即使进程随后崩溃，下一轮历史里仍能看到这次提问。
+            if (!imageObjectKeys.isEmpty()) {
+                agentImageStorageService.validateObjectKey(SUPER_AGENT_KEY, conversationId, imageObjectKey);
+            }
+            // 先落 USER 轮次：即使进程随后崩溃，下一轮历史里仍能看到这次提问和图片。
             userMessageId = agentConversationService.startUserTurn(
-                    actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, message, clientRequestId);
+                    actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, message, imageObjectKeys, clientRequestId);
         } catch (RuntimeException exception) {
             conversationLease.close();
             throw exception;
@@ -566,9 +601,22 @@ public class AiController {
         McpTools mcpTools = null;
         ToolCallback[] availableTools;
         String historyContext;
+        String imageContext = "";
+        String retrievalQuery = message;
         try {
+            if (imageObjectKey != null && !imageObjectKey.isBlank()) {
+                agentImageStorageService.validateObjectKey(SUPER_AGENT_KEY, conversationId, imageObjectKey);
+                String imageUrl = agentImageStorageService.presignedReadUrl(SUPER_AGENT_KEY, conversationId, imageObjectKey);
+                var analysis = imageAnalysisService.analyze(actor.tenantId(), imageUrl, message);
+                if (analysis.available()) {
+                    imageContext = analysis.contextBlock();
+                    retrievalQuery = analysis.queryOr(message);
+                } else {
+                    imageContext = "[图片分析失败：" + analysis.error() + "]\n";
+                }
+            }
             knowledge = knowledgeSearch
-                    ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, message)
+                    ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, retrievalQuery)
                     : new AgentKnowledgeRagResult("", List.of());
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
             availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)), Arrays.stream(mcpTools.callbacks()))
@@ -589,11 +637,13 @@ public class AiController {
             throw exception;
         }
         McpTools activeMcpTools = mcpTools;
+        String knowledgeContext = imageContext + knowledge.context();
+        String agentMessage = imageContext.isBlank() ? message : message + "\n\n" + imageContext;
         String ragTraceJson = knowledge.trace() == null ? "{}" : toJson(knowledge.trace());
         String runId;
         try {
             runId = agentRunService.start(conversationId, actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
-                    userMessageId, message, historyContext, knowledge.context(), ragTraceJson);
+                    userMessageId, agentMessage, historyContext, knowledgeContext, ragTraceJson);
         } catch (RuntimeException exception) {
             agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
             activeMcpTools.close();
@@ -605,7 +655,7 @@ public class AiController {
             conversationLease.close();
         };
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
-                conversationId, actor.tenantId(), message, historyContext, availableTools, knowledge.context(),
+                conversationId, actor.tenantId(), agentMessage, historyContext, availableTools, knowledgeContext,
                 knowledge.trace() == null ? null : ragTraceJson, runId, null, null, cleanup,
                 result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result));
         ManusGraphOrchestrator.ManusRunHandle handle;

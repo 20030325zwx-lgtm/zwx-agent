@@ -1,7 +1,7 @@
 package com.zwx.zwximagesearchmcpserver;
 
 import com.zwx.zwximagesearchmcpserver.tools.ImageSearchTool;
-import com.zwx.zwximagesearchmcpserver.tools.CurrentTimeTool;
+import com.zwx.zwximagesearchmcpserver.tools.ImageUnderstandingTool;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.boot.SpringApplication;
@@ -16,9 +16,10 @@ public class ZwxImageSearchMcpServerApplication {
     }
 
     @Bean
-    public ToolCallbackProvider imageSearchTools(ImageSearchTool imageSearchTool, CurrentTimeTool currentTimeTool) {
+    public ToolCallbackProvider imageSearchTools(ImageSearchTool imageSearchTool,
+                                                 ImageUnderstandingTool imageUnderstandingTool) {
         return MethodToolCallbackProvider.builder()
-                .toolObjects(imageSearchTool, currentTimeTool)
+                .toolObjects(imageSearchTool, imageUnderstandingTool)
                 .build();
     }
 

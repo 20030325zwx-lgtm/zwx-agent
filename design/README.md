@@ -12,6 +12,7 @@
 - [知识库重建索引与发布状态](./2026-10-20-knowledge-reindex-lifecycle.md)
 - [知识库原始文档预览（File Viewer）](./2026-10-20-knowledge-document-viewer.md)
 - [目录（TOC）切片后处理](./2026-10-20-toc-chunk-postprocessing.md)
+- [图片转文本 MCP 集成](./2026-10-20-image-to-text-mcp.md)
 - [改造实施方案索引](./plans/README.md)
 
 本目录保存相对稳定的架构、模块边界、数据流和设计决策。实现细节以源码为准。

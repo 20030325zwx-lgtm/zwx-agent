@@ -65,7 +65,7 @@ app:
     # markdown 技能目录（批次 B，相对后端工作目录）；目录为空或解析失败时回落内置 web-research
     dir: ${APP_SKILLS_DIR:skills}
   love:
-    vision-model: qwen-vl-plus
+    vision-model: ${APP_LOVE_VISION_MODEL:qwen3-vl-plus}
     rag:
       top-k: 3
       similarity-threshold: 0.55
@@ -114,6 +114,14 @@ app:
     bucket: ${ALIYUN_OSS_BUCKET:zwx-agent}
     access-key-id: ${ALIYUN_OSS_ACCESS_KEY_ID:}
     access-key-secret: ${ALIYUN_OSS_ACCESS_KEY_SECRET:}
+  image:
+    max-bytes: ${APP_IMAGE_MAX_BYTES:10485760}
+    signed-url-seconds: ${APP_IMAGE_SIGNED_URL_SECONDS:900}
+  mcp:
+    image-tools:
+      enabled: ${APP_MCP_IMAGE_TOOLS_ENABLED:true}
+      describe-tool: ${APP_MCP_IMAGE_DESCRIBE_TOOL:describe_image}
+      ocr-tool: ${APP_MCP_IMAGE_OCR_TOOL:ocr_image}
   document-parser:
     tika:
       # Optional Apache Tika Server endpoint, for example http://127.0.0.1:9998

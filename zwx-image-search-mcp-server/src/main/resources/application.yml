@@ -5,3 +5,7 @@ spring:
     active: sse
 server:
   port: 8127
+dashscope:
+  api-key: ${DASHSCOPE_API_KEY:}
+  vision-model: ${DASHSCOPE_VISION_MODEL:qwen3-vl-plus}
+  allowed-image-hosts: ${IMAGE_ALLOWED_HOSTS:*.aliyuncs.com,localhost,127.0.0.1}

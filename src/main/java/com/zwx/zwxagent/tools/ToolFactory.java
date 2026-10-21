@@ -79,7 +79,8 @@ public class ToolFactory {
                 webSearchTool,
                 new WebScrapingTool(urlAccessPolicy),
                 new ResourceDownloadTool(urlAccessPolicy, sandbox, workDir, maxDownloadBytes),
-                new PDFGenerationTool(sandbox, workDir)));
+                new PDFGenerationTool(sandbox, workDir),
+                new CurrentTimeTool()));
         if (terminalEnabled) {
             tools.add(new TerminalOperationTool(workDir, terminalAllowlist));
         }

@@ -5,12 +5,13 @@ import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.rag.LoveKnowledgeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwx.zwxagent.agent.AgentRegistry;
+import com.zwx.zwxagent.configuration.AppConfigurationService;
+import com.zwx.zwxagent.configuration.DynamicChatModelFactory;
 import com.zwx.zwxagent.conversation.AgentConversationService;
 import com.zwx.zwxagent.execution.ExecutionUpdate;
 import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
 import com.zwx.zwxagent.skills.SkillPromptBuilder;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.stereotype.Component;
@@ -22,24 +23,27 @@ import java.util.function.Consumer;
 @Component
 public class TravelPlannerApp {
 
-    private final ChatClient chatClient;
     private final BuiltInSkillRegistry skillRegistry;
     private final SkillPromptBuilder skillPromptBuilder;
     private final AgentKnowledgeRagService knowledgeRagService;
     private final AgentConversationService conversationService;
     private final AgentRegistry agentRegistry;
     private final ObjectMapper objectMapper;
+    private final AppConfigurationService configurationService;
+    private final DynamicChatModelFactory modelFactory;
 
-    public TravelPlannerApp(ChatModel dashscopeChatModel, BuiltInSkillRegistry skillRegistry, SkillPromptBuilder skillPromptBuilder,
+    public TravelPlannerApp(BuiltInSkillRegistry skillRegistry, SkillPromptBuilder skillPromptBuilder,
                             AgentKnowledgeRagService knowledgeRagService, AgentConversationService conversationService, AgentRegistry agentRegistry,
-                            ObjectMapper objectMapper) {
-        this.chatClient = ChatClient.builder(dashscopeChatModel).build();
+                            ObjectMapper objectMapper, AppConfigurationService configurationService,
+                            DynamicChatModelFactory modelFactory) {
         this.skillRegistry = skillRegistry;
         this.skillPromptBuilder = skillPromptBuilder;
         this.knowledgeRagService = knowledgeRagService;
         this.conversationService = conversationService;
         this.agentRegistry = agentRegistry;
         this.objectMapper = objectMapper;
+        this.configurationService = configurationService;
+        this.modelFactory = modelFactory;
     }
 
     public Flux<String> chat(String tenantId, String userId, String conversationId, String runId, String message, Consumer<ExecutionUpdate> progress) {
@@ -52,6 +56,8 @@ public class TravelPlannerApp {
 
     public Flux<String> chat(String tenantId, String userId, String conversationId, String runId, String message, Long retryUserMessageId,
                              boolean webSearch, Consumer<ExecutionUpdate> progress, Consumer<AgentKnowledgeRagResult> retrievalConsumer, String clientRequestId) {
+        ChatClient chatClient = ChatClient.builder(modelFactory.model(
+                configurationService.resolve(userId, AppConfigurationService.CHAT))).build();
         long userMessageId = retryUserMessageId == null
                 ? conversationService.startUserTurn(tenantId, userId, "travel", conversationId, message, clientRequestId)
                 : retryUserMessageId;

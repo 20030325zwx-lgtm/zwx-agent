@@ -1,6 +1,8 @@
 package com.zwx.zwxagent.app;
 
 import com.zwx.zwxagent.agent.AgentRegistry;
+import com.zwx.zwxagent.configuration.AppConfigurationService;
+import com.zwx.zwxagent.configuration.DynamicChatModelFactory;
 import com.zwx.zwxagent.conversation.AgentConversationService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
@@ -9,7 +11,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
 import com.zwx.zwxagent.skills.SkillPromptBuilder;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -20,28 +21,33 @@ import java.util.function.Consumer;
 public class TestAgentApp {
     private static final String KEY = "test";
     private static final String DEFAULT_TITLE = "新的功能测试";
-    private final ChatClient chatClient;
     private final AgentKnowledgeRagService knowledgeRagService;
     private final AgentConversationService conversationService;
     private final AgentRegistry agentRegistry;
     private final BuiltInSkillRegistry skillRegistry;
     private final SkillPromptBuilder skillPromptBuilder;
     private final ObjectMapper objectMapper;
+    private final AppConfigurationService configurationService;
+    private final DynamicChatModelFactory modelFactory;
 
-    public TestAgentApp(ChatModel dashscopeChatModel, AgentKnowledgeRagService knowledgeRagService,
+    public TestAgentApp(AgentKnowledgeRagService knowledgeRagService,
                         AgentConversationService conversationService, AgentRegistry agentRegistry, BuiltInSkillRegistry skillRegistry,
-                        SkillPromptBuilder skillPromptBuilder, ObjectMapper objectMapper) {
-        this.chatClient = ChatClient.builder(dashscopeChatModel).build();
+                        SkillPromptBuilder skillPromptBuilder, ObjectMapper objectMapper,
+                        AppConfigurationService configurationService, DynamicChatModelFactory modelFactory) {
         this.knowledgeRagService = knowledgeRagService;
         this.conversationService = conversationService;
         this.agentRegistry = agentRegistry;
         this.skillRegistry = skillRegistry;
         this.skillPromptBuilder = skillPromptBuilder;
         this.objectMapper = objectMapper;
+        this.configurationService = configurationService;
+        this.modelFactory = modelFactory;
     }
 
     public Flux<String> chat(String tenantId, String userId, String conversationId, String message, boolean webSearch, Long retryUserMessageId,
                              Consumer<AgentKnowledgeRagResult> retrievalConsumer, String clientRequestId) {
+        ChatClient chatClient = ChatClient.builder(modelFactory.model(
+                configurationService.resolve(userId, AppConfigurationService.CHAT))).build();
         long userMessageId = retryUserMessageId == null
                 ? conversationService.startUserTurn(tenantId, userId, KEY, conversationId, message, clientRequestId)
                 : retryUserMessageId;

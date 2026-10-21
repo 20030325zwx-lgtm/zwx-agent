@@ -2,21 +2,21 @@
   <main class="knowledge-admin">
     <header class="admin-header">
       <div class="header-inner">
-        <div class="header-start">
-          <HomeButton />
-          <span class="header-divider" aria-hidden="true"></span>
-          <div class="header-title">
-            <span class="title-kicker"><Database :size="12" /> KNOWLEDGE</span>
-            <h1>知识库管理</h1>
-            <span class="header-sub">{{ currentAgent.name }} · {{ currentAgent.category }}</span>
-          </div>
+        <div class="header-title">
+          <span class="title-kicker"><Database :size="12" /> KNOWLEDGE BASE</span>
+          <h1>知识库</h1>
+          <span class="header-sub">管理私有资料、检索切片与发布状态</span>
         </div>
         <div class="header-actions">
-          <label class="agent-select">
-            <span>资料归属</span>
-            <select v-model="agentKey" :disabled="uploading" @change="switchAgent">
-              <option v-for="agent in KNOWLEDGE_AGENTS" :key="agent.key" :value="agent.key">{{ agent.name }}</option>
-            </select>
+          <label class="agent-switcher">
+            <span class="agent-switcher-icon">{{ currentAgent.icon }}</span>
+            <span class="agent-switcher-copy">
+              <small>资料归属</small>
+              <select v-model="agentKey" :disabled="uploading" @change="switchAgent">
+                <option v-for="agent in KNOWLEDGE_AGENTS" :key="agent.key" :value="agent.key">{{ agent.name }}</option>
+              </select>
+            </span>
+            <ChevronDown :size="14" class="agent-chevron" />
           </label>
           <button class="icon-button" type="button" title="刷新文档列表" aria-label="刷新文档列表" :disabled="loadingPrivateDocuments" @click="loadPrivateDocuments({ preserveSelection: true })">
             <RefreshCw :size="15" :class="{ spinning: loadingPrivateDocuments }" />
@@ -24,7 +24,6 @@
           <input ref="knowledgeFileInput" class="knowledge-file-input" type="file" accept=".md,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" @change="uploadPrivateDocument" />
           <button v-if="canPublish" type="button" class="publish-button" :disabled="publishing" @click="publishSelected">{{ publishing ? '发布中...' : '发布待发布版本' }}</button>
           <button type="button" class="upload-button" :disabled="uploading" :title="`上传到：${targetUploadCategoryName}`" @click="knowledgeFileInput?.click()"><Upload :size="15" />{{ uploading ? '上传中...' : '上传资料' }}</button>
-          <AgentSettingsMenu :agent-key="agentKey" default-theme="rose" />
         </div>
       </div>
     </header>
@@ -207,17 +206,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { BookOpen, CircleCheck, Clock3, Database, FileText, FolderOpen, FolderPlus, FolderTree, Layers, RefreshCw, Search, Sparkles, Upload } from 'lucide-vue-next'
+import { BookOpen, ChevronDown, CircleCheck, Clock3, Database, FileText, FolderOpen, FolderPlus, FolderTree, Layers, RefreshCw, Search, Sparkles, Upload } from 'lucide-vue-next'
 import { createAgentKnowledgeCategory, getAgentKnowledgeDocument, listAgentKnowledgeCategories, listAgentKnowledgeDocuments, moveAgentKnowledgeDocument, publishAgentKnowledgeDocument, reindexAgentKnowledgeDocument, uploadAgentKnowledgeDocument } from '../api'
 import { KNOWLEDGE_AGENTS, getAgent } from '../config/agents'
-import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
-import HomeButton from '../components/HomeButton.vue'
 import KnowledgeDocumentViewer from '../components/KnowledgeDocumentViewer.vue'
 
 useHead({ title: '知识库管理 - ZWX Agent' })
 
 const route = useRoute()
-const requestedAgentKey = typeof route.query.agentKey === 'string' && KNOWLEDGE_AGENTS.some(agent => agent.key === route.query.agentKey) ? route.query.agentKey : 'love'
+const requestedAgentKey = typeof route.query.agentKey === 'string' && KNOWLEDGE_AGENTS.some(agent => agent.key === route.query.agentKey) ? route.query.agentKey : 'super'
 const detail = ref(null)
 const selectedDocumentId = ref('')
 const selectedChunkId = ref('')
@@ -502,7 +499,8 @@ onBeforeUnmount(() => {
 .knowledge-admin {
   position: relative;
   display: flex;
-  height: 100vh;
+  height: calc(100vh - 72px);
+  min-height: 560px;
   flex-direction: column;
   overflow: hidden;
   background:
@@ -512,49 +510,69 @@ onBeforeUnmount(() => {
   color: var(--sk-label);
 }
 
-/* ── 毛玻璃工具栏 ───────────────────────────────────── */
-.admin-header {
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--sk-separator);
-  background: var(--sk-material);
-  backdrop-filter: var(--sk-blur);
-  -webkit-backdrop-filter: var(--sk-blur);
-}
+/* ── 内容标题与操作区 ───────────────────────────────── */
+.admin-header { flex: 0 0 auto; }
 
 .header-inner {
   display: flex;
-  min-height: 72px;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
-  padding: 8px 20px;
+  gap: 20px;
+  padding: 18px 22px 12px;
 }
 
-.header-start { display: flex; min-width: 0; align-items: center; gap: 14px; }
-
-.header-divider { width: 1px; height: 30px; background: var(--sk-separator-strong); }
-
 .header-title { display: grid; min-width: 0; gap: 1px; }
-.title-kicker { display: flex; align-items: center; gap: 4px; color: var(--zwx-primary); font-size: 9px; font-weight: 800; letter-spacing: 0.14em; }
-.header-title h1 { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
-.header-sub { overflow: hidden; color: var(--sk-label-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.title-kicker { display: flex; align-items: center; gap: 4px; color: var(--zwx-primary); font-size: 10px; font-weight: 800; letter-spacing: 0.14em; }
+.header-title h1 { margin: 4px 0 2px; font-size: 26px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; }
+.header-sub { color: var(--sk-label-2); font-size: 12px; }
 
 .header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 
-.agent-select { display: flex; align-items: center; gap: 8px; color: var(--sk-label-2); font-size: 12px; font-weight: 550; }
-
-.agent-select select {
-  height: 36px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--sk-fill);
-  color: var(--sk-label);
-  padding: 0 10px;
-  font-size: 12px;
-  outline: none;
+.agent-switcher {
+  position: relative;
+  display: flex;
+  height: 44px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--sk-separator);
+  border-radius: 12px;
+  padding: 0 32px 0 9px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.agent-select select:focus { background: var(--sk-surface); box-shadow: 0 0 0 3px var(--zwx-primary-ring); }
+.agent-switcher:hover { border-color: rgba(0, 122, 255, 0.28); background: rgba(255, 255, 255, 0.86); box-shadow: 0 6px 18px rgba(40, 80, 150, 0.08); }
+
+.agent-switcher-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--zwx-primary-soft);
+  color: var(--zwx-primary);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.agent-switcher-copy { display: grid; min-width: 0; gap: 1px; }
+.agent-switcher-copy small { color: var(--sk-label-3); font-size: 9px; font-weight: 700; letter-spacing: 0.05em; }
+.agent-switcher select {
+  width: 118px;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--sk-label);
+  font-size: 12px;
+  font-weight: 650;
+  outline: none;
+  cursor: pointer;
+}
+.agent-switcher select:disabled { opacity: 0.6; cursor: default; }
+.agent-chevron { position: absolute; right: 10px; color: var(--sk-label-3); pointer-events: none; }
 
 .icon-button {
   display: grid;
@@ -863,22 +881,21 @@ onBeforeUnmount(() => {
 /* ── 响应式 ─────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .stat-foot { display: none; }
-  .header-actions .agent-select span { display: none; }
 }
 
 @media (max-width: 960px) {
   .knowledge-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 16px 0; }
   .knowledge-workspace { grid-template-columns: 260px minmax(230px, var(--chunk-panel-width)) 10px minmax(0, 1fr); gap: 12px; padding: 12px 16px 16px; }
   .header-actions { gap: 6px; }
-  .header-actions .icon-button, .header-actions .agent-select { display: none; }
+  .header-actions .icon-button { display: none; }
 }
 
 @media (max-width: 720px) {
-  .knowledge-admin { height: auto; min-height: 100vh; overflow: visible; }
-  .header-inner { min-height: auto; flex-wrap: wrap; padding: 10px 14px; }
-  .header-divider { display: none; }
+  .knowledge-admin { height: auto; min-height: 720px; overflow: visible; }
+  .header-inner { flex-wrap: wrap; align-items: flex-start; padding: 14px; }
   .header-actions { width: 100%; flex-wrap: wrap; }
-  .header-actions .icon-button, .header-actions .agent-select { display: flex; }
+  .agent-switcher { flex: 1 1 100%; }
+  .header-actions .icon-button { display: flex; }
   .knowledge-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px 14px 0; }
   .stat-card { padding: 10px; }
   .stat-copy strong { font-size: 18px; }

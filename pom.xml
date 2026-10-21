@@ -95,6 +95,11 @@
             <groupId>com.alibaba.cloud.ai</groupId>
             <artifactId>spring-ai-alibaba-graph-core</artifactId>
         </dependency>
+        <!-- OpenAI 兼容接口：允许用户配置第三方兼容服务作为对话模型 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-openai</artifactId>
+        </dependency>
         <!-- https://docs.spring.io/spring-ai/reference/api/chat/ollama-chat.html -->
         <dependency>
             <groupId>org.springframework.ai</groupId>

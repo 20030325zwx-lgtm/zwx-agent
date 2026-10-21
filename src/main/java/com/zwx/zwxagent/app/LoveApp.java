@@ -12,6 +12,9 @@ import com.zwx.zwxagent.rag.LoveRagTrace;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagService;
 import com.zwx.zwxagent.rag.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.agent.AgentRegistry;
+import com.zwx.zwxagent.configuration.AppConfigurationService;
+import com.zwx.zwxagent.configuration.DynamicChatModelFactory;
+import com.zwx.zwxagent.configuration.ResolvedModelConfig;
 import com.zwx.zwxagent.memory.MemoryService;
 import com.zwx.zwxagent.skills.BuiltInSkillRegistry;
 import com.zwx.zwxagent.skills.SkillPromptBuilder;
@@ -42,7 +45,9 @@ import java.util.stream.Collectors;
 public class LoveApp {
 
     private final ChatClient chatClient;
-    private final ChatClient streamingChatClient;
+    private final PostgresChatMemory chatMemory;
+    private final AppConfigurationService configurationService;
+    private final DynamicChatModelFactory modelFactory;
     private final BuiltInSkillRegistry skillRegistry;
     private final SkillPromptBuilder skillPromptBuilder;
 
@@ -55,7 +60,6 @@ public class LoveApp {
     private final LoveVisionChatService loveVisionChatService;
     private final LoveRagService loveRagService;
     private final ObjectMapper objectMapper;
-    private final String visionModel;
     private final AgentKnowledgeRagService agentKnowledgeRagService;
     private final AgentRegistry agentRegistry;
     private final MemoryService memoryService;
@@ -63,15 +67,18 @@ public class LoveApp {
     public LoveApp(ChatModel dashscopeChatModel, PostgresChatMemory chatMemory,
                    LoveConversationService conversationService,
                    LoveVisionChatService loveVisionChatService, LoveRagService loveRagService,
-                   ObjectMapper objectMapper, @org.springframework.beans.factory.annotation.Value("${app.love.vision-model}") String visionModel,
+                   ObjectMapper objectMapper,
                    AgentKnowledgeRagService agentKnowledgeRagService, AgentRegistry agentRegistry,
                    BuiltInSkillRegistry skillRegistry, SkillPromptBuilder skillPromptBuilder,
-                   MemoryService memoryService) {
+                   MemoryService memoryService, AppConfigurationService configurationService,
+                   DynamicChatModelFactory modelFactory) {
         this.conversationService = conversationService;
+        this.chatMemory = chatMemory;
         this.loveVisionChatService = loveVisionChatService;
         this.loveRagService = loveRagService;
         this.objectMapper = objectMapper;
-        this.visionModel = visionModel;
+        this.configurationService = configurationService;
+        this.modelFactory = modelFactory;
         this.agentKnowledgeRagService = agentKnowledgeRagService;
         this.agentRegistry = agentRegistry;
         this.skillRegistry = skillRegistry;
@@ -88,7 +95,17 @@ public class LoveApp {
 //                       ,new ReReadingAdvisor()
                 )
                 .build();
-        streamingChatClient = ChatClient.builder(dashscopeChatModel).build();
+    }
+
+    private ChatClient streamingClientFor(String userId) {
+        return ChatClient.builder(modelFactory.model(configurationService.resolve(userId, AppConfigurationService.CHAT))).build();
+    }
+
+    private ChatClient memoryClientFor(String userId) {
+        return ChatClient.builder(modelFactory.model(configurationService.resolve(userId, AppConfigurationService.CHAT)))
+                .defaultSystem(agentRegistry.get("love").systemPrompt())
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build(), new MyLoggerAdvisor())
+                .build();
     }
 
     /**
@@ -100,7 +117,7 @@ public class LoveApp {
      */
     public String doChat(com.zwx.zwxagent.security.CurrentActor actor, String message, String chatId) {
         conversationService.ensureOwnedConversation(actor, chatId, message);
-        ChatResponse chatResponse = chatClient
+        ChatResponse chatResponse = memoryClientFor(actor.userId())
                 .prompt()
                 .user(message)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
@@ -125,13 +142,13 @@ public class LoveApp {
                 .collect(Collectors.joining("\n"));
         history = budgetHistory(history);
         String memoryContext = buildMemoryContext(tenantId, message);
+        ChatClient streamingClient = streamingClientFor(actor.userId());
         StringBuilder answer = new StringBuilder();
         long userMessageId = retryUserMessageId == null
                 ? conversationService.startUserTurn(actor, chatId, message, List.of(), clientRequestId)
                 : retryUserMessageId;
         java.util.concurrent.atomic.AtomicBoolean persisted = new java.util.concurrent.atomic.AtomicBoolean(false);
-        var prompt = streamingChatClient
-                .prompt()
+        var prompt = streamingClient.prompt()
                 .system(agentRegistry.get("love").systemPrompt() + skillPromptBuilder.build(tenantId, "love", webSearch)
                         + memoryContext + "\n\n" + ragContext + "\n\n最近对话：\n" + history)
                 .user(message);
@@ -189,7 +206,7 @@ public class LoveApp {
                 .map(item -> item.role() + ": " + item.content())
                 .collect(Collectors.joining("\n")));
         StringBuilder answer = new StringBuilder();
-        var prompt = streamingChatClient
+        var prompt = streamingClientFor(actor.userId())
                 .prompt()
                 .system(agentRegistry.get("love").systemPrompt() + skillPromptBuilder.build(tenantId, "love", webSearch)
                         + "\n\n" + ragContext
@@ -217,13 +234,14 @@ public class LoveApp {
     }
 
     public LoveVisionChatResult prepareVisionChat(com.zwx.zwxagent.security.CurrentActor actor, String message, String chatId, List<String> imageObjectKeys) {
-        LoveVisionAnalysis analysis = loveVisionChatService.analyze(chatId, message, imageObjectKeys);
+        ResolvedModelConfig visionConfig = configurationService.resolve(actor.userId(), AppConfigurationService.VISION);
+        LoveVisionAnalysis analysis = loveVisionChatService.analyze(actor.userId(), chatId, message, imageObjectKeys);
 
         LoveRagResult ragResult = analysis.available()
-                ? loveRagService.retrieve(analysis.retrievalQuery(), visionModel)
+                ? loveRagService.retrieve(analysis.retrievalQuery(), visionConfig.modelName())
                 : new LoveRagResult(new com.zwx.zwxagent.rag.LoveRagTrace(message, 3, 0.55, List.of(),
                 "视觉摘要不可用，未执行知识库检索，模型仅基于图片、系统提示词与会话上下文回答。",
-                List.of(), visionModel, true, true), "");
+                List.of(), visionConfig.modelName(), true, true), "");
         AgentKnowledgeRagResult privateKnowledge = agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), "love", analysis.retrievalQuery());
         LoveRagTrace trace = mergePrivateReferences(ragResult.trace(), privateKnowledge);
         String scopedContext = privateKnowledge.context();
@@ -244,7 +262,7 @@ public class LoveApp {
             throw new IllegalStateException("Unable to serialize vision analysis", exception);
         }
         java.util.concurrent.atomic.AtomicBoolean persisted = new java.util.concurrent.atomic.AtomicBoolean(false);
-        return loveVisionChatService.streamChat(chatId, history, preparation.systemPrompt())
+        return loveVisionChatService.streamChat(actor.userId(), chatId, history, preparation.systemPrompt())
                 .doOnNext(content::append)
                 .doFinally(signal -> {
                     if (!persisted.compareAndSet(false, true)) return;

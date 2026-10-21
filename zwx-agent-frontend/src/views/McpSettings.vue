@@ -1,9 +1,10 @@
 <template>
   <main class="mcp-page">
     <header class="page-header">
-      <button class="back-button" type="button" aria-label="返回超级智能体" @click="router.push('/super-agent')"><ArrowLeft :size="16" />超级智能体</button>
-      <div><span class="eyebrow">MCP CONNECTIONS</span><h1>MCP 管理</h1><p>已启用的服务会在下一次超级智能体执行时加载。</p></div>
-      <button class="primary-button" type="button" @click="startCreate"><Plus :size="16" />添加服务</button>
+      <div class="page-header-inner">
+        <div><span class="eyebrow">MCP CONNECTIONS</span><h1>MCP 管理</h1><p>已启用的服务会在下一次超级智能体执行时加载。</p></div>
+        <button class="primary-button" type="button" @click="startCreate"><Plus :size="16" />添加服务</button>
+      </div>
     </header>
 
     <section class="mcp-shell">
@@ -37,12 +38,10 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { AlertCircle, ArrowLeft, Pencil, PlugZap, Plus, Server, Trash2, X } from 'lucide-vue-next'
+import { AlertCircle, Pencil, PlugZap, Plus, Server, Trash2, X } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { createMcpServer, deleteMcpServer, listMcpServers, testMcpServer, updateMcpServer } from '../api'
 
-const router = useRouter()
 const servers = ref([]); const loading = ref(true); const saving = ref(false); const testing = ref(null); const editing = ref(null); const formError = ref(''); const testResults = ref({}); const pendingDelete = ref(null)
 const load = async () => { loading.value = true; try { servers.value = await listMcpServers() } finally { loading.value = false } }
 const startCreate = () => { formError.value = ''; editing.value = { name: '', endpoint: '', enabled: true } }
@@ -70,28 +69,24 @@ onMounted(load)
 </script>
 
 <style scoped>
-.mcp-page { min-height: 100vh; background: var(--sk-bg); color: var(--sk-label); }
+.mcp-page { color: var(--sk-label); }
 
-.page-header {
-  display: grid;
-  grid-template-columns: 1fr minmax(0, 680px) 1fr;
-  align-items: start;
-  gap: 22px;
-  padding: 28px 40px 26px;
-  border-bottom: 1px solid var(--sk-separator);
-  background: var(--sk-material);
-  backdrop-filter: var(--sk-blur);
-  -webkit-backdrop-filter: var(--sk-blur);
+.page-header { padding: 22px 24px 4px; }
+
+.page-header-inner {
+  display: flex;
+  max-width: 900px;
+  margin: 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
 }
 
-.back-button { display: flex; align-items: center; gap: 6px; justify-self: start; border: 0; background: transparent; color: var(--zwx-primary); font-size: 13px; }
-.back-button:hover { opacity: 0.7; }
+.eyebrow { color: var(--zwx-primary); font-size: 10px; font-weight: 700; letter-spacing: 0.12em; }
 
-.eyebrow { color: var(--zwx-primary); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; }
+.page-header h1 { margin: 6px 0 4px; font-size: 28px; font-weight: 800; letter-spacing: -0.025em; }
 
-.page-header h1 { margin: 8px 0 5px; font-size: 30px; font-weight: 800; letter-spacing: -0.025em; }
-
-.page-header p { margin: 0; color: var(--sk-label-2); font-size: 14px; }
+.page-header p { margin: 0; color: var(--sk-label-2); font-size: 13px; }
 
 .primary-button {
   display: flex;
@@ -99,7 +94,7 @@ onMounted(load)
   align-items: center;
   justify-content: center;
   gap: 6px;
-  justify-self: end;
+  flex: 0 0 auto;
   border: 0;
   border-radius: 11px;
   padding: 0 16px;
@@ -114,7 +109,7 @@ onMounted(load)
 .primary-button:active:not(:disabled) { transform: scale(0.98); }
 .primary-button:disabled { opacity: 0.5; }
 
-.mcp-shell { max-width: 900px; margin: 0 auto; padding: 32px 24px 64px; }
+.mcp-shell { max-width: 900px; margin: 0 auto; padding: 20px 24px 64px; }
 
 /* 编辑器卡片 */
 .editor { display: grid; gap: 14px; margin-bottom: 20px; border: 1px solid var(--sk-separator); border-radius: 18px; padding: 20px; background: var(--sk-surface); box-shadow: var(--sk-shadow-card); }
@@ -214,4 +209,10 @@ onMounted(load)
 .server-actions button.danger:hover { background: rgba(255, 59, 48, 0.12); color: var(--sk-red); }
 
 .server-actions button:disabled { opacity: 0.5; }
+@media (max-width: 720px) {
+  .page-header { padding: 16px 14px 2px; }
+  .page-header-inner { flex-direction: column; gap: 8px; }
+  .page-header h1 { font-size: 24px; }
+  .mcp-shell { padding: 14px 14px 48px; }
+}
 </style>

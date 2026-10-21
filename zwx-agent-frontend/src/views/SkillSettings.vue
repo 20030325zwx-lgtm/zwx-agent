@@ -1,9 +1,10 @@
 <template>
   <main class="skills-page">
     <header class="skills-header">
-      <button class="back-button" type="button" aria-label="返回智能体目录" @click="router.push('/')"><ArrowLeft :size="16" />智能体目录</button>
-      <div><span class="eyebrow">CAPABILITY CONTROL</span><h1>内置 Skill 配置</h1><p>为每个智能体选择允许在对话中使用的能力。</p></div>
-      <span class="sync-note"><Cloud :size="15" />服务端同步</span>
+      <div class="skills-header-inner">
+        <div><span class="eyebrow">CAPABILITY CONTROL</span><h1>内置 Skill 配置</h1><p>为每个智能体选择允许在对话中使用的能力。</p></div>
+        <span class="sync-note"><Cloud :size="15" />服务端同步</span>
+      </div>
     </header>
     <section class="skills-shell">
       <div class="agent-tabs" role="tablist" aria-label="选择智能体">
@@ -30,12 +31,12 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Cloud, Sparkles } from 'lucide-vue-next'
+import { useRoute } from 'vue-router'
+import { Cloud, Sparkles } from 'lucide-vue-next'
 import { getSkillCatalog, saveSkillConfiguration } from '../api'
 import { AGENT_LIST } from '../config/agents'
 
-const router = useRouter(); const route = useRoute()
+const route = useRoute()
 const configurableAgents = AGENT_LIST.filter(agent => ['love', 'travel', 'test'].includes(agent.key))
 const agentKey = ref(configurableAgents.some(agent => agent.key === route.query.agentKey) ? route.query.agentKey : 'love')
 const skills = ref([]); const loading = ref(true); const saving = ref(false); const saved = ref(false); const error = ref('')
@@ -46,32 +47,28 @@ load()
 </script>
 
 <style scoped>
-.skills-page { min-height: 100vh; background: var(--sk-bg); color: var(--sk-label); }
+.skills-page { color: var(--sk-label); }
 
-.skills-header {
-  display: grid;
-  grid-template-columns: 1fr minmax(0, 680px) 1fr;
-  align-items: start;
-  gap: 22px;
-  padding: 28px 40px 26px;
-  border-bottom: 1px solid var(--sk-separator);
-  background: var(--sk-material);
-  backdrop-filter: var(--sk-blur);
-  -webkit-backdrop-filter: var(--sk-blur);
+.skills-header { padding: 22px 24px 4px; }
+
+.skills-header-inner {
+  display: flex;
+  max-width: 900px;
+  margin: 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
 }
 
-.back-button { display: flex; align-items: center; gap: 6px; justify-self: start; border: 0; background: transparent; color: var(--zwx-primary); font-size: 13px; }
-.back-button:hover { opacity: 0.7; }
+.eyebrow { color: var(--zwx-primary); font-size: 10px; font-weight: 700; letter-spacing: 0.12em; }
 
-.eyebrow { color: var(--zwx-primary); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; }
+.skills-header h1 { margin: 6px 0 4px; font-size: 28px; font-weight: 800; letter-spacing: -0.025em; }
 
-.skills-header h1 { margin: 8px 0 5px; font-size: 30px; font-weight: 800; letter-spacing: -0.025em; }
+.skills-header p { margin: 0; color: var(--sk-label-2); font-size: 13px; }
 
-.skills-header p { margin: 0; color: var(--sk-label-2); font-size: 14px; }
+.sync-note { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; margin-top: 4px; color: #1f9d4d; font-size: 12px; font-weight: 550; }
 
-.sync-note { display: flex; align-items: center; justify-self: end; gap: 6px; color: #1f9d4d; font-size: 12px; font-weight: 550; }
-
-.skills-shell { max-width: 900px; margin: 0 auto; padding: 32px 24px 64px; }
+.skills-shell { max-width: 900px; margin: 0 auto; padding: 20px 24px 64px; }
 
 /* iOS 分段控件 */
 .agent-tabs {
@@ -207,5 +204,11 @@ load()
   color: var(--zwx-primary);
   font-size: 13px;
   font-weight: 600;
+}
+@media (max-width: 720px) {
+  .skills-header { padding: 16px 14px 2px; }
+  .skills-header-inner { flex-direction: column; gap: 8px; }
+  .skills-header h1 { font-size: 24px; }
+  .skills-shell { padding: 14px 14px 48px; }
 }
 </style>

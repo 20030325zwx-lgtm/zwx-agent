@@ -225,6 +225,13 @@ export const updateMcpServer = (id, payload) => request.put(`/ai/mcp/servers/${i
 export const deleteMcpServer = id => request.delete(`/ai/mcp/servers/${id}`)
 export const testMcpServer = id => request.post(`/ai/mcp/servers/${id}/test`).then(response => response.data)
 
+export const listModelSettings = () => request.get('/settings/models').then(response => response.data)
+export const saveUserModelSettings = (key, payload) => request.put(`/settings/models/${encodeURIComponent(key)}`, payload).then(response => response.data)
+export const resetUserModelSettings = key => request.delete(`/settings/models/${encodeURIComponent(key)}`).then(response => response.data)
+export const saveSystemModelSettings = (key, payload) => request.put(`/settings/system/models/${encodeURIComponent(key)}`, payload).then(response => response.data)
+export const resetSystemModelSettings = key => request.delete(`/settings/system/models/${encodeURIComponent(key)}`).then(response => response.data)
+export const testModelSettings = (key, scope = 'USER') => request.post(`/settings/models/${encodeURIComponent(key)}/test`, null, { params: { scope } }).then(response => response.data)
+
 export default {
   chatWithLoveApp,
   uploadLoveImage,

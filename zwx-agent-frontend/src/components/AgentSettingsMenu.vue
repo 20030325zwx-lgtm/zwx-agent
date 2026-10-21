@@ -22,6 +22,11 @@
         <span>内置 Skill 配置</span>
         <ChevronRight :size="15" />
       </button>
+      <button class="knowledge-link" type="button" role="menuitem" @click="openModels">
+        <Cpu :size="16" />
+        <span>模型设置</span>
+        <ChevronRight :size="15" />
+      </button>
       <div v-if="desktopApi" class="desktop-api-settings">
         <strong>桌面端服务配置</strong>
         <label>运行模式<select v-model="desktopSettings.backendMode"><option value="remote">连接已有服务</option><option value="local">启动本机服务</option></select></label>
@@ -49,7 +54,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ChevronRight, Database, Settings2, Sparkles } from 'lucide-vue-next'
+import { ChevronRight, Cpu, Database, Settings2, Sparkles } from 'lucide-vue-next'
 
 const props = defineProps({
   agentKey: { type: String, required: true },
@@ -82,6 +87,7 @@ const applyTheme = key => {
 const selectTheme = key => { activeTheme.value = key; localStorage.setItem(storageKey, key); applyTheme(key) }
 const openKnowledge = () => router.push({ name: 'KnowledgeAdmin', query: { agentKey: props.agentKey } })
 const openSkills = () => router.push({ name: 'SkillSettings', query: { agentKey: props.agentKey } })
+const openModels = () => router.push({ name: 'ModelSettings' })
 const saveDesktopSettings = async () => {
   desktopSettingsError.value = ''
   try { await desktopApi.saveSettings(desktopSettings.value) }
@@ -93,7 +99,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeOnOutsideClick)
 </script>
 
 <style scoped>
-.agent-settings { position: relative; display: flex; width: 190px; justify-content: flex-end; }
+.agent-settings { position: relative; display: flex; width: auto; justify-content: flex-end; }
 
 .settings-trigger {
   display: grid;

@@ -1,49 +1,40 @@
 <template>
-  <main class="catalog-page">
-    <div class="bg-glow" aria-hidden="true"></div>
-
-    <!-- 悬浮胶囊导航 -->
-    <header class="topbar">
-      <div class="topbar-inner">
-        <button class="brand" type="button" aria-label="ZWX Agent 首页" @click="clearFilter">
-          <span class="brand-mark">Z</span><span class="brand-name">ZWX Agent</span>
-        </button>
-        <div class="topbar-actions">
-          <span class="topbar-note">AI 工作空间</span>
-          <button class="skill-entry" type="button" @click="router.push({ name: 'SkillSettings' })"><Settings2 :size="14" />Skill</button>
-          <button class="skill-entry" type="button" @click="router.push({ name: 'McpSettings' })"><PlugZap :size="14" />MCP</button>
-          <button class="skill-entry" type="button" @click="router.push({ name: 'KnowledgeAdmin' })"><Database :size="14" />知识库</button>
-          <AgentSettingsMenu agent-key="love" default-theme="blue" trigger-label="本机服务设置" show-trigger-label />
-          <div ref="userMenuRoot" class="user-menu">
-            <button class="user-trigger" type="button" :aria-expanded="userMenuOpen" aria-label="账号菜单" @click="userMenuOpen = !userMenuOpen">
-              <span class="user-avatar">{{ userInitial }}</span>
-            </button>
-            <div v-if="userMenuOpen" class="user-popover" role="menu">
-              <div class="user-info">
-                <span class="user-avatar large">{{ userInitial }}</span>
-                <div class="user-copy"><strong>{{ currentUser?.username || '未登录' }}</strong><small>{{ roleLabel }}</small></div>
-              </div>
-              <button class="logout-item" type="button" role="menuitem" @click="handleLogout"><LogOut :size="15" />退出登录</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-
+  <div class="catalog-page">
     <!-- Hero：居中大标题 + 主搜索 -->
-    <section class="hero">
-      <span class="hero-badge"><i aria-hidden="true"></i>YOUR AI WORKSPACE</span>
-      <h1>让每次对话，都有<br /><em class="gradient-text">可靠的下一步</em>。</h1>
+    <section class="hero" ref="heroRef" @pointermove="handleHeroPointer" @pointerleave="resetHeroPointer">
+      <div class="hero-aurora" aria-hidden="true">
+        <span class="aurora aurora-a"></span>
+        <span class="aurora aurora-b"></span>
+        <span class="aurora aurora-c"></span>
+      </div>
+      <div class="hero-floaters" aria-hidden="true">
+        <span class="floater floater-heart" style="--depth: 1.4">♡</span>
+        <span class="floater floater-spark" style="--depth: 2.2">✦</span>
+        <span class="floater floater-pin" style="--depth: 1.8">⌖</span>
+        <span class="floater floater-check" style="--depth: 2.6">✓</span>
+      </div>
+
+      <span class="hero-badge"><i aria-hidden="true"></i>YOUR AI WORKSPACE<span class="badge-live">LIVE</span></span>
+      <h1>
+        <span>让每次对话，都有</span>
+        <span class="rotating-line">
+          <span class="word-stack">
+            <em v-for="(phrase, index) in phrases" :key="phrase" class="gradient-text"
+              :class="{ active: index === activePhrase }">{{ phrase }}</em>
+          </span>
+        </span>
+      </h1>
       <p class="hero-sub">自主智能体规划任务、调用工具并多步执行；对话问答提供专注的深度沟通与资料检索。</p>
 
       <label class="search-box">
         <svg class="search-glyph" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.75" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M13 13 L17.5 17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-        <input v-model="query" type="search" placeholder="搜索智能体，如「旅游」「超级智能体」..." />
+        <input ref="searchInput" v-model="query" type="search" placeholder="搜索智能体，如「旅游」「超级智能体」..." />
+        <kbd v-if="!query" class="search-shortcut">{{ shortcutLabel }}</kbd>
         <button v-if="query" class="search-clear" type="button" aria-label="清除搜索" @click="query = ''">×</button>
       </label>
 
       <div class="hero-meta">
-        <span class="meta-pill"><strong>{{ agents.length }}</strong>个智能体已就绪</span>
+        <span class="meta-pill meta-pill-count"><strong>{{ agents.length }}</strong>个智能体已就绪</span>
         <span class="meta-pill meta-pill-dot">支持多步任务执行</span>
         <span class="meta-pill meta-pill-dot">私有知识库检索</span>
       </div>
@@ -58,8 +49,8 @@
           <span class="group-note">可自主规划任务、调用工具并多步执行 · {{ agentAgents.length }}</span>
         </div>
         <div class="featured-grid">
-          <button v-for="agent in agentAgents" :key="agent.name" type="button" class="agent-item featured"
-            @click="navigateTo(agent.path)">
+          <button v-for="(agent, index) in agentAgents" :key="agent.name" type="button" class="agent-item featured"
+            :style="{ '--i': index }" @pointermove="trackSpotlight" @click="navigateTo(agent.path)">
             <span class="featured-glow" :class="agent.iconClass" aria-hidden="true"></span>
             <span class="agent-icon" :class="agent.iconClass" aria-hidden="true">{{ agent.icon }}</span>
             <span class="agent-copy">
@@ -69,6 +60,15 @@
               </span>
               <small>{{ agent.description }}</small>
               <span class="featured-cta">开始任务<span aria-hidden="true">›</span></span>
+            </span>
+            <span v-if="agent.kind === 'agent'" class="featured-visual" aria-hidden="true">
+              <span class="flow-node"><i></i>规划</span>
+              <span class="flow-link"></span>
+              <span class="flow-node"><i></i>执行</span>
+              <span class="flow-link"></span>
+              <span class="flow-node"><i></i>验收</span>
+              <span class="flow-link"></span>
+              <span class="flow-node"><i></i>交付</span>
             </span>
             <span class="open-agent" aria-hidden="true"><ChevronRight :size="17" /></span>
           </button>
@@ -83,8 +83,8 @@
           <span class="group-note">专注单轮对话、资料检索与方案生成 · {{ qaAgents.length }}</span>
         </div>
         <div class="agent-grid">
-          <button v-for="agent in qaAgents" :key="agent.name" type="button" class="agent-item"
-            @click="navigateTo(agent.path)">
+          <button v-for="(agent, index) in qaAgents" :key="agent.name" type="button" class="agent-item"
+            :style="{ '--i': index }" @pointermove="trackSpotlight" @click="navigateTo(agent.path)">
             <span class="agent-icon" :class="agent.iconClass" aria-hidden="true">{{ agent.icon }}</span>
             <span class="agent-copy">
               <span class="agent-title-row">
@@ -108,17 +108,15 @@
     </section>
 
     <footer class="catalog-footer">ZWX Agent · 让每次对话都有可靠的下一步</footer>
-  </main>
+  </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { ChevronRight, Database, LogOut, PlugZap, Settings2 } from 'lucide-vue-next'
-import AgentSettingsMenu from '../components/AgentSettingsMenu.vue'
+import { ChevronRight } from 'lucide-vue-next'
 import { AGENT_LIST } from '../config/agents'
-import { getCurrentUser, logout } from '../api/auth'
 
 useHead({
   title: 'ZWX Agent - 智能体目录',
@@ -131,6 +129,13 @@ useHead({
 const router = useRouter()
 const query = ref('')
 const agents = AGENT_LIST
+const searchInput = ref(null)
+const heroRef = ref(null)
+const phrases = ['可靠的下一步。', '清晰的执行计划。', '更聪明的协作。']
+const shortcutLabel = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'
+const activePhrase = ref(0)
+let phraseTimer = null
+let pointerFrame = 0
 
 const filteredAgents = computed(() => {
   const keyword = query.value.trim().toLowerCase()
@@ -147,180 +152,61 @@ const clearFilter = () => {
   query.value = ''
 }
 
-/* 账号菜单 */
-const currentUser = computed(() => getCurrentUser())
-const userInitial = computed(() => (currentUser.value?.username || 'U').trim().slice(0, 1).toUpperCase())
-const roleLabel = computed(() => ({ ADMIN: '管理员', USER: '成员' })[currentUser.value?.role] || currentUser.value?.role || '成员')
-const userMenuOpen = ref(false)
-const userMenuRoot = ref(null)
-const closeUserMenu = event => { if (!userMenuRoot.value?.contains(event.target)) userMenuOpen.value = false }
-const handleLogout = () => {
-  userMenuOpen.value = false
-  logout()
-  router.replace({ name: 'Login' })
+const trackSpotlight = event => {
+  const element = event.currentTarget
+  const rect = element.getBoundingClientRect()
+  element.style.setProperty('--mx', `${event.clientX - rect.left}px`)
+  element.style.setProperty('--my', `${event.clientY - rect.top}px`)
 }
-onMounted(() => document.addEventListener('click', closeUserMenu))
-onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
+
+const handleHeroPointer = event => {
+  if (!heroRef.value) return
+  cancelAnimationFrame(pointerFrame)
+  pointerFrame = requestAnimationFrame(() => {
+    const rect = heroRef.value.getBoundingClientRect()
+    const x = (event.clientX - rect.left) / rect.width - 0.5
+    const y = (event.clientY - rect.top) / rect.height - 0.5
+    heroRef.value.style.setProperty('--px', x.toFixed(3))
+    heroRef.value.style.setProperty('--py', y.toFixed(3))
+  })
+}
+
+const resetHeroPointer = () => {
+  if (!heroRef.value) return
+  heroRef.value.style.setProperty('--px', '0')
+  heroRef.value.style.setProperty('--py', '0')
+}
+
+const focusSearch = event => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    searchInput.value?.focus()
+  }
+}
+
+const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+onMounted(() => {
+  document.addEventListener('keydown', focusSearch)
+  if (!reduceMotion()) {
+    phraseTimer = window.setInterval(() => {
+      activePhrase.value = (activePhrase.value + 1) % phrases.length
+    }, 3200)
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', focusSearch)
+  if (phraseTimer) window.clearInterval(phraseTimer)
+  cancelAnimationFrame(pointerFrame)
+})
 </script>
 
 <style scoped>
 .catalog-page {
   position: relative;
-  min-height: 100vh;
-  overflow-x: clip;
-  background:
-    linear-gradient(120deg, rgba(213, 226, 255, 0.92), rgba(247, 251, 255, 0.82) 44%, rgba(222, 236, 255, 0.86));
   color: var(--sk-label);
 }
-
-/* ── 背景光斑 ───────────────────────────────────────── */
-.bg-glow {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(48rem 32rem at 44% -10rem, rgba(62, 110, 245, 0.26), transparent 68%),
-    radial-gradient(36rem 26rem at 100% 26%, rgba(111, 191, 255, 0.18), transparent 67%),
-    linear-gradient(125deg, transparent 0 62%, rgba(255, 255, 255, 0.28) 62% 63%, transparent 63%);
-}
-
-/* ── 悬浮胶囊导航 ───────────────────────────────────── */
-.topbar {
-  position: sticky;
-  z-index: 10;
-  top: 14px;
-  padding: 0 20px;
-}
-
-.topbar-inner {
-  display: flex;
-  max-width: 1200px;
-  height: 58px;
-  margin: 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  border-radius: 14px;
-  padding: 0 10px 0 18px;
-  background: rgba(255, 255, 255, 0.76);
-  backdrop-filter: var(--sk-blur);
-  -webkit-backdrop-filter: var(--sk-blur);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 32px rgba(0, 0, 0, 0.08);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 0;
-  background: transparent;
-  color: var(--sk-label);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.brand-mark {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border-radius: 8px;
-  background: linear-gradient(145deg, #4f8df7, var(--zwx-primary) 58%, #2248bd);
-  color: #fff;
-  font-size: 15px;
-  font-weight: 800;
-  box-shadow: 0 4px 12px var(--zwx-primary-ring), inset 0 1px 0 rgba(255, 255, 255, 0.4);
-}
-
-.topbar-note { color: var(--sk-label-2); font-size: 13px; }
-
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
-
-.skill-entry {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 13px;
-  background: var(--sk-fill);
-  color: var(--sk-label-2);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.skill-entry:hover { background: var(--sk-fill-strong); color: var(--sk-label); transform: translateY(-1px); }
-
-/* ── 账号菜单 ───────────────────────────────────────── */
-.user-menu { position: relative; display: flex; }
-
-.user-trigger { display: grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 50%; }
-
-.user-trigger:hover .user-avatar { filter: brightness(1.08); }
-
-.user-avatar {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border-radius: 50%;
-  background: linear-gradient(160deg, #98a2b3, #64748b);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 6px rgba(0, 0, 0, 0.14);
-}
-
-.user-avatar.large { width: 40px; height: 40px; flex: 0 0 40px; font-size: 16px; }
-
-.user-popover {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 12px);
-  right: 0;
-  width: 240px;
-  border: 1px solid var(--sk-separator);
-  border-radius: 16px;
-  padding: 8px;
-  background: var(--sk-material-strong);
-  backdrop-filter: var(--sk-blur);
-  -webkit-backdrop-filter: var(--sk-blur);
-  box-shadow: var(--sk-shadow-pop);
-  transform-origin: top right;
-  animation: user-menu-in 0.18s cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-@keyframes user-menu-in {
-  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-
-.user-info { display: flex; align-items: center; gap: 11px; padding: 8px 8px 12px; border-bottom: 1px solid var(--sk-separator); }
-
-.user-copy { display: grid; min-width: 0; gap: 2px; }
-.user-copy strong { overflow: hidden; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
-.user-copy small { color: var(--sk-label-3); font-size: 11px; }
-
-.logout-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  border: 0;
-  border-radius: 10px;
-  padding: 10px 10px;
-  background: transparent;
-  color: var(--sk-red);
-  font-size: 13px;
-  font-weight: 600;
-  text-align: left;
-}
-
-.logout-item:hover { background: rgba(255, 59, 48, 0.1); }
 
 /* ── Hero ───────────────────────────────────────────── */
 .hero {
@@ -328,10 +214,87 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   display: flex;
   max-width: 860px;
   margin: 0 auto;
-  padding: 92px 24px 30px;
+  padding: 62px 24px 28px;
   flex-direction: column;
   align-items: center;
   text-align: center;
+  --px: 0;
+  --py: 0;
+}
+
+.hero-aurora { position: absolute; inset: -80px -160px 0; pointer-events: none; overflow: hidden; }
+
+.aurora {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  filter: blur(10px);
+  opacity: 0.72;
+  animation: aurora-drift 16s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+}
+
+.aurora-a {
+  top: 8%;
+  left: 13%;
+  width: 260px;
+  height: 260px;
+  background: radial-gradient(circle at 36% 32%, rgba(91, 145, 255, 0.34), rgba(91, 145, 255, 0) 68%);
+}
+
+.aurora-b {
+  top: 22%;
+  right: 10%;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle at 60% 40%, rgba(72, 210, 184, 0.22), rgba(72, 210, 184, 0) 70%);
+  animation-delay: -5s;
+  animation-duration: 19s;
+}
+
+.aurora-c {
+  bottom: -14%;
+  left: 40%;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 133, 192, 0.16), rgba(255, 133, 192, 0) 70%);
+  animation-delay: -9s;
+  animation-duration: 21s;
+}
+
+@keyframes aurora-drift {
+  0% { transform: translate3d(-10px, -6px, 0) scale(0.96); }
+  50% { transform: translate3d(14px, 10px, 0) scale(1.06); }
+  100% { transform: translate3d(-4px, 16px, 0) scale(1); }
+}
+
+.hero-floaters { position: absolute; inset: 0; pointer-events: none; }
+
+.floater {
+  position: absolute;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--zwx-primary);
+  font-size: 16px;
+  box-shadow: 0 8px 20px rgba(50, 80, 140, 0.1);
+  backdrop-filter: blur(8px);
+  transform: translate3d(calc(var(--px) * var(--depth) * 12px), calc(var(--py) * var(--depth) * 10px), 0);
+  transition: transform 0.22s ease-out;
+  animation: floater-bob 6s ease-in-out infinite;
+}
+
+.floater-heart { top: 20%; left: 8%; color: #ff5b83; animation-delay: -1s; }
+.floater-spark { top: 12%; right: 9%; color: #f5a623; animation-delay: -3s; }
+.floater-pin { top: 54%; left: 4%; color: #2aa254; animation-delay: -4.5s; }
+.floater-check { top: 50%; right: 4%; color: #64748b; animation-delay: -2s; }
+
+@keyframes floater-bob {
+  0%, 100% { margin-top: 0; }
+  50% { margin-top: -10px; }
 }
 
 .hero-badge {
@@ -355,24 +318,65 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   border-radius: 50%;
   background: linear-gradient(140deg, #4cd471, var(--sk-blue));
   box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12);
+  animation: live-pulse 2.4s ease-in-out infinite;
+}
+
+.badge-live {
+  margin-left: 2px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: rgba(52, 199, 89, 0.12);
+  color: #1f9d4d;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.12); }
+  50% { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.03); }
 }
 
 .hero h1 {
-  margin: 26px 0 0;
+  margin: 24px 0 0;
   font-size: 58px;
   font-weight: 800;
   line-height: 1.12;
   letter-spacing: -0.03em;
 }
 
+.hero h1 > span { display: block; }
+
+.rotating-line { display: flex; align-items: baseline; justify-content: center; min-height: 1.12em; }
+
+.word-stack { display: inline-grid; justify-items: center; }
+
+.word-stack em {
+  grid-area: 1 / 1;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(14px);
+  filter: blur(4px);
+  transition: opacity 0.34s ease, transform 0.34s ease, filter 0.34s ease;
+}
+
+.word-stack em.active { opacity: 1; transform: translateY(0); filter: blur(0); }
+
 .gradient-text {
   font-style: normal;
-  background: linear-gradient(100deg, #1d4ed8 8%, #3679ec 52%, #1a4eb7 96%);
+  background: linear-gradient(100deg, #1d4ed8 8%, #3f8dff 30%, #6d5df5 52%, #1a4eb7 80%, #1d4ed8 100%);
+  background-size: 220% 100%;
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
+  animation: gradient-flow 9s ease-in-out infinite;
 }
+
+@keyframes gradient-flow {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
 
 .hero-sub {
   margin: 18px 0 0;
@@ -387,22 +391,38 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   display: flex;
   width: min(100%, 700px);
   height: 68px;
+  position: relative;
   margin-top: 34px;
   align-items: center;
   gap: 13px;
-  border: 2px solid #263a60;
+  border: 1px solid rgba(38, 58, 96, 0.22);
   border-radius: 14px;
   padding: 0 10px 0 20px;
-  background: var(--sk-surface);
+  background: rgba(255, 255, 255, 0.9);
   color: var(--sk-label-3);
-  box-shadow: 0 12px 28px rgba(41, 73, 133, 0.15);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 12px 28px rgba(41, 73, 133, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: box-shadow 0.22s ease, border-color 0.22s ease, transform 0.22s ease, background-color 0.22s ease;
 }
+
+.search-box:hover { border-color: rgba(38, 58, 96, 0.34); box-shadow: 0 16px 34px rgba(41, 73, 133, 0.16); }
 
 .search-box:focus-within {
   border-color: var(--zwx-primary);
-  box-shadow: 0 0 0 4px var(--zwx-primary-ring), var(--sk-shadow-raised);
-  transform: translateY(-1px);
+  background: #fff;
+  box-shadow: 0 0 0 4px var(--zwx-primary-ring), 0 18px 40px rgba(41, 73, 133, 0.18);
+  transform: translateY(-2px);
+}
+
+.search-shortcut {
+  flex: 0 0 auto;
+  border: 1px solid var(--sk-separator-strong);
+  border-radius: 6px;
+  padding: 3px 7px;
+  background: var(--sk-fill);
+  color: var(--sk-label-3);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 650;
 }
 
 .search-glyph { width: 21px; height: 21px; flex: 0 0 21px; }
@@ -518,6 +538,18 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
+.agent-item::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%), rgba(0, 122, 255, 0.1), transparent 64%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.agent-item:hover::before { opacity: 1; }
+
 .agent-item:hover {
   border-color: transparent;
   box-shadow: var(--sk-shadow-raised);
@@ -581,9 +613,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 
 .agent-copy { display: grid; min-width: 0; gap: 7px; }
 
-.agent-title-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.agent-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; min-width: 0; }
 
-.agent-copy strong { font-size: 17px; font-weight: 750; letter-spacing: -0.01em; }
+.agent-copy strong { font-size: 17px; font-weight: 750; letter-spacing: -0.01em; white-space: nowrap; }
 
 .featured .agent-copy strong { font-size: 21px; }
 
@@ -627,6 +659,65 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 .featured-cta span { font-size: 17px; line-height: 1; transition: transform 0.2s ease; }
 
 .agent-item.featured:hover .featured-cta span { transform: translateX(3px); }
+
+.featured-visual {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 0 8px;
+  opacity: 0.78;
+  transition: opacity 0.2s ease;
+}
+
+.agent-item.featured:hover .featured-visual { opacity: 1; }
+
+.flow-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(0, 122, 255, 0.14);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--sk-label-2);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.flow-node i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--zwx-primary);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+}
+
+.flow-link {
+  width: 18px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(0, 122, 255, 0.12), rgba(0, 122, 255, 0.55), rgba(0, 122, 255, 0.12));
+  background-size: 200% 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .flow-link { animation: flow-link 2.4s linear infinite; }
+  .flow-node i { animation: flow-node 2.4s ease-in-out infinite; }
+  .flow-node:nth-of-type(3) i { animation-delay: 0.2s; }
+  .flow-node:nth-of-type(5) i { animation-delay: 0.4s; }
+  .flow-node:nth-of-type(7) i { animation-delay: 0.6s; }
+}
+
+@keyframes flow-link {
+  from { background-position: 200% 0; }
+  to { background-position: 0 0; }
+}
+
+@keyframes flow-node {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.08); }
+  50% { box-shadow: 0 0 0 5px rgba(0, 122, 255, 0.03); }
+}
 
 /* 问答卡片三列网格 */
 .agent-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
@@ -690,20 +781,53 @@ onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu))
 }
 
 /* ── 响应式 ─────────────────────────────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  .agent-item {
+    animation: card-rise 0.55s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  .hero-badge, .hero h1, .hero-sub, .search-box, .hero-meta {
+    animation: hero-in 0.65s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+  }
+
+  .hero h1 { animation-delay: 0.06s; }
+  .hero-sub { animation-delay: 0.12s; }
+  .search-box { animation-delay: 0.18s; }
+  .hero-meta { animation-delay: 0.24s; }
+}
+
+@keyframes hero-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(16px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora, .floater, .hero-badge i, .gradient-text { animation: none; }
+  .floater { transform: none; }
+  .word-stack em { transition: none; }
+}
+
 @media (max-width: 900px) {
   .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+
 @media (max-width: 720px) {
-  .topbar { top: 10px; padding: 0 12px; }
-  .topbar-inner { height: 54px; padding: 0 8px 0 14px; }
-  .topbar-note, .brand-name { display: none; }
-  .hero { padding-top: 56px; }
+  .hero { padding-top: 54px; }
   .hero h1 { font-size: 36px; }
   .hero br { display: none; }
   .hero-sub { font-size: 15px; }
+  .hero-floaters { display: none; }
+  .featured-visual { display: none; }
   .search-box { height: 54px; }
   .search-box input { font-size: 16px; }
+  .search-shortcut { display: none; }
   .catalog-shell { padding-top: 40px; }
   .agent-grid { grid-template-columns: 1fr; }
   .agent-copy small { -webkit-line-clamp: 3; }

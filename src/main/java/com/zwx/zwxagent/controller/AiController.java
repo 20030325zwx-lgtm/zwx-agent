@@ -2,6 +2,8 @@ package com.zwx.zwxagent.controller;
 
 import com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator;
 import com.zwx.zwxagent.app.LoveApp;
+import com.zwx.zwxagent.configuration.AppConfigurationService;
+import com.zwx.zwxagent.configuration.DynamicChatModelFactory;
 import com.zwx.zwxagent.conversation.LoveConversationMessage;
 import com.zwx.zwxagent.conversation.LoveConversationService;
 import com.zwx.zwxagent.conversation.LoveConversationSummary;
@@ -111,7 +113,10 @@ public class AiController {
     private com.zwx.zwxagent.workspace.WorkspaceService workspaceService;
 
     @Resource
-    private ChatModel dashscopeChatModel;
+    private AppConfigurationService appConfigurationService;
+
+    @Resource
+    private DynamicChatModelFactory dynamicChatModelFactory;
 
     @Resource
     private LoveConversationService conversationService;
@@ -184,9 +189,6 @@ public class AiController {
 
     @Resource(name = "ragExecutor")
     private java.util.concurrent.Executor ragExecutor;
-
-    @org.springframework.beans.factory.annotation.Value("${spring.ai.dashscope.chat.options.model:qwen-plus}")
-    private String chatModelName;
 
     @GetMapping("/skills/catalog")
     public List<SkillCatalogItem> listSkillCatalog(CurrentActor actor, @RequestParam String agentKey) {
@@ -348,8 +350,9 @@ public class AiController {
     }
 
     @GetMapping("/love_app/knowledge/references")
-    public List<LoveKnowledgeReference> findLoveKnowledgeReferences(@RequestParam String message) {
-        return loveRagService.trace(message, chatModelName).references();
+    public List<LoveKnowledgeReference> findLoveKnowledgeReferences(CurrentActor actor, @RequestParam String message) {
+        return loveRagService.trace(message,
+                appConfigurationService.resolve(actor.userId(), AppConfigurationService.CHAT).modelName()).references();
     }
 
     @GetMapping("/love_app/knowledge/documents")
@@ -461,7 +464,8 @@ public class AiController {
 
     private LoveTextChat prepareLoveTextChat(CurrentActor actor, String message) {
         String searchQuery = rewrittenQuery(message);
-        LoveRagResult ragResult = loveRagService.retrieve(searchQuery, chatModelName);
+        LoveRagResult ragResult = loveRagService.retrieve(searchQuery,
+                appConfigurationService.resolve(actor.userId(), AppConfigurationService.CHAT).modelName());
         AgentKnowledgeRagResult privateKnowledge = agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), "love", searchQuery);
         LoveRagTrace trace = mergePrivateReferences(ragResult.trace(), privateKnowledge);
         try {
@@ -601,6 +605,7 @@ public class AiController {
         McpTools mcpTools = null;
         ToolCallback[] availableTools;
         String historyContext;
+        ChatModel runChatModel;
         String imageContext = "";
         String retrievalQuery = message;
         try {
@@ -630,6 +635,7 @@ public class AiController {
                         return role + status + ": " + historyMessage.content();
                     })
                     .collect(java.util.stream.Collectors.joining("\n"));
+            runChatModel = chatModelFor(actor.userId());
         } catch (RuntimeException exception) {
             agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
             if (mcpTools != null) mcpTools.close();
@@ -655,7 +661,7 @@ public class AiController {
             conversationLease.close();
         };
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
-                conversationId, actor.tenantId(), agentMessage, historyContext, availableTools, knowledgeContext,
+                conversationId, actor.tenantId(), runChatModel, agentMessage, historyContext, availableTools, knowledgeContext,
                 knowledge.trace() == null ? null : ragTraceJson, runId, null, null, cleanup,
                 result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result));
         ManusGraphOrchestrator.ManusRunHandle handle;
@@ -735,12 +741,14 @@ public class AiController {
         if (conversationLease == null) throw new com.zwx.zwxagent.conversation.ConversationBusyException();
         McpTools mcpTools = null;
         ToolCallback[] availableTools;
+        ChatModel runChatModel;
         try {
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
             availableTools = Stream.concat(
                             Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)),
                             Arrays.stream(mcpTools.callbacks()))
                     .toArray(ToolCallback[]::new);
+            runChatModel = chatModelFor(actor.userId());
         } catch (RuntimeException exception) {
             if (mcpTools != null) mcpTools.close();
             conversationLease.close();
@@ -766,7 +774,7 @@ public class AiController {
         };
         com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest runRequest =
                 new com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest(
-                        conversationId, actor.tenantId(), run.input(),
+                        conversationId, actor.tenantId(), runChatModel, run.input(),
                         run.historyContext() == null ? "" : run.historyContext(),
                         availableTools, run.knowledgeContext() == null ? "" : run.knowledgeContext(),
                         run.ragTraceJson(), runId, resumeCheckpoint, resumeFrom, cleanup,
@@ -782,6 +790,10 @@ public class AiController {
         }
         manageManusEmitter(handle.emitter(), handle.stream());
         return handle.emitter();
+    }
+
+    private ChatModel chatModelFor(String userId) {
+        return dynamicChatModelFactory.model(appConfigurationService.resolve(userId, AppConfigurationService.CHAT));
     }
 
     private void manageManusEmitter(SseEmitter emitter, com.zwx.zwxagent.agent.graph.RunStream stream) {

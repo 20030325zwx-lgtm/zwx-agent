@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getToken } from '../api/auth'
+import WorkspaceLayout from '../components/WorkspaceLayout.vue'
 
 const routes = [
   {
@@ -10,12 +11,45 @@ const routes = [
   },
   {
     path: '/',
-    name: 'Home',
-    component: () => import('../views/Home.vue'),
-    meta: {
-      title: 'ZWX Agent - 智能体目录',
-      description: 'ZWX Agent 提供情感分析大师和超级智能体服务。'
-    }
+    component: WorkspaceLayout,
+    children: [
+      {
+        path: '',
+        name: 'Home',
+        component: () => import('../views/Home.vue'),
+        meta: {
+          title: 'ZWX Agent - 智能体目录',
+          description: 'ZWX Agent 提供情感分析大师和超级智能体服务。'
+        }
+      },
+      {
+        path: 'model-settings',
+        name: 'ModelSettings',
+        component: () => import('../views/ModelSettings.vue'),
+        meta: { title: '模型设置 - ZWX Agent', description: '配置个人或系统默认的对话与视觉模型。' }
+      },
+      {
+        path: 'skill-settings',
+        name: 'SkillSettings',
+        component: () => import('../views/SkillSettings.vue'),
+        meta: { title: 'Skill 配置 - ZWX Agent', description: '配置各个智能体可使用的内置 Skill。' }
+      },
+      {
+        path: 'mcp-settings',
+        name: 'McpSettings',
+        component: () => import('../views/McpSettings.vue'),
+        meta: { title: 'MCP 管理 - ZWX Agent', description: '管理超级智能体可用的远程 MCP SSE 服务。' }
+      },
+      {
+        path: 'knowledge-admin',
+        name: 'KnowledgeAdmin',
+        component: () => import('../views/KnowledgeAdmin.vue'),
+        meta: {
+          title: '知识库管理 - ZWX Agent',
+          description: '查看各智能体的私有知识文档、版本状态与实际向量切片。'
+        }
+      }
+    ]
   },
   {
     path: '/love-master',
@@ -42,27 +76,6 @@ const routes = [
     meta: { title: '旅游规划专家 - ZWX Agent', description: '旅游规划专家提供行程建议并按需查询实时信息。' }
   },
   { path: '/test-agent', name: 'TestAgent', component: () => import('../views/TestAgent.vue'), meta: { title: '功能测试助手 - ZWX Agent', description: '用于验证 ZWX Agent 对话与知识库功能的隔离测试空间。' } },
-  {
-    path: '/knowledge-admin',
-    name: 'KnowledgeAdmin',
-    component: () => import('../views/KnowledgeAdmin.vue'),
-    meta: {
-      title: '知识库管理 - ZWX Agent',
-      description: '查看各智能体的私有知识文档、版本状态与实际向量切片。'
-    }
-  },
-  {
-    path: '/skill-settings',
-    name: 'SkillSettings',
-    component: () => import('../views/SkillSettings.vue'),
-    meta: { title: 'Skill 配置 - ZWX Agent', description: '配置各个智能体可使用的内置 Skill。' }
-  },
-  {
-    path: '/mcp-settings',
-    name: 'McpSettings',
-    component: () => import('../views/McpSettings.vue'),
-    meta: { title: 'MCP 管理 - ZWX Agent', description: '管理超级智能体可用的远程 MCP SSE 服务。' }
-  }
 ]
 
 const router = createRouter({

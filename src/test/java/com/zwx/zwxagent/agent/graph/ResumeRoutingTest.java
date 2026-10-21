@@ -64,7 +64,7 @@ class ResumeRoutingTest {
                 List.of(new PlanStep("原始任务", WorkerRole.GENERAL, "按原始请求执行")),
                 List.of(), List.of(), List.of(), 0, "unverified", "", "", "");
         ManusGraphOrchestrator.ManusRunRequest request = new ManusGraphOrchestrator.ManusRunRequest(
-                "conversation", "tenant", "原始请求", "历史", new org.springframework.ai.tool.ToolCallback[0],
+                "conversation", "tenant", null, "原始请求", "历史", new org.springframework.ai.tool.ToolCallback[0],
                 "", null, "run-1", checkpoint, ManusGraphOrchestrator.NODE_WORKERS, () -> { }, result -> { });
         var state = orchestrator.resumeInputs(request, RunContext.of(new org.springframework.ai.tool.ToolCallback[0], "", () -> false));
         Assertions.assertEquals("原始请求", state.get(GraphState.INPUT));

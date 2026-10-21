@@ -109,13 +109,17 @@ public class ManusGraphOrchestrator {
     }
 
     private GraphInstance buildGraph() throws Exception {
-        WorkersNode workersNode = new WorkersNode(chatModel, workerExecutor);
+        return buildGraph(chatModel);
+    }
+
+    private GraphInstance buildGraph(ChatModel graphChatModel) throws Exception {
+        WorkersNode workersNode = new WorkersNode(graphChatModel, workerExecutor);
         StateGraph graph = new StateGraph(this::newState);
         graph.addNode(NODE_RESUME_ROUTER, AsyncNodeAction.node_async(state -> Map.of()));
-        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(chatModel)));
+        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel)));
         graph.addNode(NODE_WORKERS, AsyncNodeAction.node_async(workersNode));
-        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(chatModel)));
-        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(chatModel)));
+        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel)));
+        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel)));
         graph.addEdge(StateGraph.START, NODE_RESUME_ROUTER);
         graph.addConditionalEdges(NODE_RESUME_ROUTER, AsyncEdgeAction.edge_async(this::routeResume),
                 Map.of(NODE_PLANNER, NODE_PLANNER, NODE_WORKERS, NODE_WORKERS,
@@ -210,6 +214,7 @@ public class ManusGraphOrchestrator {
 
     public record ManusRunRequest(String conversationId,
                                   String tenantId,
+                                  ChatModel chatModel,
                                   String message,
                                   String historyContext,
                                   ToolCallback[] tools,
@@ -238,7 +243,7 @@ public class ManusGraphOrchestrator {
     public ManusRunHandle runStream(ManusRunRequest request, Executor runExecutor) {
         GraphInstance runGraph;
         try {
-            runGraph = buildGraph();
+            runGraph = buildGraph(request.chatModel() == null ? chatModel : request.chatModel());
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to build agent graph", exception);
         }

@@ -1,7 +1,7 @@
 package com.zwx.zwxagent.agent.hook;
 
-import com.zwx.zwxagent.agent.BaseAgent;
-import com.zwx.zwxagent.execution.AgentExecutionTraceService;
+import com.zwx.zwxagent.agent.core.BaseAgent;
+import com.zwx.zwxagent.agent.execution.AgentExecutionTraceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 

@@ -1,0 +1,103 @@
+package com.zwx.zwxagent.capability.tools;
+
+import org.springframework.ai.support.ToolCallbacks;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+
+@Component
+public class ToolFactory {
+
+    private final ToolSandbox sandbox;
+    private final com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService;
+    private final UrlAccessPolicy urlAccessPolicy;
+    private final WebSearchTool webSearchTool;
+    private final boolean terminalEnabled;
+    private final long maxDownloadBytes;
+    private final Set<String> terminalAllowlist;
+    private final javax.sql.DataSource dataSource;
+    private final boolean dbQueryEnabled;
+    private final Set<String> dbQueryTableAllowlist;
+    private final Set<String> dbQueryDeniedTables;
+    private final int dbQueryMaxRows;
+    private final int dbQueryTimeoutSeconds;
+    private final boolean dbQueryExternalEnabled;
+
+    public ToolFactory(ToolSandbox sandbox,
+                       com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService,
+                       UrlAccessPolicy urlAccessPolicy,
+                       @Value("${search-api.api-key}") String searchApiKey,
+                       @Value("${search-api.provider:searchapi}") String searchProvider,
+                       @Value("${app.tools.terminal-enabled:false}") boolean terminalEnabled,
+                       @Value("${app.tools.max-download-bytes:20971520}") long maxDownloadBytes,
+                       @Value("${app.tools.terminal-allowlist:}") String terminalAllowlist,
+                       javax.sql.DataSource dataSource,
+                       @Value("${app.tools.db-query-enabled:false}") boolean dbQueryEnabled,
+                       @Value("${app.tools.db-query-table-allowlist:}") String dbQueryTableAllowlist,
+                       @Value("${app.tools.db-query-denied-tables:}") String dbQueryDeniedTables,
+                       @Value("${app.tools.db-query-max-rows:20}") int dbQueryMaxRows,
+                       @Value("${app.tools.db-query-timeout-seconds:5}") int dbQueryTimeoutSeconds,
+                       @Value("${app.tools.db-query-external-enabled:false}") boolean dbQueryExternalEnabled) {
+        this.sandbox = sandbox;
+        this.workspaceService = workspaceService;
+        this.urlAccessPolicy = urlAccessPolicy;
+        this.webSearchTool = new WebSearchTool(searchProvider, searchApiKey);
+        this.terminalEnabled = terminalEnabled;
+        this.maxDownloadBytes = maxDownloadBytes;
+        this.terminalAllowlist = terminalAllowlist == null || terminalAllowlist.isBlank()
+                ? null
+                : new HashSet<>(Arrays.asList(terminalAllowlist.split(",")));
+        this.dataSource = dataSource;
+        this.dbQueryEnabled = dbQueryEnabled;
+        this.dbQueryTableAllowlist = toSet(dbQueryTableAllowlist);
+        this.dbQueryDeniedTables = toSet(dbQueryDeniedTables);
+        this.dbQueryMaxRows = dbQueryMaxRows;
+        this.dbQueryTimeoutSeconds = dbQueryTimeoutSeconds;
+        this.dbQueryExternalEnabled = dbQueryExternalEnabled;
+    }
+
+    /** 工作区签名（design/plans/09 批次 A）：工具 workDir 来自统一工作区目录模型。 */
+    public ToolCallback[] createTools(String tenantId, String agentKey, String conversationId) {
+        Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
+        return buildTools(workDir);
+    }
+
+    /** 旧签名（scope 目录）：保留给测试与 legacy 调用。 */
+    public ToolCallback[] createTools(String scope) {
+        Path workDir = sandbox.scopeDir(scope);
+        return buildTools(workDir);
+    }
+
+    private ToolCallback[] buildTools(Path workDir) {
+        java.util.List<Object> tools = new java.util.ArrayList<>(java.util.List.of(
+                new FileOperationTool(sandbox, workDir),
+                webSearchTool,
+                new WebScrapingTool(urlAccessPolicy),
+                new ResourceDownloadTool(urlAccessPolicy, sandbox, workDir, maxDownloadBytes),
+                new PDFGenerationTool(sandbox, workDir),
+                new CurrentTimeTool()));
+        if (terminalEnabled) {
+            tools.add(new TerminalOperationTool(workDir, terminalAllowlist));
+        }
+        if (dbQueryEnabled) {
+            tools.add(new DatabaseQueryTool(dataSource, dbQueryTableAllowlist, dbQueryDeniedTables,
+                    dbQueryMaxRows, dbQueryTimeoutSeconds));
+        }
+        if (dbQueryExternalEnabled) {
+            tools.add(new ExternalDatabaseQueryTool(dbQueryMaxRows, dbQueryTimeoutSeconds, urlAccessPolicy));
+        }
+        return ToolCallbacks.from(tools.toArray());
+    }
+
+    private static Set<String> toSet(String commaSeparated) {
+        if (commaSeparated == null || commaSeparated.isBlank()) {
+            return Set.of();
+        }
+        return new HashSet<>(Arrays.asList(commaSeparated.split(",")));
+    }
+}

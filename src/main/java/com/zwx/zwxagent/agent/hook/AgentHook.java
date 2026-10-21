@@ -1,6 +1,6 @@
 package com.zwx.zwxagent.agent.hook;
 
-import com.zwx.zwxagent.agent.BaseAgent;
+import com.zwx.zwxagent.agent.core.BaseAgent;
 
 import java.util.List;
 

@@ -1,6 +1,6 @@
 package com.zwx.zwxagent.agent.hook;
 
-import com.zwx.zwxagent.tools.UrlAccessPolicy;
+import com.zwx.zwxagent.capability.tools.UrlAccessPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;

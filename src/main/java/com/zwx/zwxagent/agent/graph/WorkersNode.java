@@ -2,9 +2,9 @@ package com.zwx.zwxagent.agent.graph;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
-import com.zwx.zwxagent.agent.BaseAgent;
-import com.zwx.zwxagent.agent.ToolCallAgent;
-import com.zwx.zwxagent.advisor.MyLoggerAdvisor;
+import com.zwx.zwxagent.agent.core.BaseAgent;
+import com.zwx.zwxagent.agent.core.ToolCallAgent;
+import com.zwx.zwxagent.agent.advisor.MyLoggerAdvisor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -168,7 +168,7 @@ public class WorkersNode implements NodeAction {
         ToolCallback[] roleTools = filterTools(allTools, role);
         GraphWorker worker = new GraphWorker(roleTools, role, step.title());
         if (runContext != null && runContext.tenantId() != null) {
-            worker.setRunIdentity(new com.zwx.zwxagent.agent.AgentRunIdentity(
+            worker.setRunIdentity(new com.zwx.zwxagent.agent.core.AgentRunIdentity(
                     runContext.tenantId(), "super", runContext.conversationId()));
         }
         worker.setName("worker-" + stepNumber + "-" + role.key());

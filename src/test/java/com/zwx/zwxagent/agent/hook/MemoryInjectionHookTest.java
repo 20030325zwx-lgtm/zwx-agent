@@ -1,6 +1,6 @@
 package com.zwx.zwxagent.agent.hook;
 
-import com.zwx.zwxagent.memory.MemoryService;
+import com.zwx.zwxagent.chat.memory.MemoryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;

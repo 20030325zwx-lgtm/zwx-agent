@@ -2,7 +2,7 @@ package com.zwx.zwxagent.agent.graph;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
-import com.zwx.zwxagent.advisor.MyLoggerAdvisor;
+import com.zwx.zwxagent.agent.advisor.MyLoggerAdvisor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;

@@ -1,8 +1,8 @@
 package com.zwx.zwxagent.agent.hook;
 
-import com.zwx.zwxagent.agent.BaseAgent;
-import com.zwx.zwxagent.execution.AgentExecutionEvent;
-import com.zwx.zwxagent.execution.AgentExecutionTraceService;
+import com.zwx.zwxagent.agent.core.BaseAgent;
+import com.zwx.zwxagent.agent.execution.AgentExecutionEvent;
+import com.zwx.zwxagent.agent.execution.AgentExecutionTraceService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

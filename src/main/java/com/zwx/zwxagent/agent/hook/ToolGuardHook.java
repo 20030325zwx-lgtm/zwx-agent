@@ -1,8 +1,8 @@
 package com.zwx.zwxagent.agent.hook;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zwx.zwxagent.tools.ToolGuardPolicy;
-import com.zwx.zwxagent.tools.UrlAccessPolicy;
+import com.zwx.zwxagent.capability.tools.ToolGuardPolicy;
+import com.zwx.zwxagent.capability.tools.UrlAccessPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -80,9 +80,9 @@ public class ToolGuardHook implements AgentHook {
                     ToolGuardPolicy.relativePathViolation(text(args, "fileName")));
             case "scrapeWebPage" -> urlViolation(text(args, "url"));
             case "webSearch" -> null;
-            case "executeDatabaseQuery" -> com.zwx.zwxagent.tools.DatabaseQueryTool.validateSyntax(text(args, "sql"));
+            case "executeDatabaseQuery" -> com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql"));
             case "queryExternalDatabase" -> firstNonBlank(
-                    com.zwx.zwxagent.tools.DatabaseQueryTool.validateSyntax(text(args, "sql")),
+                    com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql")),
                     externalDatabaseTargetViolation(args));
             default -> allowedUnregisteredTools.contains(call.name()) ? null : "工具未登记，默认拒绝";
         };

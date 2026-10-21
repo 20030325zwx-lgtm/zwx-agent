@@ -1,2 +1,2 @@
 org.springframework.boot.env.EnvironmentPostProcessor=\
-  com.zwx.zwxagent.config.GlobeConfEnvironmentPostProcessor
+  com.zwx.zwxagent.platform.config.GlobeConfEnvironmentPostProcessor

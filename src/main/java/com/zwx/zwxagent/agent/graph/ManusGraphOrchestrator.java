@@ -14,9 +14,9 @@ import com.alibaba.cloud.ai.graph.checkpoint.constant.SaverConstant;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.state.strategy.AppendStrategy;
 import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
-import com.zwx.zwxagent.execution.AgentRunService;
-import com.zwx.zwxagent.execution.AgentToolCallLedgerService;
-import com.zwx.zwxagent.tools.IdempotentToolCallback;
+import com.zwx.zwxagent.agent.execution.AgentRunService;
+import com.zwx.zwxagent.agent.execution.AgentToolCallLedgerService;
+import com.zwx.zwxagent.capability.tools.IdempotentToolCallback;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
@@ -400,8 +400,8 @@ public class ManusGraphOrchestrator {
             String answer = completedAnswer(finalAnswer, streamedAnswer, stopped.get());
             String status = stopped.get() ? "INTERRUPTED" : "FAILED";
             persist(request, answer, activities, false, status, exception.getMessage(), finalized);
-            stream.send("generation-error", com.zwx.zwxagent.util.ErrorMessages.describe(exception));
-            stream.sendMessage("任务已中止：" + com.zwx.zwxagent.util.ErrorMessages.describe(exception));
+            stream.send("generation-error", com.zwx.zwxagent.common.ErrorMessages.describe(exception));
+            stream.sendMessage("任务已中止：" + com.zwx.zwxagent.common.ErrorMessages.describe(exception));
             stream.complete();
         }
     }

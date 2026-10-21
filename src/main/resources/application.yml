@@ -161,7 +161,7 @@ springdoc:
   group-configs:
     - group: 'default'
       paths-to-match: '/**'
-      packages-to-scan: com.zwx.zwxagent.controller
+      packages-to-scan: com.zwx.zwxagent.web.controller
 # knife4j config
 knife4j:
   enable: true

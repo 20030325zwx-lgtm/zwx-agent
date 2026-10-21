@@ -1,6 +1,6 @@
 package com.zwx.zwxagent.agent.hook;
 
-import com.zwx.zwxagent.memory.MemoryService;
+import com.zwx.zwxagent.chat.memory.MemoryService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;

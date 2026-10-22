@@ -7,7 +7,7 @@ Aster 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 工作区，当�
 - **超级智能体**：Planner → Workers → Verifier → Aggregator 多智能体协作，支持多步任务与并行执行。
 - **流式对话与续跑**：SSE 实时输出；支持断线重连、事件回放和跨重启检查点续跑。
 - **工具调用**：联网搜索、网页抓取、文件读写、PDF 生成、只读 SQL、终端白名单等。
-- **私有知识库**：上传 Markdown、TXT、PDF、Word、Excel、PPT，默认通过 MinerU 在线解析，自动切片并写入 PGVector；回答带引用和切片预览。
+- **私有知识库**：上传 Markdown、TXT、PDF、Word、Excel、PPT，默认通过 MinerU 在线解析并写入 PGVector；HTML 表格会展开合并单元格并转换为带列名的逐行记录，回答带引用和切片预览。
 - **图片理解**：图片上传到私有 OSS，通过视觉模型或图片 MCP 分析图片内容。
 - **模型配置**：`/model-settings` 支持个人配置、管理员系统默认和环境变量回退；兼容 DashScope 与 OpenAI 兼容接口，密钥加密存储。
 - **MCP 与 Skill**：动态注册 MCP SSE 服务；支持 Skill 配置和工具授权。
@@ -178,6 +178,12 @@ CHROME_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Ch
 - 模型设置：`/model-settings`
 - 知识库：`/knowledge-admin`
 - MCP 管理：`/mcp-settings`
+
+## 文档解析与切片核验
+
+知识库索引按“解析 → 结构化切片 → 向量写入”处理。HTML 表格切片会把每一行转换成带列名的记录，并展开 `rowspan` / `colspan`，让检索结果保留“流程、动作、检查内容”等字段关系；章节路径继续附加到切片上下文。对具体问题，应优先核对命中的完整行和原文件，而不只看是否召回了相关关键词。
+
+排查回答不准确时，可在知识库页面检查文档状态和切片内容，确认切片包含问题所需的字段与完整值，再对照原文件核实。若源文件是扫描件或表格结构已被 OCR 破坏，应先修正解析质量再重建索引。当前无 `<thead>` 的 HTML 表格默认将首行视为列名；复杂多层表头、跨页续表和超长单行的专项恢复仍需结合原文件验证。分阶段处理方案见 [文档切片质量改进计划](docs/design/2026-10-23-document-chunking-quality.md)。
 
 ## 文档
 

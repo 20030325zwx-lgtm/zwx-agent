@@ -6,6 +6,7 @@ import org.springframework.ai.document.Document;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -59,5 +60,60 @@ class MyTokenTextSplitterTest {
                 """;
         List<Document> chunks = new MyTokenTextSplitter().splitStructuredMarkdown(List.of(Document.builder().text(extractedPdf).build()));
         assertTrue(chunks.stream().allMatch(chunk -> Integer.valueOf(3).equals(chunk.getMetadata().get("pageNumber"))));
+    }
+
+    @Test
+    void expandsHtmlTableRowspansIntoHeaderLabeledRecords() {
+        String html = """
+                ## 待办功能流程测试
+                <table>
+                  <thead>
+                    <tr><th rowspan="2">流程</th><th colspan="2">检查项</th></tr>
+                    <tr><th>测试动作</th><th>检查内容</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td rowspan="2">待我审批</td><td>审批详情</td><td>检查待办中心详情</td></tr>
+                    <tr><td>待办处理</td><td>检查审批后是否正常转为已办</td></tr>
+                  </tbody>
+                </table>
+                """;
+
+        List<Document> chunks = new MyTokenTextSplitter().splitStructuredMarkdown(
+                List.of(Document.builder().text(html).build()));
+        String text = chunks.stream().map(Document::getText).reduce("", (left, right) -> left + "\n" + right);
+
+        assertEquals(2, occurrences(text, "流程：待我审批"));
+        assertTrue(text.contains("检查项 / 测试动作：审批详情；检查项 / 检查内容：检查待办中心详情"));
+        assertTrue(text.contains("检查项 / 测试动作：待办处理；检查项 / 检查内容：检查审批后是否正常转为已办"));
+        assertFalse(text.contains("<table"));
+        assertTrue(chunks.stream().allMatch(chunk -> "table-record".equals(chunk.getMetadata().get("structuredContentType"))));
+    }
+
+    @Test
+    void keepsLongHtmlTableRowsWholeAcrossChunks() {
+        String longCheck = "检查待办流程状态与审批结果是否一致。".repeat(45);
+        String html = """
+                ## 流程验收
+                <table>
+                  <tr><th>用例</th><th>检查内容</th></tr>
+                  <tr><td>案例一</td><td>%s</td></tr>
+                  <tr><td>案例二</td><td>%s</td></tr>
+                  <tr><td>案例三</td><td>%s</td></tr>
+                </table>
+                """.formatted(longCheck, longCheck, longCheck);
+
+        List<Document> chunks = new MyTokenTextSplitter().splitStructuredMarkdown(
+                List.of(Document.builder().text(html).build()));
+
+        assertTrue(chunks.size() >= 2);
+        assertTrue(chunks.stream().allMatch(chunk -> chunk.getText().contains("检查内容：")));
+        for (String example : List.of("案例一", "案例二", "案例三")) {
+            assertTrue(chunks.stream().anyMatch(chunk -> chunk.getText().contains(example)
+                    && chunk.getText().contains(longCheck)));
+        }
+    }
+
+    private int occurrences(String text, String value) {
+        return text.split(java.util.regex.Pattern.quote(value), -1).length - 1;
     }
 }

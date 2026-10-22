@@ -9,7 +9,7 @@
           <button class="back-button" type="button" @click="router.push('/mcp-settings')">MCP 管理</button>
         </div>
         <div class="title">
-          <span class="super-mark" aria-hidden="true">✦</span>
+          <span class="super-mark" aria-hidden="true"><AsterAvatar /></span>
           <strong>超级智能体</strong>
           <em class="kind-pill">Agent</em>
         </div>
@@ -25,6 +25,7 @@
           @continue-message="continueMessage" @stop-generation="stopGeneration" />
         <div v-if="messagesLoading" class="chat-loading">正在恢复历史消息...</div>
       </section>
+      <AgentCompanion :state="companionState" :caption="companionCaption" />
     </main>
     <ConfirmDialog
       :open="!!pendingDelete"
@@ -41,6 +42,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
+import AgentCompanion from '../components/AgentCompanion.vue'
+import AsterAvatar from '../components/AsterAvatar.vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -57,9 +60,28 @@ const historyLoading = ref(false)
 const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
 const pendingDelete = ref(null)
+const companionState = ref('idle')
+const companionCaption = ref('')
+let companionIdleTimer = null
 let eventSource = null
 let activeTurnStart = -1
 let reconnectAttempts = 0
+const clearCompanionIdle = () => {
+  if (companionIdleTimer) { clearTimeout(companionIdleTimer); companionIdleTimer = null }
+}
+const setCompanion = (state, caption = '') => {
+  clearCompanionIdle()
+  companionState.value = state
+  companionCaption.value = caption
+}
+const settleCompanion = (state, caption, delay = 2600) => {
+  setCompanion(state, caption)
+  companionIdleTimer = setTimeout(() => {
+    companionState.value = 'idle'
+    companionCaption.value = ''
+    companionIdleTimer = null
+  }, delay)
+}
 const statusText = computed(() => connectionStatus.value === 'connecting' ? '正在执行' : connectionStatus.value === 'error' ? '连接异常' : '就绪')
 const addMessage = (content, isUser, imageObjectKey = null) => {
   const message = { content, isUser, time: Date.now(), imageKeys: imageObjectKey ? [imageObjectKey] : [], imageUrls: [] }
@@ -138,12 +160,14 @@ const createConversation = async () => {
   chatId.value = conversation.id
   messages.value = []
   sidebarOpen.value = false
+  setCompanion('idle')
 }
 const selectConversation = async conversation => {
   if (connectionStatus.value === 'connecting' || conversation.id === chatId.value) { sidebarOpen.value = false; return }
   messagesLoading.value = true
   chatId.value = conversation.id
   sidebarOpen.value = false
+  setCompanion('idle')
   try { messages.value = (await getManusConversationMessages(conversation.id)).map(mapMessage) }
   finally {
     messagesLoading.value = false
@@ -173,10 +197,12 @@ const sendMessage = async payload => {
   const files = typeof payload === 'string' ? [] : payload.files || []
   let imageObjectKey = null
   if (files.length) {
+    setCompanion('working', '正在上传图片')
     try {
       imageObjectKey = (await uploadManusImage(chatId.value, files[0])).objectKey
     } catch (error) {
       console.error('Unable to upload image:', error)
+      settleCompanion('error', '图片上传失败，请重试', 3200)
       addMessage('图片上传失败，请检查文件格式和大小后重试。', false)
       return
     }
@@ -189,6 +215,7 @@ const sendMessage = async payload => {
   const requestId = crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`
   connectionStatus.value = 'connecting'
   reconnectAttempts = 0
+  setCompanion('thinking', knowledgeSearch ? '正在检索知识库并规划任务' : '正在规划任务')
   eventSource = chatWithManus(chatId.value, message, knowledgeSearch, requestId, imageObjectKey)
   attachManusStream(eventSource, answerIndex)
 }
@@ -197,23 +224,31 @@ const attachManusStream = (stream, answerIndex) => {
   stream.addEventListener('run', event => {
     const answer = messages.value[answerIndex]
     if (answer) answer.runId = event.data
+    if (!answer?.content) setCompanion('thinking', '任务已创建，正在规划步骤')
   })
   stream.addEventListener('rag-trace', event => {
     try { messages.value[answerIndex].ragTrace = JSON.parse(event.data) }
     catch (error) { console.error('RAG retrieval trace unavailable:', error) }
+    if (!messages.value[answerIndex]?.content) setCompanion('working', '已检索知识库，正在整理依据')
   })
   stream.addEventListener('activity', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return
-    answer.activities.push(parseActivity(event.data || ''))
+    const activity = parseActivity(event.data || '')
+    answer.activities.push(activity)
+    if (!answer.content) setCompanion('working', activity.label)
   })
   stream.addEventListener('interrupted', () => {
     const answer = messages.value[answerIndex]
     if (answer) answer.status = 'INTERRUPTED'
+    settleCompanion('idle', '任务已中断', 1800)
   })
   stream.onmessage = event => {
     if (event.data === '[DONE]') { finishStream(); return }
-    if (event.data && messages.value[answerIndex]) messages.value[answerIndex].content += event.data
+    if (event.data && messages.value[answerIndex]) {
+      if (!messages.value[answerIndex].content) setCompanion('speaking', '正在组织回答')
+      messages.value[answerIndex].content += event.data
+    }
   }
   stream.onerror = () => handleManusStreamError(answerIndex)
 }
@@ -235,10 +270,13 @@ const handleManusStreamError = answerIndex => {
   }
   activeTurnStart = -1
   connectionStatus.value = 'error'
+  setCompanion('error', '连接异常，正在恢复历史记录')
   if (answer && !answer.content) answer.content = '连接异常，正在恢复历史消息...'
   setTimeout(() => { finishStream().catch(error => console.error(error)) }, 1500)
 }
 const finishStream = async () => {
+  if (companionState.value === 'error') settleCompanion('error', '连接异常，已恢复历史记录', 3200)
+  else settleCompanion('done', '任务完成')
   connectionStatus.value = 'disconnected'
   eventSource?.close()
   eventSource = null
@@ -256,6 +294,7 @@ const cancelActiveStream = () => {
   activeTurnStart = -1
   reconnectAttempts = 0
   connectionStatus.value = 'disconnected'
+  setCompanion('idle')
 }
 const stopGeneration = async () => {
   const answer = messages.value[messages.value.length - 1]
@@ -265,6 +304,7 @@ const stopGeneration = async () => {
   activeTurnStart = -1
   reconnectAttempts = 0
   connectionStatus.value = 'disconnected'
+  settleCompanion('idle', '已停止生成', 2200)
   if (answer) {
     answer.status = 'INTERRUPTED'
     if (!answer.content) answer.content = '已停止生成。'
@@ -295,6 +335,7 @@ const continueMessage = ({ message, index }) => {
   answer.ragTrace = null
   connectionStatus.value = 'connecting'
   reconnectAttempts = 0
+  setCompanion('thinking', '正在继续未完成的任务')
   eventSource = resumeManusRun(chatId.value, message.runId)
   const answerIndex = messages.value.indexOf(answer)
   const originalError = eventSource.onerror
@@ -309,13 +350,21 @@ onMounted(async () => {
   await refreshConversations()
   if (conversations.value.length) await selectConversation(conversations.value[0])
   else await createConversation()
+  if (!messages.value.length) {
+    setCompanion('listening', '你好，我是星枢，有什么可以帮你？')
+    companionIdleTimer = setTimeout(() => {
+      companionState.value = 'idle'
+      companionCaption.value = ''
+      companionIdleTimer = null
+    }, 4200)
+  }
 })
-onBeforeUnmount(cancelActiveStream)
+onBeforeUnmount(() => { clearCompanionIdle(); cancelActiveStream() })
 </script>
 
 <style scoped>
 .super-layout { display: flex; height: 100vh; overflow: hidden; background: linear-gradient(135deg, #e5efff, #f5f9ff 44%, #eaf3ff); }
-.super-main { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+.super-main { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
 
 .super-header {
   display: flex;
@@ -356,6 +405,7 @@ onBeforeUnmount(cancelActiveStream)
   width: 30px;
   height: 30px;
   place-items: center;
+  overflow: hidden;
   border-radius: 9px;
   background: linear-gradient(160deg, #3f9bff, var(--zwx-primary) 70%);
   color: #fff;

@@ -1,11 +1,14 @@
 <template>
   <div class="ai-avatar-fallback" :class="type">
-    <span v-if="type === 'love'">❤️</span>
+    <AsterAvatar v-if="type === 'super' || type === 'default'" />
+    <span v-else-if="type === 'love'">❤️</span>
     <span v-else>🤖</span>
   </div>
 </template>
 
 <script setup>
+import AsterAvatar from './AsterAvatar.vue'
+
 defineProps({
   type: {
     type: String,

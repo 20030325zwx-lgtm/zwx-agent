@@ -2,7 +2,10 @@
   <div class="chat-container" :class="`chat-${aiType}`">
     <div class="chat-messages" ref="messagesContainer">
       <section v-if="!messages.length" class="empty-state">
-        <div class="empty-brand">{{ agent.icon }}</div>
+        <div class="empty-brand">
+          <AsterAvatar v-if="aiType === 'super' || aiType === 'default'" />
+          <template v-else>{{ agent.icon }}</template>
+        </div>
         <h2>{{ emptyTitle }}</h2>
         <p>{{ emptyDescription }}</p>
         <div class="suggestion-list">
@@ -178,6 +181,7 @@ import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import AsterAvatar from './AsterAvatar.vue'
 import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square, X } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment } from '../api'
@@ -395,6 +399,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleCitationKeydow
   width: 62px;
   height: 62px;
   place-items: center;
+  overflow: hidden;
   border-radius: 14px;
   background: linear-gradient(145deg, #eff5ff, #dce9ff);
   color: var(--zwx-primary);

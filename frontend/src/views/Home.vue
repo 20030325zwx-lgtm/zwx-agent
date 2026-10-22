@@ -50,7 +50,10 @@
             <span class="launch-ready"><i aria-hidden="true"></i>已就绪</span>
           </header>
           <div class="launch-body">
-            <span class="launch-icon" :class="featuredAgent.iconClass" aria-hidden="true">{{ featuredAgent.icon }}</span>
+            <span class="launch-icon" :class="featuredAgent.iconClass" aria-hidden="true">
+              <AsterAvatar v-if="featuredAgent.key === 'super'" />
+              <template v-else>{{ featuredAgent.icon }}</template>
+            </span>
             <div class="launch-copy">
               <h2>{{ featuredAgent.name }}</h2>
               <p>{{ featuredAgent.description }}</p>
@@ -98,6 +101,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import { ArrowRight, BookOpen, Image as ImageIcon, Sparkles, Workflow, Wrench } from 'lucide-vue-next'
+import AsterAvatar from '../components/AsterAvatar.vue'
 import { AGENT_LIST } from '../config/agents'
 
 useHead({

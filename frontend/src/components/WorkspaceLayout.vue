@@ -4,8 +4,8 @@
 
     <header class="topbar">
       <div class="topbar-inner">
-        <button class="brand" type="button" aria-label="ZWX Agent 首页" @click="navigate({ name: 'Home' })">
-          <span class="brand-mark">Z</span><span class="brand-name">ZWX Agent</span>
+        <button class="brand" type="button" aria-label="Aster 首页" @click="navigate({ name: 'Home' })">
+          <span class="brand-mark">A</span><span class="brand-name">Aster</span>
         </button>
 
         <div class="topbar-actions">

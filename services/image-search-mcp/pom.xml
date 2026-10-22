@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.zwx</groupId>
-    <artifactId>zwx-image-search-mcp-server</artifactId>
+    <artifactId>aster-image-mcp-server</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>zwx-image-search-mcp-server</name>
-    <description>zwx-image-search-mcp-server</description>
+    <name>aster-image-mcp-server</name>
+    <description>aster-image-mcp-server</description>
     <url/>
     <licenses>
         <license/>

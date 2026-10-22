@@ -1,8 +1,8 @@
 <template>
   <div class="login-page">
     <form class="login-card" @submit.prevent="submit">
-      <div class="login-badge" aria-hidden="true">Z</div>
-      <h1>ZWX Agent</h1>
+      <div class="login-badge" aria-hidden="true">A</div>
+      <h1>Aster</h1>
       <p class="login-subtitle">登录后继续使用智能体服务</p>
 
       <label>

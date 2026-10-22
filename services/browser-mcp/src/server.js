@@ -82,7 +82,7 @@ async function screenshotPage({ url, full_page = false, width = 1440, height = 9
   const browser = await getBrowser();
   const context = await browser.newContext({
     viewport: { width: viewportWidth, height: viewportHeight },
-    userAgent: 'zwx-browser-mcp/0.1'
+    userAgent: 'aster-browser-mcp/0.1'
   });
   const page = await context.newPage();
   try {
@@ -108,7 +108,7 @@ async function screenshotPage({ url, full_page = false, width = 1440, height = 9
 }
 
 function createServer() {
-  const server = new McpServer({ name: 'zwx-browser-mcp-server', version: '0.0.1' });
+  const server = new McpServer({ name: 'aster-browser-mcp-server', version: '0.0.1' });
   server.registerTool('screenshot_page', {
     description: 'Render a web page in headless Chromium and save a screenshot. Returns a short-lived image URL.',
     inputSchema: {
@@ -162,7 +162,7 @@ app.post('/messages', async (req, res) => {
 });
 
 const httpServer = app.listen(PORT, '127.0.0.1', () => {
-  console.log(`zwx-browser-mcp-server listening on http://127.0.0.1:${PORT}`);
+  console.log(`aster-browser-mcp-server listening on http://127.0.0.1:${PORT}`);
   console.log(`SSE endpoint: http://127.0.0.1:${PORT}/sse`);
 });
 

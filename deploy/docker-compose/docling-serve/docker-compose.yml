@@ -1,4 +1,4 @@
-name: zwx-agent-docling
+name: aster-docling
 
 services:
   docling-serve:

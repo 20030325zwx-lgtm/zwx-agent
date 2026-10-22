@@ -1,6 +1,6 @@
-# ZWX Agent
+# Aster（星枢）
 
-ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 工作区，当前以**超级智能体**为唯一入口：由规划器拆解任务、多个子智能体并行执行、质检员验收、交付器统一汇总，并在执行过程中调用工具、检索私有知识库、处理图片和文件。
+Aster 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 工作区，当前以**超级智能体**为唯一入口：由规划器拆解任务、多个子智能体并行执行、质检员验收、交付器统一汇总，并在执行过程中调用工具、检索私有知识库、处理图片和文件。
 
 ## 功能
 
@@ -34,12 +34,12 @@ ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 工作区，�
 ### 2. 启动 PostgreSQL + pgvector
 
 ```bash
-docker run -d --name zwx-agent-postgres \
+docker run -d --name aster-postgres \
   -e POSTGRES_DB=zwx_agent \
   -e POSTGRES_USER=zwx_agent \
   -e POSTGRES_PASSWORD=zwx_agent_password \
   -p 5432:5432 \
-  -v zwx-agent-pgdata:/var/lib/postgresql/data \
+  -v aster-pgdata:/var/lib/postgresql/data \
   pgvector/pgvector:pg16
 ```
 
@@ -71,7 +71,7 @@ OSS 仅在使用图片上传和知识库文档上传时需要；不配置也可�
 
 ```bash
 mvn -DskipTests package
-java -jar target/zwx-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
+java -jar target/aster-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
 后端地址：`http://127.0.0.1:8123/api`  
@@ -97,13 +97,13 @@ npm run dev -- --host 127.0.0.1
 VERSION=0.0.1 TARGET_PLATFORM=linux/amd64 sh deploy/scripts/package.sh
 ```
 
-产物位于 `release/zwx-agent-0.0.1-linux-amd64.tar.gz`。
+产物位于 `release/aster-0.0.1-linux-amd64.tar.gz`。
 
 ### 2. 服务器安装
 
 ```bash
-tar -xzf zwx-agent-0.0.1-linux-amd64.tar.gz
-cd zwx-agent-0.0.1-linux-amd64
+tar -xzf aster-0.0.1-linux-amd64.tar.gz
+cd aster-0.0.1-linux-amd64
 
 cp .env.example .env
 # 编辑 .env，至少填写 POSTGRES_PASSWORD、DASHSCOPE_API_KEY 和 MINERU_TOKEN
@@ -153,7 +153,7 @@ cp .env.example .env
 # 编辑 .env，填写 MINERU_TOKEN
 mvn -DskipTests package
 set -a && . ./.env && set +a
-java -jar target/zwx-document-mcp-server-0.0.1-SNAPSHOT.jar
+java -jar target/aster-document-mcp-server-0.0.1-SNAPSHOT.jar
 ```
 
 默认地址 `http://127.0.0.1:8128`。提供 `parse_document`，默认调用 MinerU 精准解析 API；Docling、Tika 仅作为可选回退。

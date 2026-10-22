@@ -1,5 +1,5 @@
 {
-  "name": "zwx-agent-desktop",
+  "name": "aster-desktop",
   "version": "0.1.2",
   "private": true,
   "main": "electron/main.cjs",
@@ -17,8 +17,8 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.zwx.agent.desktop",
-    "productName": "ZWX Agent",
+    "appId": "com.aster.agent",
+    "productName": "Aster",
     "directories": {
       "output": "release"
     },

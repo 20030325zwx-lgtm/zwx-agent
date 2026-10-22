@@ -28,10 +28,10 @@
 ## Start and Restart
 
 1. Keep the Docker PostgreSQL container running.
-2. Build the backend with `mvn -DskipTests package` from the repository root. Do not use the repository's `mvnw`; it is not executable in this checkout. After any backend source change, rebuild the JAR before restarting; `compile` alone does not update `target/zwx-agent-0.0.1-SNAPSHOT.jar`.
+2. Build the backend with `mvn -DskipTests package` from the repository root. Do not use the repository's `mvnw`; it is not executable in this checkout. After any backend source change, rebuild the JAR before restarting; `compile` alone does not update `target/aster-agent-0.0.1-SNAPSHOT.jar`.
 3. Start the backend with:
    ```sh
-   java -jar target/zwx-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
+   java -jar target/aster-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
    ```
 4. Start the frontend from `frontend` with:
    ```sh
@@ -46,7 +46,7 @@ Use the local service log monitor when starting long-running processes if it is 
 When a shell-launched background process does not survive after the terminal command exits, use user-level `launchctl` jobs instead. Run these commands from any shell (replace an existing job with `launchctl remove` first if needed):
 
 ```sh
-launchctl submit -l com.zwx.yu-ai-agent.backend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/yu-ai-agent && exec /usr/bin/java -jar target/zwx-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local > /tmp/yu-ai-agent-backend.log 2>&1'
+launchctl submit -l com.zwx.yu-ai-agent.backend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/yu-ai-agent && exec /usr/bin/java -jar target/aster-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local > /tmp/yu-ai-agent-backend.log 2>&1'
 launchctl submit -l com.zwx.yu-ai-agent.frontend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/yu-ai-agent/frontend && exec /usr/local/bin/node node_modules/vite/bin/vite.js --host 127.0.0.1 > /tmp/yu-ai-agent-frontend.log 2>&1'
 ```
 

@@ -89,7 +89,7 @@
       </div>
     </section>
 
-    <footer class="catalog-footer">ZWX Agent · 让每次对话都有可靠的下一步</footer>
+    <footer class="catalog-footer">Aster · 让每次对话都有可靠的下一步</footer>
   </div>
 </template>
 
@@ -101,10 +101,10 @@ import { ArrowRight, BookOpen, Image as ImageIcon, Sparkles, Workflow, Wrench } 
 import { AGENT_LIST } from '../config/agents'
 
 useHead({
-  title: 'ZWX Agent - 智能体目录',
+  title: 'Aster - 智能体目录',
   meta: [
-    { name: 'description', content: 'ZWX Agent 超级智能体工作区，统一规划任务、调用工具并检索私有知识库。' },
-    { name: 'keywords', content: 'ZWX Agent,超级智能体,AI 工作区,知识库,MCP' }
+    { name: 'description', content: 'Aster 超级智能体工作区，统一规划任务、调用工具并检索私有知识库。' },
+    { name: 'keywords', content: 'Aster,超级智能体,AI 工作区,知识库,MCP' }
   ]
 })
 

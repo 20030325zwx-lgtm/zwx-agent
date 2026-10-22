@@ -1,4 +1,4 @@
-# 服务器部署手册（4核8G / Docker）
+# Aster（星枢）服务器部署手册（4核8G / Docker）
 
 本文档记录从构建机打包到服务器部署、验证、更新和回滚的完整流程。目标是：服务器只运行镜像，不在服务器上执行 Maven/npm/浏览器构建。
 
@@ -49,20 +49,20 @@ VERSION=0.1.0 TARGET_PLATFORM=linux/amd64 sh deploy/scripts/package.sh
 产物：
 
 ```text
-release/zwx-agent-0.1.0-linux-amd64/
+release/aster-0.1.0-linux-amd64/
 ├── images/
-│   ├── zwx-agent-backend.tar
-│   ├── zwx-agent-frontend.tar
-│   ├── zwx-image-search-mcp-server.tar
-│   ├── zwx-document-mcp-server.tar
+│   ├── aster-backend.tar
+│   ├── aster-frontend.tar
+│   ├── aster-image-mcp.tar
+│   ├── aster-document-mcp.tar
 │   ├── pgvector-pg16.tar
-│   └── zwx-browser-mcp-server.tar（可选）
+│   └── aster-browser-mcp.tar（可选）
 ├── docker-compose.yml
 ├── .env.example
 ├── globe.conf.example
 ├── install.sh
 └── stop.sh
-release/zwx-agent-0.1.0-linux-amd64.tar.gz
+release/aster-0.1.0-linux-amd64.tar.gz
 ```
 
 需要网页截图时：
@@ -79,8 +79,8 @@ VERSION=0.1.0 TARGET_PLATFORM=linux/amd64 WITH_BROWSER_MCP=true \
 把安装包上传到服务器并解压：
 
 ```bash
-tar -xzf zwx-agent-0.1.0-linux-amd64.tar.gz
-cd zwx-agent-0.1.0-linux-amd64
+tar -xzf aster-0.1.0-linux-amd64.tar.gz
+cd aster-0.1.0-linux-amd64
 ```
 
 ### 4.1 `.env`
@@ -94,7 +94,7 @@ chmod 600 .env
 
 ```env
 IMAGE_TAG=0.1.0
-ZWX_AGENT_PORT=8080
+ASTER_PORT=8080
 POSTGRES_PASSWORD=<随机强密码>
 DASHSCOPE_API_KEY=<DashScope Key>
 MINERU_TOKEN=<MinerU Token>
@@ -213,9 +213,9 @@ agent.example.com {
 VERSION=0.1.1 sh deploy/scripts/package.sh
 
 # 服务器：解压新版本，保留旧目录
-cd zwx-agent-0.1.1-linux-amd64
-cp ../zwx-agent-0.1.0-linux-amd64/.env .env
-cp ../zwx-agent-0.1.0-linux-amd64/../globe.conf /home/globe.conf  # 如路径不同请调整
+cd aster-0.1.1-linux-amd64
+cp ../aster-0.1.0-linux-amd64/.env .env
+cp ../aster-0.1.0-linux-amd64/../globe.conf /home/globe.conf  # 如路径不同请调整
 ./install.sh
 ```
 

@@ -9,7 +9,7 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.zwx</groupId>
-    <artifactId>zwx-agent</artifactId>
+    <artifactId>aster-agent</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>zwx-agent</name>
     <description>zwx-agent</description>

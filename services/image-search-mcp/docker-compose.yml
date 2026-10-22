@@ -1,12 +1,12 @@
-name: zwx-image-mcp
+name: aster-image-mcp
 
 services:
   image-search-mcp:
     build:
       context: .
       dockerfile: Dockerfile
-    image: zwx-image-search-mcp-server:local
-    container_name: zwx-image-search-mcp-server
+    image: aster-image-mcp:local
+    container_name: aster-image-mcp
     restart: unless-stopped
     ports:
       # 默认只绑定本机，避免无鉴权的 MCP 服务暴露到局域网/公网。

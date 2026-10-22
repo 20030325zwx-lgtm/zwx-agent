@@ -1,12 +1,12 @@
-name: zwx-browser-mcp
+name: aster-browser-mcp
 
 services:
   browser-mcp:
     build:
       context: .
       dockerfile: Dockerfile
-    image: zwx-browser-mcp-server:local
-    container_name: zwx-browser-mcp-server
+    image: aster-browser-mcp:local
+    container_name: aster-browser-mcp
     restart: unless-stopped
     ports:
       - "127.0.0.1:8129:8129"

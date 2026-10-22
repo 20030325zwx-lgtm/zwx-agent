@@ -5,7 +5,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 VERSION=${VERSION:-0.0.1}
 TARGET_PLATFORM=${TARGET_PLATFORM:-linux/amd64}
 WITH_BROWSER_MCP=${WITH_BROWSER_MCP:-false}
-PACKAGE_NAME="zwx-agent-${VERSION}-$(printf '%s' "$TARGET_PLATFORM" | tr / -)"
+PACKAGE_NAME="aster-${VERSION}-$(printf '%s' "$TARGET_PLATFORM" | tr / -)"
 RELEASE_DIR="$ROOT_DIR/release/$PACKAGE_NAME"
 IMAGE_DIR="$RELEASE_DIR/images"
 
@@ -27,21 +27,21 @@ echo "构建前端静态资源..."
 (cd "$ROOT_DIR/frontend" && npm ci && npm run build)
 
 echo "构建 ${TARGET_PLATFORM} 应用镜像..."
-docker build --platform "$TARGET_PLATFORM" -t "zwx-agent-backend:$VERSION" -f "$ROOT_DIR/deploy/Dockerfile.backend" "$ROOT_DIR"
-docker build --platform "$TARGET_PLATFORM" -t "zwx-agent-frontend:$VERSION" "$ROOT_DIR/frontend"
-docker build --platform "$TARGET_PLATFORM" -t "zwx-image-search-mcp-server:$VERSION" "$ROOT_DIR/services/image-search-mcp"
-docker build --platform "$TARGET_PLATFORM" -t "zwx-document-mcp-server:$VERSION" "$ROOT_DIR/services/document-mcp"
+docker build --platform "$TARGET_PLATFORM" -t "aster-backend:$VERSION" -f "$ROOT_DIR/deploy/Dockerfile.backend" "$ROOT_DIR"
+docker build --platform "$TARGET_PLATFORM" -t "aster-frontend:$VERSION" "$ROOT_DIR/frontend"
+docker build --platform "$TARGET_PLATFORM" -t "aster-image-mcp:$VERSION" "$ROOT_DIR/services/image-search-mcp"
+docker build --platform "$TARGET_PLATFORM" -t "aster-document-mcp:$VERSION" "$ROOT_DIR/services/document-mcp"
 if [ "$WITH_BROWSER_MCP" = "true" ]; then
-  docker build --platform "$TARGET_PLATFORM" -t "zwx-browser-mcp-server:$VERSION" "$ROOT_DIR/services/browser-mcp"
+  docker build --platform "$TARGET_PLATFORM" -t "aster-browser-mcp:$VERSION" "$ROOT_DIR/services/browser-mcp"
 fi
 docker pull --platform "$TARGET_PLATFORM" pgvector/pgvector:pg16
 
-docker save -o "$IMAGE_DIR/zwx-agent-backend.tar" "zwx-agent-backend:$VERSION"
-docker save -o "$IMAGE_DIR/zwx-agent-frontend.tar" "zwx-agent-frontend:$VERSION"
-docker save -o "$IMAGE_DIR/zwx-image-search-mcp-server.tar" "zwx-image-search-mcp-server:$VERSION"
-docker save -o "$IMAGE_DIR/zwx-document-mcp-server.tar" "zwx-document-mcp-server:$VERSION"
+docker save -o "$IMAGE_DIR/aster-backend.tar" "aster-backend:$VERSION"
+docker save -o "$IMAGE_DIR/aster-frontend.tar" "aster-frontend:$VERSION"
+docker save -o "$IMAGE_DIR/aster-image-mcp.tar" "aster-image-mcp:$VERSION"
+docker save -o "$IMAGE_DIR/aster-document-mcp.tar" "aster-document-mcp:$VERSION"
 if [ "$WITH_BROWSER_MCP" = "true" ]; then
-  docker save -o "$IMAGE_DIR/zwx-browser-mcp-server.tar" "zwx-browser-mcp-server:$VERSION"
+  docker save -o "$IMAGE_DIR/aster-browser-mcp.tar" "aster-browser-mcp:$VERSION"
 fi
 docker save -o "$IMAGE_DIR/pgvector-pg16.tar" pgvector/pgvector:pg16
 

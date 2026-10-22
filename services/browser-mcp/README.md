@@ -1,4 +1,4 @@
-# zwx-browser-mcp-server
+# aster-browser-mcp-server
 
 基于 Playwright + SSE 的 MCP 服务，提供 `screenshot_page`：
 

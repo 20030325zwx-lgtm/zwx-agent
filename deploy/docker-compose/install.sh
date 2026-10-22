@@ -2,7 +2,7 @@
 set -eu
 
 WORKDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-INSTALL_DIR=${ZWX_AGENT_INSTALL_DIR:-/opt/zwx-agent}
+INSTALL_DIR=${ASTER_INSTALL_DIR:-/opt/aster}
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || { echo "缺少命令：$1" >&2; exit 1; }
@@ -129,13 +129,13 @@ SQL
 fi
 
 for i in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:$(env_value ZWX_AGENT_PORT)/api/health" >/dev/null 2>&1; then
+  if curl -fsS "http://127.0.0.1:$(env_value ASTER_PORT)/api/health" >/dev/null 2>&1; then
     break
   fi
   sleep 2
 done
 
-echo "ZWX Agent 已启动：http://<服务器地址>:$(env_value ZWX_AGENT_PORT)"
+echo "Aster 已启动：http://<服务器地址>:$(env_value ASTER_PORT)"
 if [ "$BROWSER_MCP_ENABLED_VALUE" = "true" ]; then
   echo "网页截图已启用，PUBLIC_BASE_URL=$(env_value PUBLIC_BASE_URL)，请确认该地址可从浏览器访问。"
 fi

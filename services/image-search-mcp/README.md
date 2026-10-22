@@ -1,4 +1,4 @@
-# zwx-image-search-mcp-server
+# aster-image-mcp-server
 
 独立的 SSE MCP 服务，提供：
 
@@ -11,7 +11,7 @@
 
 ```bash
 mvn -DskipTests package
-DASHSCOPE_API_KEY=... java -jar target/zwx-image-search-mcp-server-0.0.1-SNAPSHOT.jar
+DASHSCOPE_API_KEY=... java -jar target/aster-image-mcp-server-0.0.1-SNAPSHOT.jar
 ```
 
 默认端口 `8127`，SSE 地址 `http://127.0.0.1:8127/sse`，健康检查 `GET /health`。

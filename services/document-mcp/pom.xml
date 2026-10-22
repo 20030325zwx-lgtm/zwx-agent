@@ -9,10 +9,10 @@
         <relativePath/>
     </parent>
     <groupId>com.zwx</groupId>
-    <artifactId>zwx-document-mcp-server</artifactId>
+    <artifactId>aster-document-mcp-server</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>zwx-document-mcp-server</name>
-    <description>Document parsing MCP server</description>
+    <name>aster-document-mcp-server</name>
+    <description>Aster document parsing MCP server</description>
     <properties>
         <java.version>21</java.version>
     </properties>

@@ -1,4 +1,4 @@
-name: zwx-agent
+name: aster
 
 services:
   postgres:
@@ -18,7 +18,7 @@ services:
       retries: 20
 
   image-mcp:
-    image: zwx-image-search-mcp-server:${IMAGE_TAG}
+    image: aster-image-mcp:${IMAGE_TAG}
     restart: unless-stopped
     mem_limit: 512m
     environment:
@@ -34,7 +34,7 @@ services:
       start_period: 20s
 
   document-mcp:
-    image: zwx-document-mcp-server:${IMAGE_TAG}
+    image: aster-document-mcp:${IMAGE_TAG}
     restart: unless-stopped
     mem_limit: 512m
     environment:
@@ -58,13 +58,13 @@ services:
 
   browser-mcp:
     profiles: ["browser"]
-    image: zwx-browser-mcp-server:${IMAGE_TAG}
+    image: aster-browser-mcp:${IMAGE_TAG}
     restart: unless-stopped
     mem_limit: 1536m
     environment:
       PORT: 8129
       SCREENSHOT_DIR: /app/screenshots
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:${ZWX_AGENT_PORT:-8080}}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:${ASTER_PORT:-8080}}
       BROWSER_ALLOW_PRIVATE_HOSTS: "false"
       BROWSER_ALLOWED_HOSTS: ${BROWSER_ALLOWED_HOSTS:-*}
       SCREENSHOT_TTL_MS: ${SCREENSHOT_TTL_MS:-1800000}
@@ -78,7 +78,7 @@ services:
       start_period: 30s
 
   backend:
-    image: zwx-agent-backend:${IMAGE_TAG}
+    image: aster-backend:${IMAGE_TAG}
     restart: unless-stopped
     mem_limit: 1536m
     depends_on:
@@ -108,13 +108,13 @@ services:
       - ${APP_GLOBE_CONF:-/home/globe.conf}:/home/globe.conf:ro
 
   frontend:
-    image: zwx-agent-frontend:${IMAGE_TAG}
+    image: aster-frontend:${IMAGE_TAG}
     restart: unless-stopped
     mem_limit: 128m
     depends_on:
       - backend
     ports:
-      - "${ZWX_AGENT_PORT:-8080}:80"
+      - "${ASTER_PORT:-8080}:80"
 
 volumes:
   postgres-data:

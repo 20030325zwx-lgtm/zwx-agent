@@ -202,7 +202,7 @@ import { createAgentKnowledgeCategory, getAgentKnowledgeDocument, listAgentKnowl
 import { KNOWLEDGE_AGENTS, getAgent } from '../config/agents'
 import KnowledgeDocumentViewer from '../components/KnowledgeDocumentViewer.vue'
 
-useHead({ title: '知识库管理 - ZWX Agent' })
+useHead({ title: '知识库管理 - Aster' })
 
 const route = useRoute()
 const requestedAgentKey = typeof route.query.agentKey === 'string' && KNOWLEDGE_AGENTS.some(agent => agent.key === route.query.agentKey) ? route.query.agentKey : 'super'

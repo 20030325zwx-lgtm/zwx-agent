@@ -2,7 +2,7 @@ spring:
   ai:
     mcp:
       server:
-        name: zwx-document-mcp-server
+        name: aster-document-mcp-server
         version: 0.0.1
         type: SYNC
         stdio: true

@@ -1,12 +1,12 @@
-name: zwx-document-mcp
+name: aster-document-mcp
 
 services:
   document-mcp:
     build:
       context: .
       dockerfile: Dockerfile
-    image: zwx-document-mcp-server:local
-    container_name: zwx-document-mcp-server
+    image: aster-document-mcp:local
+    container_name: aster-document-mcp
     restart: unless-stopped
     ports:
       - "127.0.0.1:8128:8128"

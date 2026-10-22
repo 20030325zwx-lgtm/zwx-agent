@@ -1,4 +1,4 @@
-# zwx-document-mcp-server
+# aster-document-mcp-server
 
 独立的 SSE MCP 服务，提供 `parse_document`：
 
@@ -12,7 +12,7 @@
 ```bash
 mvn -DskipTests package
 MINERU_TOKEN=<你的 MinerU Token> \
-  java -jar target/zwx-document-mcp-server-0.0.1-SNAPSHOT.jar
+  java -jar target/aster-document-mcp-server-0.0.1-SNAPSHOT.jar
 ```
 
 默认端口 `8128`，SSE 地址 `http://127.0.0.1:8128/sse`，健康检查 `GET /health`。

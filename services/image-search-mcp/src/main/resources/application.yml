@@ -1,6 +1,6 @@
 spring:
   application:
-    name: zwx-image-search-mcp-server
+    name: aster-image-mcp-server
   profiles:
     active: sse
 server:

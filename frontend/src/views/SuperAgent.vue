@@ -47,7 +47,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import HomeButton from '../components/HomeButton.vue'
 import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, uploadManusImage, listManusConversations } from '../api'
 
-useHead({ title: '超级智能体 - ZWX Agent', meta: [{ name: 'description', content: 'ZWX Agent 的自主智能体，可规划任务、调用工具并多步执行。' }] })
+useHead({ title: '超级智能体 - Aster', meta: [{ name: 'description', content: 'Aster 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
 const messages = ref([])
 const chatId = ref('')

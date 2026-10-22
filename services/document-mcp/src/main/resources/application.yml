@@ -1,6 +1,6 @@
 spring:
   application:
-    name: zwx-document-mcp-server
+    name: aster-document-mcp-server
   profiles:
     active: sse
 server:

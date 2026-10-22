@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -DskipTests package
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 RUN addgroup -S app && adduser -S app -G app
-COPY --from=build /build/target/zwx-image-search-mcp-server-0.0.1-SNAPSHOT.jar /app/mcp-server.jar
+COPY --from=build /build/target/aster-image-mcp-server-0.0.1-SNAPSHOT.jar /app/mcp-server.jar
 USER app
 EXPOSE 8127
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \

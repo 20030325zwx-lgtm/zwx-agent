@@ -2,7 +2,7 @@ spring:
   ai:
     mcp:
       server:
-        name: zwx-image-search-mcp-server
+        name: aster-image-mcp-server
         version: 0.0.1
         type: SYNC
         # stdio

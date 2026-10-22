@@ -143,7 +143,7 @@ public class McpServerConfigurationService {
         }
         McpSyncClient client = McpClient.sync(transportBuilder.build())
                 .requestTimeout(requestTimeout).initializationTimeout(INITIALIZATION_TIMEOUT)
-                .clientInfo(new McpSchema.Implementation("zwx-agent", "0.0.1"))
+                .clientInfo(new McpSchema.Implementation("aster-agent", "0.0.1"))
                 .build();
         client.initialize();
         return client;

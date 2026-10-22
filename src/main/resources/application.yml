@@ -1,6 +1,6 @@
 spring:
   application:
-    name: zwx-agent
+    name: aster-agent
   profiles:
     default: local
   sql:

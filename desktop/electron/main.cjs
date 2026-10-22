@@ -68,7 +68,7 @@ const startStaticServer = () => new Promise((resolve, reject) => {
 const startLocalBackend = () => {
   const config = readConfig()
   if (config.backendMode !== 'local') return
-  const jar = resourcePath('server', 'zwx-agent.jar')
+  const jar = resourcePath('server', 'aster-agent.jar')
   const bundledJava = resourcePath('runtime', 'bin', 'java')
   if (!fs.existsSync(jar)) return
   const dashscopeApiKey = readSecret(config, 'dashscopeApiKey')
@@ -120,7 +120,7 @@ ipcMain.handle('desktop:save-settings', (_, payload) => {
 
 const createWindow = port => {
   const window = new BrowserWindow({
-    width: 1440, height: 920, minWidth: 1080, minHeight: 700, title: 'ZWX Agent', backgroundColor: '#ffffff',
+    width: 1440, height: 920, minWidth: 1080, minHeight: 700, title: 'Aster', backgroundColor: '#ffffff',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   })
   window.loadURL(`http://127.0.0.1:${port}`)

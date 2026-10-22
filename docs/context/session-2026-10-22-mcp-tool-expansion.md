@@ -10,6 +10,8 @@
 - Token 维护在 `services/document-mcp/.env`（已被 Git 忽略），不提交、不回显。
 - `DOCLING_ENABLED` 默认改为 `false`，Docling/Tika 仅作可选回退；4核8G 服务器不再需要 Docling 容器。
 - 主应用 MCP 请求超时从 90 秒提升为可配置 `app.mcp.request-timeout-seconds`，默认 600 秒。
+- 主应用知识库入库也接入 MinerU：`app.document-parser.provider=mineru`，Docling/Tika/本地作为回退。
+- 修复知识库索引线程池 Bean 缺失（`knowledgeIndexExecutor`）。
 - 增加 `McpToolRegistry`：MCP 工具被发现并授权后，ToolGuard 不再把 `zwx_agent_*` 工具当作未登记工具拦截。
 
 ## 改动内容
@@ -41,6 +43,7 @@
 - 三个新 MCP 服务的 `tools/list` 均已通过真实 SSE 握手验证。
 - MinerU 真实解析成功：通过 document-mcp 上传 PDF，返回 `source=mineru` 的 Markdown。
 - 主应用端到端成功：超级智能体调用 `zwx_agent_parse_document`，MinerU 解析 PDF 后返回内容摘要。
+- 知识库入库验证成功：上传 PDF 后状态 READY，3 个切片，元数据 `parser=mineru`。
 - 主应用 `mvn test`：198 个测试，0 失败，0 错误，1 跳过；后端 `/api/health` 正常。
 
 ## 遗留事项

@@ -12,6 +12,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.security.MessageDigest;
@@ -24,6 +26,8 @@ import java.util.UUID;
 @Service
 public class AgentKnowledgeDocumentService {
 
+    private static final Logger log = LoggerFactory.getLogger(AgentKnowledgeDocumentService.class);
+
     // DashScope embedding 单次最多 25 条文本，超过会直接报 "The input texts limit 25"。
     private static final int BATCH_SIZE = 25;
     private static final String DEFAULT_CATEGORY_NAME = "默认分类";
@@ -34,6 +38,8 @@ public class AgentKnowledgeDocumentService {
     private final MyTokenTextSplitter textSplitter;
     private final DocumentParsingModule documentParsingModule;
     private final DoclingServeChunkingService doclingChunkingService;
+    private final MineruDocumentParser mineruDocumentParser;
+    private final String documentParserProvider;
     private final TransactionTemplate txTemplate;
 
     public AgentKnowledgeDocumentService(OssClientProvider ossClientProvider,
@@ -41,6 +47,8 @@ public class AgentKnowledgeDocumentService {
                                          @Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore,
                                          MyTokenTextSplitter textSplitter, DocumentParsingModule documentParsingModule,
                                          DoclingServeChunkingService doclingChunkingService,
+                                         MineruDocumentParser mineruDocumentParser,
+                                         @Value("${app.document-parser.provider:mineru}") String documentParserProvider,
                                          PlatformTransactionManager transactionManager) {
         this.ossClientProvider = ossClientProvider;
         this.bucket = bucket;
@@ -49,6 +57,9 @@ public class AgentKnowledgeDocumentService {
         this.textSplitter = textSplitter;
         this.documentParsingModule = documentParsingModule;
         this.doclingChunkingService = doclingChunkingService;
+        this.mineruDocumentParser = mineruDocumentParser;
+        this.documentParserProvider = documentParserProvider == null || documentParserProvider.isBlank()
+                ? "mineru" : documentParserProvider.trim().toLowerCase(java.util.Locale.ROOT);
         this.txTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -137,7 +148,7 @@ public class AgentKnowledgeDocumentService {
         }
     }
 
-    @Async("loveKnowledgeIndexExecutor")
+    @Async("knowledgeIndexExecutor")
     public void indexDocument(String documentId) {
         String originalLifecycle;
         try {
@@ -161,18 +172,28 @@ public class AgentKnowledgeDocumentService {
             sourceMetadata.put("agentKey", stored.agentKey());
             sourceMetadata.put("objectKey", stored.objectKey());
             sourceMetadata.put("filename", stored.filename());
-            List<Document> splitChunks;
-            if (doclingChunkingService.shouldUse(stored.filename())) {
+            List<Document> splitChunks = null;
+            if ("mineru".equals(documentParserProvider) && mineruDocumentParser.isConfigured()
+                    && mineruDocumentParser.supports(stored.filename())) {
+                try {
+                    splitChunks = mineruChunks(bytes, stored, sourceMetadata, documentId);
+                } catch (Exception exception) {
+                    log.warn("MinerU knowledge parsing failed, falling back; filename={}, reason={}",
+                            stored.filename(), safeMessage(exception));
+                }
+            }
+            boolean useDocling = "docling".equals(documentParserProvider)
+                    || ("mineru".equals(documentParserProvider) && splitChunks == null);
+            if (splitChunks == null && useDocling && doclingChunkingService.shouldUse(stored.filename())) {
                 try {
                     splitChunks = doclingChunkingService.chunk(bytes, stored.filename(), sourceMetadata);
                 } catch (DoclingServeException exception) {
                     if (!doclingChunkingService.fallbackToLocal()) throw exception;
-                    org.slf4j.LoggerFactory.getLogger(AgentKnowledgeDocumentService.class)
-                            .warn("Docling Serve unavailable, falling back to local parser; filename={}, reason={}",
-                                    stored.filename(), exception.getMessage());
-                    splitChunks = localChunks(bytes, stored, sourceMetadata, documentId);
+                    log.warn("Docling Serve unavailable, falling back to local parser; filename={}, reason={}",
+                            stored.filename(), exception.getMessage());
                 }
-            } else {
+            }
+            if (splitChunks == null) {
                 splitChunks = localChunks(bytes, stored, sourceMetadata, documentId);
             }
             final List<Document> resolvedChunks = splitChunks;
@@ -215,6 +236,22 @@ public class AgentKnowledgeDocumentService {
                         .warn("Auto publish failed for document {}, stays READY: {}", documentId, exception.getMessage());
             }
         }
+    }
+
+    private List<Document> mineruChunks(byte[] bytes, StoredDocument stored,
+                                        Map<String, Object> sourceMetadata, String documentId) {
+        String markdown = mineruDocumentParser.parse(bytes, stored.filename());
+        if (markdown == null || markdown.isBlank()) {
+            throw new IllegalStateException("MinerU returned no extractable content");
+        }
+        sourceMetadata.put("parser", "mineru");
+        return textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(markdown)
+                .metadata(sourceMetadata).build()));
+    }
+
+    private String safeMessage(Exception exception) {
+        String value = exception.getMessage();
+        return value == null || value.isBlank() ? exception.getClass().getSimpleName() : value.replaceAll("[\\r\\n]", " ");
     }
 
     private List<Document> localChunks(byte[] bytes, StoredDocument stored,

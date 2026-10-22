@@ -38,6 +38,20 @@ public class AgentExecutorConfig {
         return executor;
     }
 
+    @Bean("knowledgeIndexExecutor")
+    ThreadPoolTaskExecutor knowledgeIndexExecutor(@Value("${app.knowledge.index.executor.core-pool-size:2}") int corePoolSize,
+                                                  @Value("${app.knowledge.index.executor.max-pool-size:4}") int maxPoolSize,
+                                                  @Value("${app.knowledge.index.executor.queue-capacity:50}") int queueCapacity) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(corePoolSize);
+        executor.setMaxPoolSize(maxPoolSize);
+        executor.setQueueCapacity(queueCapacity);
+        executor.setThreadNamePrefix("knowledge-index-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
+
     @Bean("graphWorkerExecutor")
     ThreadPoolTaskExecutor graphWorkerExecutor(@Value("${app.graph.executor.core-pool-size:6}") int corePoolSize,
                                                @Value("${app.graph.executor.max-pool-size:12}") int maxPoolSize,

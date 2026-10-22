@@ -132,6 +132,16 @@ app:
       describe-tool: ${APP_MCP_IMAGE_DESCRIBE_TOOL:describe_image}
       ocr-tool: ${APP_MCP_IMAGE_OCR_TOOL:ocr_image}
   document-parser:
+    # mineru：知识库入库优先在线解析；docling/local 用于回退或私有部署
+    provider: ${APP_DOCUMENT_PARSER_PROVIDER:mineru}
+    mineru:
+      token: ${MINERU_TOKEN:}
+      base-url: ${APP_DOCUMENT_PARSER_MINERU_BASE_URL:https://mineru.net}
+      model-version: ${APP_DOCUMENT_PARSER_MINERU_MODEL:vlm}
+      language: ${APP_DOCUMENT_PARSER_MINERU_LANGUAGE:ch}
+      timeout-seconds: ${APP_DOCUMENT_PARSER_MINERU_TIMEOUT_SECONDS:600}
+      poll-interval-ms: ${APP_DOCUMENT_PARSER_MINERU_POLL_MS:3000}
+      max-zip-bytes: ${APP_DOCUMENT_PARSER_MINERU_MAX_ZIP_BYTES:104857600}
     tika:
       # Optional Apache Tika Server endpoint, for example http://127.0.0.1:9998
       base-url: ${APP_TIKA_BASE_URL:}

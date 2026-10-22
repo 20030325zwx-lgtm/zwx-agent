@@ -7,7 +7,7 @@ ZWX Agent 是一个基于 Spring Boot、Spring AI 和 Vue 3 的 AI 工作区，�
 - **超级智能体**：Planner → Workers → Verifier → Aggregator 多智能体协作，支持多步任务与并行执行。
 - **流式对话与续跑**：SSE 实时输出；支持断线重连、事件回放和跨重启检查点续跑。
 - **工具调用**：联网搜索、网页抓取、文件读写、PDF 生成、只读 SQL、终端白名单等。
-- **私有知识库**：上传 Markdown、TXT、PDF、Word、Excel、PPT，自动解析切片并写入 PGVector；回答带引用和切片预览。
+- **私有知识库**：上传 Markdown、TXT、PDF、Word、Excel、PPT，默认通过 MinerU 在线解析，自动切片并写入 PGVector；回答带引用和切片预览。
 - **图片理解**：图片上传到私有 OSS，通过视觉模型或图片 MCP 分析图片内容。
 - **模型配置**：`/model-settings` 支持个人配置、管理员系统默认和环境变量回退；兼容 DashScope 与 OpenAI 兼容接口，密钥加密存储。
 - **MCP 与 Skill**：动态注册 MCP SSE 服务；支持 Skill 配置和工具授权。
@@ -106,7 +106,7 @@ tar -xzf zwx-agent-0.0.1-linux-amd64.tar.gz
 cd zwx-agent-0.0.1-linux-amd64
 
 cp .env.example .env
-# 编辑 .env，至少填写 POSTGRES_PASSWORD 和 DASHSCOPE_API_KEY
+# 编辑 .env，至少填写 POSTGRES_PASSWORD、DASHSCOPE_API_KEY 和 MINERU_TOKEN
 
 cp globe.conf.example /home/globe.conf
 # 编辑 /home/globe.conf，填写 spring.ai.dashscope.api-key 和 app.security.jwt-secret
@@ -120,7 +120,7 @@ cp globe.conf.example /home/globe.conf
 ./stop.sh
 ```
 
-服务器需要 Docker 和 Docker Compose v2。`install.sh` 会加载镜像、启动 PostgreSQL、后端与前端，并把外部配置挂载到容器。
+服务器需要 Docker 和 Docker Compose v2。`install.sh` 会加载镜像、启动 PostgreSQL、后端与前端，并把外部配置挂载到容器。默认 `APP_DOCUMENT_PARSER_PROVIDER=mineru`、`APP_DOCUMENT_PARSER_DOCLING_ENABLED=false`，因此 4核8G 服务器无需运行 Docling；需要私有解析时再打开 Docling。
 
 ## 可选服务
 

@@ -126,6 +126,15 @@
 - 截图 URL 是短时公开资源，需限制保存时间和访问范围。
 - 所有外部内容在提示词中标记为不可信数据。
 
+## 知识库入库也走 MinerU
+
+- `AgentKnowledgeDocumentService` 新增 `app.document-parser.provider`：
+  - `mineru`：知识库 PDF/Office 入库优先调用 MinerU；
+  - `docling`：保留原 Docling Serve 链路；
+  - 本地 Markdown/TXT、Tika 和 iText 仍作为回退。
+- MinerU 返回 Markdown 后由现有 `MyTokenTextSplitter` 切片并写入 PGVector，元数据标记 `parser=mineru`。
+- 这样 4核8G 服务器可以关闭 Docling，知识库入库和 `parse_document` 工具都使用在线解析。
+
 ## 部署影响
 
 - 采用 MinerU 后，4核8G 服务器不需要运行 Docling 容器，可省出约 5.6GB 内存。
@@ -139,5 +148,6 @@
 - 通过 MCP `initialize` / `tools/list` 验证工具名称和 JSON Schema。
 - `extract_table`：用现有录取分数表图片验证。
 - `parse_document`：用真实 PDF 验证 MinerU 解析，并检查 `full.md` 内容。
+- 知识库入库：上传真实 PDF，确认索引完成且切片元数据 `parser=mineru`。
 - `screenshot_page`：对公开网页截图并访问返回 URL。
 - 主应用 `/mcp-settings` 添加服务后可发现并调用工具。

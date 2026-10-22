@@ -5,6 +5,7 @@
 - `searchImage(query)`：按关键词搜索图片；
 - `describe_image(image_url, question)`：图片摘要、相关文字与检索 query；
 - `ocr_image(image_url)`：完整 OCR；
+- `extract_table(image_url, format, max_rows)`：从图片抽取 Markdown/CSV/JSON 表格；
 
 ## 本地运行
 

@@ -145,6 +145,30 @@ docker compose up -d --build
 
 默认地址 `http://127.0.0.1:8127`，只绑定本机。
 
+### 文档解析 MCP
+
+```bash
+cd services/document-mcp
+cp .env.example .env
+# 编辑 .env，填写 MINERU_TOKEN
+mvn -DskipTests package
+set -a && . ./.env && set +a
+java -jar target/zwx-document-mcp-server-0.0.1-SNAPSHOT.jar
+```
+
+默认地址 `http://127.0.0.1:8128`。提供 `parse_document`，默认调用 MinerU 精准解析 API；Docling、Tika 仅作为可选回退。
+
+### 网页截图 MCP
+
+```bash
+cd services/browser-mcp
+npm install
+CHROME_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  npm start
+```
+
+默认地址 `http://127.0.0.1:8129`。提供 `screenshot_page`，用无头 Chromium 渲染网页并返回短时截图 URL。Docker 部署可使用 `docker compose up -d --build`。
+
 ## 常用地址
 
 - 前端：`http://127.0.0.1:3000/`

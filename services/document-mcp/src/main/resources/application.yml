@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: zwx-document-mcp-server
+  profiles:
+    active: sse
+server:
+  port: 8128
+document:
+  provider: ${DOCUMENT_PROVIDER:mineru}
+  fallback-to-docling: ${DOCUMENT_FALLBACK_TO_DOCLING:true}
+  mineru:
+    token: ${MINERU_TOKEN:}
+    base-url: ${MINERU_BASE_URL:https://mineru.net}
+    model-version: ${MINERU_MODEL_VERSION:vlm}
+    language: ${MINERU_LANGUAGE:ch}
+    timeout-seconds: ${MINERU_TIMEOUT_SECONDS:600}
+    poll-interval-ms: ${MINERU_POLL_INTERVAL_MS:3000}
+    max-zip-bytes: ${MINERU_MAX_ZIP_BYTES:104857600}
+  docling:
+    enabled: ${DOCLING_ENABLED:false}
+    base-url: ${DOCLING_BASE_URL:http://127.0.0.1:5001}
+    timeout-seconds: ${DOCLING_TIMEOUT_SECONDS:660}
+  tika:
+    base-url: ${TIKA_BASE_URL:}
+  allowed-hosts: ${DOCUMENT_ALLOWED_HOSTS:*.aliyuncs.com,localhost,127.0.0.1}
+  max-bytes: ${DOCUMENT_MAX_BYTES:20971520}

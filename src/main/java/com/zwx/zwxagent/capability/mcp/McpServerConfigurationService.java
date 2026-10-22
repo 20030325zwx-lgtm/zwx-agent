@@ -22,18 +22,20 @@ import java.util.Set;
 @Service
 public class McpServerConfigurationService {
     private static final Duration INITIALIZATION_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(90);
+    private final Duration requestTimeout;
     private final JdbcTemplate jdbcTemplate;
     private final com.zwx.zwxagent.capability.tools.UrlAccessPolicy urlAccessPolicy;
     private final ConfigSecretCipher secretCipher;
     private final ObjectMapper objectMapper;
 
     public McpServerConfigurationService(JdbcTemplate jdbcTemplate, com.zwx.zwxagent.capability.tools.UrlAccessPolicy urlAccessPolicy,
-                                         ConfigSecretCipher secretCipher, ObjectMapper objectMapper) {
+                                         ConfigSecretCipher secretCipher, ObjectMapper objectMapper,
+                                         @org.springframework.beans.factory.annotation.Value("${app.mcp.request-timeout-seconds:600}") long requestTimeoutSeconds) {
         this.jdbcTemplate = jdbcTemplate;
         this.urlAccessPolicy = urlAccessPolicy;
         this.secretCipher = secretCipher;
         this.objectMapper = objectMapper;
+        this.requestTimeout = Duration.ofSeconds(Math.max(30, requestTimeoutSeconds));
     }
 
     public List<McpServerConfiguration> list(String tenantId) {
@@ -119,6 +121,8 @@ public class McpServerConfigurationService {
                 if (client != null) client.close();
             }
         }
+        McpToolRegistry.replace(tenantId, callbacks.stream()
+                .map(callback -> callback.getToolDefinition().name()).toList());
         if (callbacks.isEmpty()) {
             clients.forEach(McpSyncClient::close);
             return McpTools.EMPTY;
@@ -135,7 +139,7 @@ public class McpServerConfigurationService {
             transportBuilder.customizeRequest(builder -> builder.header(header, value));
         }
         McpSyncClient client = McpClient.sync(transportBuilder.build())
-                .requestTimeout(REQUEST_TIMEOUT).initializationTimeout(INITIALIZATION_TIMEOUT)
+                .requestTimeout(requestTimeout).initializationTimeout(INITIALIZATION_TIMEOUT)
                 .clientInfo(new McpSchema.Implementation("zwx-agent", "0.0.1"))
                 .build();
         client.initialize();

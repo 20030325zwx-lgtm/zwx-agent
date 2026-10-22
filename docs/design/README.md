@@ -17,6 +17,7 @@
 - [收敛为超级智能体单入口](./2026-10-21-single-super-agent.md)
 - [后端包结构重组](./2026-10-21-package-structure.md)
 - [仓库顶层目录整理](./2026-10-21-repo-layout.md)
+- [MCP 工具扩展：表格、文档与网页截图](./2026-10-22-mcp-tool-expansion.md)
 - [MCP 连接管理与工具授权](./2026-10-21-mcp-connection-management.md)
 - [改造实施方案索引](./plans/README.md)
 

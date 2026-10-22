@@ -55,7 +55,7 @@ public class ToolGuardHook implements AgentHook {
             return;
         }
         for (PlannedToolCall call : plannedCalls) {
-            String reason = violationOf(call);
+            String reason = violationOf(context, call);
             if (reason != null) {
                 log.warn("[tool-guard] 拦截工具调用 agent={} conversation={} step={} tool={} argsSummary={} 原因={}",
                         context.agentKey(), context.conversationId(), context.currentStep(),
@@ -66,11 +66,11 @@ public class ToolGuardHook implements AgentHook {
     }
 
     /** @return null=放行；非 null=拒绝原因 */
-    private String violationOf(PlannedToolCall call) {
+    private String violationOf(AgentRunContext context, PlannedToolCall call) {
         Map<String, Object> args = parseArguments(call.arguments());
         if (args == null) {
             if (isKnownTool(call.name())) return "工具参数不是有效 JSON";
-            return allowedUnregisteredTools.contains(call.name()) ? null : "工具未登记，默认拒绝";
+            return isAllowedTool(context.tenantId(), call.name()) ? null : "工具未登记，默认拒绝";
         }
         return switch (call.name()) {
             case "executeTerminalCommand" -> ToolGuardPolicy.terminalViolation(text(args, "command"), terminalAllowlist);
@@ -84,7 +84,7 @@ public class ToolGuardHook implements AgentHook {
             case "queryExternalDatabase" -> firstNonBlank(
                     com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql")),
                     externalDatabaseTargetViolation(args));
-            default -> allowedUnregisteredTools.contains(call.name()) ? null : "工具未登记，默认拒绝";
+            default -> isAllowedTool(context.tenantId(), call.name()) ? null : "工具未登记，默认拒绝";
         };
     }
 
@@ -104,6 +104,11 @@ public class ToolGuardHook implements AgentHook {
         }
         if (port < 1 || port > 65535) return "数据库端口无效";
         return urlViolation("http://" + host + ":" + port + "/");
+    }
+
+    private boolean isAllowedTool(String tenantId, String toolName) {
+        return allowedUnregisteredTools.contains(toolName)
+                || com.zwx.zwxagent.capability.mcp.McpToolRegistry.allows(tenantId, toolName);
     }
 
     private boolean isKnownTool(String toolName) {

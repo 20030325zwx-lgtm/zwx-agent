@@ -125,6 +125,8 @@ app:
     max-bytes: ${APP_IMAGE_MAX_BYTES:10485760}
     signed-url-seconds: ${APP_IMAGE_SIGNED_URL_SECONDS:900}
   mcp:
+    # 文档解析等长任务可能超过 90 秒；与 document-mcp/MinerU 轮询上限保持一致
+    request-timeout-seconds: ${APP_MCP_REQUEST_TIMEOUT_SECONDS:600}
     image-tools:
       enabled: ${APP_MCP_IMAGE_TOOLS_ENABLED:true}
       describe-tool: ${APP_MCP_IMAGE_DESCRIBE_TOOL:describe_image}

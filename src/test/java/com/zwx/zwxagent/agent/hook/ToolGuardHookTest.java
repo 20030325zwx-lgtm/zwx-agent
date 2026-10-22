@@ -1,5 +1,6 @@
 package com.zwx.zwxagent.agent.hook;
 
+import com.zwx.zwxagent.capability.mcp.McpToolRegistry;
 import com.zwx.zwxagent.capability.tools.UrlAccessPolicy;
 import org.junit.jupiter.api.Test;
 
@@ -84,6 +85,16 @@ class ToolGuardHookTest {
         assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), calls));
         ToolGuardHook registered = new ToolGuardHook(true, "", "someFutureTool", new UrlAccessPolicy());
         assertDoesNotThrow(() -> registered.beforeToolCalls(context(), calls));
+    }
+
+    @Test
+    void mcpToolRegisteredForTenantIsAllowed() {
+        McpToolRegistry.replace("mcp-tenant", List.of("zwx_agent_parse_document"));
+        AgentRunContext context = AgentRunContext.builder().tenantId("mcp-tenant").agentKey("super")
+                .conversationId("conv-1").build();
+        List<PlannedToolCall> calls = List.of(new PlannedToolCall("id-1", "function",
+                "zwx_agent_parse_document", "{\"document_url\": \"https://example.com/a.pdf\"}"));
+        assertDoesNotThrow(() -> hook(true).beforeToolCalls(context, calls));
     }
 
     @Test

@@ -185,4 +185,3 @@ CHROME_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Ch
 - 架构与设计：[docs/design/README.md](docs/design/README.md)
 - 功能进度：[docs/ROADMAP.md](docs/ROADMAP.md)
 - 会话交接：[docs/context/README.md](docs/context/README.md)
-- 原项目：[liyupi/yu-ai-agent](https://github.com/liyupi/yu-ai-agent)

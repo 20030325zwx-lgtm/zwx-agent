@@ -10,7 +10,7 @@ import org.springframework.ai.tool.ToolCallback;
 import java.util.List;
 
 /**
- * 鱼皮的 AI 超级智能体（拥有自主规划能力，可以直接使用）
+ * AI 超级智能体，支持自主规划与工具调用。
  */
 public class ZwxManus extends ToolCallAgent {
 

@@ -27,14 +27,17 @@ public class McpServerConfigurationService {
     private final com.zwx.zwxagent.capability.tools.UrlAccessPolicy urlAccessPolicy;
     private final ConfigSecretCipher secretCipher;
     private final ObjectMapper objectMapper;
+    private final boolean allowPrivateEndpoints;
 
     public McpServerConfigurationService(JdbcTemplate jdbcTemplate, com.zwx.zwxagent.capability.tools.UrlAccessPolicy urlAccessPolicy,
                                          ConfigSecretCipher secretCipher, ObjectMapper objectMapper,
-                                         @org.springframework.beans.factory.annotation.Value("${app.mcp.request-timeout-seconds:600}") long requestTimeoutSeconds) {
+                                         @org.springframework.beans.factory.annotation.Value("${app.mcp.request-timeout-seconds:600}") long requestTimeoutSeconds,
+                                         @org.springframework.beans.factory.annotation.Value("${app.mcp.allow-private-endpoints:false}") boolean allowPrivateEndpoints) {
         this.jdbcTemplate = jdbcTemplate;
         this.urlAccessPolicy = urlAccessPolicy;
         this.secretCipher = secretCipher;
         this.objectMapper = objectMapper;
+        this.allowPrivateEndpoints = allowPrivateEndpoints;
         this.requestTimeout = Duration.ofSeconds(Math.max(30, requestTimeoutSeconds));
     }
 
@@ -216,16 +219,24 @@ public class McpServerConfigurationService {
     }
 
     private String normalizeEndpoint(String endpoint) {
-        URI value;
+        URI parsed;
         try {
-            value = urlAccessPolicy.validateHttpUrl(endpoint);
+            parsed = URI.create(endpoint == null ? "" : endpoint.trim());
         } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("MCP 地址必须是可解析的公网 HTTP(S) URL");
+            throw new IllegalArgumentException("MCP 地址格式不正确");
         }
-        if (value.getFragment() != null) {
+        if (!("http".equalsIgnoreCase(parsed.getScheme()) || "https".equalsIgnoreCase(parsed.getScheme()))
+                || parsed.getHost() == null || parsed.getUserInfo() != null || parsed.getFragment() != null) {
             throw new IllegalArgumentException("MCP 地址必须是无凭据的 HTTP(S) URL");
         }
-        return value.toString().replaceAll("/$", "");
+        if (!allowPrivateEndpoints) {
+            try {
+                urlAccessPolicy.validateHttpUrl(endpoint);
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException("MCP 地址必须是可解析的公网 HTTP(S) URL");
+            }
+        }
+        return parsed.toString().replaceAll("/$", "");
     }
 
     private String safeMessage(Exception exception) {

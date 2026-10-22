@@ -4,6 +4,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    mem_limit: 1g
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -16,9 +17,70 @@ services:
       timeout: 5s
       retries: 20
 
+  image-mcp:
+    image: zwx-image-search-mcp-server:${IMAGE_TAG}
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      DASHSCOPE_VISION_MODEL: ${DASHSCOPE_VISION_MODEL:-qwen3-vl-plus}
+      IMAGE_ALLOWED_HOSTS: ${IMAGE_ALLOWED_HOSTS:-*.aliyuncs.com}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8127/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  document-mcp:
+    image: zwx-document-mcp-server:${IMAGE_TAG}
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      DOCUMENT_PROVIDER: ${DOCUMENT_PROVIDER:-mineru}
+      DOCUMENT_FALLBACK_TO_DOCLING: ${DOCUMENT_FALLBACK_TO_DOCLING:-false}
+      MINERU_TOKEN: ${MINERU_TOKEN:-}
+      MINERU_MODEL_VERSION: ${MINERU_MODEL_VERSION:-vlm}
+      MINERU_LANGUAGE: ${MINERU_LANGUAGE:-ch}
+      MINERU_TIMEOUT_SECONDS: ${MINERU_TIMEOUT_SECONDS:-600}
+      DOCLING_ENABLED: "false"
+      TIKA_BASE_URL: ${TIKA_BASE_URL:-}
+      DOCUMENT_ALLOWED_HOSTS: ${DOCUMENT_ALLOWED_HOSTS:-*.aliyuncs.com}
+      DOCUMENT_MAX_BYTES: ${DOCUMENT_MAX_BYTES:-20971520}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8128/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  browser-mcp:
+    profiles: ["browser"]
+    image: zwx-browser-mcp-server:${IMAGE_TAG}
+    restart: unless-stopped
+    mem_limit: 1536m
+    environment:
+      PORT: 8129
+      SCREENSHOT_DIR: /app/screenshots
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:${ZWX_AGENT_PORT:-8080}}
+      BROWSER_ALLOW_PRIVATE_HOSTS: "false"
+      BROWSER_ALLOWED_HOSTS: ${BROWSER_ALLOWED_HOSTS:-*}
+      SCREENSHOT_TTL_MS: ${SCREENSHOT_TTL_MS:-1800000}
+    volumes:
+      - screenshots:/app/screenshots
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8129/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   backend:
     image: zwx-agent-backend:${IMAGE_TAG}
     restart: unless-stopped
+    mem_limit: 1536m
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,16 +100,17 @@ services:
       APP_DOCUMENT_PARSER_PROVIDER: ${APP_DOCUMENT_PARSER_PROVIDER:-mineru}
       APP_DOCUMENT_PARSER_DOCLING_ENABLED: ${APP_DOCUMENT_PARSER_DOCLING_ENABLED:-false}
       MINERU_TOKEN: ${MINERU_TOKEN:-}
+      APP_MCP_ALLOW_PRIVATE_ENDPOINTS: "true"
       APP_TEMP_DIR: /app/temp
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./temp:/app/temp
-      # 服务器外部配置（API Key、JWT 密钥等），只读挂载；路径可用 .env 的 APP_GLOBE_CONF 覆盖
       - ${APP_GLOBE_CONF:-/home/globe.conf}:/home/globe.conf:ro
 
   frontend:
     image: zwx-agent-frontend:${IMAGE_TAG}
     restart: unless-stopped
+    mem_limit: 128m
     depends_on:
       - backend
     ports:
@@ -55,3 +118,4 @@ services:
 
 volumes:
   postgres-data:
+  screenshots:

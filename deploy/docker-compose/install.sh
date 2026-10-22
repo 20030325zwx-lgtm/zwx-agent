@@ -26,6 +26,7 @@ conf_value() {
 }
 
 require_command docker
+require_command curl
 docker compose version >/dev/null 2>&1 || { echo "需要 Docker Compose v2（docker compose）" >&2; exit 1; }
 
 mkdir -p "$INSTALL_DIR/images" "$INSTALL_DIR/temp"
@@ -61,20 +62,22 @@ GLOBE_CONF=$(env_value APP_GLOBE_CONF)
 if [ ! -f "$GLOBE_CONF" ]; then
   cp "$INSTALL_DIR/globe.conf.example" "$GLOBE_CONF"
   chmod 600 "$GLOBE_CONF"
-  echo "已创建 $GLOBE_CONF，请填写 spring.ai.dashscope.api-key 与 app.security.jwt-secret 后重新执行安装脚本。" >&2
+  echo "已创建 $GLOBE_CONF，请填写 app.security.jwt-secret 后重新执行安装脚本。" >&2
   exit 1
 fi
 chmod 600 "$GLOBE_CONF" 2>/dev/null || true
-
-# DashScope 密钥二选一：.env 的 DASHSCOPE_API_KEY 或 globe.conf 的 spring.ai.dashscope.api-key
-DASHSCOPE_RESOLVED=$(env_value DASHSCOPE_API_KEY)
-case "$DASHSCOPE_RESOLVED" in ''|YOUR_*|CHANGE_ME_*) DASHSCOPE_RESOLVED='' ;; esac
-if [ -z "$DASHSCOPE_RESOLVED" ]; then
-  DASHSCOPE_RESOLVED=$(conf_value 'spring\.ai\.dashscope\.api-key')
-fi
-case "$DASHSCOPE_RESOLVED" in
-  ''|YOUR_*|CHANGE_ME_*) echo "必须在 .env 的 DASHSCOPE_API_KEY 或 $GLOBE_CONF 的 spring.ai.dashscope.api-key 中至少填写一处" >&2; exit 1 ;;
+JWT_RESOLVED=$(conf_value 'app\.security\.jwt-secret')
+case "$JWT_RESOLVED" in
+  ''|YOUR_*|CHANGE_ME_*) echo "请在 $GLOBE_CONF 中填写 app.security.jwt-secret（至少 32 位随机字符串）" >&2; exit 1 ;;
 esac
+
+# 图片 MCP 直接读取 .env，因此 DashScope Key 必须写在 .env 中
+require_value DASHSCOPE_API_KEY || { echo ".env 中必须填写 DASHSCOPE_API_KEY（图片 MCP 使用）" >&2; exit 1; }
+require_value MINERU_TOKEN || { echo ".env 中必须填写 MINERU_TOKEN（知识库入库与文档解析使用）" >&2; exit 1; }
+BROWSER_MCP_ENABLED_VALUE=$(env_value BROWSER_MCP_ENABLED)
+if [ "$BROWSER_MCP_ENABLED_VALUE" = "true" ]; then
+  require_value PUBLIC_BASE_URL || { echo "启用网页截图时必须在 .env 填写 PUBLIC_BASE_URL，例如 http://<服务器IP>:8080" >&2; exit 1; }
+fi
 
 chmod 700 "$INSTALL_DIR/temp"
 
@@ -84,4 +87,55 @@ for image_archive in "$INSTALL_DIR"/images/*.tar; do
 done
 
 docker compose --env-file "$INSTALL_DIR/.env" -f "$INSTALL_DIR/docker-compose.yml" up -d
+if [ "$BROWSER_MCP_ENABLED_VALUE" = "true" ]; then
+  docker compose --env-file "$INSTALL_DIR/.env" -f "$INSTALL_DIR/docker-compose.yml" --profile browser up -d browser-mcp
+fi
+
+# 等待 PostgreSQL 可用后注册内置 MCP 服务；后端容器通过服务名访问。
+POSTGRES_USER_VALUE=$(env_value POSTGRES_USER)
+POSTGRES_DB_VALUE=$(env_value POSTGRES_DB)
+for i in $(seq 1 30); do
+  if docker compose --env-file "$INSTALL_DIR/.env" -f "$INSTALL_DIR/docker-compose.yml" \
+      exec -T postgres pg_isready -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+docker compose --env-file "$INSTALL_DIR/.env" -f "$INSTALL_DIR/docker-compose.yml" \
+  exec -T postgres psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" <<'SQL'
+INSERT INTO mcp_server_configuration (tenant_id, name, endpoint, enabled, auth_type, allowed_tools)
+VALUES
+  ('default', '图片理解', 'http://image-mcp:8127', true, 'NONE', '["describe_image","ocr_image","extract_table"]'::jsonb),
+  ('default', '文档解析', 'http://document-mcp:8128', true, 'NONE', '["parse_document"]'::jsonb)
+ON CONFLICT (tenant_id, name) DO UPDATE SET
+  endpoint = EXCLUDED.endpoint,
+  enabled = true,
+  auth_type = 'NONE',
+  allowed_tools = EXCLUDED.allowed_tools,
+  updated_at = CURRENT_TIMESTAMP;
+SQL
+if [ "$BROWSER_MCP_ENABLED_VALUE" = "true" ]; then
+  docker compose --env-file "$INSTALL_DIR/.env" -f "$INSTALL_DIR/docker-compose.yml" \
+    exec -T postgres psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" <<'SQL'
+INSERT INTO mcp_server_configuration (tenant_id, name, endpoint, enabled, auth_type, allowed_tools)
+VALUES ('default', '网页截图', 'http://browser-mcp:8129', true, 'NONE', '["screenshot_page"]'::jsonb)
+ON CONFLICT (tenant_id, name) DO UPDATE SET
+  endpoint = EXCLUDED.endpoint,
+  enabled = true,
+  auth_type = 'NONE',
+  allowed_tools = EXCLUDED.allowed_tools,
+  updated_at = CURRENT_TIMESTAMP;
+SQL
+fi
+
+for i in $(seq 1 60); do
+  if curl -fsS "http://127.0.0.1:$(env_value ZWX_AGENT_PORT)/api/health" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
 echo "ZWX Agent 已启动：http://<服务器地址>:$(env_value ZWX_AGENT_PORT)"
+if [ "$BROWSER_MCP_ENABLED_VALUE" = "true" ]; then
+  echo "网页截图已启用，PUBLIC_BASE_URL=$(env_value PUBLIC_BASE_URL)，请确认该地址可从浏览器访问。"
+fi

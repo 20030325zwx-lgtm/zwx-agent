@@ -127,6 +127,8 @@ app:
   mcp:
     # 文档解析等长任务可能超过 90 秒；与 document-mcp/MinerU 轮询上限保持一致
     request-timeout-seconds: ${APP_MCP_REQUEST_TIMEOUT_SECONDS:600}
+    # Docker Compose 内网服务名（如 http://image-mcp:8127）需要显式开启；管理员专用
+    allow-private-endpoints: ${APP_MCP_ALLOW_PRIVATE_ENDPOINTS:false}
     image-tools:
       enabled: ${APP_MCP_IMAGE_TOOLS_ENABLED:true}
       describe-tool: ${APP_MCP_IMAGE_DESCRIBE_TOOL:describe_image}

@@ -109,18 +109,18 @@ cp .env.example .env
 # 编辑 .env，至少填写 POSTGRES_PASSWORD、DASHSCOPE_API_KEY 和 MINERU_TOKEN
 
 cp globe.conf.example /home/globe.conf
-# 编辑 /home/globe.conf，填写 spring.ai.dashscope.api-key 和 app.security.jwt-secret
+# 编辑 /home/globe.conf，至少填写 app.security.jwt-secret
 
 ./install.sh
 ```
 
-启动后访问 `http://<服务器地址>:8080`。停止服务：
+启动后访问 `http://<服务器地址>:8080`。完整部署、HTTPS、更新、回滚和数据迁移见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。停止服务：
 
 ```bash
 ./stop.sh
 ```
 
-服务器需要 Docker 和 Docker Compose v2。`install.sh` 会加载镜像、启动 PostgreSQL、后端与前端，并把外部配置挂载到容器。默认 `APP_DOCUMENT_PARSER_PROVIDER=mineru`、`APP_DOCUMENT_PARSER_DOCLING_ENABLED=false`，因此 4核8G 服务器无需运行 Docling；需要私有解析时再打开 Docling。
+服务器需要 Docker 和 Docker Compose v2。`install.sh` 会加载镜像、启动 PostgreSQL、后端、前端、图片 MCP 和文档 MCP，并自动注册 MCP 配置；网页截图 MCP 默认关闭，需要时用 `WITH_BROWSER_MCP=true` 打包并设置 `BROWSER_MCP_ENABLED=true`。默认 `APP_DOCUMENT_PARSER_PROVIDER=mineru`、`APP_DOCUMENT_PARSER_DOCLING_ENABLED=false`，因此 4核8G 服务器无需运行 Docling。
 
 ## 可选服务
 
@@ -181,6 +181,7 @@ CHROME_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Ch
 
 ## 文档
 
+- 服务器部署：[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - 架构与设计：[docs/design/README.md](docs/design/README.md)
 - 功能进度：[docs/ROADMAP.md](docs/ROADMAP.md)
 - 会话交接：[docs/context/README.md](docs/context/README.md)

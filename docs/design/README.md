@@ -18,6 +18,7 @@
 - [后端包结构重组](./2026-10-21-package-structure.md)
 - [仓库顶层目录整理](./2026-10-21-repo-layout.md)
 - [MCP 工具扩展：表格、文档与网页截图](./2026-10-22-mcp-tool-expansion.md)
+- [超级智能体工作台改造方案](./2026-10-22-super-agent-workspace.md)
 - [MCP 连接管理与工具授权](./2026-10-21-mcp-connection-management.md)
 - [改造实施方案索引](./plans/README.md)
 

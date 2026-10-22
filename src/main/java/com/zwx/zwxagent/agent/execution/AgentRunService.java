@@ -131,6 +131,15 @@ public class AgentRunService {
                 """, runMapper(), runId, tenantId, userId, conversationId).stream().findFirst();
     }
 
+    public List<AgentRun> findScopedRuns(String tenantId, String userId, String conversationId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT * FROM agent_run
+                WHERE tenant_id = ? AND user_id = ? AND conversation_id = ? AND agent_key = 'super'
+                ORDER BY created_at DESC, updated_at DESC
+                LIMIT ?
+                """, runMapper(), tenantId, userId, conversationId, Math.max(1, limit));
+    }
+
     public Optional<AgentRun> findLatestResumable(String tenantId, String userId, String conversationId) {
         return jdbcTemplate.query("""
                 SELECT * FROM agent_run

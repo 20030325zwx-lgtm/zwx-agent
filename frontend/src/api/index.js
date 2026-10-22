@@ -176,6 +176,12 @@ export const getManusConversationMessages = conversationId => request.get(`/ai/m
 export const deleteManusConversation = conversationId => request.delete(`/ai/manus/conversations/${conversationId}`)
 export const getManusFileUrl = (conversationId, path) =>
   fetchAuthBlobUrl(`/ai/manus/files?conversationId=${encodeURIComponent(conversationId)}&path=${encodeURIComponent(path)}`)
+export const listManusRuns = conversationId =>
+  request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs`).then(response => response.data)
+export const getManusRun = (conversationId, runId) =>
+  request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`).then(response => response.data)
+export const listWorkspaceFiles = (agentKey, conversationId, limit = 200) =>
+  request.get('/ai/workspace/files', { params: { agentKey, conversationId, limit } }).then(response => response.data)
 
 export const listMcpServers = () => request.get('/ai/mcp/servers').then(response => response.data)
 export const createMcpServer = payload => request.post('/ai/mcp/servers', payload).then(response => response.data)
@@ -200,6 +206,9 @@ export default {
   getManusConversationMessages,
   deleteManusConversation,
   getManusFileUrl,
+  listManusRuns,
+  getManusRun,
+  listWorkspaceFiles,
   listMcpServers,
   createMcpServer,
   updateMcpServer,

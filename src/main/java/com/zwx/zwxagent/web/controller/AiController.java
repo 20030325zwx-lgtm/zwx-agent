@@ -1,5 +1,7 @@
 package com.zwx.zwxagent.web.controller;
 
+import com.zwx.zwxagent.agent.execution.AgentRunSummary;
+import com.zwx.zwxagent.agent.execution.AgentRunView;
 import com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator;
 import com.zwx.zwxagent.platform.settings.AppConfigurationService;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
@@ -385,23 +387,21 @@ public class AiController {
         return handle.emitter();
     }
 
+    @GetMapping("/manus/conversations/{conversationId}/runs")
+    public List<AgentRunSummary> listManusRuns(CurrentActor actor, @PathVariable String conversationId,
+                                               @RequestParam(defaultValue = "30") int limit) {
+        return agentRunService.findScopedRuns(actor.tenantId(), actor.userId(), conversationId,
+                        Math.min(Math.max(limit, 1), 100)).stream()
+                .map(AgentRunSummary::from)
+                .toList();
+    }
+
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}")
-    public Map<String, Object> getManusRun(CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
-        com.zwx.zwxagent.agent.execution.AgentRun run = agentRunService
-                .findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+    public AgentRunView getManusRun(CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
+        return agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .map(AgentRunView::from)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
-        var checkpoint = run.checkpoint();
-        return Map.of(
-                "id", run.id(),
-                "status", run.status(),
-                "lastNode", checkpoint == null || checkpoint.lastNode() == null ? "" : checkpoint.lastNode(),
-                "nextNode", checkpoint == null || checkpoint.nextNode() == null ? "" : checkpoint.nextNode(),
-                "planSize", checkpoint == null ? 0 : checkpoint.plan().size(),
-                "taskResultCount", checkpoint == null ? 0 : checkpoint.taskResults().size(),
-                "partialAnswerLength", checkpoint == null || checkpoint.partialAnswer() == null ? 0 : checkpoint.partialAnswer().length(),
-                "finalAnswerLength", checkpoint == null || checkpoint.finalAnswer() == null ? 0 : checkpoint.finalAnswer().length(),
-                "resumeCount", run.resumeCount());
     }
 
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/reconnect")

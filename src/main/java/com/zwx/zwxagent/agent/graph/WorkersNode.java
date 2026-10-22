@@ -23,6 +23,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * 执行节点：按计划并行运行多个子 agent（复用加固过的 ToolCallAgent 循环），
@@ -48,19 +49,23 @@ public class WorkersNode implements NodeAction {
         final WorkerRole role;
         final String title;
         final List<ActivityEvent> events = new ArrayList<>();
+        final Consumer<ActivityEvent> activitySink;
 
-        GraphWorker(ToolCallback[] tools, WorkerRole role, String title) {
+        GraphWorker(ToolCallback[] tools, WorkerRole role, String title, Consumer<ActivityEvent> activitySink) {
             super(tools);
             this.role = role;
             this.title = title;
+            this.activitySink = activitySink;
         }
 
         @Override
         public String step() {
             String result = super.step();
             for (BaseAgent.ToolExecution execution : lastToolExecutions()) {
-                events.add(ActivityEvent.of("work", role.displayName(),
-                        WorkerRole.toolLabel(execution.name()) + " → " + compact(execution.result(), MAX_EVENT_SUMMARY_CHARS)));
+                ActivityEvent event = ActivityEvent.of("work", role.displayName(),
+                        WorkerRole.toolLabel(execution.name()) + " → " + compact(execution.result(), MAX_EVENT_SUMMARY_CHARS));
+                events.add(event);
+                streamEvent(activitySink, event);
             }
             return result;
         }
@@ -81,6 +86,7 @@ public class WorkersNode implements NodeAction {
         BooleanSupplier stopCheck = context == null ? () -> false : context.stopCheck();
         String runKey = context == null || context.conversationId() == null
                 ? java.util.UUID.randomUUID().toString() : context.conversationId();
+        Consumer<ActivityEvent> activitySink = context == null ? null : context.activitySink();
         ToolCallback[] tools = context == null ? new ToolCallback[0] : context.tools();
         if (context != null && stopCheck.getAsBoolean()) {
             return Map.of(GraphState.ACTIVITIES, List.of("收到停止信号，跳过剩余子任务"));
@@ -102,10 +108,12 @@ public class WorkersNode implements NodeAction {
             if (stopCheck.getAsBoolean()) break;
             PlanStep step = plan.get(index);
             final int stepNumber = index + 1;
-            events.add(ActivityEvent.of("work", step.role().displayName(),
-                    "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title()));
+            ActivityEvent startEvent = ActivityEvent.of("work", step.role().displayName(),
+                    "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title());
+            events.add(startEvent);
+            streamEvent(activitySink, startEvent);
             FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
-                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck, context, runKey));
+                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck, context, runKey, activitySink));
             futures.add(task);
             activeTasks.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(task);
             try {
@@ -120,7 +128,9 @@ public class WorkersNode implements NodeAction {
                 }
                 activities.add("子任务未能启动：执行队列已满");
                 results.add("【" + step.title() + "】执行队列已满，未能启动");
-                events.add(ActivityEvent.of("work", "执行器", "执行队列已满，子任务未能启动"));
+                ActivityEvent rejected = ActivityEvent.of("work", "执行器", "执行队列已满，子任务未能启动");
+                events.add(rejected);
+                streamEvent(activitySink, rejected);
             }
         }
         for (FutureTask<WorkerOutcome> future : futures) {
@@ -138,12 +148,16 @@ public class WorkersNode implements NodeAction {
                 log.warn("worker 执行失败：{}", cause.getMessage());
                 activities.add("子任务执行失败：" + cause.getMessage());
                 results.add("子任务失败：" + cause.getMessage());
-                events.add(ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(cause.getMessage(), 80)));
+                ActivityEvent failure = ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(cause.getMessage(), 80));
+                events.add(failure);
+                streamEvent(activitySink, failure);
             } catch (Exception exception) {
                 log.warn("worker 执行失败：{}", exception.getMessage());
                 activities.add("子任务执行失败：" + exception.getMessage());
                 results.add("子任务失败：" + exception.getMessage());
-                events.add(ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(exception.getMessage(), 80)));
+                ActivityEvent failure = ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(exception.getMessage(), 80));
+                events.add(failure);
+                streamEvent(activitySink, failure);
             } finally {
                 List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(runKey);
                 if (tasks != null) {
@@ -159,14 +173,14 @@ public class WorkersNode implements NodeAction {
 
     private WorkerOutcome runWorker(PlanStep step, int stepNumber, ToolCallback[] allTools,
                                     String feedback, ChatClient sharedClient, BooleanSupplier stopCheck,
-                                    RunContext runContext, String runKey) {
+                                    RunContext runContext, String runKey, Consumer<ActivityEvent> activitySink) {
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             return WorkerOutcome.stopped(step.title());
         }
         WorkerRole role = step.role();
         String knowledge = runContext == null ? "" : runContext.knowledgeContext();
         ToolCallback[] roleTools = filterTools(allTools, role);
-        GraphWorker worker = new GraphWorker(roleTools, role, step.title());
+        GraphWorker worker = new GraphWorker(roleTools, role, step.title(), activitySink);
         if (runContext != null && runContext.tenantId() != null) {
             worker.setRunIdentity(new com.zwx.zwxagent.agent.core.AgentRunIdentity(
                     runContext.tenantId(), "super", runContext.conversationId()));
@@ -206,8 +220,10 @@ public class WorkersNode implements NodeAction {
             }
             activities.add("[worker" + stepNumber + "/" + role.key() + "] 结论：" + compact(summary));
             List<ActivityEvent> events = new ArrayList<>(worker.events);
-            events.add(ActivityEvent.of("work", role.displayName(),
-                    "完成：" + compact(summary, MAX_EVENT_SUMMARY_CHARS)));
+            ActivityEvent doneEvent = ActivityEvent.of("work", role.displayName(),
+                    "完成：" + compact(summary, MAX_EVENT_SUMMARY_CHARS));
+            events.add(doneEvent);
+            streamEvent(activitySink, doneEvent);
             return new WorkerOutcome(activities, events, "【" + step.title() + "】" + summary);
         } finally {
             List<ToolCallAgent> workers = activeWorkers.get(runKey);
@@ -252,6 +268,15 @@ public class WorkersNode implements NodeAction {
         if (tasks != null) tasks.forEach(task -> task.cancel(true));
         List<ToolCallAgent> workers = activeWorkers.get(conversationId);
         if (workers != null) workers.forEach(ToolCallAgent::stopForClientDisconnect);
+    }
+
+    private static void streamEvent(Consumer<ActivityEvent> sink, ActivityEvent event) {
+        if (sink == null) return;
+        try {
+            sink.accept(event);
+        } catch (RuntimeException ignored) {
+            // 实时推送失败不能中断 worker；事件仍会随节点检查点落库。
+        }
     }
 
     private static String compact(String value) {

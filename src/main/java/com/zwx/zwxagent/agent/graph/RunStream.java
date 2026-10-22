@@ -111,7 +111,7 @@ public final class RunStream {
         }
     }
 
-    public void send(String type, String data) {
+    public synchronized void send(String type, String data) {
         if (completed.get()) return;
         Event event;
         synchronized (this) {
@@ -143,7 +143,7 @@ public final class RunStream {
         }
     }
 
-    private void sendEventWithoutCompletingCheck(String type, String data) {
+    private synchronized void sendEventWithoutCompletingCheck(String type, String data) {
         Event event;
         synchronized (this) {
             event = new Event(sequence.incrementAndGet(), type, data == null ? "" : data);

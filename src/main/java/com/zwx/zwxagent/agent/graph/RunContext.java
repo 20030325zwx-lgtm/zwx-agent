@@ -14,23 +14,30 @@ public record RunContext(ToolCallback[] tools,
                          BooleanSupplier stopCheck,
                          String tenantId,
                          String conversationId,
-                         Consumer<String> answerChunkSink) {
+                         Consumer<String> answerChunkSink,
+                         Consumer<ActivityEvent> activitySink) {
 
     public RunContext {
         if (knowledgeContext == null) knowledgeContext = "";
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck) {
-        return new RunContext(tools, knowledgeContext, stopCheck, null, null, null);
+        return new RunContext(tools, knowledgeContext, stopCheck, null, null, null, null);
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
                                 String tenantId, String conversationId) {
-        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, null);
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, null, null);
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
                                 String tenantId, String conversationId, Consumer<String> answerChunkSink) {
-        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, answerChunkSink);
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, answerChunkSink, null);
+    }
+
+    public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
+                                String tenantId, String conversationId, Consumer<String> answerChunkSink,
+                                Consumer<ActivityEvent> activitySink) {
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, answerChunkSink, activitySink);
     }
 }

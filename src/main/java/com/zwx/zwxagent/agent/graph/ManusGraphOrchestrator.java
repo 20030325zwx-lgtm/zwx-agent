@@ -15,6 +15,7 @@ import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.state.strategy.AppendStrategy;
 import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 import com.zwx.zwxagent.agent.execution.AgentRunService;
+import com.zwx.zwxagent.agent.execution.AgentRunView;
 import com.zwx.zwxagent.agent.execution.AgentToolCallLedgerService;
 import com.zwx.zwxagent.capability.tools.IdempotentToolCallback;
 import jakarta.annotation.PostConstruct;
@@ -33,8 +34,10 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -254,6 +257,7 @@ public class ManusGraphOrchestrator {
         AtomicBoolean cancelledBeforeStart = new AtomicBoolean(false);
         Object startLock = new Object();
         RunStream[] holder = new RunStream[1];
+        ScheduledFuture<?>[] deadline = new ScheduledFuture<?>[1];
         FutureTask<Void> runTask = new FutureTask<>(() -> {
             synchronized (startLock) {
                 if (cancelledBeforeStart.get()) {
@@ -267,6 +271,7 @@ public class ManusGraphOrchestrator {
             try {
                 execute(request, holder[0], stopped, runGraph.graph());
             } finally {
+                if (deadline[0] != null) deadline[0].cancel(false);
                 holder[0].cleanup();
                 scheduleStreamRemoval(runId, holder[0]);
             }
@@ -289,9 +294,17 @@ public class ManusGraphOrchestrator {
         holder[0] = stream;
         runStreams.put(runId, stream);
         SseEmitter emitter = stream.createEmitter();
+        deadline[0] = RECONNECT_SCHEDULER.schedule(() -> {
+            if (!stream.completed()) {
+                log.warn("manus run 超过 {} 分钟上限，主动停止；runId={}", MAX_RUN_MILLIS / 60000, runId);
+                stream.send("activity", "{\"phase\":\"verify\",\"agent\":\"系统\",\"summary\":\"任务超过执行时限，已自动停止\"}");
+                stream.cancel();
+            }
+        }, MAX_RUN_MILLIS, TimeUnit.MILLISECONDS);
         try {
             runExecutor.execute(runTask);
         } catch (RuntimeException exception) {
+            if (deadline[0] != null) deadline[0].cancel(false);
             runStreams.remove(runId, stream);
             stream.cleanup();
             throw exception;
@@ -333,7 +346,25 @@ public class ManusGraphOrchestrator {
             if (request.runId() != null && !request.runId().isBlank()) {
                 stream.send("run", request.runId());
             }
+            List<AgentRunView.PlanStepView> sentPlan = List.of();
+            if (request.resumeCheckpoint() != null) {
+                List<AgentRunView.PlanStepView> resumedPlan = AgentRunView.planView(request.resumeCheckpoint().plan());
+                if (!resumedPlan.isEmpty()) {
+                    stream.send("plan", objectMapper.writeValueAsString(resumedPlan));
+                    sentPlan = resumedPlan;
+                }
+            }
             long[] lastPartialFlush = {0};
+            Map<String, AtomicInteger> liveEvents = new ConcurrentHashMap<>();
+            Consumer<ActivityEvent> activitySink = event -> {
+                if (event == null) return;
+                liveEvents.computeIfAbsent(eventKey(event), key -> new AtomicInteger()).incrementAndGet();
+                try {
+                    stream.send("activity", objectMapper.writeValueAsString(event));
+                } catch (Exception exception) {
+                    log.debug("实时活动事件推送失败；runId={}", request.runId(), exception);
+                }
+            };
             ToolCallback[] tools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(), toolCallLedger);
             RunContext context = RunContext.of(tools, request.knowledgeContext(), stopped::get,
                     request.tenantId(), request.conversationId(), chunk -> {
@@ -349,14 +380,14 @@ public class ManusGraphOrchestrator {
                         if (!stopped.get()) {
                             stream.sendMessage(chunk);
                         }
-                    });
+                    }, activitySink);
             Map<String, Object> inputs = Map.of(
                     GraphState.INPUT, request.message(),
                     GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext(),
                     GraphState.RUN_CONTEXT, context,
                     GraphState.RUN_ID, request.runId() == null ? "" : request.runId());
             int sentActivities = 0;
-            int sentEvents = 0;
+            int sentEvents = request.resumeCheckpoint() == null ? 0 : request.resumeCheckpoint().events().size();
             RunnableConfig runnableConfig = RunnableConfig.builder()
                     .threadId(request.runId() == null || request.runId().isBlank()
                             ? java.util.UUID.randomUUID().toString()
@@ -368,12 +399,23 @@ public class ManusGraphOrchestrator {
             for (NodeOutput output : outputs) {
                 if (stopped.get()) break;
                 OverAllState state = output.state();
+                // 计划板：planner 产出后推送一次结构化计划，恢复时以 checkpoint 为准。
+                List<PlanStep> plan = state.value(GraphState.PLAN)
+                        .map(value -> (List<PlanStep>) value)
+                        .orElse(List.of());
+                List<AgentRunView.PlanStepView> planView = AgentRunView.planView(plan);
+                if (!planView.isEmpty() && !planView.equals(sentPlan)) {
+                    stream.send("plan", objectMapper.writeValueAsString(planView));
+                    sentPlan = planView;
+                }
                 // 面向用户的语义事件：差量推送 JSON（前端按 phase/agent/summary 渲染）
                 List<ActivityEvent> events = state.value(GraphState.SSE_EVENTS)
                         .map(value -> (List<ActivityEvent>) value)
                         .orElse(List.of());
                 while (sentEvents < events.size()) {
-                    stream.send("activity", objectMapper.writeValueAsString(events.get(sentEvents++)));
+                    ActivityEvent event = events.get(sentEvents++);
+                    if (consumeLiveSent(liveEvents, event)) continue;
+                    stream.send("activity", objectMapper.writeValueAsString(event));
                 }
                 // 内部留痕（附件提取依赖），不再直接推给前端
                 List<String> latest = state.value(GraphState.ACTIVITIES)
@@ -498,6 +540,20 @@ public class ManusGraphOrchestrator {
         } catch (Exception persistenceError) {
             log.error("failed to persist manus run result; runId={}, status={}", request.runId(), status, persistenceError);
         }
+    }
+
+    private static String eventKey(ActivityEvent event) {
+        return (event.phase() == null ? "" : event.phase()) + "|"
+                + (event.agent() == null ? "" : event.agent()) + "|"
+                + (event.summary() == null ? "" : event.summary());
+    }
+
+    private static boolean consumeLiveSent(Map<String, AtomicInteger> liveEvents, ActivityEvent event) {
+        String key = eventKey(event);
+        AtomicInteger count = liveEvents.get(key);
+        if (count == null) return false;
+        if (count.decrementAndGet() <= 0) liveEvents.remove(key, count);
+        return true;
     }
 
     private void sendDone(RunStream stream, boolean completed) {

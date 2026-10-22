@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-container" :class="`chat-${aiType}`">
+  <div class="chat-container" :class="[`chat-${aiType}`, { 'chat-no-input': hideInput }]">
     <div class="chat-messages" ref="messagesContainer">
       <section v-if="!messages.length" class="empty-state">
         <div class="empty-brand">
@@ -131,7 +131,7 @@
       </div>
     </div>
 
-    <footer class="chat-input-container">
+    <footer v-if="!hideInput" class="chat-input-container">
       <div class="chat-input">
         <input ref="fileInput" class="file-input" type="file" :accept="attachmentAccept" multiple @change="selectImages" />
         <div v-if="selectedImages.length" class="selected-images">
@@ -193,7 +193,8 @@ const props = defineProps({
   attachmentsEnabled: { type: Boolean, default: false },
   attachmentAccept: { type: String, default: 'image/jpeg,image/png,image/gif' },
   webSearchAvailable: { type: Boolean, default: false },
-  knowledgeSearchAvailable: { type: Boolean, default: false }
+  knowledgeSearchAvailable: { type: Boolean, default: false },
+  hideInput: { type: Boolean, default: false }
 })
 const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message', 'continue-message', 'stop-generation'])
 const agent = computed(() => getAgent(props.aiType))
@@ -383,6 +384,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleCitationKeydow
   overflow-y: auto;
   padding: 40px max(28px, calc((100% - 880px) / 2));
 }
+
+.chat-no-input .chat-messages { inset: 0; padding-bottom: 24px; }
 
 /* ── 空状态 ─────────────────────────────────────────── */
 .empty-state {

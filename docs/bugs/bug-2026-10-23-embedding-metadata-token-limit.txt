@@ -2,10 +2,16 @@
 问题现象：上传《个人绩效承诺书PBC-x2292-朱文轩(1).pdf》后索引失败，知识库显示“0 切片 · 失败”，错误为
 “Tokens in a single document exceeds the maximum number of allowed input tokens”。
 影响范围：MinerU 解析出较多文件的 PDF 无法完成 embedding，文档保持 FAILED；解析和来源块本身已生成。
-原因：DashScope embedding 默认使用 MetadataMode.EMBED，会把切片 metadata 拼进 embedding 输入；
-切片 metadata 里长期保留了完整的 mineruResultFiles 文件清单，单个切片的输入被明显放大，超过模型 token 上限。
+原因：
+1. PBC 表格的首行是 colspan 覆盖全表的说明文字，HtmlTableParser 把它当成表头；7 列都得到 757 字的长标签，并在每条记录里重复，单个切片远超 2048 tokens。
+2. DashScope embedding 默认使用 MetadataMode.EMBED，会把切片 metadata 拼进 embedding 输入；完整的 mineruResultFiles 清单进一步放大输入。
 解决方式：
-1. application.yml 增加 spring.ai.dashscope.embedding.metadata-mode: NONE，只嵌入正文。
-2. 切片 metadata 不再写入完整文件清单，改为 mineruResultFileCount；完整清单仍保存在 OSS manifest。
-验证结果：后端 212 个测试通过（1 跳过）；新 JAR 启动健康检查 200；需要重新解析该文档后确认。
+1. HtmlTableParser 跳过覆盖整列的说明/标题首行，改用下一行作为表头；表头长度超过 120 字时截断，避免长标签反复进入每条记录。
+2. application.yml 设置 spring.ai.dashscope.embedding.metadata-mode: NONE，只嵌入正文。
+3. 切片 metadata 不再写入完整文件清单，改为 mineruResultFileCount；完整清单仍保存在 OSS manifest。
+4. 保留 text-embedding-v2，避免改变已有向量的语义空间。
+验证结果：
+- 用该文档已存 html_content 重新解析，表头恢复为“主目标描述/主目标权重/…”；6 行切片正文约 843 字，不再超 2048 tokens。
+- HtmlTableParserTest 覆盖“整列说明行”场景并通过；后端 213 个测试通过（1 跳过）。
+- 需要重新解析文档确认最终状态。
 后续注意：新增 metadata 字段前先评估 embedding 时的体积；大批量入库建议保留 embedding 长度预检和分批降级。

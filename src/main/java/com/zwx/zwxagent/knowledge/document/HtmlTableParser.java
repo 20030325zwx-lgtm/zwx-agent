@@ -98,21 +98,30 @@ public final class HtmlTableParser {
             carriedCells = nextCarriedCells;
         }
 
-        int headerRows = table.select("> thead > tr").size();
-        if (headerRows == 0) headerRows = 1;
-        headerRows = Math.min(headerRows, grid.size());
+        int declaredHeaderRows = table.select("> thead > tr").size();
+        if (declaredHeaderRows == 0) declaredHeaderRows = 1;
+        int noteRows = 0;
+        while (noteRows < grid.size() && noteRows < declaredHeaderRows && isNoteRow(grid.get(noteRows))) {
+            noteRows++;
+        }
+        int headerStart = noteRows >= grid.size() ? 0 : noteRows;
+        int headerRows = Math.max(1, declaredHeaderRows - noteRows);
+        headerRows = Math.min(headerRows, grid.size() - headerStart);
+        int dataStart = Math.min(grid.size(), headerStart + headerRows);
         List<String> headers = new ArrayList<>();
         for (int column = 0; column < columnCount; column++) {
             List<String> labels = new ArrayList<>();
-            for (int row = 0; row < headerRows; row++) {
+            for (int row = headerStart; row < dataStart; row++) {
                 String label = grid.get(row).getOrDefault(column, "");
                 if (!label.isBlank() && !labels.contains(label)) labels.add(label);
             }
-            headers.add(labels.isEmpty() ? "第" + (column + 1) + "列" : String.join(" / ", labels));
+            String joined = labels.isEmpty() ? "第" + (column + 1) + "列" : String.join(" / ", labels);
+            if (joined.length() > 120) joined = joined.substring(0, 120) + "…";
+            headers.add(joined);
         }
 
         List<List<String>> dataRows = new ArrayList<>();
-        for (int row = headerRows; row < grid.size(); row++) {
+        for (int row = dataStart; row < grid.size(); row++) {
             Map<Integer, String> cells = grid.get(row);
             if (cells.values().stream().allMatch(String::isBlank)) continue;
             List<String> values = new ArrayList<>(columnCount);
@@ -174,6 +183,15 @@ public final class HtmlTableParser {
         if (escaped) current.append('\\');
         cells.add(current.toString().trim());
         return cells;
+    }
+
+    /** 首行可能是 colspan 覆盖整列的说明/标题行，不能当作列名反复拼进每条记录。 */
+    private static boolean isNoteRow(Map<Integer, String> row) {
+        List<String> values = row.values().stream()
+                .filter(value -> value != null && !value.isBlank())
+                .distinct()
+                .toList();
+        return values.size() == 1 && values.get(0).length() > 40;
     }
 
     private static boolean hasOccupiedColumn(Map<Integer, String> cells, int start, int span) {

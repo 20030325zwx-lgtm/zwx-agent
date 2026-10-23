@@ -37,6 +37,25 @@ class HtmlTableParserTest {
     }
 
     @Test
+    void skipsFullWidthNoteRowAndUsesNextRowAsHeader() {
+        String note = "本表说明：".repeat(20);
+        String html = """
+                <table>
+                  <tr><td colspan="2">%s</td></tr>
+                  <tr><td>流程</td><td>检查项</td></tr>
+                  <tr><td>撤回流</td><td>检查未审批人的待办是否被正常删除</td></tr>
+                </table>
+                """.formatted(note);
+
+        HtmlTableParser.TableData data = HtmlTableParser.parse(html, "验收");
+
+        assertEquals(List.of("流程", "检查项"), data.headers());
+        assertEquals(1, data.rows().size());
+        assertEquals("撤回流", data.rows().get(0).get(0));
+        assertFalse(data.headers().get(0).contains("本表说明"));
+    }
+
+    @Test
     void parsesMarkdownPipeTable() {
         String markdown = """
                 | 流程 | 检查项 | 结果 |

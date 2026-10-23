@@ -7,25 +7,27 @@
 
 ## 根因
 
-- DashScope `DashScopeEmbeddingModel.embed(Document)` 默认使用 `MetadataMode.EMBED`，会把文档 metadata 拼进待 embedding 的文本。
-- MinerU 结果采集把完整 `mineruResultFiles` 文件清单写进了每个切片的 metadata；PDF 图片/JSON 文件较多时，单个切片的 embedding 输入被 metadata 放大，超过模型 token 上限。
-- 表格/文本正文本身并不大（表格块最大约 8.5K 字符，文本块最大约 155 字符）。
+- PBC 表格首行是 colspan 覆盖全表的说明文字，`HtmlTableParser` 把它当成表头；7 列都得到 757 字的长标签，并在每条记录里重复，单个切片远超 `text-embedding-v2` 的 2048 token 上限。
+- 同时 DashScope embedding 默认 `MetadataMode.EMBED` 会把 metadata 拼进输入，完整 `mineruResultFiles` 文件清单进一步放大了输入。
 
 ## 修复
 
-- `application.yml` 增加：
+- `HtmlTableParser` 跳过覆盖整列的说明/标题首行，改用下一行作为表头，并将表头长度限制在 120 字。
+- `application.yml` 设置：
   ```yaml
   spring.ai.dashscope.embedding.metadata-mode: NONE
   ```
   只嵌入正文，不再把 metadata 拼进 embedding。
+- 保留 `text-embedding-v2`，避免改变已有向量的语义空间；v4 在该 SDK 版本下 fixed 1024 维，和现有 1536 维表不兼容。
 - 切片 metadata 不再写入完整 `mineruResultFiles` 列表，改为 `mineruResultFileCount`；JSON/HTML 数量保留。
 - 完整文件清单仍保存在 OSS manifest 中，便于排查。
 
 ## 验证
 
-- 后端 212 个测试通过（1 跳过）。
+- 后端 213 个测试通过（1 跳过）。
+- 用该文档已存 `html_content` 重新解析：表头恢复为“主目标描述/主目标权重/…”，6 行切片正文约 843 字，低于 2048 token 上限。
 - 新 JAR 已重启，`/api/health` 返回 200。
-- 需要用户在知识库管理页对失败文档重新解析一次；索引会重新调用 MinerU、生成 block 并重新 embedding。
+- 需要用户重新解析失败文档；其他已成功文档不受影响。
 
 ## 遗留事项
 

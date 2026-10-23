@@ -257,7 +257,7 @@ public class AgentKnowledgeDocumentService {
             throw new IllegalStateException("MinerU returned no extractable content");
         }
         sourceMetadata.put("parser", "mineru");
-        sourceMetadata.put("mineruResultFiles", result.fileNames());
+        sourceMetadata.put("mineruResultFileCount", result.fileNames().size());
         sourceMetadata.put("mineruJsonFileCount", result.countFiles(".json"));
         sourceMetadata.put("mineruHtmlFileCount", result.countFiles(".html"));
 

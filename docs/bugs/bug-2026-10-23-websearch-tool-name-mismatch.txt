@@ -1,0 +1,9 @@
+日期：2026-10-23
+问题现象：接通联网搜索开关时发现 researcher 子智能体实际拿不到搜索工具，只能抓取/下载网页。
+影响范围：超级智能体多智能体图中的 researcher 工作者，以及 ToolGuard 对搜索工具的放行判断。
+原因：实际工具方法名是 searchWeb，但 WorkerRole 的白名单和 ToolGuardHook 的分支写成了 webSearch，
+导致工具过滤和工具守卫都把它当成未登记工具。
+解决方式：将 WorkerRole、ToolGuardHook、orchestrator 的工具检测统一为 searchWeb，并保留 webSearch 兼容别名；
+Skill 体系里的 webSearch 是技能 front-matter 别名，不属于实际工具名，暂不修改。
+验证结果：新增 ToolFactoryWebSearchTest；WorkerToolFilterTest 使用真实工具名；后端 212 个测试通过。
+后续注意：新增工具时以 ToolCallback.getToolDefinition().name() 为准，不要依赖旧别名。

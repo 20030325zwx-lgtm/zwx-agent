@@ -1,0 +1,11 @@
+日期：2026-10-23
+问题现象：上传《个人绩效承诺书PBC-x2292-朱文轩(1).pdf》后索引失败，知识库显示“0 切片 · 失败”，错误为
+“Tokens in a single document exceeds the maximum number of allowed input tokens”。
+影响范围：MinerU 解析出较多文件的 PDF 无法完成 embedding，文档保持 FAILED；解析和来源块本身已生成。
+原因：DashScope embedding 默认使用 MetadataMode.EMBED，会把切片 metadata 拼进 embedding 输入；
+切片 metadata 里长期保留了完整的 mineruResultFiles 文件清单，单个切片的输入被明显放大，超过模型 token 上限。
+解决方式：
+1. application.yml 增加 spring.ai.dashscope.embedding.metadata-mode: NONE，只嵌入正文。
+2. 切片 metadata 不再写入完整文件清单，改为 mineruResultFileCount；完整清单仍保存在 OSS manifest。
+验证结果：后端 212 个测试通过（1 跳过）；新 JAR 启动健康检查 200；需要重新解析该文档后确认。
+后续注意：新增 metadata 字段前先评估 embedding 时的体积；大批量入库建议保留 embedding 长度预检和分批降级。

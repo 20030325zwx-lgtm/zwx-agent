@@ -23,6 +23,9 @@ spring:
       chat:
         options:
           model: qwen-plus
+      embedding:
+        # 只嵌入正文，避免把 bbox/文件名等 metadata 拼进 embedding 导致超 token 上限。
+        metadata-mode: NONE
     ollama:
       base-url: http://localhost:11434
       chat:

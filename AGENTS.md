@@ -9,6 +9,14 @@
 - 旧摘要不删除；被取代时在文件头部标注「已被 `<新文件>` 取代」。
 - 交接期间若发现 `docs/context/` 与实际代码不符，以源码为准，并在摘要中修正差异。
 
+## Bug Record Protocol
+
+- 每次发现并修复一个 bug，必须在本仓库的 `docs/bugs/` 下新增一个 `bug-YYYY-MM-DD-<简短主题>.txt` 文件。
+- 文件使用纯文本，至少包含：日期、问题现象、影响范围、原因、解决方式、验证结果、后续注意事项。
+- 记录保持简短，面向排查和交接，不复制完整代码或日志。
+- 同一天同一主题只建一个文件；追加信息时直接更新原文件。
+- 修复提交前检查对应的 bug 记录是否已创建。
+
 ## Non-Negotiable: Preserve Local Configuration
 
 - **Never delete, rename, overwrite, reset, replace, or regenerate** `src/main/resources/application-local.yml`.

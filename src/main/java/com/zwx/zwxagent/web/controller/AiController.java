@@ -191,8 +191,10 @@ public class AiController {
 
     @GetMapping("/agent-knowledge/chunks/{chunkId}")
     public com.zwx.zwxagent.knowledge.document.AgentKnowledgeChunkPreview getAgentKnowledgeChunk(
-            CurrentActor actor, @PathVariable String chunkId, @RequestParam String agentKey) {
-        return agentKnowledgeDocumentService.getChunk(actor.tenantId(), agentKey, chunkId)
+            CurrentActor actor, @PathVariable String chunkId, @RequestParam String agentKey,
+            @RequestParam(required = false) String documentId,
+            @RequestParam(required = false) String blockId) {
+        return agentKnowledgeDocumentService.getChunk(actor.tenantId(), agentKey, chunkId, documentId, blockId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Knowledge chunk not found"));
     }

@@ -22,6 +22,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.ArrayList;
+import com.zwx.zwxagent.knowledge.document.AgentKnowledgeChunkPreview.TableRegion;
 
 @Service
 public class AgentKnowledgeDocumentService {
@@ -39,6 +41,9 @@ public class AgentKnowledgeDocumentService {
     private final DocumentParsingModule documentParsingModule;
     private final DoclingServeChunkingService doclingChunkingService;
     private final MineruDocumentParser mineruDocumentParser;
+    private final MineruBlockParser mineruBlockParser;
+    private final StructuredKnowledgeChunker structuredKnowledgeChunker;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final String documentParserProvider;
     private final TransactionTemplate txTemplate;
 
@@ -48,6 +53,9 @@ public class AgentKnowledgeDocumentService {
                                          MyTokenTextSplitter textSplitter, DocumentParsingModule documentParsingModule,
                                          DoclingServeChunkingService doclingChunkingService,
                                          MineruDocumentParser mineruDocumentParser,
+                                         MineruBlockParser mineruBlockParser,
+                                         StructuredKnowledgeChunker structuredKnowledgeChunker,
+                                         com.fasterxml.jackson.databind.ObjectMapper objectMapper,
                                          @Value("${app.document-parser.provider:mineru}") String documentParserProvider,
                                          PlatformTransactionManager transactionManager) {
         this.ossClientProvider = ossClientProvider;
@@ -58,6 +66,9 @@ public class AgentKnowledgeDocumentService {
         this.documentParsingModule = documentParsingModule;
         this.doclingChunkingService = doclingChunkingService;
         this.mineruDocumentParser = mineruDocumentParser;
+        this.mineruBlockParser = mineruBlockParser;
+        this.structuredKnowledgeChunker = structuredKnowledgeChunker;
+        this.objectMapper = objectMapper;
         this.documentParserProvider = documentParserProvider == null || documentParserProvider.isBlank()
                 ? "mineru" : documentParserProvider.trim().toLowerCase(java.util.Locale.ROOT);
         this.txTemplate = new TransactionTemplate(transactionManager);
@@ -249,8 +260,98 @@ public class AgentKnowledgeDocumentService {
         sourceMetadata.put("mineruResultFiles", result.fileNames());
         sourceMetadata.put("mineruJsonFileCount", result.countFiles(".json"));
         sourceMetadata.put("mineruHtmlFileCount", result.countFiles(".html"));
+
+        List<MineruBlockParser.MineruBlock> blocks = mineruBlockParser.parse(result);
+        if (!blocks.isEmpty()) {
+            Map<String, String> objectKeys = persistMineruFiles(stored, result, documentId);
+            persistBlocks(stored, documentId, blocks, objectKeys);
+            List<Document> structured = structuredKnowledgeChunker.chunks(blocks, sourceMetadata);
+            if (!structured.isEmpty()) return structured;
+            log.warn("MinerU content_list produced no usable chunks, falling back to markdown; filename={}", stored.filename());
+        }
         return textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(markdown)
                 .metadata(sourceMetadata).build()));
+    }
+
+    /** 完整结果包落 OSS，图片块可以直接按相对路径找到对象。失败不阻断 Markdown 索引。 */
+    private Map<String, String> persistMineruFiles(StoredDocument stored, MineruParseResult result, String documentId) {
+        Map<String, String> objectKeys = new HashMap<>();
+        String base = "knowledge/" + stored.tenantId() + "/" + stored.agentKey() + "/" + documentId + "/mineru/";
+        for (Map.Entry<String, byte[]> entry : result.files().entrySet()) {
+            String name = safeObjectName(entry.getKey());
+            if (name.isBlank()) continue;
+            String key = base + name;
+            try {
+                ObjectMetadata metadata = new ObjectMetadata();
+                metadata.setContentLength(entry.getValue().length);
+                metadata.setContentType(contentType(name));
+                ossClientProvider.getClient().putObject(bucket, key, new ByteArrayInputStream(entry.getValue()), metadata);
+                objectKeys.put(entry.getKey(), key);
+            } catch (Exception exception) {
+                log.warn("Unable to persist MinerU result file; documentId={}, file={}, reason={}",
+                        documentId, name, safeMessage(exception));
+            }
+        }
+        String manifestKey = base + "manifest.json";
+        try {
+            byte[] manifest = objectMapper.writeValueAsBytes(Map.of(
+                    "files", result.fileNames(),
+                    "jsonFileCount", result.countFiles(".json"),
+                    "htmlFileCount", result.countFiles(".html"),
+                    "capturedAt", java.time.Instant.now().toString()));
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentLength(manifest.length);
+            metadata.setContentType("application/json; charset=UTF-8");
+            ossClientProvider.getClient().putObject(bucket, manifestKey, new ByteArrayInputStream(manifest), metadata);
+        } catch (Exception exception) {
+            log.warn("Unable to persist MinerU manifest; documentId={}, reason={}", documentId, safeMessage(exception));
+        }
+        return objectKeys;
+    }
+
+    private void persistBlocks(StoredDocument stored, String documentId,
+                               List<MineruBlockParser.MineruBlock> blocks, Map<String, String> objectKeys) {
+        jdbcTemplate.update("DELETE FROM agent_knowledge_block WHERE document_id = ?", documentId);
+        for (MineruBlockParser.MineruBlock block : blocks) {
+            String json = null;
+            if (AgentKnowledgeBlock.TABLE.equals(block.type()) && block.table() != null) {
+                try {
+                    json = objectMapper.writeValueAsString(Map.of(
+                            "caption", block.table().caption() == null ? "" : block.table().caption(),
+                            "headers", block.table().headers(),
+                            "rows", block.table().rows()));
+                } catch (Exception exception) {
+                    log.warn("Unable to serialize knowledge table block; documentId={}, blockId={}", documentId, block.blockId());
+                }
+            }
+            String imageObjectKey = block.imagePath() == null ? null : resolveObjectKey(objectKeys, block.imagePath());
+            jdbcTemplate.update("""
+                    INSERT INTO agent_knowledge_block
+                        (id, document_id, tenant_id, agent_key, block_id, source_type, page_number, bbox, caption,
+                         text_content, html_content, json_content, image_object_key)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, CAST(? AS jsonb), ?)
+                    """, UUID.randomUUID().toString(), documentId, stored.tenantId(), stored.agentKey(),
+                    block.blockId(), block.type(), block.pageNumber(), block.bbox(), block.caption(),
+                    block.text(), block.html(), json, imageObjectKey);
+        }
+    }
+
+    private String resolveObjectKey(Map<String, String> objectKeys, String imagePath) {
+        String exact = objectKeys.get(imagePath);
+        if (exact != null) return exact;
+        String normalized = imagePath.replace('\\', '/');
+        return objectKeys.entrySet().stream()
+                .filter(entry -> entry.getKey().replace('\\', '/').endsWith(normalized))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String safeObjectName(String name) {
+        if (name == null) return "";
+        String normalized = name.replace('\\', '/').replaceAll("^/+", "");
+        while (normalized.contains("../")) normalized = normalized.replace("../", "");
+        return normalized.replaceAll("[^A-Za-z0-9._/-]", "_");
     }
 
     private String safeMessage(Exception exception) {
@@ -403,18 +504,144 @@ public class AgentKnowledgeDocumentService {
      * 只校验 tenant/agent 作用域，不要求管理员权限；引用来自当前用户可见的回答。
      */
     public java.util.Optional<AgentKnowledgeChunkPreview> getChunk(String tenantId, String agentKey, String chunkId) {
+        return getChunk(tenantId, agentKey, chunkId, null, null);
+    }
+
+    /**
+     * 按切片 ID 读取引用；切片已被重建时，可用 documentId + blockId 回退到来源块。
+     */
+    public java.util.Optional<AgentKnowledgeChunkPreview> getChunk(String tenantId, String agentKey, String chunkId,
+                                                                    String documentId, String blockId) {
         validateScope(tenantId, agentKey);
-        return jdbcTemplate.query("""
+        java.util.Optional<AgentKnowledgeChunkPreview> chunk = jdbcTemplate.query("""
                 SELECT id::text AS chunk_id, content,
                        metadata ->> 'documentId' AS document_id,
                        metadata ->> 'filename' AS filename,
-                       NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index
+                       NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index,
+                       NULLIF(metadata ->> 'pageNumber', '')::integer AS page_number,
+                       metadata ->> 'sectionPath' AS section_path,
+                       metadata ->> 'sourceType' AS source_type,
+                       metadata ->> 'blockId' AS block_id,
+                       NULLIF(metadata ->> 'rowStart', '')::integer AS row_start,
+                       NULLIF(metadata ->> 'rowEnd', '')::integer AS row_end,
+                       metadata ->> 'regionLabel' AS region_label,
+                       metadata ->> 'tableCaption' AS table_caption
                 FROM agent_knowledge_vector
                 WHERE id::text = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                """, (rs, rowNum) -> new AgentKnowledgeChunkPreview(
+                """, (rs, rowNum) -> chunkPreview(tenantId, agentKey,
                         rs.getString("chunk_id"), rs.getString("document_id"), rs.getString("filename"),
-                        rs.getObject("chunk_index", Integer.class), rs.getString("content")),
+                        rs.getObject("chunk_index", Integer.class), rs.getString("content"),
+                        rs.getObject("page_number", Integer.class), rs.getString("section_path"),
+                        rs.getString("source_type"), rs.getString("block_id"),
+                        rs.getObject("row_start", Integer.class), rs.getObject("row_end", Integer.class),
+                        rs.getString("region_label"), rs.getString("table_caption")),
                 chunkId, tenantId, agentKey).stream().findFirst();
+        if (chunk.isPresent()) return chunk;
+        if (documentId == null || documentId.isBlank() || blockId == null || blockId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return jdbcTemplate.query("""
+                SELECT b.*, d.filename
+                FROM agent_knowledge_block b
+                JOIN agent_knowledge_document d ON d.id = b.document_id
+                WHERE b.document_id = ? AND b.block_id = ? AND b.tenant_id = ? AND b.agent_key = ?
+                """, (rs, rowNum) -> blockPreview(tenantId, agentKey,
+                        rs.getString("document_id"), rs.getString("filename"), rs.getString("block_id"),
+                        rs.getString("source_type"), rs.getObject("page_number", Integer.class),
+                        rs.getString("caption"), rs.getString("text_content"), rs.getString("json_content"),
+                        rs.getString("image_object_key")),
+                documentId, blockId, tenantId, agentKey).stream().findFirst();
+    }
+
+    private AgentKnowledgeChunkPreview chunkPreview(String tenantId, String agentKey, String chunkId, String documentId,
+                                                    String filename, Integer chunkIndex, String content,
+                                                    Integer pageNumber, String sectionPath, String sourceType,
+                                                    String blockId, Integer rowStart, Integer rowEnd,
+                                                    String regionLabel, String tableCaption) {
+        AgentKnowledgeBlock block = null;
+        if (documentId != null && blockId != null) {
+            block = findBlock(tenantId, agentKey, documentId, blockId);
+        }
+        TableRegion table = tableRegion(sourceType, block, rowStart, rowEnd, tableCaption);
+        boolean legacy = sourceType == null || sourceType.isBlank();
+        return new AgentKnowledgeChunkPreview(chunkId, documentId, filename, chunkIndex, content,
+                plainText(content), pageNumber, sectionPath, sourceType, blockId,
+                regionLabel == null || regionLabel.isBlank() ? legacyLabel(filename, pageNumber) : regionLabel,
+                legacy, table);
+    }
+
+    private AgentKnowledgeChunkPreview blockPreview(String tenantId, String agentKey, String documentId,
+                                                    String filename, String blockId, String sourceType,
+                                                    Integer pageNumber, String caption, String textContent,
+                                                    String jsonContent, String imageObjectKey) {
+        AgentKnowledgeBlock block = new AgentKnowledgeBlock(null, documentId, tenantId, agentKey, blockId, sourceType,
+                pageNumber, null, caption, textContent, null, jsonContent, imageObjectKey, null);
+        String content = textContent == null || textContent.isBlank() ? caption : textContent;
+        TableRegion table = tableRegion(sourceType, block, null, null, caption);
+        return new AgentKnowledgeChunkPreview(null, documentId, filename, null, content,
+                plainText(content == null ? "" : content), pageNumber, null, sourceType, blockId,
+                caption == null || caption.isBlank() ? legacyLabel(filename, pageNumber) : caption,
+                false, table);
+    }
+
+    private AgentKnowledgeBlock findBlock(String tenantId, String agentKey, String documentId, String blockId) {
+        return jdbcTemplate.query("""
+                        SELECT * FROM agent_knowledge_block
+                        WHERE document_id = ? AND block_id = ? AND tenant_id = ? AND agent_key = ?
+                        """, (rs, rowNum) -> new AgentKnowledgeBlock(
+                        rs.getString("id"), rs.getString("document_id"), rs.getString("tenant_id"),
+                        rs.getString("agent_key"), rs.getString("block_id"), rs.getString("source_type"),
+                        rs.getObject("page_number", Integer.class), rs.getString("bbox"),
+                        rs.getString("caption"), rs.getString("text_content"), rs.getString("html_content"),
+                        rs.getString("json_content"), rs.getString("image_object_key"),
+                        rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant()),
+                documentId, blockId, tenantId, agentKey).stream().findFirst().orElse(null);
+    }
+
+    private TableRegion tableRegion(String sourceType, AgentKnowledgeBlock block, Integer rowStart, Integer rowEnd,
+                                    String fallbackCaption) {
+        if (!AgentKnowledgeBlock.TABLE.equals(sourceType) || block == null
+                || block.jsonContent() == null || block.jsonContent().isBlank()) {
+            return null;
+        }
+        try {
+            var node = objectMapper.readTree(block.jsonContent());
+            List<String> headers = new ArrayList<>();
+            node.path("headers").forEach(item -> headers.add(item.asText("")));
+            List<List<String>> rows = new ArrayList<>();
+            node.path("rows").forEach(rowNode -> {
+                List<String> row = new ArrayList<>();
+                rowNode.forEach(cell -> row.add(cell.asText("")));
+                rows.add(row);
+            });
+            if (rows.isEmpty()) return null;
+            int from = rowStart == null ? 0 : Math.max(0, rowStart);
+            int to = rowEnd == null ? rows.size() : Math.min(rows.size(), rowEnd);
+            List<Integer> highlightRows = new ArrayList<>();
+            for (int index = from; index < to; index++) highlightRows.add(index);
+            String caption = node.path("caption").asText("");
+            if (caption.isBlank()) caption = fallbackCaption;
+            return new TableRegion(caption, headers, rows, highlightRows);
+        } catch (Exception exception) {
+            log.warn("Unable to read knowledge table block; documentId={}, blockId={}", block.documentId(), block.blockId());
+            return null;
+        }
+    }
+
+    private String plainText(String content) {
+        if (content == null || content.isBlank()) return "";
+        String lower = content.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("<table") || lower.contains("<tr") || lower.contains("<td") || lower.contains("<p")) {
+            return org.jsoup.Jsoup.parse(content).text().replaceAll("\\s+", " ").trim();
+        }
+        return content;
+    }
+
+    private String legacyLabel(String filename, Integer pageNumber) {
+        List<String> parts = new ArrayList<>();
+        if (filename != null && !filename.isBlank()) parts.add(filename);
+        if (pageNumber != null) parts.add("第 " + pageNumber + " 页");
+        return String.join(" · ", parts);
     }
 
     /** 读取原始文件字节，供前端在浏览器内解析预览。 */

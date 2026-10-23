@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import org.jsoup.Jsoup;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -294,20 +295,53 @@ public class AgentKnowledgeRagService {
                                                Map<String, Integer> fusedRanks, Map<String, Double> fusionScores,
                                                Map<String, Integer> rerankRanks, Map<String, Double> rerankScores,
                                                boolean selected) {
-        Object chunk = document.getMetadata().get("chunkIndex");
-        Object page = document.getMetadata().get("pageNumber");
-        Object logicalKey = document.getMetadata().get("logicalKey");
-        Object filename = document.getMetadata().get("filename");
+        Map<String, Object> metadata = document.getMetadata();
+        Object chunk = metadata.get("chunkIndex");
+        Object page = metadata.get("pageNumber");
+        Object logicalKey = metadata.get("logicalKey");
+        Object filename = metadata.get("filename");
         String id = documentKey(document);
-        String excerpt = document.getText().replaceAll("\\s+", " ").trim();
-        if (excerpt.length() > 480) excerpt = excerpt.substring(0, 480) + "...";
+        String excerpt = excerpt(document.getText());
         return new RagTraceCandidate(id, filename == null ? "" : String.valueOf(filename),
                 logicalKey == null ? null : String.valueOf(logicalKey),
                 chunk instanceof Number number ? number.intValue() : null,
                 page instanceof Number number ? number.intValue() : null, excerpt,
                 vectorRanks.get(id), vectorScores.get(id),
                 lexicalRanks.get(id), lexicalScores.get(id), fusedRanks.get(id), fusionScores.get(id),
-                rerankRanks.get(id), rerankScores.get(id), selected);
+                rerankRanks.get(id), rerankScores.get(id), selected,
+                id,
+                stringValue(metadata.get("documentId")),
+                stringValue(metadata.get("blockId")),
+                stringValue(metadata.get("sourceType")),
+                intValue(metadata.get("rowStart")),
+                intValue(metadata.get("rowEnd")),
+                stringValue(metadata.get("regionLabel")));
+    }
+
+    private String excerpt(String text) {
+        String value = text == null ? "" : text;
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("<table") || lower.contains("<tr") || lower.contains("<td") || lower.contains("<p")) {
+            value = Jsoup.parse(value).text();
+        }
+        value = value.replaceAll("\\s+", " ").trim();
+        return value.length() > 480 ? value.substring(0, 480) + "..." : value;
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private Integer intValue(Object value) {
+        if (value instanceof Number number) return number.intValue();
+        if (value instanceof String string) {
+            try {
+                return Integer.parseInt(string.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void addRanked(Map<String, FusionHit> fused, List<Document> documents) {

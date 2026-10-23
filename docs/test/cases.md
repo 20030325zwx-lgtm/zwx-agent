@@ -21,3 +21,17 @@
 | ID | 场景 | 关键断言 | 自动化用例 |
 | --- | --- | --- | --- |
 | KB-MINERU-001 | MinerU 结果 ZIP 含 Markdown、JSON、HTML 和二进制资源 | 选择 `full.md` 作为主文本；完整保留所有文件和二进制字节；可按扩展名读取文本产物 | `MineruDocumentParserTest#collectsEveryMineruZipOutputAndSelectsFullMarkdown` |
+
+## 引用区域定位
+
+| ID | 场景 | 关键断言 | 自动化用例 |
+| --- | --- | --- | --- |
+| KB-CITE-001 | MinerU content_list 中的表格块 | 表格转为 headers/rows；按行组切片；metadata 带 blockId、页码、rowStart/rowEnd 和 regionLabel；切片文本不含 HTML 标签 | `MineruBlockParserTest#parsesTextTableAndFigureBlocksWithPageAndRegion`、`HtmlTableParserTest#expandsRowspanAndColspanIntoHeaderLabeledRows`、`StructuredKnowledgeChunkerTest#splitsTablesByRowGroupsAndKeepsRegionMetadata` |
+| KB-CITE-002 | 引用弹窗展示表格 | 渲染真实表格并高亮命中行；显示区域标签；页面不出现原始 `<table>` 标签 | `ChatRoom` + `CitationPreview`，Playwright mock 流程（见 `docs/test/results/2026-10-23-citation-region.md`） |
+| KB-CITE-003 | 旧切片/未重建索引 | 引用仍能打开；原始 HTML 被降级为纯文本并标记“旧索引” | 手工回归：使用旧 metadata 切片打开 `CitationPreview` |
+
+### 回归检查建议
+
+- 重新解析文档后，对照原文件确认表格行号、合并单元格和页码一致。
+- 引用回答必须能定位到具体行；只显示整张表或整个切片不算通过。
+- 旧文档未重建索引时，确认预览不出现 HTML 标签。

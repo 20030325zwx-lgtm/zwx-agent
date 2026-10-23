@@ -46,7 +46,7 @@
             <div class="citation-heading"><BookOpen :size="15" /><span>引用资料</span><small>{{ citedChunks(msg).length }} 个切片</small></div>
             <button v-for="citation in citedChunks(msg)" :key="citation.key" type="button" class="citation-card" @click="openCitation(citation)">
               <span class="citation-file">{{ citation.filename }}<em>#{{ citation.chunkIndex }}</em></span>
-              <span class="citation-excerpt">{{ citation.excerpt || (citation.chunkId ? '点击预览切片原文' : '未找到可预览的切片') }}</span>
+              <span class="citation-excerpt">{{ citation.regionLabel || citation.excerpt || (citation.chunkId ? '点击预览切片原文' : '未找到可预览的切片') }}</span>
               <ChevronRight :size="15" />
             </button>
           </div>
@@ -156,23 +156,8 @@
       </div>
     </footer>
 
-    <Teleport to="body">
-      <div v-if="citationPreview" class="citation-modal-backdrop" @click.self="closeCitation">
-        <section class="citation-modal" role="dialog" aria-modal="true" aria-label="引用切片预览">
-          <header>
-            <div>
-              <span class="citation-kicker">引用切片</span>
-              <strong>{{ citationPreview.filename }}<em>#{{ citationPreview.chunkIndex }}</em></strong>
-            </div>
-            <button type="button" aria-label="关闭引用预览" @click="closeCitation"><X :size="18" /></button>
-          </header>
-          <p v-if="citationLoading" class="citation-state">正在加载切片原文...</p>
-          <p v-else-if="citationError" class="citation-state error">{{ citationError }}</p>
-          <pre v-else class="citation-content">{{ citationPreview.content }}</pre>
-          <footer><span>文档 {{ citationPreview.documentId || '未记录' }}</span><span>切片 #{{ citationPreview.chunkIndex }}</span></footer>
-        </section>
-      </div>
-    </Teleport>
+    <CitationPreview v-if="citationPreview" :preview="citationPreview" :loading="citationLoading"
+      :error="citationError" @close="closeCitation" />
   </div>
 </template>
 
@@ -181,8 +166,9 @@ import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import CitationPreview from './CitationPreview.vue'
 import AsterAvatar from './AsterAvatar.vue'
-import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square, X } from 'lucide-vue-next'
+import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment } from '../api'
 
@@ -239,6 +225,10 @@ const citationLoading = ref(false)
 const citationError = ref('')
 const citationCache = new Map()
 const citationPattern = /\[([^\[\]\n]+?)#(\d+)\]/g
+const plainExcerpt = value => (value || '')
+  .replace(/<[^>]*>/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
 
 const citedChunks = message => {
   if (!message?.content || !message.ragTrace?.candidates?.length) return []
@@ -263,8 +253,13 @@ const citedChunks = message => {
       key,
       filename: candidate?.filename || normalizedFilename || '未知文档',
       chunkIndex,
-      chunkId: candidate?.documentId || null,
-      excerpt: candidate?.excerpt || ''
+      chunkId: candidate?.chunkId || candidate?.documentId || null,
+      sourceDocumentId: candidate?.sourceDocumentId || null,
+      blockId: candidate?.blockId || null,
+      sourceType: candidate?.sourceType || null,
+      pageNumber: candidate?.pageNumber || null,
+      regionLabel: candidate?.regionLabel || null,
+      excerpt: plainExcerpt(candidate?.excerpt || '')
     })
   }
   return result
@@ -277,16 +272,20 @@ const openCitation = async citation => {
     citationError.value = '本次回答没有保存对应切片，无法预览原文。'
     return
   }
-  if (citationCache.has(citation.chunkId)) {
-    citationPreview.value = citationCache.get(citation.chunkId)
+  const cacheKey = `${citation.chunkId}|${citation.sourceDocumentId || ''}|${citation.blockId || ''}`
+  if (citationCache.has(cacheKey)) {
+    citationPreview.value = citationCache.get(cacheKey)
     return
   }
   citationPreview.value = { ...citation, content: '', documentId: null }
   citationLoading.value = true
   try {
-    const chunk = await getAgentKnowledgeChunk(citation.chunkId, props.aiType)
+    const chunk = await getAgentKnowledgeChunk(citation.chunkId, props.aiType, {
+      documentId: citation.sourceDocumentId || undefined,
+      blockId: citation.blockId || undefined
+    })
     const preview = { ...citation, ...chunk }
-    citationCache.set(citation.chunkId, preview)
+    citationCache.set(cacheKey, preview)
     citationPreview.value = preview
   } catch (error) {
     citationError.value = error?.response?.status === 404

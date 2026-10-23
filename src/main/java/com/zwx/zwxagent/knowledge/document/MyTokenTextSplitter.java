@@ -11,7 +11,6 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -134,80 +133,15 @@ class MyTokenTextSplitter {
     }
 
     private String normalizeHtmlTable(Element table) {
-        List<Element> rows = table.select("> thead > tr, > tbody > tr, > tfoot > tr, > tr");
-        if (rows.isEmpty()) return table.text();
-
-        List<Map<Integer, String>> grid = new ArrayList<>();
-        Map<Integer, SpanCell> carriedCells = new LinkedHashMap<>();
-        int columnCount = 0;
-        for (Element row : rows) {
-            Map<Integer, String> cells = new LinkedHashMap<>();
-            carriedCells.forEach((column, cell) -> cells.put(column, cell.text()));
-            Map<Integer, SpanCell> nextCarriedCells = new LinkedHashMap<>();
-            carriedCells.forEach((column, cell) -> {
-                if (cell.rowsRemaining() > 1) nextCarriedCells.put(column, new SpanCell(cell.text(), cell.rowsRemaining() - 1));
-            });
-
-            int column = 0;
-            for (Element cell : row.select("> th, > td")) {
-                int colspan = span(cell, "colspan");
-                while (hasOccupiedColumn(cells, column, colspan)) column++;
-                String value = cell.text().replaceAll("\\s+", " ").trim();
-                for (int offset = 0; offset < colspan; offset++) {
-                    cells.put(column + offset, value);
-                    int rowspan = span(cell, "rowspan");
-                    if (rowspan > 1) nextCarriedCells.put(column + offset, new SpanCell(value, rowspan - 1));
-                }
-                column += colspan;
-            }
-            if (!cells.isEmpty()) columnCount = Math.max(columnCount, cells.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1) + 1);
-            grid.add(cells);
-            carriedCells = nextCarriedCells;
-        }
-
-        int headerRows = table.select("> thead > tr").size();
-        if (headerRows == 0) headerRows = 1;
-        headerRows = Math.min(headerRows, grid.size());
-        List<String> headers = new ArrayList<>();
-        for (int column = 0; column < columnCount; column++) {
-            List<String> labels = new ArrayList<>();
-            for (int row = 0; row < headerRows; row++) {
-                String label = grid.get(row).getOrDefault(column, "");
-                if (!label.isBlank() && !labels.contains(label)) labels.add(label);
-            }
-            headers.add(labels.isEmpty() ? "第" + (column + 1) + "列" : String.join(" / ", labels));
-        }
-
+        HtmlTableParser.TableData data = HtmlTableParser.parse(table, null);
+        if (data.rows().isEmpty()) return table.text();
         List<String> records = new ArrayList<>();
-        for (int row = headerRows; row < grid.size(); row++) {
-            Map<Integer, String> cells = grid.get(row);
-            if (cells.values().stream().allMatch(String::isBlank)) continue;
-            List<String> fields = new ArrayList<>();
-            for (int column = 0; column < columnCount; column++) {
-                String value = cells.getOrDefault(column, "");
-                if (!value.isBlank()) fields.add(headers.get(column) + "：" + value);
-            }
-            if (!fields.isEmpty()) records.add("[表格记录] " + String.join("；", fields));
+        for (int index = 0; index < data.rows().size(); index++) {
+            String record = data.recordText(index);
+            if (!record.isBlank()) records.add(record);
         }
         return records.isEmpty() ? table.text() : String.join("\n\n", records);
     }
-
-    private boolean hasOccupiedColumn(Map<Integer, String> cells, int start, int span) {
-        for (int column = start; column < start + span; column++) {
-            if (cells.containsKey(column)) return true;
-        }
-        return false;
-    }
-
-    private int span(Element cell, String attribute) {
-        try {
-            return Math.max(1, Integer.parseInt(cell.attr(attribute)));
-        } catch (NumberFormatException ignored) {
-            return 1;
-        }
-    }
-
-    private record SpanCell(String text, int rowsRemaining) {}
 
     private List<String> splitBlock(String block) {
         if (block.length() <= STRUCTURED_MAX_CHARS) return List.of(block);

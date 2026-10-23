@@ -34,16 +34,18 @@ class StructuredKnowledgeChunkerTest {
         List<Document> chunks = new StructuredKnowledgeChunker().chunks(blocks, Map.of("filename", "handbook.docx"));
 
         List<Document> tables = chunks.stream().filter(chunk -> AgentKnowledgeBlock.TABLE.equals(chunk.getMetadata().get("sourceType"))).toList();
-        assertEquals(2, tables.size());
+        assertEquals(8, tables.size());
         assertEquals(0, tables.get(0).getMetadata().get("rowStart"));
-        assertEquals(6, tables.get(0).getMetadata().get("rowEnd"));
-        assertEquals(6, tables.get(1).getMetadata().get("rowStart"));
-        assertEquals(8, tables.get(1).getMetadata().get("rowEnd"));
-        assertEquals("表 1 验收 · 第 12 页 · 第 1-6 行", tables.get(0).getMetadata().get("regionLabel"));
+        assertEquals(1, tables.get(0).getMetadata().get("rowEnd"));
+        assertEquals(7, tables.get(7).getMetadata().get("rowStart"));
+        assertEquals(8, tables.get(7).getMetadata().get("rowEnd"));
+        assertEquals("表 1 验收 · 第 12 页 · 第 1 行", tables.get(0).getMetadata().get("regionLabel"));
         assertTrue(tables.get(0).getText().contains("列：流程 | 检查项 | 结果"));
         assertTrue(tables.get(0).getText().contains("检查项：检查项 1"));
         assertFalse(tables.get(0).getText().contains("<table"));
         assertTrue(tables.get(0).getText().contains("2.3.2 待办功能流程测试"));
+        assertTrue(tables.get(1).getText().contains("检查项：检查项 2"));
+        assertFalse(tables.get(1).getText().contains("检查项：检查项 1"));
 
         Document text = chunks.stream().filter(chunk -> AgentKnowledgeBlock.TEXT.equals(chunk.getMetadata().get("sourceType"))).findFirst().orElseThrow();
         assertEquals("b2", text.getMetadata().get("blockId"));

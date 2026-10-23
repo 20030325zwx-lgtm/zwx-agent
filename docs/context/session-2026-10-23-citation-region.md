@@ -13,7 +13,7 @@
 - 新增 `MineruBlockParser`：解析 `content_list.json`（兼容 `*_content_list.json`、pages 包装），生成 text/table/figure/equation 块。
 - 新增 `StructuredKnowledgeChunker`：
   - 文本按章节聚合，写 page/blockId；
-  - 表格按 6 行一组切片，写 `rowStart/rowEnd/regionLabel/tableCaption`；
+  - 表格按行切片，写 `rowStart/rowEnd/regionLabel/tableCaption`；
   - 图片先用图注入索引，视觉理解留到批次 2。
 - `AgentKnowledgeDocumentService` 接入 block 解析、结果包持久化、来源块落库；没有 content_list 时回退原 Markdown 切片。
 

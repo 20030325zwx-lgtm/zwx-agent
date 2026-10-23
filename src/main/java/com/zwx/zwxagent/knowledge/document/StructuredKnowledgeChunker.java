@@ -16,7 +16,11 @@ import java.util.Map;
 public class StructuredKnowledgeChunker {
 
     static final int TEXT_MAX_CHARS = 1200;
-    static final int TABLE_ROWS_PER_CHUNK = 6;
+    /**
+     * 表格按行切片：引用需要定位到具体行，不能把多行合并后再高亮整段。
+     * 每行重复表名和表头，保证单行切片仍可独立回答。
+     */
+    static final int TABLE_ROWS_PER_CHUNK = 1;
 
     public List<Document> chunks(List<MineruBlockParser.MineruBlock> blocks, Map<String, Object> baseMetadata) {
         List<Document> chunks = new ArrayList<>();
@@ -177,7 +181,9 @@ public class StructuredKnowledgeChunker {
         List<String> parts = new ArrayList<>();
         if (caption != null && !caption.isBlank()) parts.add(caption);
         if (pageNumber != null) parts.add("第 " + pageNumber + " 页");
-        parts.add("第 " + (rowStart + 1) + "-" + rowEnd + " 行");
+        parts.add(rowStart + 1 == rowEnd
+                ? "第 " + (rowStart + 1) + " 行"
+                : "第 " + (rowStart + 1) + "-" + rowEnd + " 行");
         return String.join(" · ", parts);
     }
 

@@ -46,7 +46,7 @@ agent_knowledge_block（完整来源块）
         ↓
 StructuredKnowledgeChunker
   ├─ 文本：按章节/长度聚合成切片
-  ├─ 表格：每 6 行一组，重复表头和表名
+  ├─ 表格：每行一条，重复表头和表名
   └─ metadata：blockId / page / rowStart / rowEnd / regionLabel
         ↓
 PGVector 切片（检索用）
@@ -107,7 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_block_scope
   "sectionPath": "集成测试报告 > 2.3.2 待办功能流程测试",
   "rowStart": 3,
   "rowEnd": 6,
-  "regionLabel": "表 2.3.2-1 · 第 12 页 · 第 3-6 行",
+  "regionLabel": "表 2.3.2-1 · 第 12 页 · 第 4 行",
   "chunkSchemaVersion": 2
 }
 ```
@@ -141,9 +141,10 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_block_scope
 - 优先消费 `content_list.json` 的 `table` 块，读取 `table_body` HTML。
 - 复用现有 rowspan/colspan 展开逻辑，抽成独立 `HtmlTableParser`。
 - 表格模型：`caption + headerRows + rows + cellRefs`。
-- 切片按行分组（建议每组 3–8 行或 600–900 tokens）：
-  - 文本用于 embedding：`[表格] 表名；列名：值；...`
-  - metadata 记录 `rowStart/rowEnd`
+- 推荐按行切片（每行一个 chunk）：
+  - 文本用于 embedding：`[表格] 表名；列名：值；...`，每条重复表头和表名；
+  - metadata 记录 `rowStart/rowEnd`，引用时只高亮命中的行；
+  - 多行问题通过召回多个行切片解决；
   - 完整表格写入 `agent_knowledge_block.json_content`
 - 跨页表按 caption + header 合并；找不到 caption 时按相邻页表头签名合并。
 - Markdown 管道表也转成同样的行记录，不再只做长表切分。
@@ -181,7 +182,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_block_scope
   "pageNumber": 12,
   "sectionPath": "集成测试报告 > 2.3.2 待办功能流程测试",
   "sourceType": "TABLE",
-  "regionLabel": "表 2.3.2-1 · 第 12 页 · 第 3-6 行",
+  "regionLabel": "表 2.3.2-1 · 第 12 页 · 第 4 行",
   "displayText": "[表格] ...（已去除 HTML 标签）",
   "table": {
     "caption": "2.3.2 待办功能流程测试",
@@ -220,7 +221,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_block_scope
 
 ```text
 2026综合管控平台...docx
-表 2.3.2-1 · 第 12 页 · 第 3-6 行
+表 2.3.2-1 · 第 12 页 · 第 4 行
 撤回流程 / 发起方 / 检查未审批人的待办是否被正常删除…
 ```
 
@@ -291,7 +292,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_block_scope
 - 新增 `V19__add_knowledge_source_block.sql` 与 `agent_knowledge_block` 表。
 - 新增 `HtmlTableParser`、`MineruBlockParser`、`StructuredKnowledgeChunker`、`MineruParseResult` 结果包采集。
 - MinerU 解析结果落 OSS：`knowledge/{tenant}/{agent}/{documentId}/mineru/`，并保存 manifest。
-- 表格从 `content_list.json` 的 `table_body` 转 header/rows，按 6 行一组切片；metadata 写入 `blockId/sourceType/pageNumber/rowStart/rowEnd/regionLabel`。
+- 表格从 `content_list.json` 的 `table_body` 转 header/rows，按行切片；metadata 写入 `blockId/sourceType/pageNumber/rowStart/rowEnd/regionLabel`。
 - 文本块按章节聚合，带 page/blockId；图片块先以图注进入索引，视觉理解为批次 2。
 - `AgentKnowledgeChunkPreview` 增加 `displayText/pageNumber/sectionPath/sourceType/regionLabel/legacy/table`。
 - 引用接口支持 `chunkId` 查不到时用 `documentId + blockId` 回退到来源块。

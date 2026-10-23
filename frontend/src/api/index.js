@@ -145,6 +145,7 @@ export const createAgentKnowledgeCategory = (agentKey, name) => request.post('/a
 export const moveAgentKnowledgeDocument = (documentId, agentKey, categoryId) => request.post(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}/category`, null, { params: { agentKey, categoryId } }).then(response => response.data)
 export const publishAgentKnowledgeDocument = (documentId, agentKey) => request.post(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}/publish`, null, { params: { agentKey } }).then(response => response.data)
 export const reindexAgentKnowledgeDocument = (documentId, agentKey) => request.post(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}/reindex`, null, { params: { agentKey } }).then(response => response.data)
+export const deleteAgentKnowledgeDocument = (documentId, agentKey) => request.delete(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}`, { params: { agentKey } })
 export const getAgentKnowledgeChunk = (chunkId, agentKey, scope = {}) => request.get(`/ai/agent-knowledge/chunks/${encodeURIComponent(chunkId)}`, { params: { agentKey, ...scope } }).then(response => response.data)
 export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)

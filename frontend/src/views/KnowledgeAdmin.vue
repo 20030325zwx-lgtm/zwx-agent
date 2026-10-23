@@ -82,6 +82,7 @@
                     <button type="button" title="检查切片" aria-label="检查切片" @click="openDrawer(group.latest, 'chunks')"><ScanSearch :size="15" /></button>
                     <button type="button" title="重新解析" aria-label="重新解析" :disabled="busyDocumentId === group.latest.id" @click="reindex(group.latest)"><RefreshCw :size="15" :class="{ spinning: busyDocumentId === group.latest.id }" /></button>
                     <button v-if="group.latest.lifecycleStatus === 'READY'" type="button" class="publish-action" title="发布此版本" aria-label="发布此版本" :disabled="busyDocumentId === group.latest.id" @click="publish(group.latest)"><Send :size="14" /></button>
+                    <button type="button" class="danger-action" title="删除文件（含全部版本）" aria-label="删除文件（含全部版本）" :disabled="deleting" @click="requestDeleteGroup(group)"><Trash2 :size="15" /></button>
                   </div></td>
                 </tr>
                 <tr v-for="version in expandedGroups.has(group.key) ? group.visibleVersions.slice(1) : []" :key="version.id" class="version-row" :class="{ selected: activeDocumentId === version.id }">
@@ -96,6 +97,7 @@
                     <button type="button" title="检查历史版本切片" aria-label="检查历史版本切片" @click="openDrawer(version, 'chunks')"><ScanSearch :size="15" /></button>
                     <button type="button" title="重新解析历史版本" aria-label="重新解析历史版本" :disabled="busyDocumentId === version.id" @click="reindex(version)"><RefreshCw :size="15" :class="{ spinning: busyDocumentId === version.id }" /></button>
                     <button v-if="version.lifecycleStatus === 'READY'" type="button" class="publish-action" title="发布此历史版本" aria-label="发布此历史版本" :disabled="busyDocumentId === version.id" @click="publish(version)"><Send :size="14" /></button>
+                    <button type="button" class="danger-action" title="删除此版本" aria-label="删除此版本" :disabled="deleting" @click="requestDeleteVersion(version)"><Trash2 :size="15" /></button>
                   </div></td>
                 </tr>
               </template>
@@ -137,6 +139,15 @@
         </div>
       </section>
     </Transition>
+
+    <ConfirmDialog
+      :open="!!pendingDelete"
+      title="删除知识文件"
+      :message="deleteMessage"
+      confirm-text="删除"
+      @confirm="confirmDelete"
+      @cancel="pendingDelete = null"
+    />
   </main>
 </template>
 
@@ -144,10 +155,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Copy, Database, Download, Eye, FileText, Folder, FolderOpen, FolderPlus, History, Layers, LoaderCircle, RefreshCw, Replace, ScanSearch, Search, Send, Upload, X } from 'lucide-vue-next'
-import { createAgentKnowledgeCategory, getAgentKnowledgeDocument, getAgentKnowledgeDocumentFile, listAgentKnowledgeCategories, listAgentKnowledgeDocuments, moveAgentKnowledgeDocument, publishAgentKnowledgeDocument, reindexAgentKnowledgeDocument, uploadAgentKnowledgeDocument } from '../api'
+import { Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Copy, Database, Download, Eye, FileText, Folder, FolderOpen, FolderPlus, History, Layers, LoaderCircle, RefreshCw, Replace, ScanSearch, Search, Send, Trash2, Upload, X } from 'lucide-vue-next'
+import { createAgentKnowledgeCategory, deleteAgentKnowledgeDocument, getAgentKnowledgeDocument, getAgentKnowledgeDocumentFile, listAgentKnowledgeCategories, listAgentKnowledgeDocuments, moveAgentKnowledgeDocument, publishAgentKnowledgeDocument, reindexAgentKnowledgeDocument, uploadAgentKnowledgeDocument } from '../api'
 import { KNOWLEDGE_AGENTS, getAgent } from '../config/agents'
 import KnowledgeDocumentViewer from '../components/KnowledgeDocumentViewer.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 useHead({ title: '知识库管理 - Aster' })
 
@@ -170,6 +182,8 @@ const categoryInput = ref(null)
 const fileInput = ref(null)
 const replacementTarget = ref(null)
 const busyDocumentId = ref('')
+const deleting = ref(false)
+const pendingDelete = ref(null)
 const activeDocumentId = ref('')
 const error = ref('')
 const drawerOpen = ref(false)
@@ -213,6 +227,14 @@ const visibleGroups = computed(() => fileGroups.value.flatMap(group => {
   })
   return matchingVersions.length ? [{ ...group, latest: matchingVersions[0], visibleVersions: matchingVersions }] : []
 }))
+const deleteMessage = computed(() => {
+  const target = pendingDelete.value
+  if (!target) return ''
+  const count = target.documents.length
+  if (count > 1) return `删除“${target.label}”及其 ${count} 个版本、全部切片和来源块？删除后无法恢复。`
+  const versionNo = target.documents[0]?.versionNo || 1
+  return `删除“${target.label}”v${versionNo} 及其切片、来源块？删除后无法恢复。`
+})
 const completedDocuments = computed(() => documents.value.filter(isComplete).length)
 const processingDocuments = computed(() => documents.value.filter(isProcessing).length)
 const totalChunks = computed(() => documents.value.reduce((sum, document) => sum + (Number(document.chunkCount) || 0), 0))
@@ -388,6 +410,41 @@ const publish = async document => {
     busyDocumentId.value = ''
   }
 }
+const requestDeleteGroup = group => {
+  if (group.versions.some(isProcessing)) {
+    error.value = '该文件有版本正在处理中，请等待处理结束后再删除。'
+    return
+  }
+  pendingDelete.value = { label: group.latest.filename, documents: [...group.versions] }
+}
+const requestDeleteVersion = document => {
+  if (isProcessing(document)) {
+    error.value = '该版本正在处理中，请等待处理结束后再删除。'
+    return
+  }
+  pendingDelete.value = { label: document.filename, documents: [document] }
+}
+const confirmDelete = async () => {
+  const target = pendingDelete.value
+  if (!target) return
+  pendingDelete.value = null
+  deleting.value = true
+  error.value = ''
+  try {
+    for (const document of target.documents) {
+      await deleteAgentKnowledgeDocument(document.id, agentKey.value)
+    }
+    if (drawerDocument.value && target.documents.some(document => document.id === drawerDocument.value.id)) {
+      closeDrawer()
+    }
+    await loadDocuments(true)
+  } catch (requestError) {
+    error.value = '删除失败，请稍后重试。'
+    console.error(requestError)
+  } finally {
+    deleting.value = false
+  }
+}
 
 onMounted(async () => {
   await loadDocuments()
@@ -428,7 +485,7 @@ onBeforeUnmount(() => { if (refreshTimer) window.clearInterval(refreshTimer) })
 .files-panel { display: flex; flex-direction: column; }.files-toolbar { display: flex; min-height: 60px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--sk-separator); padding: 10px 14px; }.files-title { display: flex; min-width: 0; align-items: baseline; gap: 9px; }.files-title h2 { overflow: hidden; margin: 0; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }.files-title > span { flex: 0 0 auto; color: var(--sk-label-3); font-size: 10px; }.file-controls { display: flex; align-items: center; gap: 7px; }.search-field { display: flex; width: min(260px, 28vw); height: 34px; align-items: center; gap: 7px; border: 1px solid var(--sk-separator); border-radius: 5px; padding: 0 9px; color: var(--sk-label-3); }.search-field input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--sk-label); font-size: 11px; }.file-controls select { height: 34px; border: 1px solid var(--sk-separator); border-radius: 5px; padding: 0 8px; background: var(--sk-surface); color: var(--sk-label-2); font-size: 10px; }
 .table-scroll { min-height: 0; flex: 1; overflow: auto; }.file-table { width: 100%; border-collapse: collapse; table-layout: fixed; }.file-table th { position: sticky; z-index: 1; top: 0; height: 34px; border-bottom: 1px solid var(--sk-separator); padding: 0 10px; background: #f8f9fb; color: var(--sk-label-3); text-align: left; font-size: 10px; font-weight: 650; }.file-table th:first-child, .file-table td:first-child { padding-left: 14px; }.file-table th:nth-child(1) { width: 31%; }.file-table th:nth-child(2) { width: 23%; }.file-table th:nth-child(3) { width: 13%; }.file-table th:nth-child(4) { width: 13%; }.file-table th:nth-child(5) { width: 20%; }.file-table td { height: 58px; border-bottom: 1px solid var(--sk-separator); padding: 5px 10px; }.file-row:hover, .version-row:hover { background: #fafbfd; }.file-row.selected, .version-row.selected { background: #eff6ff; }
 .file-cell { display: flex; min-width: 0; align-items: center; gap: 9px; }.file-icon { display: grid; width: 34px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 6px; background: #edf3ff; color: #317be5; }.file-icon.tone-pdf { background: #fff0ef; color: #d64d44; }.file-icon.tone-doc { background: #eaf2ff; color: #326fc7; }.file-icon.tone-sheet { background: #eaf6ef; color: #258657; }.file-icon.tone-slide { background: #fff3e7; color: #c2752e; }.file-icon.tone-text { background: #f0efff; color: #7563ce; }.file-icon.small-icon { width: 29px; height: 30px; }.file-copy { display: grid; min-width: 0; gap: 3px; }.file-copy strong { overflow: hidden; color: var(--sk-label); font-size: 11px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }.file-copy small { overflow: hidden; color: var(--sk-label-3); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }.history-button { display: inline-flex; height: 24px; flex: 0 0 auto; align-items: center; gap: 3px; border: 1px solid var(--sk-separator); border-radius: 4px; padding: 0 4px; background: var(--sk-surface); color: var(--sk-label-3); font-size: 9px; }.history-button[aria-expanded="true"] svg:last-child { transform: rotate(180deg); }
-.chunk-status { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 4px; padding: 4px 6px; background: transparent; font-size: 10px; white-space: nowrap; }.chunk-status:disabled { cursor: default; }.chunk-status.complete { background: #edf8f1; color: #21834e; }.chunk-status.processing { background: #fff5e8; color: #a76312; }.chunk-status.failed { background: #fff0ef; color: #b33f37; }.version-pill, .active-pill, .archived-pill { display: inline-block; margin-right: 4px; border-radius: 4px; padding: 3px 5px; background: #f0efff; color: #6e58d2; font-size: 9px; font-weight: 700; }.active-pill { background: #e8f7ee; color: #18894e; }.archived-pill { background: #f1f2f4; color: #707986; }.date-cell { color: var(--sk-label-3); font-size: 10px; white-space: nowrap; }.row-actions { display: flex; align-items: center; justify-content: flex-start; gap: 2px; }.row-actions button { display: grid; width: 27px; height: 27px; flex: 0 0 auto; place-items: center; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--sk-label-2); }.row-actions button:hover:not(:disabled) { border-color: var(--zwx-primary-ring); background: var(--zwx-primary-soft); color: var(--zwx-primary); }.row-actions button:disabled { opacity: .4; }.row-actions button.publish-action { color: #198b51; }
+.chunk-status { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 4px; padding: 4px 6px; background: transparent; font-size: 10px; white-space: nowrap; }.chunk-status:disabled { cursor: default; }.chunk-status.complete { background: #edf8f1; color: #21834e; }.chunk-status.processing { background: #fff5e8; color: #a76312; }.chunk-status.failed { background: #fff0ef; color: #b33f37; }.version-pill, .active-pill, .archived-pill { display: inline-block; margin-right: 4px; border-radius: 4px; padding: 3px 5px; background: #f0efff; color: #6e58d2; font-size: 9px; font-weight: 700; }.active-pill { background: #e8f7ee; color: #18894e; }.archived-pill { background: #f1f2f4; color: #707986; }.date-cell { color: var(--sk-label-3); font-size: 10px; white-space: nowrap; }.row-actions { display: flex; align-items: center; justify-content: flex-start; gap: 2px; }.row-actions button { display: grid; width: 27px; height: 27px; flex: 0 0 auto; place-items: center; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--sk-label-2); }.row-actions button:hover:not(:disabled) { border-color: var(--zwx-primary-ring); background: var(--zwx-primary-soft); color: var(--zwx-primary); }.row-actions button:disabled { opacity: .4; }.row-actions button.publish-action { color: #198b51; }.row-actions button.danger-action { color: #b33f37; }.row-actions button.danger-action:hover:not(:disabled) { border-color: rgba(255,59,48,.28); background: rgba(255,59,48,.08); color: #b33f37; }
 .version-row td { height: 52px; background: #fcfcfd; }.version-file-cell { padding-left: 18px; }.version-branch { width: 12px; height: 23px; flex: 0 0 auto; border-left: 1px solid var(--sk-separator-strong); border-bottom: 1px solid var(--sk-separator-strong); border-radius: 0 0 0 5px; margin-top: -11px; }.files-foot { display: flex; flex: 0 0 auto; justify-content: space-between; border-top: 1px solid var(--sk-separator); padding: 8px 13px; color: var(--sk-label-3); font-size: 9px; }.table-state { height: 180px !important; color: var(--sk-label-3); text-align: center; font-size: 12px; }.empty-state { display: table-cell; }.empty-state > * { display: block; margin: 7px auto; }.empty-state strong { color: var(--sk-label); }.empty-state .primary-button { display: inline-flex; margin-top: 10px; }
 .inspect-drawer { position: fixed; z-index: 1200; inset: 0; display: flex; flex-direction: column; background: var(--sk-bg); }.drawer-header { display: flex; min-height: 76px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--sk-separator); padding: 11px 20px; background: var(--sk-surface); }.drawer-title { display: flex; min-width: 0; align-items: center; gap: 14px; }.drawer-title > div { min-width: 0; }.drawer-title h2 { overflow: hidden; margin: 2px 0; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }.drawer-title p { margin: 0; color: var(--sk-label-3); font-size: 10px; }.close-drawer { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border: 1px solid var(--sk-separator); border-radius: 5px; background: var(--sk-surface); color: var(--sk-label-2); }.drawer-actions { display: flex; align-items: center; gap: 7px; }.drawer-error { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 8px 18px; background: #fff0ef; color: #a63830; font-size: 11px; }.drawer-body { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr); }.drawer-body.chunks-mode { grid-template-columns: minmax(320px, 42%) minmax(0, 58%); }.chunks-pane, .source-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; }.chunks-pane { border-right: 1px solid var(--sk-separator); background: #f7f8fa; }.source-pane { background: #eef0f2; }.pane-heading { display: flex; min-height: 52px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--sk-separator); padding: 8px 14px; background: var(--sk-surface); }.pane-heading > div { display: grid; min-width: 0; gap: 2px; }.pane-heading strong { font-size: 11px; }.pane-heading small { overflow: hidden; color: var(--sk-label-3); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }.pane-total { display: grid; min-width: 24px; height: 22px; place-items: center; border-radius: 4px; background: #edf3ff; color: var(--zwx-primary); font-size: 10px; font-weight: 700; }.source-hint { color: var(--sk-label-3); font-size: 9px; }.chunk-stack { display: grid; min-height: 0; flex: 1; align-content: start; gap: 8px; overflow: auto; padding: 10px; }.chunk-card { min-width: 0; border: 1px solid var(--sk-separator); border-radius: 6px; background: var(--sk-surface); }.chunk-card.focused { border-color: #8bbaff; box-shadow: 0 0 0 2px rgba(22,119,232,.08); }.chunk-card header, .chunk-card footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; }.chunk-card header { border-bottom: 1px solid var(--sk-separator); }.chunk-card header strong { color: var(--sk-label); font-size: 10px; }.chunk-card header span { color: var(--sk-label-3); font-size: 9px; }.chunk-card pre { margin: 0; padding: 10px; color: var(--sk-label); font: 11px/1.65 inherit; white-space: pre-wrap; overflow-wrap: anywhere; }.chunk-card footer { border-top: 1px solid var(--sk-separator); color: var(--sk-label-3); font-size: 8px; }.chunk-card footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.chunk-card footer button { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--sk-label-2); }.chunk-card footer button:hover { background: var(--sk-fill); color: var(--zwx-primary); }.source-preview { min-height: 0; flex: 1; overflow: hidden; }.pane-state { display: grid; flex: 1; place-content: center; justify-items: center; gap: 8px; padding: 22px; color: var(--sk-label-3); text-align: center; font-size: 11px; }.pane-state strong { color: var(--sk-label); font-size: 12px; }.drawer-enter-active, .drawer-leave-active { transition: opacity .18s ease, transform .18s ease; }.drawer-enter-from, .drawer-leave-to { opacity: 0; transform: translateY(8px); }
 .spinning { animation: spin .9s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }

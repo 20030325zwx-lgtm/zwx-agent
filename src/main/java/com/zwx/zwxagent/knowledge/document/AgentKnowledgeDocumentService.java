@@ -135,14 +135,10 @@ public class AgentKnowledgeDocumentService {
         } catch (org.springframework.dao.EmptyResultDataAccessException exception) {
             throw new IllegalArgumentException("Document does not exist in the current scope");
         }
-        removeDocumentCompletely(documentId);
-        try {
-            ossClientProvider.getClient().deleteObject(bucket, stored.objectKey());
-        } catch (Exception ignored) {
-        }
+        removeDocumentCompletely(documentId, stored.tenantId(), agentKey);
     }
 
-    private void removeDocumentCompletely(String documentId) {
+    void removeDocumentCompletely(String documentId, String tenantId, String agentKey) {
         List<String> objectKeys = jdbcTemplate.queryForList(
                 "SELECT object_key FROM agent_knowledge_document WHERE id = ?", String.class, documentId);
         List<String> chunkIds = jdbcTemplate.queryForList("""
@@ -150,12 +146,39 @@ public class AgentKnowledgeDocumentService {
                 WHERE metadata ->> 'documentId' = ?
                 """, String.class, documentId);
         if (!chunkIds.isEmpty()) vectorStore.delete(chunkIds);
+        jdbcTemplate.update("DELETE FROM agent_knowledge_block WHERE document_id = ?", documentId);
         jdbcTemplate.update("DELETE FROM agent_knowledge_document WHERE id = ?", documentId);
         for (String objectKey : objectKeys) {
             try {
                 ossClientProvider.getClient().deleteObject(bucket, objectKey);
             } catch (Exception ignored) {
             }
+        }
+        // MinerU 结果包按 documentId 目录保存，原文件不在该目录下，需要按前缀一并清理。
+        try {
+            deleteObjectsByPrefix("knowledge/" + tenantId + "/" + agentKey + "/" + documentId + "/");
+        } catch (Exception exception) {
+            log.warn("Unable to clean MinerU result objects; documentId={}, reason={}", documentId, safeMessage(exception));
+        }
+    }
+
+    private void deleteObjectsByPrefix(String prefix) {
+        String marker = null;
+        while (true) {
+            com.aliyun.oss.model.ListObjectsRequest request = new com.aliyun.oss.model.ListObjectsRequest(bucket)
+                    .withPrefix(prefix)
+                    .withMaxKeys(1000);
+            if (marker != null && !marker.isBlank()) request.setMarker(marker);
+            com.aliyun.oss.model.ObjectListing listing = ossClientProvider.getClient().listObjects(request);
+            for (com.aliyun.oss.model.OSSObjectSummary summary : listing.getObjectSummaries()) {
+                try {
+                    ossClientProvider.getClient().deleteObject(bucket, summary.getKey());
+                } catch (Exception ignored) {
+                }
+            }
+            if (!listing.isTruncated()) break;
+            marker = listing.getNextMarker();
+            if (marker == null || marker.isBlank()) break;
         }
     }
 

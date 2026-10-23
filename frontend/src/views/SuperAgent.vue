@@ -35,7 +35,7 @@
             <div class="workspace-section">
               <DeliverableView :answer="activeAnswer" :files="activeMessageFiles" :rag-trace="activeRagTrace"
                 :verification="activeRun.verification" :status="activeRun.status" :can-resume="activeRun.canResume"
-                @open-conversation="conversationOpen = true" @resume="resumeActiveRun" />
+                agent-key="super" @open-conversation="conversationOpen = true" @resume="resumeActiveRun" />
             </div>
             <button v-if="messages.length" type="button" class="conversation-toggle" :aria-expanded="conversationOpen" @click="conversationOpen = !conversationOpen">
               <MessageSquare :size="14" />

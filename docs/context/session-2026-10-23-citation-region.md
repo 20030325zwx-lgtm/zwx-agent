@@ -24,6 +24,7 @@
 - `RagTraceCandidate` 增加 `chunkId/sourceDocumentId/blockId/sourceType/rowStart/rowEnd/regionLabel`，检索摘要遇到 HTML 时做纯文本化。
 - 新增前端 `CitationPreview.vue`：真实表格渲染、命中行高亮、区域标签；旧切片降级纯文本并显示“旧索引”。
 - `ChatRoom` 引用卡片优先显示 `regionLabel`，不再直接展示原始 HTML。
+- 工作台交付区的“引用资料”也改为可点击：复用 `CitationPreview` 与引用接口，卡片显示区域标签并去掉 HTML 摘要；此前该区域只是静态 article，没有绑定点击事件。
 
 ## 验证结果
 
@@ -33,6 +34,7 @@
   - 引用卡片显示“表 2.3.2-1 · 第 12 页 · 第 3-5 行”；
   - 弹窗渲染 8 行真实表格，命中 3 行高亮；
   - 页面无原始 `<table>` 标签。
+- 交付区引用卡片点击验证：1 个引用可打开弹窗，区域标签正确，表格命中 3 行高亮。
 - V19 已应用到本地 PostgreSQL；新 JAR 已重启，`/api/health` 返回 200。
 
 ## 遗留事项

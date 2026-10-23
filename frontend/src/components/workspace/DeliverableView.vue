@@ -31,12 +31,17 @@
 
     <div v-if="citations.length" class="citation-strip">
       <div class="citation-title"><BookOpen :size="14" /><span>引用资料 · {{ citations.length }} 个切片</span></div>
-      <article v-for="citation in citations" :key="citation.documentId || `${citation.filename}-${citation.chunkIndex}`" class="citation">
+      <button v-for="citation in citations" :key="citation.chunkId || citation.documentId || `${citation.filename}-${citation.chunkIndex}`"
+        type="button" class="citation" @click="openCitation(citation)">
         <strong>{{ citation.filename }}<em v-if="citation.chunkIndex !== null && citation.chunkIndex !== undefined">#{{ citation.chunkIndex }}</em></strong>
-        <p>{{ citation.excerpt }}</p>
-      </article>
+        <span v-if="citation.regionLabel" class="citation-region">{{ citation.regionLabel }}</span>
+        <p>{{ plainExcerpt(citation.excerpt) }}</p>
+      </button>
       <button type="button" class="link-button" @click="emit('open-conversation')">在对话中查看完整引用</button>
     </div>
+
+    <CitationPreview v-if="citationPreview" :preview="citationPreview" :loading="citationLoading"
+      :error="citationError" @close="closeCitation" />
 
     <div v-if="canResume" class="resume-card">
       <div>
@@ -49,10 +54,12 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { BookOpen, FileText } from 'lucide-vue-next'
+import CitationPreview from '../CitationPreview.vue'
+import { getAgentKnowledgeChunk } from '../../api'
 
 const props = defineProps({
   answer: { type: String, default: '' },
@@ -60,9 +67,59 @@ const props = defineProps({
   ragTrace: { type: Object, default: null },
   verification: { type: Object, default: () => ({ status: '', feedback: '' }) },
   status: { type: String, default: '' },
-  canResume: { type: Boolean, default: false }
+  canResume: { type: Boolean, default: false },
+  agentKey: { type: String, default: 'super' }
 })
 const emit = defineEmits(['open-conversation', 'resume'])
+
+const citationPreview = ref(null)
+const citationLoading = ref(false)
+const citationError = ref('')
+const citationCache = new Map()
+
+const plainExcerpt = value => (value || '')
+  .replace(/<[^>]*>/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+
+const openCitation = async citation => {
+  const chunkId = citation?.chunkId || citation?.documentId
+  const sourceDocumentId = citation?.sourceDocumentId || citation?.documentId
+  if (!chunkId) {
+    citationPreview.value = { ...citation, content: '', displayText: '', documentId: null }
+    citationError.value = '本次回答没有保存对应切片，无法预览原文。'
+    return
+  }
+  const cacheKey = `${chunkId}|${sourceDocumentId || ''}|${citation.blockId || ''}`
+  if (citationCache.has(cacheKey)) {
+    citationPreview.value = citationCache.get(cacheKey)
+    citationError.value = ''
+    return
+  }
+  citationPreview.value = { ...citation, content: '', displayText: '', documentId: null }
+  citationLoading.value = true
+  citationError.value = ''
+  try {
+    const chunk = await getAgentKnowledgeChunk(chunkId, props.agentKey, {
+      documentId: sourceDocumentId || undefined,
+      blockId: citation.blockId || undefined
+    })
+    const preview = { ...citation, ...chunk }
+    citationCache.set(cacheKey, preview)
+    citationPreview.value = preview
+  } catch (error) {
+    citationError.value = error?.response?.status === 404
+      ? '切片已被删除或重建，请重新解析该文档后再试。'
+      : '切片加载失败，请稍后重试。'
+  } finally {
+    citationLoading.value = false
+  }
+}
+const closeCitation = () => {
+  citationPreview.value = null
+  citationError.value = ''
+  citationLoading.value = false
+}
 
 const stripInlineCitations = content => (content || '')
   .replace(/\[([^\[\]\n]+?)#(\d+)\]/g, '')
@@ -140,9 +197,23 @@ const headline = computed(() => {
 
 .citation-strip { display: grid; gap: 8px; border-top: 1px dashed var(--sk-separator); padding-top: 12px; }
 .citation-title { display: flex; align-items: center; gap: 6px; color: var(--sk-label-2); font-size: 11.5px; }
-.citation { border: 1px solid var(--sk-separator); border-radius: 11px; padding: 8px 10px; background: #fff; }
+.citation {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--sk-separator);
+  border-radius: 11px;
+  padding: 8px 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.citation:hover { border-color: var(--zwx-primary-ring); background: var(--zwx-primary-soft); }
 .citation strong { display: block; color: var(--zwx-primary); font-size: 11.5px; }
 .citation strong em { color: var(--sk-label-3); font-style: normal; font-weight: 500; }
+.citation-region { display: block; margin-top: 3px; color: var(--zwx-primary); font-size: 10.5px; font-weight: 600; }
 .citation p { display: -webkit-box; overflow: hidden; margin: 3px 0 0; color: var(--sk-label-2); font-size: 11px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .link-button { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--zwx-primary); font-size: 11.5px; cursor: pointer; }
 

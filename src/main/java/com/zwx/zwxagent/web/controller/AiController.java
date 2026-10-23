@@ -294,17 +294,20 @@ public class AiController {
     @GetMapping("/manus/chat")
     public SseEmitter doChatWithManus(CurrentActor actor, @RequestParam String conversationId, @RequestParam String message,
                                       @RequestParam(defaultValue = "false") boolean knowledgeSearch,
-                                      @RequestParam(required = false) String imageObjectKey,
+                                      @RequestParam(defaultValue = "true") boolean webSearch,
+                                      @RequestParam(required = false) List<String> imageObjectKey,
                                       @RequestParam(required = false) String clientRequestId) {
         agentConversationService.ensureConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
         var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
         if (conversationLease == null) throw new com.zwx.zwxagent.chat.conversation.ConversationBusyException();
         long userMessageId;
-        List<String> imageObjectKeys = imageObjectKey == null || imageObjectKey.isBlank()
-                ? List.of() : List.of(imageObjectKey);
+        List<String> imageObjectKeys = imageObjectKey == null ? List.of() : imageObjectKey.stream()
+                .filter(key -> key != null && !key.isBlank())
+                .distinct()
+                .toList();
         try {
-            if (!imageObjectKeys.isEmpty()) {
-                agentImageStorageService.validateObjectKey(SUPER_AGENT_KEY, conversationId, imageObjectKey);
+            for (String key : imageObjectKeys) {
+                agentImageStorageService.validateObjectKey(SUPER_AGENT_KEY, conversationId, key);
             }
             // 先落 USER 轮次：即使进程随后崩溃，下一轮历史里仍能看到这次提问和图片。
             userMessageId = agentConversationService.startUserTurn(
@@ -321,22 +324,34 @@ public class AiController {
         String imageContext = "";
         String retrievalQuery = message;
         try {
-            if (imageObjectKey != null && !imageObjectKey.isBlank()) {
-                agentImageStorageService.validateObjectKey(SUPER_AGENT_KEY, conversationId, imageObjectKey);
-                String imageUrl = agentImageStorageService.presignedReadUrl(SUPER_AGENT_KEY, conversationId, imageObjectKey);
-                var analysis = imageAnalysisService.analyze(actor.tenantId(), imageUrl, message);
-                if (analysis.available()) {
-                    imageContext = analysis.contextBlock();
-                    retrievalQuery = analysis.queryOr(message);
-                } else {
-                    imageContext = "[图片分析失败：" + analysis.error() + "]\n";
+            if (!imageObjectKeys.isEmpty()) {
+                StringBuilder contexts = new StringBuilder();
+                int imageIndex = 0;
+                for (String key : imageObjectKeys) {
+                    imageIndex++;
+                    try {
+                        String imageUrl = agentImageStorageService.presignedReadUrl(SUPER_AGENT_KEY, conversationId, key);
+                        var analysis = imageAnalysisService.analyze(actor.tenantId(), imageUrl, message);
+                        if (analysis.available()) {
+                            contexts.append("[图片 ").append(imageIndex).append(" 分析]\n")
+                                    .append(analysis.contextBlock()).append("\n\n");
+                            if (retrievalQuery.equals(message)) retrievalQuery = analysis.queryOr(message);
+                        } else {
+                            contexts.append("[图片 ").append(imageIndex).append(" 分析失败：")
+                                    .append(analysis.error()).append("]\n");
+                        }
+                    } catch (RuntimeException exception) {
+                        contexts.append("[图片 ").append(imageIndex).append(" 分析失败：")
+                                .append(exception.getMessage()).append("]\n");
+                    }
                 }
+                imageContext = contexts.toString();
             }
             knowledge = knowledgeSearch
                     ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, retrievalQuery)
                     : new AgentKnowledgeRagResult("", List.of());
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
-            availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)), Arrays.stream(mcpTools.callbacks()))
+            availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId, webSearch)), Arrays.stream(mcpTools.callbacks()))
                     .toArray(ToolCallback[]::new);
             historyContext = agentConversationService
                     .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
@@ -437,7 +452,8 @@ public class AiController {
     }
 
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/resume")
-    public SseEmitter resumeManusRun(CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
+    public SseEmitter resumeManusRun(CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId,
+                                     @RequestParam(defaultValue = "true") boolean webSearch) {
         com.zwx.zwxagent.agent.execution.AgentRun run = agentRunService
                 .findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
@@ -455,7 +471,7 @@ public class AiController {
         try {
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
             availableTools = Stream.concat(
-                            Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId)),
+                            Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId, webSearch)),
                             Arrays.stream(mcpTools.callbacks()))
                     .toArray(ToolCallback[]::new);
             runChatModel = chatModelFor(actor.userId());

@@ -24,7 +24,7 @@ class WorkerToolFilterTest {
     }
 
     private final ToolCallback[] all = new ToolCallback[]{
-            callback("webSearch"), callback("scrapeWebPage"), callback("downloadResource"),
+            callback("searchWeb"), callback("scrapeWebPage"), callback("downloadResource"),
             callback("readFile"), callback("writeFile"), callback("generatePDF"),
             callback("executeDatabaseQuery"), callback("queryExternalDatabase"),
             callback("executeTerminalCommand")
@@ -34,8 +34,8 @@ class WorkerToolFilterTest {
     void researcherOnlySeesResearchTools() {
         ToolCallback[] filtered = WorkersNode.filterTools(all, WorkerRole.RESEARCHER);
         Assertions.assertEquals(3, filtered.length);
-        Assertions.assertTrue(WorkersNode.filterTools(all, WorkerRole.RESEARCHER)[0].getToolDefinition().name().equals("webSearch")
-                || filtered.length == Set.of("webSearch", "scrapeWebPage", "downloadResource").size());
+        Assertions.assertTrue(WorkersNode.filterTools(all, WorkerRole.RESEARCHER)[0].getToolDefinition().name().equals("searchWeb")
+                || filtered.length == Set.of("searchWeb", "scrapeWebPage", "downloadResource").size());
     }
 
     @Test

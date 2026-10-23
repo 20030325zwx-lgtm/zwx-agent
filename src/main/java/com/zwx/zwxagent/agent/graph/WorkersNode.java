@@ -179,6 +179,7 @@ public class WorkersNode implements NodeAction {
         }
         WorkerRole role = step.role();
         String knowledge = runContext == null ? "" : runContext.knowledgeContext();
+        boolean webSearchEnabled = runContext == null || runContext.webSearchEnabled();
         ToolCallback[] roleTools = filterTools(allTools, role);
         GraphWorker worker = new GraphWorker(roleTools, role, step.title(), activitySink);
         if (runContext != null && runContext.tenantId() != null) {
@@ -195,7 +196,9 @@ public class WorkersNode implements NodeAction {
                 knowledge.isBlank() ? "按可用证据完成任务。"
                         : "本轮已提供私有知识资料。回答必须优先且仅依据这些资料，不要将资料外内容当作事实；"
                         + "每项关键结论都要使用资料中的 [文件名#切片号] 引用；资料不支持时明确说无法从知识库确认。",
-                role == WorkerRole.AUTHOR ? " 生成的文件务必保存到工作区，并在结论里说明文件名。" : ""));
+                (role == WorkerRole.AUTHOR ? " 生成的文件务必保存到工作区，并在结论里说明文件名。" : "")
+                        + (webSearchEnabled ? "" : " 本轮未开启联网搜索，不要尝试搜索、抓取网页或下载网络资源；"
+                        + "需要实时外部信息时明确说明无法联网获取。")));
         worker.setNextStepPrompt(feedback.isBlank()
                 ? "开始执行你的子任务，需要时调用工具。"
                 : feedback + "\n开始执行你的子任务，需要时调用工具。");

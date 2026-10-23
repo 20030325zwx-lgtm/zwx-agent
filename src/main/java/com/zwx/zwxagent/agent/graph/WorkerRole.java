@@ -7,7 +7,7 @@ import java.util.Locale;
  */
 public enum WorkerRole {
     RESEARCHER("researcher", "调研员", "联网调研员：检索、抓取与下载公开资料",
-            SetOf("webSearch", "scrapeWebPage", "downloadResource")),
+            SetOf("searchWeb", "scrapeWebPage", "downloadResource")),
     AUTHOR("author", "撰写员", "文档撰写员：读写工作区文件并生成 PDF 交付物",
             SetOf("readFile", "writeFile", "generatePDF")),
     ANALYST("analyst", "分析员", "数据分析员：执行只读 SQL 查询与白名单命令分析数据",
@@ -57,7 +57,7 @@ public enum WorkerRole {
     /** 工具名的中文动作标签，用于面向用户的执行事件。 */
     public static String toolLabel(String toolName) {
         return switch (toolName == null ? "" : toolName) {
-            case "webSearch" -> "联网搜索";
+            case "searchWeb", "webSearch" -> "联网搜索";
             case "scrapeWebPage" -> "抓取网页";
             case "downloadResource" -> "下载资源";
             case "readFile" -> "读取文件";

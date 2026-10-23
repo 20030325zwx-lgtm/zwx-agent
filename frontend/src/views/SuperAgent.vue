@@ -81,7 +81,7 @@
 
           <footer class="workspace-composer-shell">
             <TaskComposer ref="composerRef" :connection-status="connectionStatus" attachments-enabled
-              attachment-accept="image/jpeg,image/png,image/gif,image/webp" knowledge-search-available
+              attachment-accept="image/jpeg,image/png,image/gif,image/webp" knowledge-search-available web-search-available
               :placeholder="activeRun ? '继续补充要求，或描述下一步…' : '描述目标、约束或需要交付的结果…'"
               @send-message="sendMessage" @stop-generation="stopGeneration" />
           </footer>
@@ -185,13 +185,16 @@ const settleCompanion = (state, caption, delay = 2600) => {
     companionIdleTimer = null
   }, delay)
 }
-const addMessage = (content, isUser, imageObjectKey = null) => {
-  const message = { content, isUser, time: Date.now(), imageKeys: imageObjectKey ? [imageObjectKey] : [], imageUrls: [] }
+const addMessage = (content, isUser, imageObjectKeys = []) => {
+  const keys = Array.isArray(imageObjectKeys) ? [...imageObjectKeys] : (imageObjectKeys ? [imageObjectKeys] : [])
+  const message = { content, isUser, time: Date.now(), imageKeys: keys, imageUrls: [] }
   messages.value.push(message)
-  if (imageObjectKey && chatId.value) {
-    getManusImageUrl(chatId.value, imageObjectKey)
-      .then(url => { message.imageUrls = [url] })
-      .catch(error => console.error('Unable to load uploaded image:', error))
+  if (keys.length && chatId.value) {
+    keys.forEach((key, index) => {
+      getManusImageUrl(chatId.value, key)
+        .then(url => { message.imageUrls[index] = url })
+        .catch(error => console.error('Unable to load uploaded image:', error))
+    })
   }
   return message
 }
@@ -273,6 +276,7 @@ const normalizeRun = (run, messageIndex = -1) => ({
   userMessageId: run?.userMessageId ?? null,
   assistantMessageId: run?.assistantMessageId ?? null,
   errorMessage: run?.errorMessage || '',
+  webSearch: run?.webSearch !== false,
   createdAt: run?.createdAt || null,
   updatedAt: run?.updatedAt || null,
   messageIndex
@@ -392,6 +396,7 @@ const refreshActiveRun = async () => {
       : messages.value.findIndex(message => detail.assistantMessageId != null && String(message.id) === String(detail.assistantMessageId))
     const previousStatus = activeRun.value.status
     const updated = normalizeRun(detail, messageIndex)
+    if (run.webSearch !== undefined) updated.webSearch = run.webSearch
     if ((detail.events?.length || 0) < (run.events?.length || 0)) updated.events = run.events
     if ((detail.taskResults?.length || 0) < (run.taskResults?.length || 0)) updated.taskResults = run.taskResults
     if ((detail.plan?.length || 0) < (run.plan?.length || 0)) updated.plan = run.plan
@@ -466,12 +471,16 @@ const sendMessage = async payload => {
   if (!chatId.value || connectionStatus.value === 'connecting') return
   const message = typeof payload === 'string' ? payload : payload.message
   const knowledgeSearch = typeof payload === 'string' ? false : payload.knowledgeSearch === true
+  const webSearch = typeof payload === 'string' ? false : payload.webSearch === true
   const files = typeof payload === 'string' ? [] : payload.files || []
-  let imageObjectKey = null
+  const imageObjectKeys = []
   if (files.length) {
-    setCompanion('working', '正在上传图片')
+    setCompanion('working', files.length > 1 ? `正在上传 ${files.length} 张图片` : '正在上传图片')
     try {
-      imageObjectKey = (await uploadManusImage(chatId.value, files[0])).objectKey
+      for (const file of files) {
+        const uploaded = await uploadManusImage(chatId.value, file)
+        if (uploaded?.objectKey) imageObjectKeys.push(uploaded.objectKey)
+      }
     } catch (error) {
       console.error('Unable to upload image:', error)
       settleCompanion('error', '图片上传失败，请重试', 3200)
@@ -481,18 +490,20 @@ const sendMessage = async payload => {
   }
   cancelActiveStream()
   activeTurnStart = messages.value.length
-  addMessage(message, true, imageObjectKey)
+  addMessage(message, true, imageObjectKeys)
   messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], collapsibleActivities: true })
   const answerIndex = messages.value.length - 1
   activeAnswerIndex.value = answerIndex
   activeRun.value = normalizeRun({ status: 'RUNNING', canCancel: true, input: message, createdAt: new Date().toISOString() }, answerIndex)
+  activeRun.value.webSearch = webSearch
   conversationOpen.value = false
   workspaceFiles.value = []
   const requestId = crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`
   connectionStatus.value = 'connecting'
   reconnectAttempts = 0
-  setCompanion('thinking', knowledgeSearch ? '正在检索知识库并规划任务' : '正在规划任务')
-  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, requestId, imageObjectKey)
+  const thinkingSteps = [knowledgeSearch ? '检索知识库' : '', webSearch ? '联网搜索' : ''].filter(Boolean).join('与')
+  setCompanion('thinking', thinkingSteps ? `正在${thinkingSteps}并规划任务` : '正在规划任务')
+  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, webSearch, requestId, imageObjectKeys)
   attachManusStream(eventSource, answerIndex)
 }
 const attachManusStream = (stream, answerIndex) => {
@@ -660,7 +671,7 @@ const continueMessage = ({ message, index }) => {
     activeRun.value.canResume = false
   }
   setCompanion('thinking', '正在继续未完成的任务')
-  eventSource = resumeManusRun(chatId.value, message.runId)
+  eventSource = resumeManusRun(chatId.value, message.runId, activeRun.value?.webSearch !== false)
   const answerIndex = messages.value.indexOf(answer)
   const originalError = eventSource.onerror
   attachManusStream(eventSource, answerIndex >= 0 ? answerIndex : index)

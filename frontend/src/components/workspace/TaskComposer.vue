@@ -22,15 +22,19 @@
       </div>
       <div class="composer-actions">
         <input ref="fileInput" class="file-input" type="file" :accept="attachmentAccept" multiple @change="selectImages" />
-        <button v-if="attachmentsEnabled" class="tool-button" type="button" title="上传图片" aria-label="上传图片" @click="fileInput?.click()">
+        <button v-if="attachmentsEnabled" class="tool-button" type="button" data-tooltip="上传图片（可多选）" aria-label="上传图片，可多选" @click="fileInput?.click()">
           <Paperclip :size="17" />
         </button>
         <button v-if="webSearchAvailable" class="tool-button" :class="{ active: webSearch }" type="button"
-          :aria-pressed="webSearch" :title="webSearch ? '本轮允许联网搜索' : '本轮不联网搜索'" @click="webSearch = !webSearch">
+          :data-tooltip="webSearch ? '联网搜索：已开启，点击关闭' : '联网搜索：已关闭，点击开启'"
+          :aria-label="webSearch ? '联网搜索已开启，点击关闭' : '联网搜索已关闭，点击开启'"
+          :aria-pressed="webSearch" @click="webSearch = !webSearch">
           <Globe2 :size="17" />
         </button>
         <button v-if="knowledgeSearchAvailable" class="tool-button" :class="{ active: knowledgeSearch }" type="button"
-          :aria-pressed="knowledgeSearch" :title="knowledgeSearch ? '本轮先检索知识库' : '本轮不检索知识库'" @click="knowledgeSearch = !knowledgeSearch">
+          :data-tooltip="knowledgeSearch ? '知识库检索：已开启，点击关闭' : '知识库检索：已关闭，点击开启'"
+          :aria-label="knowledgeSearch ? '知识库检索已开启，点击关闭' : '知识库检索已关闭，点击开启'"
+          :aria-pressed="knowledgeSearch" @click="knowledgeSearch = !knowledgeSearch">
           <BookOpenCheck :size="17" />
         </button>
         <span class="composer-hint">{{ connectionStatus === 'connecting' ? '任务执行中，可随时停止' : 'Enter 发送 · Shift+Enter 换行' }}</span>
@@ -162,6 +166,7 @@ defineExpose({ fill, submit, focus })
 .composer-actions { display: flex; align-items: center; gap: 6px; padding: 4px 12px 11px; }
 
 .tool-button {
+  position: relative;
   display: grid;
   width: 30px;
   height: 30px;
@@ -175,6 +180,32 @@ defineExpose({ fill, submit, focus })
 
 .tool-button:hover { background: var(--sk-fill); color: var(--sk-label); }
 .tool-button.active { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+
+.tool-button::after {
+  position: absolute;
+  z-index: 10;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: rgba(23, 33, 58, 0.94);
+  color: #fff;
+  content: attr(data-tooltip);
+  font-size: 10.5px;
+  font-weight: 550;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(3px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+}
+
+.tool-button:hover::after, .tool-button:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
 
 .composer-hint { margin-right: auto; color: var(--sk-label-3); font-size: 11.5px; }
 

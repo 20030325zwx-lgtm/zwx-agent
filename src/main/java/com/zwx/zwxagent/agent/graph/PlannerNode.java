@@ -42,8 +42,9 @@ public class PlannerNode implements NodeAction {
     @Override
     public Map<String, Object> apply(OverAllState state) {
         String input = state.value(GraphState.INPUT, "");
-        String knowledge = state.value(GraphState.RUN_CONTEXT, RunContext.class)
-                .map(RunContext::knowledgeContext).orElse("");
+        RunContext runContext = state.value(GraphState.RUN_CONTEXT, RunContext.class).orElse(null);
+        String knowledge = runContext == null ? "" : runContext.knowledgeContext();
+        boolean webSearchEnabled = runContext == null || runContext.webSearchEnabled();
         String history = state.value(GraphState.HISTORY, "");
         if (!knowledge.isBlank()) {
             List<PlanStep> plan = List.of(new PlanStep("依据私有知识回答", WorkerRole.GENERAL,
@@ -56,7 +57,9 @@ public class PlannerNode implements NodeAction {
                     GraphState.SSE_EVENTS, List.of(ActivityEvent.of("plan", "规划器", activity)));
         }
         String prompt = (history.isBlank() ? "" : "最近对话摘要：\n" + history + "\n\n")
-                + "用户请求：" + input;
+                + "用户请求：" + input
+                + (webSearchEnabled ? "" : "\n\n注意：本轮未开启联网搜索，researcher 角色不可用；"
+                + "不要规划搜索、抓取网页或下载网络资源。需要实时外部信息时，使用 general 并说明无法联网获取。");
         List<PlanStep> plan;
         String activity;
         try {

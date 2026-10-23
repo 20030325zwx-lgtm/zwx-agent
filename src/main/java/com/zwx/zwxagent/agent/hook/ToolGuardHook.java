@@ -79,7 +79,7 @@ public class ToolGuardHook implements AgentHook {
                     urlViolation(text(args, "url")),
                     ToolGuardPolicy.relativePathViolation(text(args, "fileName")));
             case "scrapeWebPage" -> urlViolation(text(args, "url"));
-            case "webSearch" -> null;
+            case "searchWeb", "webSearch" -> null;
             case "executeDatabaseQuery" -> com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql"));
             case "queryExternalDatabase" -> firstNonBlank(
                     com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql")),
@@ -114,7 +114,7 @@ public class ToolGuardHook implements AgentHook {
     private boolean isKnownTool(String toolName) {
         return switch (toolName) {
             case "executeTerminalCommand", "readFile", "writeFile", "generatePDF",
-                    "downloadResource", "scrapeWebPage", "webSearch", "executeDatabaseQuery",
+                    "downloadResource", "scrapeWebPage", "searchWeb", "webSearch", "executeDatabaseQuery",
                     "queryExternalDatabase" -> true;
             default -> false;
         };

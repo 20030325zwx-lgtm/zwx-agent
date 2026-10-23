@@ -355,6 +355,7 @@ public class ManusGraphOrchestrator {
                 }
             }
             long[] lastPartialFlush = {0};
+            boolean webSearchEnabled = hasTool(request.tools(), "searchWeb");
             Map<String, AtomicInteger> liveEvents = new ConcurrentHashMap<>();
             Consumer<ActivityEvent> activitySink = event -> {
                 if (event == null) return;
@@ -380,7 +381,7 @@ public class ManusGraphOrchestrator {
                         if (!stopped.get()) {
                             stream.sendMessage(chunk);
                         }
-                    }, activitySink);
+                    }, activitySink, webSearchEnabled);
             Map<String, Object> inputs = Map.of(
                     GraphState.INPUT, request.message(),
                     GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext(),
@@ -540,6 +541,18 @@ public class ManusGraphOrchestrator {
         } catch (Exception persistenceError) {
             log.error("failed to persist manus run result; runId={}, status={}", request.runId(), status, persistenceError);
         }
+    }
+
+    private static boolean hasTool(ToolCallback[] tools, String name) {
+        if (tools == null) return false;
+        for (ToolCallback tool : tools) {
+            try {
+                if (tool.getToolDefinition() != null && name.equalsIgnoreCase(tool.getToolDefinition().name())) return true;
+            } catch (RuntimeException ignored) {
+                // 某些动态工具无法读取定义，按不存在处理。
+            }
+        }
+        return false;
     }
 
     private static String eventKey(ActivityEvent event) {

@@ -63,24 +63,36 @@ public class ToolFactory {
 
     /** 工作区签名（design/plans/09 批次 A）：工具 workDir 来自统一工作区目录模型。 */
     public ToolCallback[] createTools(String tenantId, String agentKey, String conversationId) {
+        return createTools(tenantId, agentKey, conversationId, true);
+    }
+
+    /** webSearchEnabled=false 时只移除内置联网工具，MCP 与其他工具不受影响。 */
+    public ToolCallback[] createTools(String tenantId, String agentKey, String conversationId,
+                                      boolean webSearchEnabled) {
         Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
-        return buildTools(workDir);
+        return buildTools(workDir, webSearchEnabled);
     }
 
     /** 旧签名（scope 目录）：保留给测试与 legacy 调用。 */
     public ToolCallback[] createTools(String scope) {
-        Path workDir = sandbox.scopeDir(scope);
-        return buildTools(workDir);
+        return createTools(scope, true);
     }
 
-    private ToolCallback[] buildTools(Path workDir) {
-        java.util.List<Object> tools = new java.util.ArrayList<>(java.util.List.of(
-                new FileOperationTool(sandbox, workDir),
-                webSearchTool,
-                new WebScrapingTool(urlAccessPolicy),
-                new ResourceDownloadTool(urlAccessPolicy, sandbox, workDir, maxDownloadBytes),
-                new PDFGenerationTool(sandbox, workDir),
-                new CurrentTimeTool()));
+    public ToolCallback[] createTools(String scope, boolean webSearchEnabled) {
+        Path workDir = sandbox.scopeDir(scope);
+        return buildTools(workDir, webSearchEnabled);
+    }
+
+    private ToolCallback[] buildTools(Path workDir, boolean webSearchEnabled) {
+        java.util.List<Object> tools = new java.util.ArrayList<>();
+        tools.add(new FileOperationTool(sandbox, workDir));
+        if (webSearchEnabled) {
+            tools.add(webSearchTool);
+            tools.add(new WebScrapingTool(urlAccessPolicy));
+            tools.add(new ResourceDownloadTool(urlAccessPolicy, sandbox, workDir, maxDownloadBytes));
+        }
+        tools.add(new PDFGenerationTool(sandbox, workDir));
+        tools.add(new CurrentTimeTool());
         if (terminalEnabled) {
             tools.add(new TerminalOperationTool(workDir, terminalAllowlist));
         }

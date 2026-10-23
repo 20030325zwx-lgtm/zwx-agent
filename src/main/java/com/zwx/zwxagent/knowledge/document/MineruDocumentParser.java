@@ -19,7 +19,7 @@ import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-/** MinerU 精准解析 API 客户端：申请上传地址 -> 上传 -> 轮询 -> 下载 full.md。 */
+/** MinerU 精准解析 API 客户端：申请上传地址 -> 上传 -> 轮询 -> 下载并采集完整结果包。 */
 @Component
 public class MineruDocumentParser {
 
@@ -66,10 +66,10 @@ public class MineruDocumentParser {
     }
 
     /**
-     * 使用 MinerU 文件上传模式解析，返回 full.md 内容。
+     * 使用 MinerU 文件上传模式解析并保留完整结果包。
      * 使用文件上传而非 URL，避免签名 URL 过期和 MinerU 访问内网/境外 URL 失败。
      */
-    public String parse(byte[] bytes, String filename) {
+    public MineruParseResult parse(byte[] bytes, String filename) {
         if (!isConfigured()) throw new MineruException("MINERU_TOKEN is not configured");
         try {
             Map<String, Object> file = new LinkedHashMap<>();
@@ -82,6 +82,7 @@ public class MineruDocumentParser {
             body.put("language", language);
             body.put("enable_table", true);
             body.put("enable_formula", true);
+            body.put("extra_formats", java.util.List.of("docx", "html", "latex"));
 
             JsonNode submitted = postJson("/api/v4/file-urls/batch", body);
             if (submitted.path("code").asInt(-1) != 0) {
@@ -96,7 +97,7 @@ public class MineruDocumentParser {
             JsonNode result = poll(batchId, filename);
             String zipUrl = result.path("full_zip_url").asText("");
             if (zipUrl.isBlank()) throw new MineruException("MinerU returned no result zip");
-            return extractMarkdown(zipUrl);
+            return extractResult(downloadResultZip(zipUrl));
         } catch (MineruException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -171,7 +172,7 @@ public class MineruDocumentParser {
         throw new MineruException("MinerU parse timed out; last state=" + lastState);
     }
 
-    private String extractMarkdown(String zipUrl) throws Exception {
+    private byte[] downloadResultZip(String zipUrl) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(URI.create(zipUrl))
                 .timeout(Duration.ofSeconds(60))
                 .GET()
@@ -182,27 +183,38 @@ public class MineruDocumentParser {
         }
         byte[] zip = response.body();
         if (zip.length > maxZipBytes) throw new MineruException("MinerU result zip is too large");
-        String fallback = null;
+        return zip;
+    }
+
+    MineruParseResult extractResult(byte[] zip) throws Exception {
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        String fallbackMarkdown = null;
+        long expandedBytes = 0;
         try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(zip), StandardCharsets.UTF_8)) {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
                 if (entry.isDirectory()) continue;
                 String name = entry.getName();
-                if (!name.endsWith(".md")) continue;
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 byte[] buffer = new byte[8192];
                 int read;
                 while ((read = input.read(buffer)) != -1) {
                     output.write(buffer, 0, read);
-                    if (output.size() > maxZipBytes) throw new MineruException("MinerU markdown is too large");
+                    expandedBytes += read;
+                    if (expandedBytes > maxZipBytes) throw new MineruException("MinerU expanded result is too large");
                 }
-                String markdown = output.toString(StandardCharsets.UTF_8);
-                if (name.equals("full.md") || name.endsWith("/full.md")) return markdown;
-                if (fallback == null) fallback = markdown;
+                byte[] contents = output.toByteArray();
+                files.put(name, contents);
+                if (name.endsWith(".md")) {
+                    String markdown = new String(contents, StandardCharsets.UTF_8);
+                    if (name.equals("full.md") || name.endsWith("/full.md")) fallbackMarkdown = markdown;
+                    else if (fallbackMarkdown == null) fallbackMarkdown = markdown;
+                }
             }
         }
-        if (fallback != null) return fallback;
-        throw new MineruException("MinerU result zip contains no Markdown");
+        if (files.isEmpty()) throw new MineruException("MinerU result zip is empty");
+        if (fallbackMarkdown == null) throw new MineruException("MinerU result zip contains no Markdown");
+        return new MineruParseResult(fallbackMarkdown, files);
     }
 
     private String safeMessage(Exception exception) {

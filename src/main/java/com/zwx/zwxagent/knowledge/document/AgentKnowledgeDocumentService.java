@@ -240,11 +240,15 @@ public class AgentKnowledgeDocumentService {
 
     private List<Document> mineruChunks(byte[] bytes, StoredDocument stored,
                                         Map<String, Object> sourceMetadata, String documentId) {
-        String markdown = mineruDocumentParser.parse(bytes, stored.filename());
+        MineruParseResult result = mineruDocumentParser.parse(bytes, stored.filename());
+        String markdown = result.markdown();
         if (markdown == null || markdown.isBlank()) {
             throw new IllegalStateException("MinerU returned no extractable content");
         }
         sourceMetadata.put("parser", "mineru");
+        sourceMetadata.put("mineruResultFiles", result.fileNames());
+        sourceMetadata.put("mineruJsonFileCount", result.countFiles(".json"));
+        sourceMetadata.put("mineruHtmlFileCount", result.countFiles(".html"));
         return textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(markdown)
                 .metadata(sourceMetadata).build()));
     }

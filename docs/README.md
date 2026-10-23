@@ -7,6 +7,7 @@
 - [ROADMAP.md](./ROADMAP.md)：功能路线图和进度
 - [skills.md](./skills.md)：内置技能说明
 - [pdf-parsing.md](./pdf-parsing.md)：PDF 解析说明
+- [test/README.md](./test/README.md)：测试用例目录、记录规范与最近测试结果
 
 联网搜索可在 `application-local.yml` 配置：`search-api.provider` 使用 `searchapi` 或 `tavily`，`search-api.api-key` 填对应服务的密钥。
 

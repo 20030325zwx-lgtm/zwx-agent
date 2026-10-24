@@ -84,6 +84,11 @@ public class AgentKnowledgeDocumentService {
 
     public AgentKnowledgeDocument upload(String tenantId, String agentKey, MultipartFile file, String createdBy,
                                          String categoryId) {
+        return upload(tenantId, agentKey, file, createdBy, categoryId, true);
+    }
+
+    public AgentKnowledgeDocument upload(String tenantId, String agentKey, MultipartFile file, String createdBy,
+                                         String categoryId, boolean autoPublish) {
         validateScope(tenantId, agentKey);
         String resolvedCategoryId = resolveCategoryId(tenantId, agentKey, categoryId);
         String filename = file.getOriginalFilename() == null ? "document.txt" : file.getOriginalFilename();
@@ -124,7 +129,11 @@ public class AgentKnowledgeDocumentService {
                 VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, 'INDEXING', ?, ?, ?, ?)
                 """, id, tenantId, agentKey, objectKey, filename, logicalKey, nextVersion,
                 sha256(content), supersedesId, createdBy, resolvedCategoryId);
-        return getDocumentRecord(tenantId, agentKey, id);
+        AgentKnowledgeDocument document = getDocumentRecord(tenantId, agentKey, id);
+        if (!autoPublish) {
+            jdbcTemplate.update("UPDATE agent_knowledge_document SET auto_publish = FALSE WHERE id = ?", id);
+        }
+        return document;
     }
 
     public void deleteDocument(String tenantId, String agentKey, String documentId) {
@@ -262,7 +271,9 @@ public class AgentKnowledgeDocumentService {
             return;
         }
         // 新版本或重试成功（INDEXING/FAILED → READY）自动发布；ACTIVE/ARCHIVED 重建索引保持原生命周期
-        if ("INDEXING".equals(originalLifecycle) || "FAILED".equals(originalLifecycle)) {
+        boolean autoPublish = Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                "SELECT auto_publish FROM agent_knowledge_document WHERE id = ?", Boolean.class, documentId));
+        if (autoPublish && ("INDEXING".equals(originalLifecycle) || "FAILED".equals(originalLifecycle))) {
             try {
                 publish(documentId);
             } catch (Exception exception) {
@@ -432,6 +443,18 @@ public class AgentKnowledgeDocumentService {
         });
     }
 
+    public void reject(String documentId, String reviewNote) {
+        txTemplate.executeWithoutResult(transactionStatus -> {
+            int updated = jdbcTemplate.update("""
+                    UPDATE agent_knowledge_document
+                    SET status = 'REJECTED', lifecycle_status = 'REJECTED', review_note = ?
+                    WHERE id = ? AND lifecycle_status = 'READY'
+                    """, reviewNote == null ? "" : reviewNote.trim(), documentId);
+            if (updated == 0) throw new IllegalStateException("Only READY versions can be rejected");
+            flipChunkLifecycle(documentId, "REJECTED");
+        });
+    }
+
     private void flipChunkLifecycle(String documentId, String lifecycleStatus) {
         jdbcTemplate.update("""
                 UPDATE agent_knowledge_vector
@@ -446,7 +469,7 @@ public class AgentKnowledgeDocumentService {
         return jdbcTemplate.query("""
                 SELECT id, tenant_id, agent_key, filename, status, chunk_count, error_message, created_at, completed_at,
                        logical_key, version_no, lifecycle_status, content_sha256, published_at, archived_at, created_by,
-                       category_id
+                       category_id, review_note
                 FROM agent_knowledge_document WHERE tenant_id = ? AND agent_key = ?
                 ORDER BY logical_key, version_no DESC
                 """, (rs, rowNum) -> mapDocument(rs), tenantId, agentKey);
@@ -708,7 +731,7 @@ public class AgentKnowledgeDocumentService {
         return jdbcTemplate.queryForObject("""
                 SELECT id, tenant_id, agent_key, filename, status, chunk_count, error_message, created_at, completed_at,
                        logical_key, version_no, lifecycle_status, content_sha256, published_at, archived_at, created_by,
-                       category_id
+                       category_id, review_note
                 FROM agent_knowledge_document WHERE id = ? AND tenant_id = ? AND agent_key = ?
                 """, (rs, rowNum) -> mapDocument(rs), id, tenantId, agentKey);
     }
@@ -724,7 +747,7 @@ public class AgentKnowledgeDocumentService {
                 rs.getString("content_sha256"),
                 publishedAt == null ? null : publishedAt.toInstant(),
                 archivedAt == null ? null : archivedAt.toInstant(),
-                rs.getString("created_by"), rs.getString("category_id"));
+                rs.getString("created_by"), rs.getString("category_id"), rs.getString("review_note"));
     }
 
     private Document toScopedChunk(Document document, StoredDocument stored, int chunkIndex) {

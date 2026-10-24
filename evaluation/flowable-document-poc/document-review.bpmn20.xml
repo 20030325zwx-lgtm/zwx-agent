@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="https://aster.example/flowable-pilot">
+    <process id="asterDocumentReview" name="Aster knowledge document review" isExecutable="true">
+        <startEvent id="start" name="Retrieval verification complete"/>
+        <sequenceFlow id="start-review" sourceRef="start" targetRef="review"/>
+        <userTask id="review" name="人工确认检索结果" flowable:assignee="${reviewer}"/>
+        <sequenceFlow id="review-decision" sourceRef="review" targetRef="decision"/>
+        <exclusiveGateway id="decision" name="审核通过?" default="rejected"/>
+        <sequenceFlow id="approved" name="通过" sourceRef="decision" targetRef="endApproved">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
+        </sequenceFlow>
+        <sequenceFlow id="rejected" name="退回" sourceRef="decision" targetRef="endRejected"/>
+        <endEvent id="endApproved" name="审核通过"/>
+        <endEvent id="endRejected" name="审核退回"/>
+    </process>
+</definitions>

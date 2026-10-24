@@ -63,6 +63,13 @@ public class AgentKnowledgeRagService {
         return vectorStore.similaritySearch(searchRequest(tenantId, agentKey, query, topK, similarityThreshold));
     }
 
+    public List<Document> verifyDocument(String tenantId, String agentKey, String documentId, String query) {
+        SearchRequest request = SearchRequest.builder().query(query).topK(5).similarityThreshold(0.0)
+                .filterExpression("tenantId == '" + tenantId + "' && agentKey == '" + agentKey
+                        + "' && documentId == '" + documentId + "'").build();
+        return vectorStore.similaritySearch(request);
+    }
+
     public String context(String tenantId, String agentKey, String query) {
         return retrieveWithContext(tenantId, agentKey, query).context();
     }

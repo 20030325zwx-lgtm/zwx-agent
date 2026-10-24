@@ -1,0 +1,116 @@
+{
+  "name": "Aster 文档入库人工确认试点（模拟）",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8d4146da-12f2-47d8-91df-1255df5a9ca1",
+      "name": "模拟文档上传",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { documentId: 'demo-doc-001', filename: 'sample-policy.pdf', parser: 'MinerU (mock)', markdown: '# 示例制度\\n\\n审批流程：提交申请后由负责人审核。' } }];"
+      },
+      "id": "d46e2524-0e29-4a1a-9295-d95437d73bc8",
+      "name": "MinerU 解析（模拟）",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.markdown; const chunks = text.split(/\\n{2,}/).filter(Boolean).map((content, index) => ({ index, content, tokenEstimate: Math.ceil(content.length / 3) })); return [{ json: { ...$json, chunks } }];"
+      },
+      "id": "a06e8a7c-c02f-4b75-ae33-41d680d90457",
+      "name": "结构化切片（模拟）",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ...$json, indexedChunks: $json.chunks.length, retrievalCheck: { query: '审批流程', matched: true, evidence: $json.chunks[1]?.content ?? '' }, readyForReview: true } }];"
+      },
+      "id": "c6e0d28a-04fd-4a77-9e44-7d6d79496d82",
+      "name": "PGVector 入库与检索验证（模拟）",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "b24a3c7f-8334-48ea-a629-f69fc3286a15",
+      "name": "人工确认",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1180, 300],
+      "webhookId": "5cb2d7cf-4d5f-4eaf-8739-14254707ac02"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "9ac4f25b-8585-4c99-9c4f-250bfeadd150",
+              "leftValue": "={{ $json.body.approved }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f9cc6f44-20cd-4c45-9a1f-1faf3f6f1223",
+      "name": "审批通过？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const review = $json.body ?? {}; const document = $('PGVector 入库与检索验证（模拟）').first().json; return [{ json: { documentId: document.documentId, status: 'PUBLISHED', reviewerNote: review.reviewNote ?? '' } }];"
+      },
+      "id": "b13bbde4-4956-4c2a-bbf3-1c8871ab60f4",
+      "name": "发布知识版本（模拟）",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const review = $json.body ?? {}; const document = $('PGVector 入库与检索验证（模拟）').first().json; return [{ json: { documentId: document.documentId, status: 'REJECTED', reviewerNote: review.reviewNote ?? '' } }];"
+      },
+      "id": "16ec59ba-70ea-4ca8-b3aa-7ff5e98c4b20",
+      "name": "退回待修复（模拟）",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 380]
+    }
+  ],
+  "connections": {
+    "模拟文档上传": { "main": [[{ "node": "MinerU 解析（模拟）", "type": "main", "index": 0 }]] },
+    "MinerU 解析（模拟）": { "main": [[{ "node": "结构化切片（模拟）", "type": "main", "index": 0 }]] },
+    "结构化切片（模拟）": { "main": [[{ "node": "PGVector 入库与检索验证（模拟）", "type": "main", "index": 0 }]] },
+    "PGVector 入库与检索验证（模拟）": { "main": [[{ "node": "人工确认", "type": "main", "index": 0 }]] },
+    "人工确认": { "main": [[{ "node": "审批通过？", "type": "main", "index": 0 }]] },
+    "审批通过？": {
+      "main": [
+        [{ "node": "发布知识版本（模拟）", "type": "main", "index": 0 }],
+        [{ "node": "退回待修复（模拟）", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "1f85f332-401d-45a0-993e-e767bf62af96",
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}

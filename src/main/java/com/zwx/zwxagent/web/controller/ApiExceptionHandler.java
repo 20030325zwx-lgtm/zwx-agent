@@ -31,6 +31,12 @@ public class ApiExceptionHandler {
                 .body(Map.of("error", exception.getMessage() == null ? "Invalid request" : exception.getMessage()));
     }
 
+    @ExceptionHandler(org.springframework.dao.EmptyResultDataAccessException.class)
+    public ResponseEntity<Map<String, String>> handleMissingRecord(
+            org.springframework.dao.EmptyResultDataAccessException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Resource not found"));
+    }
+
     @ExceptionHandler({com.zwx.zwxagent.chat.conversation.AgentConversationService.DuplicateRequestException.class,
             com.zwx.zwxagent.chat.conversation.ConversationBusyException.class})
     public ResponseEntity<Map<String, String>> handleDuplicateRequest(Exception exception) {

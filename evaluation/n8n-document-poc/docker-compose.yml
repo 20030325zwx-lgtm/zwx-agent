@@ -1,0 +1,27 @@
+name: aster-n8n-pilot
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.44.6
+    restart: unless-stopped
+    environment:
+      N8N_HOST: 127.0.0.1
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_EDITOR_BASE_URL: http://127.0.0.1:5678/
+      N8N_WEBHOOK_URL: http://127.0.0.1:5678/
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}
+      GENERIC_TIMEZONE: Asia/Shanghai
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+
+volumes:
+  n8n-data:

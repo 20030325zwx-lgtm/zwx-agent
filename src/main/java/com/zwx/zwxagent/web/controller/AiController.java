@@ -153,21 +153,25 @@ public class AiController {
     @PostMapping(value = "/agent-knowledge/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public AgentKnowledgeDocument uploadAgentKnowledgeDocument(CurrentActor actor, @RequestParam String agentKey,
                                                                @RequestPart("file") MultipartFile file,
-                                                               @RequestParam(required = false) String categoryId) {
-        actor.requireAdmin();
-        AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(actor.tenantId(), agentKey, file, actor.username(), categoryId);
+                                                               @RequestParam(required = false) String categoryId,
+                                                               @RequestParam(defaultValue = "true") boolean autoPublish) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
+        AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(actor.tenantId(), agentKey, file,
+                actor.username(), categoryId, autoPublish);
         agentKnowledgeDocumentService.indexDocument(document.id());
         return document;
     }
 
     @GetMapping("/agent-knowledge/documents")
     public List<AgentKnowledgeDocument> listAgentKnowledgeDocuments(CurrentActor actor, @RequestParam String agentKey) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
         return agentKnowledgeDocumentService.listDocuments(actor.tenantId(), agentKey);
     }
 
     @GetMapping("/agent-knowledge/categories")
     public List<com.zwx.zwxagent.knowledge.document.AgentKnowledgeCategory> listAgentKnowledgeCategories(CurrentActor actor,
                                                                                           @RequestParam String agentKey) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
         return agentKnowledgeDocumentService.listCategories(actor.tenantId(), agentKey);
     }
 
@@ -194,6 +198,7 @@ public class AiController {
             CurrentActor actor, @PathVariable String chunkId, @RequestParam String agentKey,
             @RequestParam(required = false) String documentId,
             @RequestParam(required = false) String blockId) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
         return agentKnowledgeDocumentService.getChunk(actor.tenantId(), agentKey, chunkId, documentId, blockId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Knowledge chunk not found"));
@@ -201,8 +206,29 @@ public class AiController {
 
     @GetMapping("/agent-knowledge/documents/{documentId}")
     public AgentKnowledgeDocumentDetail getAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
-        actor.requireAdmin();
+        actor.requireKnowledgeWorkflowAccess(agentKey);
         return agentKnowledgeDocumentService.getDocument(actor.tenantId(), agentKey, documentId);
+    }
+
+    @GetMapping("/agent-knowledge/documents/{documentId}/workflow-status")
+    public AgentKnowledgeDocument getWorkflowDocumentStatus(CurrentActor actor, @PathVariable String documentId,
+                                                            @RequestParam String agentKey) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
+        return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+    }
+
+    @PostMapping("/agent-knowledge/documents/{documentId}/verify-retrieval")
+    public Map<String, Object> verifyWorkflowDocumentRetrieval(CurrentActor actor, @PathVariable String documentId,
+                                                               @RequestParam String agentKey,
+                                                               @RequestBody Map<String, String> request) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
+        agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+        String query = request.getOrDefault("query", "").trim();
+        if (query.isBlank()) throw new IllegalArgumentException("query is required");
+        List<Map<String, Object>> matches = agentKnowledgeRagService.verifyDocument(actor.tenantId(), agentKey, documentId, query).stream()
+                .map(document -> Map.<String, Object>of("content", document.getText(), "metadata", document.getMetadata(),
+                        "score", document.getScore() == null ? 0.0 : document.getScore())).toList();
+        return Map.of("matched", !matches.isEmpty(), "matches", matches);
     }
 
     @GetMapping("/agent-knowledge/documents/{documentId}/content")
@@ -220,9 +246,19 @@ public class AiController {
     @PostMapping("/agent-knowledge/documents/{documentId}/publish")
     public AgentKnowledgeDocument publishAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
                                                                  @RequestParam String agentKey) {
-        actor.requireAdmin();
+        actor.requireKnowledgeWorkflowAccess(agentKey);
         agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
         agentKnowledgeDocumentService.publish(documentId);
+        return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+    }
+
+    @PostMapping("/agent-knowledge/documents/{documentId}/reject")
+    public AgentKnowledgeDocument rejectAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
+                                                                @RequestParam String agentKey,
+                                                                @RequestBody(required = false) Map<String, String> request) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
+        agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+        agentKnowledgeDocumentService.reject(documentId, request == null ? "" : request.get("reviewNote"));
         return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
     }
 

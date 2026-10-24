@@ -1,0 +1,40 @@
+name: aster-flowable-pilot
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${FLOWABLE_DB_NAME:-flowable}
+      POSTGRES_USER: ${FLOWABLE_DB_USER:-flowable}
+      POSTGRES_PASSWORD: ${FLOWABLE_DB_PASSWORD:?Set FLOWABLE_DB_PASSWORD in .env}
+    volumes:
+      - flowable-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  flowable-ui:
+    image: flowable/flowable-ui:6.8.0
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_DRIVER-CLASS-NAME: org.postgresql.Driver
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${FLOWABLE_DB_NAME:-flowable}
+      SPRING_DATASOURCE_USERNAME: ${FLOWABLE_DB_USER:-flowable}
+      SPRING_DATASOURCE_PASSWORD: ${FLOWABLE_DB_PASSWORD}
+      FLOWABLE_COMMON_APP_IDMADMIN_USER: ${FLOWABLE_ADMIN_USER:-admin}
+      FLOWABLE_COMMON_APP_IDMADMIN_PASSWORD: ${FLOWABLE_ADMIN_PASSWORD:?Set FLOWABLE_ADMIN_PASSWORD in .env}
+      FLOWABLE_IDM_APP_ADMIN_USERID: ${FLOWABLE_ADMIN_USER:-admin}
+      FLOWABLE_IDM_APP_ADMIN_PASSWORD: ${FLOWABLE_ADMIN_PASSWORD}
+      JAVA_OPTS: -Xmx1024M
+    ports:
+      - "127.0.0.1:${FLOWABLE_UI_PORT:-8181}:8080"
+
+volumes:
+  flowable-data:

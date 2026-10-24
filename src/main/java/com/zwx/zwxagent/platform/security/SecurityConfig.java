@@ -22,6 +22,7 @@ public class SecurityConfig {
     private static final List<String> PUBLIC_PATHS = List.of(
             "/health",
             "/auth/login",
+            "/auth/token",
             "/auth/register",
             "/v3/api-docs/**",
             "/swagger-ui/**",

@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.regex.Pattern;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 @RestController
 @RequestMapping("/auth")
@@ -61,13 +63,33 @@ public class AuthController {
 
     @PostMapping("/login")
     public AuthResponse login(@RequestBody AuthRequest request) {
-        String username = request.username() == null ? "" : request.username().trim();
+        return authenticate(request.username(), request.password());
+    }
+
+    @PostMapping("/token")
+    public AuthResponse token(jakarta.servlet.http.HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        if (authorization == null || !authorization.startsWith("Basic ")) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Basic credentials required");
+        }
+        try {
+            String decoded = new String(Base64.getDecoder().decode(authorization.substring(6)), StandardCharsets.UTF_8);
+            int separator = decoded.indexOf(':');
+            if (separator < 1) throw new IllegalArgumentException("Invalid Basic credentials");
+            return authenticate(decoded.substring(0, separator), decoded.substring(separator + 1));
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
+        }
+    }
+
+    private AuthResponse authenticate(String rawUsername, String rawPassword) {
+        String username = rawUsername == null ? "" : rawUsername.trim();
         AppUser user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password"));
         if (!"ACTIVE".equals(user.status())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account is disabled");
         }
-        if (!passwordEncoder.matches(request.password() == null ? "" : request.password(), user.passwordHash())) {
+        if (!passwordEncoder.matches(rawPassword == null ? "" : rawPassword, user.passwordHash())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
         }
         CurrentActor actor = new CurrentActor(user.id(), user.tenantId(), user.username(), user.role());

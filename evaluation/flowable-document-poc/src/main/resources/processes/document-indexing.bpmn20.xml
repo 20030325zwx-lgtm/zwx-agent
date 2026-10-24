@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="https://aster.example/workflows">
+    <process id="document-indexing" name="Knowledge document indexing" isExecutable="true">
+        <startEvent id="start" name="Document accepted"/>
+        <sequenceFlow id="f1" sourceRef="start" targetRef="parse"/>
+        <serviceTask id="parse" name="Parse with MinerU (mock)" flowable:class="com.zwx.evaluation.flowable.EvaluationStepDelegate"/>
+        <sequenceFlow id="f2" sourceRef="parse" targetRef="chunk"/>
+        <serviceTask id="chunk" name="Chunk document (mock)" flowable:class="com.zwx.evaluation.flowable.EvaluationStepDelegate"/>
+        <sequenceFlow id="f3" sourceRef="chunk" targetRef="index"/>
+        <serviceTask id="index" name="Write vector index (mock)" flowable:class="com.zwx.evaluation.flowable.EvaluationStepDelegate"/>
+        <sequenceFlow id="f4" sourceRef="index" targetRef="verify"/>
+        <serviceTask id="verify" name="Verify retrieval (mock)" flowable:class="com.zwx.evaluation.flowable.EvaluationStepDelegate"/>
+        <sequenceFlow id="f5" sourceRef="verify" targetRef="review"/>
+        <userTask id="review" name="Human approval" flowable:candidateGroups="knowledge-reviewers"/>
+        <sequenceFlow id="f6" sourceRef="review" targetRef="decision"/>
+        <exclusiveGateway id="decision" name="Approved?" default="rejected"/>
+        <sequenceFlow id="approved" sourceRef="decision" targetRef="publish">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
+        </sequenceFlow>
+        <sequenceFlow id="rejected" sourceRef="decision" targetRef="endRejected"/>
+        <serviceTask id="publish" name="Publish knowledge version (mock)" flowable:class="com.zwx.evaluation.flowable.EvaluationStepDelegate"/>
+        <sequenceFlow id="f7" sourceRef="publish" targetRef="endApproved"/>
+        <endEvent id="endApproved" name="Approved and published"/>
+        <endEvent id="endRejected" name="Rejected"/>
+    </process>
+</definitions>

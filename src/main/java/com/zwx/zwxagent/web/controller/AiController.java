@@ -37,6 +37,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -98,6 +99,15 @@ public class AiController {
     private AgentKnowledgeDocumentService agentKnowledgeDocumentService;
 
     @Resource
+    private com.zwx.zwxagent.platform.security.ReviewAccessGuard reviewAccessGuard;
+
+    @Resource
+    private com.zwx.zwxagent.knowledge.document.AgentReviewerAssignmentService reviewerAssignmentService;
+
+    @Resource
+    private com.zwx.zwxagent.knowledge.document.AgentKnowledgeReviewLogService reviewLogService;
+
+    @Resource
     private AgentConversationService agentConversationService;
 
     @Resource
@@ -154,12 +164,21 @@ public class AiController {
     public AgentKnowledgeDocument uploadAgentKnowledgeDocument(CurrentActor actor, @RequestParam String agentKey,
                                                                @RequestPart("file") MultipartFile file,
                                                                @RequestParam(required = false) String categoryId,
-                                                               @RequestParam(defaultValue = "true") boolean autoPublish) {
+                                                               @RequestParam(defaultValue = "true") boolean autoPublish,
+                                                               @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         actor.requireKnowledgeWorkflowAccess(agentKey);
         AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(actor.tenantId(), agentKey, file,
-                actor.username(), categoryId, autoPublish);
+                actor.username(), categoryId, autoPublish, normalizeIdempotencyKey(idempotencyKey));
         agentKnowledgeDocumentService.indexDocument(document.id());
         return document;
+    }
+
+    private String normalizeIdempotencyKey(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String key = raw.trim();
+        if (!key.matches("[A-Za-z0-9_-]{1,64}"))
+            throw new IllegalArgumentException("Idempotency-Key must be 1-64 characters of letters, digits, _ or -");
+        return key;
     }
 
     @GetMapping("/agent-knowledge/documents")
@@ -246,9 +265,9 @@ public class AiController {
     @PostMapping("/agent-knowledge/documents/{documentId}/publish")
     public AgentKnowledgeDocument publishAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
                                                                  @RequestParam String agentKey) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
+        reviewAccessGuard.requireReviewAccess(actor, agentKey);
         agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-        agentKnowledgeDocumentService.publish(documentId);
+        agentKnowledgeDocumentService.publish(documentId, actor, "API");
         return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
     }
 
@@ -256,10 +275,80 @@ public class AiController {
     public AgentKnowledgeDocument rejectAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
                                                                 @RequestParam String agentKey,
                                                                 @RequestBody(required = false) Map<String, String> request) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
+        reviewAccessGuard.requireReviewAccess(actor, agentKey);
         agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-        agentKnowledgeDocumentService.reject(documentId, request == null ? "" : request.get("reviewNote"));
+        agentKnowledgeDocumentService.reject(documentId, request == null ? "" : request.get("reviewNote"), actor, "API");
         return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+    }
+
+    @GetMapping("/agent-knowledge/documents/{documentId}/review-log")
+    public List<com.zwx.zwxagent.knowledge.document.AgentKnowledgeReviewLogService.ReviewLogEntry> getReviewLog(
+            CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
+        reviewAccessGuard.requireReviewAccess(actor, agentKey);
+        agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+        return reviewLogService.listByDocument(actor.tenantId(), agentKey, documentId);
+    }
+
+    /**
+     * n8n 人工审核暂停前登记恢复地址；恢复 URL 属机密，只接受登记，永不回显。
+     */
+    @PostMapping("/agent-knowledge/documents/{documentId}/resume-info")
+    public Map<String, Object> storeResumeInfo(CurrentActor actor, @PathVariable String documentId,
+                                               @RequestParam String agentKey,
+                                               @RequestBody Map<String, Object> request) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
+        String resumeUrl = request.getOrDefault("resumeUrl", "").toString().trim();
+        if (resumeUrl.isBlank()) throw new IllegalArgumentException("resumeUrl is required");
+        String n8nExecutionId = request.getOrDefault("n8nExecutionId", "").toString().trim();
+        String expiresAtRaw = request.getOrDefault("expiresAt", "").toString().trim();
+        java.time.Instant expiresAt = expiresAtRaw.isBlank() ? null : java.time.Instant.parse(expiresAtRaw);
+        agentKnowledgeDocumentService.storeResumeInfo(actor.tenantId(), agentKey, documentId, resumeUrl,
+                n8nExecutionId.isBlank() ? null : n8nExecutionId, expiresAt);
+        return Map.of("stored", true);
+    }
+
+    /**
+     * n8n 侧追加审计事件（当前仅 TIMEOUT）；只记审计，不改变文档状态。
+     */
+    @PostMapping("/agent-knowledge/documents/{documentId}/review-events")
+    public Map<String, Object> recordReviewEvent(CurrentActor actor, @PathVariable String documentId,
+                                                 @RequestParam String agentKey,
+                                                 @RequestBody Map<String, String> request) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
+        String action = request.getOrDefault("action", "").trim();
+        if (!"TIMEOUT".equals(action)) {
+            throw new IllegalArgumentException("Only TIMEOUT review events are accepted from workflow identities");
+        }
+        agentKnowledgeDocumentService.recordReviewEvent(actor.tenantId(), agentKey, documentId, action,
+                actor, "N8N", request.getOrDefault("note", ""), request.getOrDefault("n8nExecutionId", ""));
+        return Map.of("recorded", true);
+    }
+
+    @GetMapping("/agent-reviewers")
+    public List<com.zwx.zwxagent.knowledge.document.AgentReviewerAssignmentService.ReviewerAssignment> listReviewers(
+            CurrentActor actor, @RequestParam(required = false) String agentKey) {
+        actor.requireAdmin();
+        return reviewerAssignmentService.list(actor.tenantId(), agentKey);
+    }
+
+    public record ReviewerAssignRequest(String agentKey, String username) {
+    }
+
+    @PostMapping("/agent-reviewers")
+    public com.zwx.zwxagent.knowledge.document.AgentReviewerAssignmentService.ReviewerAssignment assignReviewer(
+            CurrentActor actor, @RequestBody ReviewerAssignRequest request) {
+        actor.requireAdmin();
+        if (request == null || request.agentKey() == null || request.agentKey().isBlank()
+                || request.username() == null || request.username().isBlank()) {
+            throw new IllegalArgumentException("agentKey and username are required");
+        }
+        return reviewerAssignmentService.assign(actor, actor.tenantId(), request.agentKey().trim(), request.username().trim());
+    }
+
+    @DeleteMapping("/agent-reviewers/{assignmentId}")
+    public void unassignReviewer(CurrentActor actor, @PathVariable String assignmentId) {
+        actor.requireAdmin();
+        reviewerAssignmentService.unassign(assignmentId);
     }
 
     @PostMapping("/agent-knowledge/documents/{documentId}/reindex")

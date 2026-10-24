@@ -1,0 +1,24 @@
+日期：2026-10-24
+
+问题现象
+- 后端 N8nResumeNotifier 触发 n8n 人工审核恢复时全部超时（HttpTimeoutException: request timed out），执行停在 waiting，恢复 URL 未清除。
+- 同一 URL 用 curl POST 立即返回 {"message":"Workflow was started"}。
+
+影响范围
+- 审批落库后的 n8n 自动收尾；审批状态本身已生效（后端事务先落库，恢复只是收尾通知）。
+
+原因
+- Java HttpClient 默认对明文 HTTP 使用 HTTP/2（发送 h2c 升级头 Upgrade: h2c / Connection: Upgrade, HTTP2-Settings）。
+- n8n（node/express）对 h2c 升级请求会挂起不响应：curl 携带同样升级头同样超时（000），强制 HTTP/1.1 的 Java 客户端立即 200。
+- 排除系统代理：scutil --proxy 显示 HTTP 代理关闭，env 无 proxy 变量。
+
+解决方式
+- N8nResumeNotifier 的 HttpClient 显式 version(HTTP_1_1)。
+- 复现脚本：jshell/java 单文件，分别 GET Spring /api/health（200）与 n8n /healthz（默认版本超时、HTTP_1_1 200）。
+
+验证结果
+- 修复后完整链路：smokeuser（REVIEWER）发布 → 审计 PUBLISH 落库 → n8n 执行自动恢复并 success（流程收尾节点显示 finalStatus=ACTIVE）→ resume_webhook_url 清空。
+
+后续注意事项
+- 后端任何直连 n8n 的 HTTP 调用都必须强制 HTTP/1.1；若未来改用 Apache HttpClient/OkHttp，注意它们对 h2c 的默认行为不同，接入后需重测。
+- n8n 对 h2c 的挂起行为与版本相关，升级 n8n 后需回归本用例。

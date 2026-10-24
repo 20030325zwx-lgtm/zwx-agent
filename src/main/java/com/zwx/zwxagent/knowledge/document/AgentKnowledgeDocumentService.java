@@ -46,6 +46,8 @@ public class AgentKnowledgeDocumentService {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final String documentParserProvider;
     private final TransactionTemplate txTemplate;
+    private final AgentKnowledgeReviewLogService reviewLogService;
+    private final N8nResumeNotifier resumeNotifier;
 
     public AgentKnowledgeDocumentService(OssClientProvider ossClientProvider,
                                          @Value("${app.oss.bucket}") String bucket, JdbcTemplate jdbcTemplate,
@@ -57,7 +59,9 @@ public class AgentKnowledgeDocumentService {
                                          StructuredKnowledgeChunker structuredKnowledgeChunker,
                                          com.fasterxml.jackson.databind.ObjectMapper objectMapper,
                                          @Value("${app.document-parser.provider:mineru}") String documentParserProvider,
-                                         PlatformTransactionManager transactionManager) {
+                                         PlatformTransactionManager transactionManager,
+                                         AgentKnowledgeReviewLogService reviewLogService,
+                                         N8nResumeNotifier resumeNotifier) {
         this.ossClientProvider = ossClientProvider;
         this.bucket = bucket;
         this.jdbcTemplate = jdbcTemplate;
@@ -72,6 +76,8 @@ public class AgentKnowledgeDocumentService {
         this.documentParserProvider = documentParserProvider == null || documentParserProvider.isBlank()
                 ? "mineru" : documentParserProvider.trim().toLowerCase(java.util.Locale.ROOT);
         this.txTemplate = new TransactionTemplate(transactionManager);
+        this.reviewLogService = reviewLogService;
+        this.resumeNotifier = resumeNotifier;
     }
 
     /**
@@ -89,7 +95,20 @@ public class AgentKnowledgeDocumentService {
 
     public AgentKnowledgeDocument upload(String tenantId, String agentKey, MultipartFile file, String createdBy,
                                          String categoryId, boolean autoPublish) {
+        return upload(tenantId, agentKey, file, createdBy, categoryId, autoPublish, null);
+    }
+
+    /**
+     * 携带幂等键的重试必须返回首次创建的文档而不是重复建版；键唯一约束由 V22 部分唯一索引兜底。
+     */
+    public AgentKnowledgeDocument upload(String tenantId, String agentKey, MultipartFile file, String createdBy,
+                                         String categoryId, boolean autoPublish, String idempotencyKey) {
         validateScope(tenantId, agentKey);
+        String normalizedKey = idempotencyKey == null || idempotencyKey.isBlank() ? null : idempotencyKey.trim();
+        if (normalizedKey != null) {
+            AgentKnowledgeDocument existing = findByUploadIdempotencyKey(tenantId, agentKey, normalizedKey);
+            if (existing != null) return existing;
+        }
         String resolvedCategoryId = resolveCategoryId(tenantId, agentKey, categoryId);
         String filename = file.getOriginalFilename() == null ? "document.txt" : file.getOriginalFilename();
         if (!filename.toLowerCase().matches(".*\\.(md|txt|pdf|doc|docx|xls|xlsx|ppt|pptx)$"))
@@ -121,19 +140,34 @@ public class AgentKnowledgeDocumentService {
                 SELECT COALESCE(MAX(version_no), 0) + 1 FROM agent_knowledge_document
                 WHERE tenant_id = ? AND agent_key = ? AND logical_key = ?
                 """, Integer.class, tenantId, agentKey, logicalKey);
-        jdbcTemplate.update("""
+        try {
+            jdbcTemplate.update("""
                 INSERT INTO agent_knowledge_document
                     (id, tenant_id, agent_key, object_key, filename, status,
                      logical_key, version_no, lifecycle_status, content_sha256, supersedes_document_id, created_by,
-                     category_id)
-                VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, 'INDEXING', ?, ?, ?, ?)
+                     category_id, idempotency_key)
+                VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, 'INDEXING', ?, ?, ?, ?, ?)
                 """, id, tenantId, agentKey, objectKey, filename, logicalKey, nextVersion,
-                sha256(content), supersedesId, createdBy, resolvedCategoryId);
+                sha256(content), supersedesId, createdBy, resolvedCategoryId, normalizedKey);
+        } catch (org.springframework.dao.DataIntegrityViolationException exception) {
+            AgentKnowledgeDocument existing = findByUploadIdempotencyKey(tenantId, agentKey, normalizedKey);
+            if (existing != null) return existing;
+            throw exception;
+        }
         AgentKnowledgeDocument document = getDocumentRecord(tenantId, agentKey, id);
         if (!autoPublish) {
             jdbcTemplate.update("UPDATE agent_knowledge_document SET auto_publish = FALSE WHERE id = ?", id);
         }
         return document;
+    }
+
+    private AgentKnowledgeDocument findByUploadIdempotencyKey(String tenantId, String agentKey, String idempotencyKey) {
+        List<String> ids = jdbcTemplate.query("""
+                SELECT id FROM agent_knowledge_document
+                WHERE tenant_id = ? AND agent_key = ? AND idempotency_key = ?
+                ORDER BY created_at LIMIT 1
+                """, (rs, rowNum) -> rs.getString("id"), tenantId, agentKey, idempotencyKey);
+        return ids.isEmpty() ? null : getDocumentRecord(tenantId, agentKey, ids.get(0));
     }
 
     public void deleteDocument(String tenantId, String agentKey, String documentId) {
@@ -280,6 +314,12 @@ public class AgentKnowledgeDocumentService {
                 org.slf4j.LoggerFactory.getLogger(AgentKnowledgeDocumentService.class)
                         .warn("Auto publish failed for document {}, stays READY: {}", documentId, exception.getMessage());
             }
+        } else if (!autoPublish) {
+            String[] scope = jdbcTemplate.queryForObject(
+                    "SELECT tenant_id, agent_key FROM agent_knowledge_document WHERE id = ?",
+                    (rs, rowNum) -> new String[]{rs.getString(1), rs.getString(2)}, documentId);
+            reviewLogService.record(scope[0], scope[1], documentId, "SUBMIT", null, "SYSTEM",
+                    "索引完成，等待人工审核", null);
         }
     }
 
@@ -410,6 +450,13 @@ public class AgentKnowledgeDocumentService {
      * 全程在同一事务内，行锁串行化同一逻辑文档的发布；发布失败整体回滚，旧版本保持生效。
      */
     public void publish(String documentId) {
+        publish(documentId, null, "SYSTEM");
+    }
+
+    /**
+     * 审批发布：状态更新与审计行同一事务；事务提交后异步触发 n8n 收尾恢复。
+     */
+    public void publish(String documentId, com.zwx.zwxagent.platform.security.CurrentActor actor, String channel) {
         StoredDocument stored = queryStoredDocument(documentId, false);
         txTemplate.executeWithoutResult(transactionStatus -> {
             List<String> chainIds = jdbcTemplate.queryForList("""
@@ -440,10 +487,19 @@ public class AgentKnowledgeDocumentService {
                     WHERE id = ?
                     """, documentId);
             flipChunkLifecycle(documentId, "ACTIVE");
+            reviewLogService.record(stored.tenantId(), stored.agentKey(), documentId, "PUBLISH",
+                    actor, channel, null, null);
         });
+        resumeNotifier.triggerAsync(stored.tenantId(), stored.agentKey(), documentId);
     }
 
     public void reject(String documentId, String reviewNote) {
+        reject(documentId, reviewNote, null, "SYSTEM");
+    }
+
+    public void reject(String documentId, String reviewNote, com.zwx.zwxagent.platform.security.CurrentActor actor,
+                       String channel) {
+        StoredDocument stored = queryStoredDocument(documentId, false);
         txTemplate.executeWithoutResult(transactionStatus -> {
             int updated = jdbcTemplate.update("""
                     UPDATE agent_knowledge_document
@@ -452,7 +508,31 @@ public class AgentKnowledgeDocumentService {
                     """, reviewNote == null ? "" : reviewNote.trim(), documentId);
             if (updated == 0) throw new IllegalStateException("Only READY versions can be rejected");
             flipChunkLifecycle(documentId, "REJECTED");
+            reviewLogService.record(stored.tenantId(), stored.agentKey(), documentId, "REJECT",
+                    actor, channel, reviewNote == null ? "" : reviewNote.trim(), null);
         });
+        resumeNotifier.triggerAsync(stored.tenantId(), stored.agentKey(), documentId);
+    }
+
+    /**
+     * n8n 在暂停到人工审核前登记恢复地址；URL 属恢复凭据，仅后端持有，不回显。
+     */
+    public void storeResumeInfo(String tenantId, String agentKey, String documentId, String resumeUrl,
+                                String n8nExecutionId, java.time.Instant expiresAt) {
+        validateScope(tenantId, agentKey);
+        int updated = jdbcTemplate.update("""
+                UPDATE agent_knowledge_document
+                SET resume_webhook_url = ?, resume_expires_at = ?
+                WHERE id = ? AND tenant_id = ? AND agent_key = ?
+                """, resumeUrl, expiresAt, documentId, tenantId, agentKey);
+        if (updated == 0) throw new IllegalArgumentException("Document does not exist in the current scope");
+    }
+
+    public void recordReviewEvent(String tenantId, String agentKey, String documentId, String action,
+                                  com.zwx.zwxagent.platform.security.CurrentActor actor, String channel,
+                                  String note, String n8nExecutionId) {
+        getDocumentRecordForScope(tenantId, agentKey, documentId);
+        reviewLogService.record(tenantId, agentKey, documentId, action, actor, channel, note, n8nExecutionId);
     }
 
     private void flipChunkLifecycle(String documentId, String lifecycleStatus) {

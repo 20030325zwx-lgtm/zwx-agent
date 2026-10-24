@@ -3,7 +3,8 @@ package com.zwx.zwxagent.platform.security;
 public enum Role {
     USER,
     ADMIN,
-    WORKFLOW;
+    WORKFLOW,
+    REVIEWER;
 
     public String authority() {
         return "ROLE_" + name();

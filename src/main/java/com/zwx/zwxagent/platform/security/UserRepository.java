@@ -48,4 +48,8 @@ public class UserRepository {
                 """, id, tenantId, username, passwordHash, role.name());
         return new AppUser(id, tenantId, username, passwordHash, role, "ACTIVE");
     }
+
+    public void updateRole(String userId, Role role) {
+        jdbcTemplate.update("UPDATE app_user SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", role.name(), userId);
+    }
 }

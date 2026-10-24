@@ -12,7 +12,10 @@
       "name": "上传文档",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [240, 320],
+      "position": [
+        240,
+        320
+      ],
       "webhookId": "22ae4c89-5594-4b6a-a153-c2f063648002"
     },
     {
@@ -24,16 +27,27 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={}",
-        "options": { "timeout": 10000 }
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "1715e761-1870-44db-9daf-f7673cdffb79",
       "name": "获取工作流令牌",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [470, 320],
+      "position": [
+        470,
+        320
+      ],
       "credentials": {
-        "httpBasicAuth": { "name": "Aster Workflow Service" }
-      }
+        "httpBasicAuth": {
+          "id": "uIzyXF4W3Pavv6a1",
+          "name": "Aster Workflow Service"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -45,7 +59,10 @@
       "name": "合并上传文件与令牌",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
-      "position": [700, 470]
+      "position": [
+        700,
+        470
+      ]
     },
     {
       "parameters": {
@@ -54,25 +71,48 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            },
+            {
+              "name": "Idempotency-Key",
+              "value": "=n8n-{{ $execution.id }}"
+            }
           ]
         },
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
           "parameters": [
-            { "parameterType": "formData", "name": "query", "value": "={{ $('上传文档').first().json.body.query || '7 years' }}" },
-            { "parameterType": "formBinaryData", "name": "file", "inputDataFieldName": "file" }
+            {
+              "parameterType": "formData",
+              "name": "query",
+              "value": "={{ $('上传文档').first().json.body.query || '7 years' }}"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            }
           ]
         },
-        "options": { "timeout": 660000 }
+        "options": {
+          "timeout": 660000
+        }
       },
       "id": "784b1308-e379-40b4-b6c4-b6694a5f54f1",
       "name": "MinerU 解析并切片入库",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [710, 320],
-      "credentials": {}
+      "position": [
+        710,
+        320
+      ],
+      "credentials": {},
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -81,16 +121,24 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            }
           ]
         },
-        "options": { "timeout": 10000 }
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "71216e14-cf3c-4688-a465-5dc488e2eab4",
       "name": "检查入库状态",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [950, 320],
+      "position": [
+        950,
+        320
+      ],
       "credentials": {}
     },
     {
@@ -103,18 +151,29 @@
       "name": "等待 MinerU 索引完成",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [950, 470]
+      "position": [
+        950,
+        470
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
           "conditions": [
             {
               "id": "9d021a0c-0ac6-43a3-92ae-aa1c8851abbb",
               "leftValue": "={{ $json.lifecycleStatus }}",
               "rightValue": "READY",
-              "operator": { "type": "string", "operation": "equals" }
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
           ],
           "combinator": "and"
@@ -125,7 +184,10 @@
       "name": "入库已就绪？",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1160, 320]
+      "position": [
+        1160,
+        320
+      ]
     },
     {
       "parameters": {
@@ -134,30 +196,47 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ { query: $('上传文档').first().json.body.query || '7 years' } }}",
-        "options": { "timeout": 60000 }
+        "options": {
+          "timeout": 60000
+        }
       },
       "id": "5d6a7b8c-c9d0-41e2-8f30-1234567890ab",
       "name": "验证 PGVector 检索",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1190, 320]
+      "position": [
+        1190,
+        320
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
-        "conditions": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
             {
               "id": "67c9ba6d-67d4-4c39-8d06-a789fbc5c3f4",
               "leftValue": "={{ $json.matched }}",
               "rightValue": true,
-              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
@@ -168,7 +247,10 @@
       "name": "检索命中？",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1430, 320]
+      "position": [
+        1430,
+        320
+      ]
     },
     {
       "parameters": {
@@ -180,111 +262,402 @@
       "name": "人工审核",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [1670, 240],
+      "position": [
+        1670,
+        240
+      ],
       "webhookId": "2b4dc41c-6c38-49be-8235-85c3b6859e02"
     },
     {
       "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "88033946-c093-413b-8460-012b57c9fa39",
+              "name": "documentId",
+              "value": "={{ $('MinerU 解析并切片入库').first().json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "4d0b15ee-8aba-4721-aa21-ab2a342e8456",
+              "name": "status",
+              "value": "READY_REVIEW_REQUIRED",
+              "type": "string"
+            },
+            {
+              "id": "2e2293c3-4c75-4fb9-8adc-a49232e986fb",
+              "name": "message",
+              "value": "检索验证未命中，需要人工确认切片质量或调整 query。",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3e1b6f1c-63a5-4b9e-988e-ccc255333d98",
+      "name": "检索无命中，需人工介入",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1670,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6e7b0573-2dcb-40f3-b43c-67d0b33e8fa4",
+              "name": "pollAttempts",
+              "value": "={{ ($('等待 MinerU 索引完成').first().json.pollAttempts || 0) + 1 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "00c9adb3-8237-446a-9ed7-6db0dc57b168",
+      "name": "更新轮询计数",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1055,
+        320
+      ]
+    },
+    {
+      "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
-              "id": "4aa6461e-6c4e-4786-a3b5-3760cd95de86",
-              "leftValue": "={{ $json.body.approved }}",
+              "id": "ff33b30e-4096-42c0-b72b-561d9eb167eb",
+              "leftValue": "={{ $json.status === 'FAILED' || $json.pollAttempts >= 90 }}",
               "rightValue": true,
-              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
         },
         "options": {}
       },
-      "id": "b7921b7b-a851-4f14-a437-331a2a8f8918",
-      "name": "审核通过？",
+      "id": "b96a55a0-d46e-41e8-ab59-419b9b125358",
+      "name": "索引失败或超时？",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1900, 240]
+      "position": [
+        1160,
+        470
+      ]
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('MinerU 解析并切片入库').first().json.id }}/publish?agentKey=test",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}" }
-          ]
-        },
-        "options": { "timeout": 30000 }
+        "errorMessage": "={{ $json.status === 'FAILED' ? ('MinerU 索引失败：documentId=' + $json.id + ($json.errorMessage ? '，原因：' + $json.errorMessage : '') + '，请人工排查后触发重建索引') : ('索引轮询超时：documentId=' + $json.id + ' 轮询 ' + $json.pollAttempts + ' 次仍未 READY（当前状态 ' + ($json.status || $json.lifecycleStatus) + '），上限 90 次 × 10 秒') }}"
       },
-      "id": "53d5cbf4-81f7-4873-b20b-990ab0454667",
-      "name": "发布知识版本",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [2140, 160],
-      "credentials": {}
+      "id": "56dd1a1b-e66b-4425-a56b-99a601854d87",
+      "name": "索引未就绪，执行失败",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1390,
+        470
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('MinerU 解析并切片入库').first().json.id }}/reject?agentKey=test",
+        "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('MinerU 解析并切片入库').first().json.id }}/resume-info?agentKey=test",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { reviewNote: $json.body.reviewNote || '' } }}",
-        "options": { "timeout": 30000 }
+        "jsonBody": "={{ { resumeUrl: $execution.resumeUrl, n8nExecutionId: String($execution.id) } }}",
+        "options": {
+          "timeout": 15000
+        }
       },
-      "id": "52c02d07-e512-4b2a-a0f6-734739e0b4be",
-      "name": "记录退回意见",
+      "id": "register-resume-node",
+      "name": "登记恢复地址",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2140, 320],
-      "credentials": {}
+      "position": [
+        1550,
+        240
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const doc = $('MinerU 解析并切片入库').first().json; return [{ json: { documentId: doc.id, status: 'READY_REVIEW_REQUIRED', message: 'Retrieval verification returned no matches.' } }];"
+        "method": "GET",
+        "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('MinerU 解析并切片入库').first().json.id }}/workflow-status?agentKey=test",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
       },
-      "id": "c8ff7304-3b37-4592-b940-2403c9f03c63",
-      "name": "检索无命中，需人工介入",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1670, 440]
+      "id": "query-final-status-node",
+      "name": "查询审批结果",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "documentId",
+              "value": "={{ $('MinerU 解析并切片入库').first().json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "f2",
+              "name": "finalStatus",
+              "value": "={{ $json.lifecycleStatus }}",
+              "type": "string"
+            },
+            {
+              "id": "f3",
+              "name": "message",
+              "value": "审批决定已由 Aster 后端实名落库，n8n 仅收尾",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "finish-node",
+      "name": "流程收尾",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2140,
+        240
+      ]
     }
   ],
   "connections": {
-    "上传文档": { "main": [[
-      { "node": "获取工作流令牌", "type": "main", "index": 0 },
-      { "node": "合并上传文件与令牌", "type": "main", "index": 0 }
-    ]] },
-    "获取工作流令牌": { "main": [[{ "node": "合并上传文件与令牌", "type": "main", "index": 1 }]] },
-    "合并上传文件与令牌": { "main": [[{ "node": "MinerU 解析并切片入库", "type": "main", "index": 0 }]] },
-    "MinerU 解析并切片入库": { "main": [[{ "node": "等待 MinerU 索引完成", "type": "main", "index": 0 }]] },
-    "等待 MinerU 索引完成": { "main": [[{ "node": "检查入库状态", "type": "main", "index": 0 }]] },
-    "检查入库状态": { "main": [[{ "node": "入库已就绪？", "type": "main", "index": 0 }]] },
-    "入库已就绪？": { "main": [[{ "node": "验证 PGVector 检索", "type": "main", "index": 0 }], [{ "node": "等待 MinerU 索引完成", "type": "main", "index": 0 }]] },
-    "验证 PGVector 检索": { "main": [[{ "node": "检索命中？", "type": "main", "index": 0 }]] },
-    "检索命中？": {
+    "上传文档": {
       "main": [
-        [{ "node": "人工审核", "type": "main", "index": 0 }],
-        [{ "node": "检索无命中，需人工介入", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "获取工作流令牌",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "合并上传文件与令牌",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "人工审核": { "main": [[{ "node": "审核通过？", "type": "main", "index": 0 }]] },
-    "审核通过？": {
+    "获取工作流令牌": {
       "main": [
-        [{ "node": "发布知识版本", "type": "main", "index": 0 }],
-        [{ "node": "记录退回意见", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "合并上传文件与令牌",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "合并上传文件与令牌": {
+      "main": [
+        [
+          {
+            "node": "MinerU 解析并切片入库",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MinerU 解析并切片入库": {
+      "main": [
+        [
+          {
+            "node": "等待 MinerU 索引完成",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "等待 MinerU 索引完成": {
+      "main": [
+        [
+          {
+            "node": "检查入库状态",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检查入库状态": {
+      "main": [
+        [
+          {
+            "node": "更新轮询计数",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "入库已就绪？": {
+      "main": [
+        [
+          {
+            "node": "验证 PGVector 检索",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "索引失败或超时？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "验证 PGVector 检索": {
+      "main": [
+        [
+          {
+            "node": "检索命中？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检索命中？": {
+      "main": [
+        [
+          {
+            "node": "登记恢复地址",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "检索无命中，需人工介入",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "人工审核": {
+      "main": [
+        [
+          {
+            "node": "查询审批结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "更新轮询计数": {
+      "main": [
+        [
+          {
+            "node": "入库已就绪？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "索引失败或超时？": {
+      "main": [
+        [
+          {
+            "node": "索引未就绪，执行失败",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "等待 MinerU 索引完成",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "登记恢复地址": {
+      "main": [
+        [
+          {
+            "node": "人工审核",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询审批结果": {
+      "main": [
+        [
+          {
+            "node": "流程收尾",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
-  "active": true,
-  "settings": { "executionOrder": "v1" },
-  "meta": { "templateCredsSetupCompleted": false },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
   "tags": []
 }

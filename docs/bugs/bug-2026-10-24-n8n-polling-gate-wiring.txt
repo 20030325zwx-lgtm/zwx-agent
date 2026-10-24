@@ -1,0 +1,28 @@
+日期：2026-10-24
+
+问题现象
+- n8n 真实流程在加"轮询超时判断"后，人工审核 webhook 恢复的执行永远停在 running；人工审批的退回/发布在后端已生效，但 n8n 执行不结束，直到下次重启被标为 crashed。
+- 超时分支永远不触发：首轮未就绪时直接走旧回环，没有经过超时判断节点。
+
+影响范围
+- evaluation/n8n-document-poc 的真实业务工作流（document-ingestion-live.json）；不影响后端 API 行为，业务结果（发布/退回/审核意见）均已正确落库。
+
+原因
+- 改造循环时把"索引失败或超时？"IF 节点接到了"入库已就绪？"IF 的 TRUE 分支（append 到 main[0]），FALSE（未就绪）分支仍是旧的直接回环到 Wait。
+- 后果一：未就绪路径从不经过超时判断，轮询无界。
+- 后果二：文档 READY 后，TRUE 分支同时驱动"验证检索→人工审核"和"超时判断→回环"两条并行链，后者永不结束，执行无法收敛，人工恢复后执行体挂死在 running。
+
+解决方式
+- 修正连接："入库已就绪？" TRUE→仅"验证 PGVector 检索"；FALSE→"索引失败或超时？"；超时判断 TRUE→"Stop and Error"，FALSE→"等待 MinerU 索引完成"回环。
+- 顺带把两个 Code 节点改为原生 Set/Stop and Error 节点：n8n 2.44.6 internal task runner 存在任务请求过期（requestExpired）导致执行挂死的问题，工作流现已不依赖任务运行器。
+- 通过 CLI 重新导入生效（新 workflow id：iupq3fy9J07Rp32D），旧副本全部归档。
+
+验证结果
+- 超时分支：cap=1 + 首次等待 1s 的测试变体，执行以 error 结束，错误信息含 documentId、轮询次数、当前状态（执行 #25）。
+- 正常路径：上传→READY→人工审核→退回，执行以 success 结束，REJECTED 与审核意见落库（执行 #26），无挂死。
+- 测试产生的合成文档已由管理员删除，agent test 范围文档与向量记录为 0。
+
+后续注意事项
+- n8n 工作流改动一律走"改仓库 JSON → CLI 导入 → unpublish/publish 切换 → 重启容器"，不要直接改 workflow_entity 的 nodes 列（发布版本快照不会跟随）。
+- 人工审核恢复 URL 形如 /webhook-waiting/{executionId}?signature={token}，属于恢复凭据，纳入审批入口设计（见 docs/design 待补文档）。
+- 升级 n8n 镜像前保留对 internal task runner 的怀疑；若重新引入 Code 节点需重新验证执行收敛。

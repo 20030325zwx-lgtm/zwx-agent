@@ -44,7 +44,8 @@ class AgentKnowledgeDocumentDeleteTest {
                 provider, "bucket", jdbcTemplate, vectorStore, new MyTokenTextSplitter(),
                 mock(DocumentParsingModule.class), mock(DoclingServeChunkingService.class), mock(MineruDocumentParser.class),
                 mock(MineruBlockParser.class), mock(StructuredKnowledgeChunker.class),
-                new com.fasterxml.jackson.databind.ObjectMapper(), "mineru", mock(PlatformTransactionManager.class));
+                new com.fasterxml.jackson.databind.ObjectMapper(), "mineru", mock(PlatformTransactionManager.class),
+                mock(AgentKnowledgeReviewLogService.class), mock(N8nResumeNotifier.class));
 
         service.removeDocumentCompletely("doc-1", "default", "super");
 

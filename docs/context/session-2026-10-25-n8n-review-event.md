@@ -45,3 +45,11 @@
 - 过程中发现并修复缺陷：**小文件索引（0.6s）快过 n8n 登记恢复 URL（1-2s）导致案件卡在等索引**——`N8nResumeNotifier.trigger` 原来只在重试循环前查一次 URL；改为查询纳入重试循环（5s/15s/60s）。`triggerAsync` 签名收敛为 `triggerAsync(documentId)`（租户/agent 从库行读）。
 - v2 e2e：上传同秒开案（#40）→ 自动唤醒 → ①②③ 真实数据（0.1s / 1 切片 / 0.3s）→ 发布收尾 success；#39（卡住案件）经发布救回走"直接收尾"分支；n8n 来源（幂等键 n8n-*）不产生案件。测试文档已删（3 份），n8n 保留 #35-#40 六条案件记录。
 - 230 个测试全绿；Flyway 至 V24；后端已重启上线。
+
+## 追加（同日第三段）：Jev 意图分流批 0（观察模式）
+
+- 用户提议引入意图识别（TypeSafe Jev / System One 决策模型）。设计见 `docs/design/2026-10-25-jev-intent-routing.md`：一次 Jev 调用三问并行（意图 choice + 复杂度 score + 是否需要私有知识库 noul），决策表按置信度路由（≥0.7 自动开检索开关、闲聊短路候选、<0.5 回退）。
+- **批 0 落地为观察模式（不改变任何行为）**：新包 `platform/intent/`（IntentRouter 接口 + IntentDecision 决策/summary + JevIntentRouter 实现）；`AiController.doChatWithManus` 建图前 classify，结论经 `ManusRunRequest.prefaceActivity`（新增可空字段，resume 传 null）作为 activity 事件（phase=plan，agent=意图识别）推给前端 + INFO 日志攒对照数据；任何失败/禁用返回 empty = 现状行为。
+- 配置 `app.intent.jev.*`（enabled/base-url/api-key/model/timeout-ms=1500）；**api-key 为空即实际禁用**——当前未配 Key，处于禁用态冒烟通过（SSE 正常、零 jev 调用）。**待用户从 console.typesafe.ai/keys 取 KEY 填入 `app.intent.jev.api-key` 后即生效**。
+- 测试 236 个全绿（新增 6 个：parse/buildRequest/决策表/禁用态/不可达端点降级/summary）。待办：批 1（自动开开关）待观察期数据；中文 criteria 措辞待真实消息校准。
+- **用户无法充值 TypeSafe → 追加 QwenIntentRouter 对照实现**（DashScope 兼容模式，复用现有 Key，LLM 自报置信非校准）；`IntentRouterConfig` 按 `app.intent.provider`（none/jev/qwen）选型，application-local.yml 已增量设 `provider: qwen` + `qwen.model: qwen-plus`（**qwen-turbo 在该账号被限流 429**）。实测 242 测试全绿；真实演示：闲聊→"闲聊问答 0.99/短路候选"，知识问题→"知识库问答 0.95/建议自动开检索"，延迟 1.1-1.3s。Jev 切换只改 provider=jev + 填 Key。

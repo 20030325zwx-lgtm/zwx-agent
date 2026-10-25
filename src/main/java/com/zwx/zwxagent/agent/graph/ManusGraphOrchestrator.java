@@ -223,6 +223,7 @@ public class ManusGraphOrchestrator {
                                   ToolCallback[] tools,
                                   String knowledgeContext,
                                   String ragTraceJson,
+                                  String prefaceActivity,
                                   String runId,
                                   GraphCheckpoint resumeCheckpoint,
                                   String resumeFrom,
@@ -345,6 +346,10 @@ public class ManusGraphOrchestrator {
             }
             if (request.runId() != null && !request.runId().isBlank()) {
                 stream.send("run", request.runId());
+            }
+            if (request.prefaceActivity() != null && !request.prefaceActivity().isBlank()) {
+                // 图启动前的附加事件（当前为意图识别观察结论）；随 run 事件一起先于图输出到达前端。
+                stream.send("activity", request.prefaceActivity());
             }
             List<AgentRunView.PlanStepView> sentPlan = List.of();
             if (request.resumeCheckpoint() != null) {

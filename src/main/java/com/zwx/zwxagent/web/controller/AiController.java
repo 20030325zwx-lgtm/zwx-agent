@@ -118,6 +118,8 @@ public class AiController {
 
     @Resource
     private ObjectMapper objectMapper;
+    @Resource
+    private com.zwx.zwxagent.platform.intent.IntentRouter intentRouter;
 
     @Resource
     private com.zwx.zwxagent.chat.conversation.ConversationLockManager conversationLockManager;
@@ -497,6 +499,10 @@ public class AiController {
             conversationLease.close();
             throw exception;
         }
+        // 意图分流（批 0 观察模式）：禁用/无 Key/失败返回 empty，不影响任何现有行为
+        String prefaceActivity = intentRouter.classify(message)
+                .map(decision -> toJson(java.util.Map.of("phase", "plan", "agent", "意图识别", "summary", decision.summary())))
+                .orElse(null);
         McpTools activeMcpTools = mcpTools;
         String knowledgeContext = imageContext + knowledge.context();
         String agentMessage = imageContext.isBlank() ? message : message + "\n\n" + imageContext;
@@ -517,7 +523,7 @@ public class AiController {
         };
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
                 conversationId, actor.tenantId(), runChatModel, agentMessage, historyContext, availableTools, knowledgeContext,
-                knowledge.trace() == null ? null : ragTraceJson, runId, null, null, cleanup,
+                knowledge.trace() == null ? null : ragTraceJson, prefaceActivity, runId, null, null, cleanup,
                 result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result));
         ManusGraphOrchestrator.ManusRunHandle handle;
         try {
@@ -631,7 +637,7 @@ public class AiController {
                         conversationId, actor.tenantId(), runChatModel, run.input(),
                         run.historyContext() == null ? "" : run.historyContext(),
                         availableTools, run.knowledgeContext() == null ? "" : run.knowledgeContext(),
-                        run.ragTraceJson(), runId, resumeCheckpoint, resumeFrom, cleanup,
+                        run.ragTraceJson(), null, runId, resumeCheckpoint, resumeFrom, cleanup,
                         result -> completeManusRun(actor, conversationId, run.userMessageId(), runId,
                                 ragTraceJson, run.assistantMessageId(), result));
         com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunHandle handle;

@@ -117,6 +117,21 @@ app:
     n8n:
       # 知识文档进入待审时推送 n8n 监听工作流（document-review-watch）；留空禁用事件推送
       review-webhook-url: ${APP_NOTIFY_N8N_REVIEW_WEBHOOK_URL:}
+  intent:
+    # 路由器选型：none（默认禁用）/ jev（TypeSafe System One）/ qwen（DashScope 对照实现）
+    provider: ${APP_INTENT_PROVIDER:none}
+    jev:
+      # 意图分流（批 0 观察模式）：api-key 留空即禁用，不改变任何现有行为
+      enabled: ${APP_INTENT_JEV_ENABLED:true}
+      base-url: ${APP_INTENT_JEV_BASE_URL:https://api.typesafe.ai}
+      api-key: ${TYPESAFE_API_KEY:}
+      model: ${APP_INTENT_JEV_MODEL:jev-latest}
+      timeout-ms: ${APP_INTENT_JEV_TIMEOUT_MS:1500}
+    qwen:
+      # 对照实现：复用 spring.ai.dashscope.api-key，无额外厂商依赖；置信度为 LLM 自报
+      base-url: ${APP_INTENT_QWEN_BASE_URL:https://dashscope.aliyuncs.com}
+      model: ${APP_INTENT_QWEN_MODEL:qwen-turbo}
+      timeout-ms: ${APP_INTENT_QWEN_TIMEOUT_MS:2500}
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}

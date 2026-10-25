@@ -64,3 +64,9 @@
 - 用户报告：知识问答几乎必现"质检打回→返工→未二次验收→未验收"，子智能体无法一次做对。根因三层（见 `docs/bugs/bug-2026-10-26-worker-missing-original-request.txt`）：**planner 知识分支短路任务不含用户问题 + worker taskPrompt 不含用户原始请求**（worker 只能输出元声明"我将要……"）→ 质检必然打回 → 返工后 revision>=1 跳过二次验收 → 未验收。
 - 修复：WorkersNode.apply 读取 GraphState.INPUT 下发给每个 worker（taskPrompt 头部【用户原始请求】，对 LLM 多步规划同样生效）；PlannerNode 知识分支 detail 前缀"用户请求：{input}"；前端按用户要求摘除交付结果区"未验收/已验收"徽标与任务头"未验收"chip（RunInspector 诊断保留）。
 - e2e：同一问题第一轮 worker 直接给出完整答案（带引用）→ "结果通过验收"单轮通过、零返工，run verification=pass。243 测试全绿 + 前端构建通过。返工路径保留为安全网；"返工后不二次验收"的有界成本设计未变。
+
+## 追加（2026-10-26 晚）：审批工作台 + 评测集 v1
+
+- **审批工作台（f568f29）**：KnowledgeAdmin 前端闭环——READY 版本"待审批"徽标 + 待审批筛选；行内发布/退回（退回必填意见，对话框），仅 REVIEWER/ADMIN 可见，403 明确提示；抽屉新增审批时间线模式（审计全记录）。api 新增 reject/review-log 函数。e2e：REVIEWER 退回带意见→REJECTED+审计、admin 发布→ACTIVE、普通用户三端点全 403；测试数据与临时用户已清理。
+- **评测集 v1（7af932a）**：`evaluation/eval-sets/`——knowledge-intent-eval-v1.json 27 例（意图 12 + RAG 15，含刻意模糊点 intent-011）；人文地理语料 31 篇入 test 范围（幂等键 n8n-eval-corpus-*，218 切片，全 ACTIVE）；基线 2026-10-26：意图 11/12（qwen-plus 1.17s 均值）、RAG 15/15 全命中；run_baseline.py 可重跑，作批 2 门禁/题面校准/检索对比基线。
+- 后续待办：批 2 短路（先重评 intent-011 归属）、Jev 切换（等 Key）、意图观察数据定期分析。

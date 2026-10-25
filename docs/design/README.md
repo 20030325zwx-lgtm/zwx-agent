@@ -20,6 +20,9 @@
 - [MCP 工具扩展：表格、文档与网页截图](./2026-10-22-mcp-tool-expansion.md)
 - [超级智能体工作台改造方案](./2026-10-22-super-agent-workspace.md)
 - [回答引用定位到具体内容区域](./2026-10-23-citation-region-provenance.md)
+- [知识文档上传幂等键](./2026-10-24-knowledge-upload-idempotency.md)
+- [知识文档人工审批入口](./2026-10-24-knowledge-approval-entry.md)
+- [Jev 意图分流层（批 0/1 已实施）](./2026-10-25-jev-intent-routing.md)
 - [MCP 连接管理与工具授权](./2026-10-21-mcp-connection-management.md)
 - [改造实施方案索引](./plans/README.md)
 

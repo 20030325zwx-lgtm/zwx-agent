@@ -8,13 +8,13 @@
         "responseMode": "onReceived",
         "options": {}
       },
-      "id": "1d5f716b-418e-4848-8812-8df55ba98642",
+      "id": "984480b4-4f67-4cbc-8102-b64c1aac27dc",
       "name": "接收待审事件",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "webhookId": "82aa2df4-cb50-4d76-b8d4-67c95e9e8fd2",
+      "webhookId": "e6f05f91-826c-498b-89c6-4bad73df5701",
       "position": [
-        -380,
+        -560,
         0
       ]
     },
@@ -40,12 +40,12 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
-      "id": "c0307167-5a83-4c1c-9a69-28344e719003",
+      "id": "61f1fc8d-568e-43ef-8ff8-373b55e847a2",
       "name": "获取工作流令牌",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -160,
+        -340,
         0
       ]
     },
@@ -53,6 +53,12 @@
       "parameters": {
         "method": "POST",
         "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('接收待审事件').first().json.body.documentId }}/resume-info?agentKey={{ $('接收待审事件').first().json.body.agentKey }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { resumeUrl: $execution.resumeUrl, n8nExecutionId: String($execution.id) } }}",
+        "options": {
+          "timeout": 15000
+        },
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -61,21 +67,15 @@
               "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
             }
           ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ { resumeUrl: $execution.resumeUrl, n8nExecutionId: String($execution.id) } }}",
-        "options": {
-          "timeout": 15000
         }
       },
       "credentials": {},
-      "id": "f12dacda-b779-43d1-97ec-596c303f121b",
-      "name": "登记恢复地址",
+      "id": "79731275-0ef3-4f0b-b6e2-e63189c38ca0",
+      "name": "登记阶段恢复地址",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        60,
+        -120,
         0
       ]
     },
@@ -86,16 +86,16 @@
         "options": {},
         "limitWaitTime": true,
         "limitType": "afterTimeInterval",
-        "resumeAmount": 7,
-        "resumeUnit": "days"
+        "resumeAmount": 30,
+        "resumeUnit": "minutes"
       },
-      "id": "b6f53748-dc03-49d5-a96b-0e8947222bdf",
-      "name": "等待审批决定",
+      "id": "7d205769-5b55-43fc-a515-f91d5124bc45",
+      "name": "等待索引完成",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "webhookId": "f1cdd9cc-6130-40a3-ae77-f48629136ca6",
+      "webhookId": "08b458ff-1a88-4fd6-a988-515eefe91979",
       "position": [
-        280,
+        100,
         0
       ]
     },
@@ -103,6 +103,9 @@
       "parameters": {
         "method": "GET",
         "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('接收待审事件').first().json.body.documentId }}/workflow-status?agentKey={{ $('接收待审事件').first().json.body.agentKey }}",
+        "options": {
+          "timeout": 15000
+        },
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -111,18 +114,15 @@
               "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
             }
           ]
-        },
-        "options": {
-          "timeout": 15000
         }
       },
       "credentials": {},
-      "id": "fb6bbb72-ba6d-48a3-b459-7247b5337e26",
-      "name": "查询审批结果",
+      "id": "f1691c38-f626-4da4-8b86-4138a589226c",
+      "name": "查询文档状态",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        500,
+        320,
         0
       ]
     },
@@ -137,7 +137,7 @@
           },
           "conditions": [
             {
-              "id": "e2f6698b-4b33-498e-af6a-4475edbf74df",
+              "id": "f02d8436-94e6-4662-a5fb-bed2249b2c21",
               "leftValue": "={{ $json.lifecycleStatus === 'ACTIVE' || $json.lifecycleStatus === 'REJECTED' }}",
               "rightValue": "",
               "operator": {
@@ -152,12 +152,12 @@
         "typeValidation": "loose",
         "options": {}
       },
-      "id": "9d55d0a0-8927-440f-9ec1-e4c48ff717cb",
-      "name": "审批已有结果？",
+      "id": "fdc6038e-1d00-4013-bc82-22e81b832d55",
+      "name": "已生效或已退回？",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        720,
+        540,
         0
       ]
     },
@@ -168,19 +168,261 @@
         "assignments": {
           "assignments": [
             {
-              "id": "695ad33f-9b79-40d7-875f-7d6d6d70f667",
+              "id": "a31551ef-ef16-4ef2-8e9a-6ff0a60d9cfd",
               "name": "documentId",
               "value": "={{ $('接收待审事件').first().json.body.documentId }}",
               "type": "string"
             },
             {
-              "id": "a91958e2-e7be-438c-9684-1b58c49ba730",
+              "id": "9a891e94-49b4-43c0-a767-8b28538f9ff6",
+              "name": "finalStatus",
+              "value": "={{ $('查询文档状态').first().json.lifecycleStatus }}",
+              "type": "string"
+            },
+            {
+              "id": "c2922d05-a7d1-4e5b-9fe1-bd91bf301f54",
+              "name": "message",
+              "value": "自动发布路径：案件打开时索引已在后台进行，恢复时已生效，无需人工审核",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "985c39b1-8e62-474a-8f6f-af83bee15569",
+      "name": "直接收尾",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        760,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a2db7520-517b-4341-a0e4-925798621287",
+              "name": "stage",
+              "value": "① 文档解析",
+              "type": "string"
+            },
+            {
+              "id": "b7b73bfa-08e0-4cae-b30b-e5e95fbb2ca1",
+              "name": "detail",
+              "value": "=远端解析完成，耗时 {{ (($('查询文档状态').first().json.parseDurationMs || 0) / 1000).toFixed(1) }}s",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c38d6578-21a0-4c51-9e5f-8c2d17223b8f",
+      "name": "① 文档解析",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        760,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9c5862ce-952c-4513-834c-28c74e513180",
+              "name": "stage",
+              "value": "② 结构化切片",
+              "type": "string"
+            },
+            {
+              "id": "4de31ba9-2d09-4ffc-9da6-65fa17cc9f51",
+              "name": "detail",
+              "value": "=生成 {{ $('查询文档状态').first().json.chunkCount || 0 }} 个切片（表格按行、文本按章节）",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3f174d34-0eae-48ee-8a9a-95ee06011225",
+      "name": "② 结构化切片",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "841f0dee-a816-4211-8e56-0a914825ed61",
+              "name": "stage",
+              "value": "③ 向量化入库",
+              "type": "string"
+            },
+            {
+              "id": "f27307af-30a4-4dc4-91cd-da13fdacd642",
+              "name": "detail",
+              "value": "=写入 PGVector 耗时 {{ (($('查询文档状态').first().json.vectorDurationMs || 0) / 1000).toFixed(1) }}s",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2da69812-367d-4608-ad80-cc0fb2c94fbc",
+      "name": "③ 向量化入库",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1160,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('接收待审事件').first().json.body.documentId }}/resume-info?agentKey={{ $('接收待审事件').first().json.body.agentKey }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { resumeUrl: $execution.resumeUrl, n8nExecutionId: String($execution.id) } }}",
+        "options": {
+          "timeout": 15000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            }
+          ]
+        }
+      },
+      "credentials": {},
+      "id": "ee8907a3-2449-4fca-a7ee-06a4d98206f6",
+      "name": "登记审批恢复地址",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1380,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "options": {},
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": 7,
+        "resumeUnit": "days"
+      },
+      "id": "0272f400-2d76-48f5-a721-5ab9cc42e279",
+      "name": "等待审批决定",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "webhookId": "8062f074-dd19-4fa3-a02d-1d262e923d33",
+      "position": [
+        1600,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('接收待审事件').first().json.body.documentId }}/workflow-status?agentKey={{ $('接收待审事件').first().json.body.agentKey }}",
+        "options": {
+          "timeout": 15000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            }
+          ]
+        }
+      },
+      "credentials": {},
+      "id": "3661bd94-42e1-4d7c-8bc1-43f5b8c6d456",
+      "name": "查询审批结果",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f02d8436-94e6-4662-a5fb-bed2249b2c21",
+              "leftValue": "={{ $json.lifecycleStatus === 'ACTIVE' || $json.lifecycleStatus === 'REJECTED' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "typeValidation": "loose",
+        "options": {}
+      },
+      "id": "817f6be0-2821-4311-8ad7-4de16a2185d8",
+      "name": "审批已有结果？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2040,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b2e2091f-4dc1-4fc9-9b77-a436bd7fee76",
+              "name": "documentId",
+              "value": "={{ $('接收待审事件').first().json.body.documentId }}",
+              "type": "string"
+            },
+            {
+              "id": "5f8cab23-c15e-407d-93ac-d9c556ca48bc",
               "name": "finalStatus",
               "value": "={{ $json.lifecycleStatus }}",
               "type": "string"
             },
             {
-              "id": "acf4b7ef-df87-4e83-b168-14cc5899f063",
+              "id": "31a52fa7-fcf5-4e25-a253-7755f7ff9f61",
               "name": "message",
               "value": "审批决定已由 Aster 后端实名落库，n8n 仅收尾",
               "type": "string"
@@ -189,26 +431,26 @@
         },
         "options": {}
       },
-      "id": "1a69c787-bc54-45f4-9cdd-7c5f041831d1",
+      "id": "7a7148a6-dc27-450b-b3ea-50084be377f6",
       "name": "流程收尾",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        940,
-        -100
+        2260,
+        80
       ]
     },
     {
       "parameters": {
         "errorMessage": "=等待审批超时（7 天）或流程未完成；documentId={{ $('接收待审事件').first().json.body.documentId }}，当前状态={{ $json.lifecycleStatus }}"
       },
-      "id": "148b702a-6a3f-41f1-9577-b78ae925b839",
+      "id": "cf13ea4b-531c-4367-9baf-a6c66bf60543",
       "name": "等待审批超时，执行失败",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
       "position": [
-        940,
-        100
+        2260,
+        260
       ]
     }
   ],
@@ -228,14 +470,98 @@
       "main": [
         [
           {
-            "node": "登记恢复地址",
+            "node": "登记阶段恢复地址",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "登记恢复地址": {
+    "登记阶段恢复地址": {
+      "main": [
+        [
+          {
+            "node": "等待索引完成",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "等待索引完成": {
+      "main": [
+        [
+          {
+            "node": "查询文档状态",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询文档状态": {
+      "main": [
+        [
+          {
+            "node": "已生效或已退回？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "已生效或已退回？": {
+      "main": [
+        [
+          {
+            "node": "直接收尾",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "① 文档解析",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "① 文档解析": {
+      "main": [
+        [
+          {
+            "node": "② 结构化切片",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "② 结构化切片": {
+      "main": [
+        [
+          {
+            "node": "③ 向量化入库",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "③ 向量化入库": {
+      "main": [
+        [
+          {
+            "node": "登记审批恢复地址",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "登记审批恢复地址": {
       "main": [
         [
           {

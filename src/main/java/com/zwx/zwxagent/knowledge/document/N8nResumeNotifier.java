@@ -42,10 +42,10 @@ public class N8nResumeNotifier {
         this.reviewLogService = reviewLogService;
     }
 
-    public void triggerAsync(String tenantId, String agentKey, String documentId) {
+    public void triggerAsync(String documentId) {
         executor.submit(() -> {
             try {
-                trigger(tenantId, agentKey, documentId);
+                trigger(documentId);
             } catch (Exception exception) {
                 log.warn("n8n resume trigger crashed unexpectedly; documentId={}, reason={}",
                         documentId, exception.getMessage());
@@ -53,15 +53,46 @@ public class N8nResumeNotifier {
         });
     }
 
-    void trigger(String tenantId, String agentKey, String documentId) {
-        List<String> urls = jdbcTemplate.query("""
-                SELECT resume_webhook_url FROM agent_knowledge_document
-                WHERE id = ? AND resume_webhook_url IS NOT NULL
-                """, (rs, rowNum) -> rs.getString(1), documentId);
-        if (urls.isEmpty()) {
+    void trigger(String documentId) {
+        // 恢复 URL 由 n8n 案件在挂起前登记；小文档索引可能快过登记，因此查询随重试循环反复执行。
+        String[] row = null;
+        for (int attempt = 0; attempt <= RETRY_BACKOFF_MS.length && row == null; attempt++) {
+            if (attempt > 0) {
+                try {
+                    Thread.sleep(RETRY_BACKOFF_MS[attempt - 1]);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+            List<String[]> rows = jdbcTemplate.query("""
+                    SELECT tenant_id, agent_key, resume_webhook_url, filename,
+                           COALESCE(chunk_count, 0), COALESCE(parse_duration_ms, 0), COALESCE(vector_duration_ms, 0)
+                    FROM agent_knowledge_document
+                    WHERE id = ? AND resume_webhook_url IS NOT NULL
+                    """, (rs, rowNum) -> new String[]{rs.getString(1), rs.getString(2), rs.getString(3),
+                    rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7)}, documentId);
+            row = rows.isEmpty() ? null : rows.get(0);
+        }
+        if (row == null) {
+            log.warn("n8n resume abandoned: no resume URL registered after retries; documentId={}", documentId);
             return;
         }
-        String url = urls.get(0);
+        String tenantId = row[0];
+        String agentKey = row[1];
+        String url = row[2];
+        String body;
+        try {
+            body = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(java.util.Map.of(
+                    "phase", "finalize",
+                    "documentId", documentId,
+                    "filename", row[3] == null ? "" : row[3],
+                    "chunks", Integer.parseInt(row[4]),
+                    "parseMs", Integer.parseInt(row[5]),
+                    "vectorMs", Integer.parseInt(row[6])));
+        } catch (Exception exception) {
+            body = "{\"phase\":\"finalize\"}";
+        }
         for (int attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
             if (attempt > 0) {
                 try {
@@ -75,7 +106,7 @@ public class N8nResumeNotifier {
                 HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                         .timeout(Duration.ofSeconds(10))
                         .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString("{\"phase\":\"finalize\"}"))
+                        .POST(HttpRequest.BodyPublishers.ofString(body))
                         .build();
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() >= 200 && response.statusCode() < 300) {

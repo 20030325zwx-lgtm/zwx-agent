@@ -38,3 +38,10 @@
 - 改造：抽出 `storeVectors`（批大小 25 不变），加 `app.knowledge.index.embedding-parallelism` 并行旋钮 + 两阶段计时日志。**实测 4 路并行反而 125s**：撞 429 `Throttling.AllocationQuota`（该账号 embedding 配额低），重试拖慢——**默认回到 1（串行）**，配额充足的账号可调大。教训：远端配额是瓶颈时并行无用且有害。
 - 过程中遭遇 **OrbStack VM 卡死**（docker 全挂、新 DB 连接超时），`orbctl stop && orbctl start` 恢复，见 `docs/bugs/bug-2026-10-25-orbstack-vm-wedge.txt`。
 - G60 文档现状：用户已自行发布 → lifecycle ACTIVE、n8n 案件 #37 success 收尾；验证用副本（dd3cfdd4）及其案件 #38 已删除，n8n 保留 3 条案件（#35/#36/#37）。
+
+## 追加（同日再后续）：v2 案件三阶段回显
+
+- 用户反馈 v1 案件"只有等审批+收尾，看不到解析/切片/向量化"。v2 重构（见设计文档 §7）：**开案事件移到 upload**（status=INDEXING，autoPublish=true 也开案）；V24 持久化 `parse_duration_ms/vector_duration_ms`；`workflow-status` 追加指标；n8n 工作流改为双 Wait（等索引 30min + 等审批 7d），恢复后按状态分支，待审路径回显 **①文档解析 ②结构化切片 ③向量化入库** 三个带真实数据的节点。现网 id `lg86ItRGcoPJYgij`（旧 `hqrJUWFuFM1SgQhT` 已 unpublish）。
+- 过程中发现并修复缺陷：**小文件索引（0.6s）快过 n8n 登记恢复 URL（1-2s）导致案件卡在等索引**——`N8nResumeNotifier.trigger` 原来只在重试循环前查一次 URL；改为查询纳入重试循环（5s/15s/60s）。`triggerAsync` 签名收敛为 `triggerAsync(documentId)`（租户/agent 从库行读）。
+- v2 e2e：上传同秒开案（#40）→ 自动唤醒 → ①②③ 真实数据（0.1s / 1 切片 / 0.3s）→ 发布收尾 success；#39（卡住案件）经发布救回走"直接收尾"分支；n8n 来源（幂等键 n8n-*）不产生案件。测试文档已删（3 份），n8n 保留 #35-#40 六条案件记录。
+- 230 个测试全绿；Flyway 至 V24；后端已重启上线。

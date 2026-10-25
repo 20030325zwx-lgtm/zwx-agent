@@ -230,10 +230,13 @@ public class AiController {
     }
 
     @GetMapping("/agent-knowledge/documents/{documentId}/workflow-status")
-    public AgentKnowledgeDocument getWorkflowDocumentStatus(CurrentActor actor, @PathVariable String documentId,
+    public java.util.Map<String, Object> getWorkflowDocumentStatus(CurrentActor actor, @PathVariable String documentId,
                                                             @RequestParam String agentKey) {
         actor.requireKnowledgeWorkflowAccess(agentKey);
-        return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+        var document = agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
+        java.util.Map<String, Object> status = new java.util.LinkedHashMap<>(objectMapper.convertValue(document, java.util.Map.class));
+        status.putAll(agentKnowledgeDocumentService.indexMetrics(documentId));
+        return status;
     }
 
     @PostMapping("/agent-knowledge/documents/{documentId}/verify-retrieval")

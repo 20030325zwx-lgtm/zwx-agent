@@ -169,6 +169,10 @@ public class AgentKnowledgeDocumentService {
         if (!autoPublish) {
             jdbcTemplate.update("UPDATE agent_knowledge_document SET auto_publish = FALSE WHERE id = ?", id);
         }
+        // 案件在上传时即打开（n8n 侧随后登记阶段恢复地址，索引完成后由后端唤醒回填三阶段指标）
+        if (normalizedKey == null || !normalizedKey.startsWith("n8n-")) {
+            reviewEventNotifier.dispatchAsync(id, tenantId, agentKey, filename, nextVersion, createdBy);
+        }
         return document;
     }
 
@@ -297,15 +301,17 @@ public class AgentKnowledgeDocumentService {
                     WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
                     """, String.class, documentId, stored.tenantId(), stored.agentKey());
             if (!existingChunkIds.isEmpty()) vectorStore.delete(existingChunkIds);
+            long parseMs = System.currentTimeMillis() - indexStartedAt;
             log.info("knowledge index parse phase done: documentId={}, chunks={}, parser={}, took={}ms",
-                    documentId, chunks.size(), sourceMetadata.get("parser"), System.currentTimeMillis() - indexStartedAt);
-            storeVectors(chunks);
+                    documentId, chunks.size(), sourceMetadata.get("parser"), parseMs);
+            long vectorMs = storeVectors(chunks);
             jdbcTemplate.update("""
                     UPDATE agent_knowledge_document SET status = 'READY',
                         lifecycle_status = CASE WHEN ? IN ('INDEXING', 'FAILED') THEN 'READY' ELSE ? END,
                         error_message = NULL, next_retry_at = NULL,
-                        chunk_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?
-                    """, originalLifecycle, originalLifecycle, chunks.size(), documentId);
+                        chunk_count = ?, parse_duration_ms = ?, vector_duration_ms = ?,
+                        completed_at = CURRENT_TIMESTAMP WHERE id = ?
+                    """, originalLifecycle, originalLifecycle, chunks.size(), (int) parseMs, (int) vectorMs, documentId);
         } catch (Exception exception) {
             // 新版本索引失败标记 FAILED；已发布版本（ACTIVE/ARCHIVED）重建索引失败保持原状态，避免误下线
             jdbcTemplate.update("""
@@ -333,27 +339,36 @@ public class AgentKnowledgeDocumentService {
         }
     }
 
-    /** 待审提交统一出口：SUBMIT 审计 + n8n 待审事件；n8n ingestion 上传（幂等键 n8n-*）已有自己的监听执行，不重复开案件。 */
+    /** 待审提交统一出口：SUBMIT 审计 + 唤醒 n8n 案件回填索引阶段指标；n8n ingestion 上传（幂等键 n8n-*）有自己的工作流，不重复开案件。 */
     void notifyPendingReview(String documentId) {
         String[] scope = jdbcTemplate.queryForObject("""
-                SELECT tenant_id, agent_key, COALESCE(idempotency_key, ''), filename, version_no, created_by
+                SELECT tenant_id, agent_key, COALESCE(idempotency_key, '')
                 FROM agent_knowledge_document WHERE id = ?
-                """, (rs, rowNum) -> new String[]{rs.getString(1), rs.getString(2), rs.getString(3),
-                rs.getString(4), rs.getString(5), rs.getString(6)}, documentId);
-        String tenantId = scope[0];
-        String agentKey = scope[1];
-        reviewLogService.record(tenantId, agentKey, documentId, "SUBMIT", null, "SYSTEM",
+                """, (rs, rowNum) -> new String[]{rs.getString(1), rs.getString(2), rs.getString(3)}, documentId);
+        reviewLogService.record(scope[0], scope[1], documentId, "SUBMIT", null, "SYSTEM",
                 "索引完成，等待人工审核", null);
         if (!scope[2].startsWith("n8n-")) {
-            Integer versionNo = scope[4] == null ? null : Integer.valueOf(scope[4]);
-            reviewEventNotifier.dispatchAsync(documentId, tenantId, agentKey, scope[3], versionNo, scope[5]);
+            resumeNotifier.triggerAsync(documentId);
         }
+    }
+
+    /** 索引阶段指标，供 workflow-status 暴露给 n8n 案件回显三阶段耗时。 */
+    public java.util.Map<String, Integer> indexMetrics(String documentId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COALESCE(parse_duration_ms, 0), COALESCE(vector_duration_ms, 0), COALESCE(chunk_count, 0)
+                FROM agent_knowledge_document WHERE id = ?
+                """, (rs, rowNum) -> java.util.Map.of(
+                "parseDurationMs", rs.getInt(1),
+                "vectorDurationMs", rs.getInt(2),
+                "chunkCount", rs.getInt(3)), documentId);
     }
 
     /**
      * 向量写入：embedding 按批调用远端 API，批间并行压缩大文档的索引墙钟时间；任一批失败即整体失败（与原串行语义一致）。
+     *
+     * @return 向量阶段耗时（毫秒），随 READY 一并持久化供 n8n 案件回显
      */
-    void storeVectors(List<Document> chunks) {
+    long storeVectors(List<Document> chunks) {
         List<List<Document>> batches = new ArrayList<>();
         for (int start = 0; start < chunks.size(); start += BATCH_SIZE) {
             batches.add(chunks.subList(start, Math.min(start + BATCH_SIZE, chunks.size())));
@@ -384,9 +399,10 @@ public class AgentKnowledgeDocumentService {
                 pool.shutdown();
             }
         }
+        long vectorMs = System.currentTimeMillis() - startedAt;
         log.info("knowledge index vector phase done: chunks={}, batches={}, parallelism={}, took={}ms",
-                chunks.size(), batches.size(), batches.size() <= 1 ? 1 : embeddingParallelism,
-                System.currentTimeMillis() - startedAt);
+                chunks.size(), batches.size(), batches.size() <= 1 ? 1 : embeddingParallelism, vectorMs);
+        return vectorMs;
     }
 
     private List<Document> mineruChunks(byte[] bytes, StoredDocument stored,
@@ -556,7 +572,7 @@ public class AgentKnowledgeDocumentService {
             reviewLogService.record(stored.tenantId(), stored.agentKey(), documentId, "PUBLISH",
                     actor, channel, null, null);
         });
-        resumeNotifier.triggerAsync(stored.tenantId(), stored.agentKey(), documentId);
+        resumeNotifier.triggerAsync(documentId);
     }
 
     public void reject(String documentId, String reviewNote) {
@@ -577,7 +593,7 @@ public class AgentKnowledgeDocumentService {
             reviewLogService.record(stored.tenantId(), stored.agentKey(), documentId, "REJECT",
                     actor, channel, reviewNote == null ? "" : reviewNote.trim(), null);
         });
-        resumeNotifier.triggerAsync(stored.tenantId(), stored.agentKey(), documentId);
+        resumeNotifier.triggerAsync(documentId);
     }
 
     /**

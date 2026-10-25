@@ -48,10 +48,9 @@ class AgentKnowledgeDocumentVectorBatchTest {
         ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
         verify(vectorStore, times(3)).add(captor.capture());
         List<List<Document>> batches = captor.getAllValues();
+        // 并行下批次完成顺序不定，只断言批次大小集合
         assertThat(batches).hasSize(3);
-        assertThat(batches.get(0)).hasSize(25);
-        assertThat(batches.get(1)).hasSize(25);
-        assertThat(batches.get(2)).hasSize(10);
+        assertThat(batches.stream().mapToInt(List::size).sorted()).containsExactly(10, 25, 25);
         List<String> stored = batches.stream().flatMap(List::stream).map(Document::getText).sorted().toList();
         assertThat(stored).hasSize(60);
         for (int i = 0; i < 60; i++) assertThat(stored).contains("chunk-" + i);

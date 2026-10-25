@@ -69,7 +69,7 @@ public class N8nReviewEventNotifier {
             return;
         }
         ReviewEventPayload payload = new ReviewEventPayload(UUID.randomUUID().toString(), EVENT_TYPE, documentId,
-                tenantId, agentKey, filename, versionNo, submittedBy, "READY", Instant.now().toString());
+                tenantId, agentKey, filename, versionNo, submittedBy, "INDEXING", Instant.now().toString());
         executor.submit(() -> {
             try {
                 dispatch(payload);

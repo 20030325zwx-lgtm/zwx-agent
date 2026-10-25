@@ -20,7 +20,7 @@ class N8nReviewEventNotifierTest {
         N8nReviewEventNotifier notifier = new N8nReviewEventNotifier("http://127.0.0.1:5678/webhook/x", new long[]{0, 0, 0});
         N8nReviewEventNotifier.ReviewEventPayload payload = new N8nReviewEventNotifier.ReviewEventPayload(
                 "evt-1", N8nReviewEventNotifier.EVENT_TYPE, "doc-1", "default", "super",
-                "员工手册v3.pdf", 3, "admin", "READY", "2026-10-25T08:00:00Z");
+                "员工手册v3.pdf", 3, "admin", "INDEXING", "2026-10-25T08:00:00Z");
 
         String json = new ObjectMapper().writeValueAsString(notifier.payloadMap(payload));
 
@@ -28,6 +28,6 @@ class N8nReviewEventNotifierTest {
         assertThat(json).contains("\"documentId\":\"doc-1\"");
         assertThat(json).contains("\"filename\":\"员工手册v3.pdf\"");
         assertThat(json).contains("\"versionNo\":3");
-        assertThat(json).contains("\"status\":\"READY\"");
+        assertThat(json).contains("\"status\":\"INDEXING\"");
     }
 }

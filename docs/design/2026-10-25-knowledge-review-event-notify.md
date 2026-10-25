@@ -1,6 +1,6 @@
 # 知识文档待审事件推送 n8n（2026-10-25）
 
-> 状态：**已实施并验证**（2026-10-25 凌晨；后端事件推送、n8n 监听工作流 `hqrJUWFuFM1SgQhT`、前端"需人工审核"开关全部落地，happy/reject/负向 e2e 通过，测试文档已清理）。目标：UI 上传的知识文档进入待审（READY + 需人工审核）时，后端推送事件触发 n8n 监听工作流，让审批过程在 n8n 侧可视化——**一条执行 = 一份文件 = 一个案件**。审批决定权仍在后端实名 REVIEWER（见 `2026-10-24-knowledge-approval-entry.md`），n8n 只做"登记恢复地址 → 等待 → 查询真实状态 → 收尾"。
+> 状态：**已实施并验证**（2026-10-25 凌晨；v1 为 READY 开案，当日追加 v2 重构：**案件在上传时即打开，索引完成后由后端唤醒并回填三阶段指标**，见 §7。现网工作流 id `lg86ItRGcoPJYgij`）。目标：UI 上传的知识文档全过程在 n8n 侧可视化——**一条执行 = 一份文件 = 一个案件，画布呈现 ①文档解析 ②结构化切片 ③向量化入库 三个阶段**。审批决定权仍在后端实名 REVIEWER（见 `2026-10-24-knowledge-approval-entry.md`），n8n 只做"登记恢复地址 → 等待 → 查询真实状态 → 收尾"。
 
 ## 1. 背景
 
@@ -74,3 +74,24 @@ payload（POST JSON body）：
 - n8n 执行历史不作为全局看板；待办清单的权威视图仍是后端 `GET /agent-knowledge/documents`。
 - 不做审批超时提醒、对账兜底（仍是 `2026-10-24-knowledge-approval-entry.md` 的第二期遗留）。
 - n8n 侧去重不做：重复事件（重试）最多多一个等待执行，靠 7 天时限自愈收敛，试点量级可接受。
+
+## 7. v2 重构：案件覆盖全生命周期、三阶段回显（2026-10-25 追加）
+
+v1 的问题是案件在 READY 才打开，n8n 里看不到解析/切片/向量化过程。v2 改为：
+
+```
+上传 → 后端派"开案"事件（status=INDEXING）→ n8n 开案并登记阶段恢复地址 → Wait(30min)
+     → 索引完成 READY → 后端经 resume_webhook_url 唤醒案件
+     → n8n 查 workflow-status（已含索引指标）→
+         已生效/已退回（自动发布路径）→ 直接收尾
+         仍待审 → ①文档解析 ②结构化切片 ③向量化入库（真实耗时/切片数）→ 登记审批恢复地址 → Wait(7天)
+         → 发布/退回 → 后端唤醒 → 查状态 → 收尾
+```
+
+- **指标持久化**：V24 给 `agent_knowledge_document` 加 `parse_duration_ms` / `vector_duration_ms`（解析阶段含切片构建；向量化阶段含 PGVector 写入），由 `indexDocument` 的 READY 更新一并写入；`workflow-status` 响应追加 `parseDurationMs/vectorDurationMs/chunkCount`。
+- **三阶段展示数据以 workflow-status 为准**（状态优先原则不变），恢复 POST body 里的指标仅作冗余。
+- **小文件竞态**（索引 0.6s 快过 n8n 登记 URL 的 1-2s）：`N8nResumeNotifier.trigger` 把"查 URL"纳入重试循环（5s/15s/60s），查到才 POST——修复了 v2 首轮 e2e 发现的案件卡在等索引的缺陷。
+- **开案事件移到 upload**（幂等键非 n8n- 前缀即开案，含 autoPublish=true 的文档）；`notifyPendingReview` 只记 SUBMIT 审计 + 触发案件唤醒（同样仅非 n8n 来源，防止 resume 打进 ingestion 工作流的审批 Wait）。
+- `N8nResumeNotifier.triggerAsync` 签名收敛为 `triggerAsync(documentId)`，租户/agent 从库行读取；恢复 payload 携带 filename/chunks/parseMs/vectorMs。
+- 重建索引（ACTIVE/ARCHIVED 文档）不重复开案、不触发唤醒；FAILED 重试成功的文档没有开案（案件随 30 分钟超时止于失败态，属已知边界）。
+- v2 e2e：上传同秒开案 → 索引完成自动唤醒 → ①②③ 节点带真实数据（小文件 0.1s/1 切片/0.3s）→ 发布后收尾 success；n8n 来源上传不产生案件。

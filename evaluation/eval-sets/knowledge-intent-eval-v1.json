@@ -29,7 +29,7 @@
     { "id": "intent-008", "type": "intent", "question": "帮我写一份项目周报，保存成 word 文档", "expectedIntent": "工具任务", "notes": "生成文件" },
     { "id": "intent-009", "type": "intent", "question": "把这份事故数据整理成 PDF 报告", "expectedIntent": "工具任务", "notes": "文档处理" },
     { "id": "intent-010", "type": "intent", "question": "看看竞品最近发了什么新产品", "expectedIntent": "联网查询", "notes": "外部动态信息" },
-    { "id": "intent-011", "type": "intent", "question": "黑龙江省的省会是哪座城市", "expectedIntent": "闲聊问答", "notes": "按当前题面，常识问答归闲聊；虽然语料已收录该事实，但用户未表达查资料意图——此用例用于暴露题面模糊点，批 2 决策时重新评审" },
+    { "id": "intent-011", "type": "intent", "question": "黑龙江省的省会是哪座城市", "expectedIntent": "知识库问答", "notes": "2026-10-26 重评改标：人文地理语料已收录该事实，常识性问题命中私有知识库是更符合用户利益的行为（基线 r1 判知识库问答 1.0 属正确）；批 2 短路仅适用于 needs_knowledge 低且意图为闲聊的消息" },
     { "id": "intent-012", "type": "intent", "question": "根据G60沪昆高速的资料，分析镇胜线交通事故的原因", "expectedIntent": "知识库问答", "notes": "显式要求依据资料" },
 
     { "id": "rag-001", "type": "rag", "question": "黑龙江省的省会是哪座城市？", "agentKey": "test",

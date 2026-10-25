@@ -2,9 +2,11 @@
 
 ## 当前版本
 
-- 评测集：[knowledge-intent-eval-v1.json](./knowledge-intent-eval-v1.json)（2026-10-26，27 例：意图 12 + RAG 15）
-- 基线结果：[baseline-2026-10-26.json](./baseline-2026-10-26.json)（意图 11/12，RAG 15/15，qwen-plus 路由）
-- 基线脚本：[run_baseline.py](./run_baseline.py)（意图走 DashScope 兼容模式 + QwenIntentRouter 同款系统提示词；RAG 走 `POST /ai/agent-knowledge/documents/{id}/verify-retrieval`）
+- 评测集：[knowledge-intent-eval-v1.json](./knowledge-intent-eval-v1.json)（27 例：意图 12 + RAG 15；2026-10-26 intent-011 重评改标为知识库问答——语料已覆盖该常识事实，模型基线判断正确）
+- 基线：
+  - [baseline-2026-10-26.json](./baseline-2026-10-26.json)：r1（intent-011 改标前），意图 11/12、RAG 15/15
+  - [baseline-2026-10-26-r2.json](./baseline-2026-10-26-r2.json)：r2（当前标注下），**意图 12/12、RAG 15/15**
+- 基线脚本：[run_baseline.py](./run_baseline.py)（意图走 DashScope 兼容模式 + QwenIntentRouter 同款系统提示词；RAG 走 `POST /ai/agent-knowledge/documents/{id}/verify-retrieval`；`python3 run_baseline.py <输出路径>` 可指定结果文件）
 
 ## 用途
 
@@ -18,10 +20,10 @@
 - `test` 范围：人文地理语料 31 篇（源文件在 `data/knowledge/super-human-geography`，已入库，幂等键 `n8n-eval-corpus-*`，自动发布，共 218 切片）。RAG 用例 rag-001~012。
 - `super` 范围：员工手册（2024版）.pdf、G60 沪昆高速镇胜线交通事故梳理。RAG 用例 rag-013~015。
 
-## 基线要点（2026-10-26）
+## 基线要点
 
-- 意图平均延迟约 1.17s（qwen-plus，自报置信非校准）。
-- **intent-011"黑龙江省的省会是哪座城市"判为 FAIL 是评测集设计使然**：按当前题面"常识问答归闲聊"，但语料已收录该事实且模型判知识库问答（置信 1.0）——模型判断其实更符合用户利益。该用例的用途是暴露"常识性问题是否该走知识库"这一题面模糊点，批 2 决策时重新评审归属，可能改注为知识库问答或调整题面。
+- 意图平均延迟约 1.17s（qwen-plus，自报置信非校准）；r2 基线意图 12/12、RAG 15/15。
+- **intent-011 已于 2026-10-26 重评**：人文地理语料入库后，"省会城市"类常识事实命中私有知识库是更符合用户利益的行为，标注从闲聊问答改为知识库问答；批 2 短路条件相应收紧为 `intent=闲聊问答 && needsKnowledge < 0.3`，纯打招呼/讲笑话类不受影响。
 - RAG 15/15 全命中：当前向量检索 + 重排在显式事实型问题上表现良好，作为混合检索改造的对照基线。
 
 ## 维护规则

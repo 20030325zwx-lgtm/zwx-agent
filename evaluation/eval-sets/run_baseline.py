@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """评测集基线运行：意图 12 例（qwen-plus 同款提示词）+ RAG 15 例（verify-retrieval 实测）。"""
-import json, time, urllib.request, urllib.error
+import json, sys, time, urllib.request, urllib.error
 
 BASE = "http://127.0.0.1:8123/api"
+OUTPUT = sys.argv[1] if len(sys.argv) > 1 else "evaluation/eval-sets/baseline-2026-10-26.json"
 key = next(l.strip().split(":", 1)[1].strip() for l in open("src/main/resources/application-local.yml") if l.strip().startswith("api-key:"))
 
 # 登录拿 admin token
@@ -71,7 +72,7 @@ results["summary"] = {"intentPass": intent_pass, "intentTotal": len(results["int
                       "avgIntentLatencySeconds": round(sum(r.get("latencySeconds", 0) for r in results["intent"]) / max(1, len(results["intent"])), 2)}
 print("汇总：意图", intent_pass, "/", len(results["intent"]), "| RAG", rag_pass, "/", len(results["rag"]))
 
-with open("evaluation/eval-sets/baseline-2026-10-26.json", "w", encoding="utf-8") as f:
+with open(OUTPUT, "w", encoding="utf-8") as f:
     json.dump(results, f, ensure_ascii=False, indent=2)
     f.write("\n")
-print("written evaluation/eval-sets/baseline-2026-10-26.json")
+print("written", OUTPUT)

@@ -458,14 +458,10 @@ public class AiController {
             var effect = decision.applyTo(effectiveKnowledgeSearch, effectiveWebSearch);
             effectiveKnowledgeSearch = effect.knowledgeSearch();
             effectiveWebSearch = effect.webSearch();
-            String action = effect.action();
-            if (!imageObjectKeys.isEmpty() && !effectiveKnowledgeSearch) {
-                // 图片提问场景（如拍照合同/票据）：classify 只见文本，按业务约定强制开启知识库检索
-                effectiveKnowledgeSearch = true;
-                action += "；检测到图片附件，强制开启知识库检索";
-            }
+            // 图片消息与文本同规则：知识类意图按图片分析改写检索词检索；随便问则不检索，
+            // 由模型基于图片分析与自身知识直接作答（worker 知识约束已分级，未覆盖时不会草草结束）。
             prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "意图识别",
-                    "summary", decision.summary(action)));
+                    "summary", decision.summary(effect.action())));
         }
         AgentKnowledgeRagResult knowledge;
         McpTools mcpTools = null;

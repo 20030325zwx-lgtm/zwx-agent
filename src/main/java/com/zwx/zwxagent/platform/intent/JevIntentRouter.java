@@ -71,7 +71,9 @@ public class JevIntentRouter implements IntentRouter {
                 return Optional.empty();
             }
             Optional<IntentDecision> decision = Optional.of(parse(response.body(), latencyMs));
-            decision.ifPresent(value -> log.info("jev intent classified: {}", value.summary()));
+            decision.ifPresent(value -> log.info(
+                    "jev intent classified: intent={}, confidence={}, complexity={}, needsKnowledge={}, latencyMs={}",
+                    value.intent(), value.intentConfidence(), value.complexity(), value.needsKnowledge(), value.latencyMs()));
             return decision;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();

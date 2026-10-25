@@ -53,3 +53,8 @@
 - 配置 `app.intent.jev.*`（enabled/base-url/api-key/model/timeout-ms=1500）；**api-key 为空即实际禁用**——当前未配 Key，处于禁用态冒烟通过（SSE 正常、零 jev 调用）。**待用户从 console.typesafe.ai/keys 取 KEY 填入 `app.intent.jev.api-key` 后即生效**。
 - 测试 236 个全绿（新增 6 个：parse/buildRequest/决策表/禁用态/不可达端点降级/summary）。待办：批 1（自动开开关）待观察期数据；中文 criteria 措辞待真实消息校准。
 - **用户无法充值 TypeSafe → 追加 QwenIntentRouter 对照实现**（DashScope 兼容模式，复用现有 Key，LLM 自报置信非校准）；`IntentRouterConfig` 按 `app.intent.provider`（none/jev/qwen）选型，application-local.yml 已增量设 `provider: qwen` + `qwen.model: qwen-plus`（**qwen-turbo 在该账号被限流 429**）。实测 242 测试全绿；真实演示：闲聊→"闲聊问答 0.99/短路候选"，知识问题→"知识库问答 0.95/建议自动开检索"，延迟 1.1-1.3s。Jev 切换只改 provider=jev + 填 Key。
+
+## 追加（2026-10-26）：批 1 生效——意图结论反哺开关
+
+- 用户案例"查一下先维信息的员工年假有几天"暴露批 0 空转（意图 0.95 建议开检索但行为不变）。批 1 落地：`IntentDecision.applyTo()`（**只开不关**规则：用户已勾选=维持，未勾选命中=自动打开并在活动事件中写明"（原为关闭）"；短路候选/低置信维持）；`AiController.doChatWithManus` 的 classify **前移到检索/工具装配之前**，effectiveKnowledgeSearch/effectiveWebSearch 反哺 RAG 调用与 toolFactory；summary() 改为 `summary(action)` 携带实际动作；路由器日志改结构化字段（攒观察数据）。
+- e2e（qwen 路由）：不勾知识库问年假 → "已自动开启知识库检索（原为关闭）" + rag-trace 出现 + **命中《员工手册（2024版）.pdf》并答出年假天数规则带引用**（批 0 同问题回答"无法确认"）；闲聊 → "维持用户开关"、检索未误开。243 测试全绿。

@@ -3,6 +3,7 @@ package com.zwx.zwxagent.web.controller;
 import com.zwx.zwxagent.agent.execution.AgentRunSummary;
 import com.zwx.zwxagent.agent.execution.AgentRunView;
 import com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator;
+import com.zwx.zwxagent.platform.intent.IntentDecision;
 import com.zwx.zwxagent.platform.settings.AppConfigurationService;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
 import com.zwx.zwxagent.chat.conversation.AgentConversationMessage;
@@ -446,6 +447,20 @@ public class AiController {
             conversationLease.close();
             throw exception;
         }
+        // 意图分流（批 1 生效）：分类前移到检索/工具装配之前，recommend() 只把开关打开、不关闭用户显式勾选；
+        // 覆盖未勾选开关时在活动事件中明示。禁用/无 Key/失败 → 维持原开关，行为与未引入该功能一致。
+        boolean effectiveKnowledgeSearch = knowledgeSearch;
+        boolean effectiveWebSearch = webSearch;
+        String prefaceActivity = null;
+        var intentDecision = intentRouter.classify(message);
+        if (intentDecision.isPresent()) {
+            IntentDecision decision = intentDecision.get();
+            var effect = decision.applyTo(effectiveKnowledgeSearch, effectiveWebSearch);
+            effectiveKnowledgeSearch = effect.knowledgeSearch();
+            effectiveWebSearch = effect.webSearch();
+            prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "意图识别",
+                    "summary", decision.summary(effect.action())));
+        }
         AgentKnowledgeRagResult knowledge;
         McpTools mcpTools = null;
         ToolCallback[] availableTools;
@@ -477,11 +492,11 @@ public class AiController {
                 }
                 imageContext = contexts.toString();
             }
-            knowledge = knowledgeSearch
+            knowledge = effectiveKnowledgeSearch
                     ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, retrievalQuery)
                     : new AgentKnowledgeRagResult("", List.of());
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
-            availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId, webSearch)), Arrays.stream(mcpTools.callbacks()))
+            availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId, effectiveWebSearch)), Arrays.stream(mcpTools.callbacks()))
                     .toArray(ToolCallback[]::new);
             historyContext = agentConversationService
                     .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
@@ -499,10 +514,6 @@ public class AiController {
             conversationLease.close();
             throw exception;
         }
-        // 意图分流（批 0 观察模式）：禁用/无 Key/失败返回 empty，不影响任何现有行为
-        String prefaceActivity = intentRouter.classify(message)
-                .map(decision -> toJson(java.util.Map.of("phase", "plan", "agent", "意图识别", "summary", decision.summary())))
-                .orElse(null);
         McpTools activeMcpTools = mcpTools;
         String knowledgeContext = imageContext + knowledge.context();
         String agentMessage = imageContext.isBlank() ? message : message + "\n\n" + imageContext;

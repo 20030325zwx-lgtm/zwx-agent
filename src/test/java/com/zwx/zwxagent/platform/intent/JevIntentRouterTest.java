@@ -86,8 +86,32 @@ class JevIntentRouterTest {
     }
 
     @Test
-    void summaryIsHumanReadable() {
-        String summary = new IntentDecision("知识库问答", 0.92, 0.4, 0.66, 0.95, 88).summary();
-        assertThat(summary).contains("意图：知识库问答").contains("0.92").contains("自动开启知识库检索").contains("88ms");
+    void applyToTurnsOnUncheckedSwitchesAndNeverTurnsOffExplicitOnes() {
+        // AUTO_KNOWLEDGE：未勾选 → 自动打开；已勾选 → 维持
+        IntentDecision knowledge = new IntentDecision("知识库问答", 0.92, 0.4, 0.66, 0.95, 88);
+        IntentDecision.SwitchAdjustment autoOn = knowledge.applyTo(false, true);
+        assertThat(autoOn.knowledgeSearch()).isTrue();
+        assertThat(autoOn.webSearch()).isTrue();
+        assertThat(autoOn.action()).contains("已自动开启知识库检索").contains("原为关闭");
+        IntentDecision.SwitchAdjustment kept = knowledge.applyTo(true, false);
+        assertThat(kept.knowledgeSearch()).isTrue();
+        assertThat(kept.action()).contains("维持用户勾选");
+
+        // AUTO_WEB：未勾选 → 自动打开
+        IntentDecision web = new IntentDecision("联网查询", 0.8, 1.2, 0.6, 0.2, 10);
+        assertThat(web.applyTo(true, false).webSearch()).isTrue();
+        assertThat(web.applyTo(true, false).action()).contains("已自动开启联网搜索");
+
+        // 短路候选与低置信：一律维持用户开关
+        assertThat(new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 0.05, 10).applyTo(false, false).knowledgeSearch()).isFalse();
+        assertThat(new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 0.05, 10).applyTo(false, false).action()).contains("批 2 未启用");
+        assertThat(new IntentDecision("工具任务", 0.55, 1.5, 0.4, 0.3, 10).applyTo(false, false).action()).contains("维持用户开关");
+    }
+
+    @Test
+    void summaryFormatsActionAndLatency() {
+        IntentDecision knowledge = new IntentDecision("知识库问答", 0.92, 0.4, 0.66, 0.95, 88);
+        String summary = knowledge.summary(knowledge.applyTo(false, true).action());
+        assertThat(summary).contains("意图：知识库问答").contains("0.92").contains("已自动开启知识库检索").contains("88ms");
     }
 }

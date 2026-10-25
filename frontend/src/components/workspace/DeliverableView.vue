@@ -6,8 +6,6 @@
         <strong>{{ headline }}</strong>
       </div>
       <div class="head-badges">
-        <span v-if="verification.status === 'unverified'" class="badge warn">未验收</span>
-        <span v-else-if="verification.status === 'pass'" class="badge pass">已验收</span>
         <span v-if="files.length" class="badge files">{{ files.length }} 个文件</span>
       </div>
     </header>

@@ -58,3 +58,9 @@
 
 - 用户案例"查一下先维信息的员工年假有几天"暴露批 0 空转（意图 0.95 建议开检索但行为不变）。批 1 落地：`IntentDecision.applyTo()`（**只开不关**规则：用户已勾选=维持，未勾选命中=自动打开并在活动事件中写明"（原为关闭）"；短路候选/低置信维持）；`AiController.doChatWithManus` 的 classify **前移到检索/工具装配之前**，effectiveKnowledgeSearch/effectiveWebSearch 反哺 RAG 调用与 toolFactory；summary() 改为 `summary(action)` 携带实际动作；路由器日志改结构化字段（攒观察数据）。
 - e2e（qwen 路由）：不勾知识库问年假 → "已自动开启知识库检索（原为关闭）" + rag-trace 出现 + **命中《员工手册（2024版）.pdf》并答出年假天数规则带引用**（批 0 同问题回答"无法确认"）；闲聊 → "维持用户开关"、检索未误开。243 测试全绿。
+
+## 追加（2026-10-26）：修复"质检必不通过"链路 + 摘除未验收徽标
+
+- 用户报告：知识问答几乎必现"质检打回→返工→未二次验收→未验收"，子智能体无法一次做对。根因三层（见 `docs/bugs/bug-2026-10-26-worker-missing-original-request.txt`）：**planner 知识分支短路任务不含用户问题 + worker taskPrompt 不含用户原始请求**（worker 只能输出元声明"我将要……"）→ 质检必然打回 → 返工后 revision>=1 跳过二次验收 → 未验收。
+- 修复：WorkersNode.apply 读取 GraphState.INPUT 下发给每个 worker（taskPrompt 头部【用户原始请求】，对 LLM 多步规划同样生效）；PlannerNode 知识分支 detail 前缀"用户请求：{input}"；前端按用户要求摘除交付结果区"未验收/已验收"徽标与任务头"未验收"chip（RunInspector 诊断保留）。
+- e2e：同一问题第一轮 worker 直接给出完整答案（带引用）→ "结果通过验收"单轮通过、零返工，run verification=pass。243 测试全绿 + 前端构建通过。返工路径保留为安全网；"返工后不二次验收"的有界成本设计未变。

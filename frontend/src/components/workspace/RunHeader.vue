@@ -11,7 +11,6 @@
         <span v-if="run?.plan?.length" class="meta-chip">{{ doneCount }}/{{ run.plan.length }} 子任务</span>
         <span v-if="run?.createdAt" class="meta-chip">{{ formattedTime }}</span>
         <span v-if="elapsedLabel" class="meta-chip" :class="{ running: run?.status === 'RUNNING' }">{{ elapsedLabel }}</span>
-        <span v-if="run?.verification?.status === 'unverified'" class="meta-chip warn">未验收</span>
         <span v-if="run?.resumeCount" class="meta-chip">已恢复 {{ run.resumeCount }} 次</span>
       </div>
     </div>

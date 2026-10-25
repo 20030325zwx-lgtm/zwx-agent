@@ -83,6 +83,9 @@ public class WorkersNode implements NodeAction {
                 .map(value -> (List<PlanStep>) value)
                 .orElse(List.of());
         String feedback = state.value(GraphState.VERIFICATION_FEEDBACK, "");
+        // 用户原始请求必须下发给每个 worker：planner 的任务标题/要求可能不含具体问题，
+        // 缺了它 worker 只能输出"我将要……"式的元描述，质检必然打回（2026-10-26 修复）。
+        String originalRequest = state.value(GraphState.INPUT, "");
         BooleanSupplier stopCheck = context == null ? () -> false : context.stopCheck();
         String runKey = context == null || context.conversationId() == null
                 ? java.util.UUID.randomUUID().toString() : context.conversationId();
@@ -113,7 +116,7 @@ public class WorkersNode implements NodeAction {
             events.add(startEvent);
             streamEvent(activitySink, startEvent);
             FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
-                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck, context, runKey, activitySink));
+                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck, context, runKey, activitySink, originalRequest));
             futures.add(task);
             activeTasks.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(task);
             try {
@@ -173,7 +176,8 @@ public class WorkersNode implements NodeAction {
 
     private WorkerOutcome runWorker(PlanStep step, int stepNumber, ToolCallback[] allTools,
                                     String feedback, ChatClient sharedClient, BooleanSupplier stopCheck,
-                                    RunContext runContext, String runKey, Consumer<ActivityEvent> activitySink) {
+                                    RunContext runContext, String runKey, Consumer<ActivityEvent> activitySink,
+                                    String originalRequest) {
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             return WorkerOutcome.stopped(step.title());
         }
@@ -209,7 +213,8 @@ public class WorkersNode implements NodeAction {
             worker.stopForClientDisconnect();
         }
         try {
-            String taskPrompt = "子任务标题：" + step.title() + "\n子任务要求：" + step.detail()
+            String taskPrompt = (originalRequest == null || originalRequest.isBlank() ? "" : "【用户原始请求】\n" + originalRequest + "\n\n")
+                    + "子任务标题：" + step.title() + "\n子任务要求：" + step.detail()
                     + (knowledge.isBlank() ? "" : "\n\n" + knowledgePrompt(knowledge));
             log.info("启动 {}：{}", worker.getName(), step.title());
             String runLog = worker.run(taskPrompt);

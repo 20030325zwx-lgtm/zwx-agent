@@ -48,7 +48,7 @@ public class PlannerNode implements NodeAction {
         String history = state.value(GraphState.HISTORY, "");
         if (!knowledge.isBlank()) {
             List<PlanStep> plan = List.of(new PlanStep("依据私有知识回答", WorkerRole.GENERAL,
-                    "仅依据本轮检索到的私有知识片段回答用户请求；不要联网或用工具寻找替代资料。"
+                    "用户请求：" + input + "。仅依据本轮检索到的私有知识片段直接作答；不要联网或用工具寻找替代资料。"
                             + "关键结论引用 [文件名#切片号]；资料未明确支持的内容说明无法确认。"));
             String activity = "检索到私有知识，交由单个通用工作者依据资料回答";
             log.info(activity);

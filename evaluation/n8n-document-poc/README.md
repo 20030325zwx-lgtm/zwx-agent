@@ -1,6 +1,22 @@
 # n8n document workflow pilot
 
-An isolated, localhost-only n8n deployment for comparing workflow authoring and operations with the Flowable pilot. Data is stored in its own named volume. `document-ingestion-pilot.json` is the mock; `document-ingestion-live.json` connects to the local Aster backend.
+An isolated, localhost-only n8n deployment for comparing workflow authoring and operations with the Flowable pilot. Data is stored in its own named volume. `document-ingestion-pilot.json` is the mock; `document-ingestion-live.json` connects to the local Aster backend; `document-review-watch.json` listens for pending-review events pushed by the backend (see `docs/design/2026-10-25-knowledge-review-event-notify.md`).
+
+## Document review watch workflow (backend event push)
+
+`document-review-watch.json` makes UI-uploaded documents visible in n8n: one execution = one file = one case. The backend dispatches a `knowledge.review.pending` event (documentId/filename/versionNo/submittedBy) from `N8nReviewEventNotifier` when an indexed document reaches `READY` with `autoPublish=false` and no `n8n-` prefixed idempotency key. The workflow registers its Wait resume URL with the backend (`resume-info`, WORKFLOW service account now allowed for agent `test` and `super` in tenant `default`), pauses up to 7 days (`limitWaitTime`), and after any resume — backend callback or time limit — queries `workflow-status` and finalizes only from the backend's authoritative `lifecycleStatus` (`ACTIVE`/`REJECTED` → success; still pending → `Stop and Error` with the documentId). The status-first design self-heals the race where approval happens before the resume URL is registered, and converges stale watchers left by re-indexing.
+
+Import and activate (new workflow, generates a fresh id):
+
+```sh
+docker cp document-review-watch.json aster-n8n-pilot-n8n-1:/tmp/
+docker exec aster-n8n-pilot-n8n-1 n8n import:workflow --input=/tmp/document-review-watch.json --projectId=U7PVZEh5wHym3aau
+# read the printed new workflow id, then:
+docker exec aster-n8n-pilot-n8n-1 n8n publish:workflow --id=<newId>
+docker restart aster-n8n-pilot-n8n-1
+```
+
+The workflow reuses the existing `Aster Workflow Service` Basic credential. Review events require `app.notify.n8n.review-webhook-url` on the backend (pointing at `http://127.0.0.1:5678/webhook/aster-document-review-notify`); leave it empty to disable the push.
 
 ## Start
 

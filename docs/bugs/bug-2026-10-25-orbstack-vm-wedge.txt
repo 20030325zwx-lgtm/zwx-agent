@@ -1,0 +1,12 @@
+日期：2026-10-25
+问题现象：docker exec / docker ps 全部挂起（>60s 无响应）；宿主负载 11~15 但无 CPU 大户；
+  后端应用正常（走已建立的 Hikari 连接），但 PG 拒绝新连接（mvn test 的 Flyway 报
+  "Unable to obtain connection: Read timed out"）；OrbStack 应用自身进程空闲、控制面响应正常。
+影响范围：本机全部容器（postgres/minio/n8n/image-mcp）的 docker API 不可用，测试无法连库。
+原因：OrbStack VM 内 docker daemon 卡死（运行时 wedged），触发点不明（宿主 62 天未重启）。
+  典型识别特征：应用层"老连接可用、新连接超时" + docker CLI 全量挂起 + 无明显 CPU 占用。
+解决方式：orbctl stop && orbctl start（干净停机，卷数据无损）。重启后 4 个容器全部自动恢复；
+  postgres 容器未手动干预即回来（OrbStack 恢复容器状态）。
+验证结果：pg_isready 正常、后端 health ok、mvn test 230 个全绿。
+后续注意事项：遇到"docker 命令集体挂起 + 新建 DB 连接超时"先怀疑 VM 卡死，
+  不要先重启应用；orbctl restart 是首选恢复手段。若复发，考虑排查宿主 VPN（aTrust）/内核状态或重启宿主。

@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import com.zwx.zwxagent.knowledge.document.AgentKnowledgeChunkPreview.TableRegion;
 
 @Service
@@ -48,6 +50,13 @@ public class AgentKnowledgeDocumentService {
     private final TransactionTemplate txTemplate;
     private final AgentKnowledgeReviewLogService reviewLogService;
     private final N8nResumeNotifier resumeNotifier;
+    private final N8nReviewEventNotifier reviewEventNotifier;
+
+    // 向量批间并行度：默认 1（串行）。DashScope embedding 配额（TPM）是真实瓶颈，
+    // 并行只会提前触发 429 Throttling.AllocationQuota 反而更慢（2026-10-25 实测：4 路并行 125s vs 串行 ~80s）；
+    // 配额充足的账号可调大。字段注入避免构造器继续加长，手工构造的单测取初始值。
+    @Value("${app.knowledge.index.embedding-parallelism:1}")
+    int embeddingParallelism = 1;
 
     public AgentKnowledgeDocumentService(OssClientProvider ossClientProvider,
                                          @Value("${app.oss.bucket}") String bucket, JdbcTemplate jdbcTemplate,
@@ -61,7 +70,8 @@ public class AgentKnowledgeDocumentService {
                                          @Value("${app.document-parser.provider:mineru}") String documentParserProvider,
                                          PlatformTransactionManager transactionManager,
                                          AgentKnowledgeReviewLogService reviewLogService,
-                                         N8nResumeNotifier resumeNotifier) {
+                                         N8nResumeNotifier resumeNotifier,
+                                         N8nReviewEventNotifier reviewEventNotifier) {
         this.ossClientProvider = ossClientProvider;
         this.bucket = bucket;
         this.jdbcTemplate = jdbcTemplate;
@@ -78,6 +88,7 @@ public class AgentKnowledgeDocumentService {
         this.txTemplate = new TransactionTemplate(transactionManager);
         this.reviewLogService = reviewLogService;
         this.resumeNotifier = resumeNotifier;
+        this.reviewEventNotifier = reviewEventNotifier;
     }
 
     /**
@@ -235,6 +246,7 @@ public class AgentKnowledgeDocumentService {
             return;
         }
         if (originalLifecycle == null) return;
+        long indexStartedAt = System.currentTimeMillis();
         try {
             jdbcTemplate.update("UPDATE agent_knowledge_document SET status = 'INDEXING', index_attempts = index_attempts + 1, "
                     + "error_message = NULL, next_retry_at = NULL WHERE id = ?", documentId);
@@ -285,7 +297,9 @@ public class AgentKnowledgeDocumentService {
                     WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
                     """, String.class, documentId, stored.tenantId(), stored.agentKey());
             if (!existingChunkIds.isEmpty()) vectorStore.delete(existingChunkIds);
-            for (int start = 0; start < chunks.size(); start += BATCH_SIZE) vectorStore.add(chunks.subList(start, Math.min(start + BATCH_SIZE, chunks.size())));
+            log.info("knowledge index parse phase done: documentId={}, chunks={}, parser={}, took={}ms",
+                    documentId, chunks.size(), sourceMetadata.get("parser"), System.currentTimeMillis() - indexStartedAt);
+            storeVectors(chunks);
             jdbcTemplate.update("""
                     UPDATE agent_knowledge_document SET status = 'READY',
                         lifecycle_status = CASE WHEN ? IN ('INDEXING', 'FAILED') THEN 'READY' ELSE ? END,
@@ -315,12 +329,64 @@ public class AgentKnowledgeDocumentService {
                         .warn("Auto publish failed for document {}, stays READY: {}", documentId, exception.getMessage());
             }
         } else if (!autoPublish) {
-            String[] scope = jdbcTemplate.queryForObject(
-                    "SELECT tenant_id, agent_key FROM agent_knowledge_document WHERE id = ?",
-                    (rs, rowNum) -> new String[]{rs.getString(1), rs.getString(2)}, documentId);
-            reviewLogService.record(scope[0], scope[1], documentId, "SUBMIT", null, "SYSTEM",
-                    "索引完成，等待人工审核", null);
+            notifyPendingReview(documentId);
         }
+    }
+
+    /** 待审提交统一出口：SUBMIT 审计 + n8n 待审事件；n8n ingestion 上传（幂等键 n8n-*）已有自己的监听执行，不重复开案件。 */
+    void notifyPendingReview(String documentId) {
+        String[] scope = jdbcTemplate.queryForObject("""
+                SELECT tenant_id, agent_key, COALESCE(idempotency_key, ''), filename, version_no, created_by
+                FROM agent_knowledge_document WHERE id = ?
+                """, (rs, rowNum) -> new String[]{rs.getString(1), rs.getString(2), rs.getString(3),
+                rs.getString(4), rs.getString(5), rs.getString(6)}, documentId);
+        String tenantId = scope[0];
+        String agentKey = scope[1];
+        reviewLogService.record(tenantId, agentKey, documentId, "SUBMIT", null, "SYSTEM",
+                "索引完成，等待人工审核", null);
+        if (!scope[2].startsWith("n8n-")) {
+            Integer versionNo = scope[4] == null ? null : Integer.valueOf(scope[4]);
+            reviewEventNotifier.dispatchAsync(documentId, tenantId, agentKey, scope[3], versionNo, scope[5]);
+        }
+    }
+
+    /**
+     * 向量写入：embedding 按批调用远端 API，批间并行压缩大文档的索引墙钟时间；任一批失败即整体失败（与原串行语义一致）。
+     */
+    void storeVectors(List<Document> chunks) {
+        List<List<Document>> batches = new ArrayList<>();
+        for (int start = 0; start < chunks.size(); start += BATCH_SIZE) {
+            batches.add(chunks.subList(start, Math.min(start + BATCH_SIZE, chunks.size())));
+        }
+        long startedAt = System.currentTimeMillis();
+        if (batches.size() <= 1 || embeddingParallelism <= 1) {
+            batches.forEach(vectorStore::add);
+        } else {
+            ExecutorService pool = Executors.newFixedThreadPool(embeddingParallelism, runnable -> {
+                Thread thread = new Thread(runnable, "knowledge-embedding");
+                thread.setDaemon(true);
+                return thread;
+            });
+            try {
+                List<java.util.concurrent.Future<?>> futures = new ArrayList<>(batches.size());
+                for (List<Document> batch : batches) futures.add(pool.submit(() -> vectorStore.add(batch)));
+                for (java.util.concurrent.Future<?> future : futures) future.get();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                pool.shutdownNow();
+                throw new IllegalStateException("Vector indexing interrupted", interrupted);
+            } catch (java.util.concurrent.ExecutionException executionException) {
+                pool.shutdownNow();
+                Throwable cause = executionException.getCause() == null ? executionException : executionException.getCause();
+                throw cause instanceof RuntimeException runtimeException ? runtimeException
+                        : new IllegalStateException("Vector batch failed", cause);
+            } finally {
+                pool.shutdown();
+            }
+        }
+        log.info("knowledge index vector phase done: chunks={}, batches={}, parallelism={}, took={}ms",
+                chunks.size(), batches.size(), batches.size() <= 1 ? 1 : embeddingParallelism,
+                System.currentTimeMillis() - startedAt);
     }
 
     private List<Document> mineruChunks(byte[] bytes, StoredDocument stored,

@@ -15,7 +15,11 @@
           <ChevronDown :size="14" />
         </label>
         <button class="icon-button" type="button" title="刷新" aria-label="刷新" :disabled="loading" @click="loadDocuments(true)"><RefreshCw :size="16" :class="{ spinning: loading }" /></button>
+        <label class="manual-review-toggle" :class="{ checked: manualReview }" title="勾选后文档索引完成不自动发布，需审批通过才生效，并会推送 n8n 待审案件">
+          <input v-model="manualReview" type="checkbox" :disabled="uploading" />需人工审核
+        </label>
         <button class="primary-button" type="button" :disabled="uploading" @click="startUpload"><Upload :size="16" />{{ uploading ? '上传中' : '上传资料' }}</button>
+        <p v-if="flashMessage" class="upload-flash" role="status">{{ flashMessage }}</p>
         <input ref="fileInput" class="visually-hidden" type="file" accept=".md,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" @change="onFileSelected" />
       </div>
     </header>
@@ -175,6 +179,14 @@ const statusFilter = ref('ALL')
 const expandedGroups = ref(new Set())
 const loading = ref(false)
 const uploading = ref(false)
+const manualReview = ref(false)
+const flashMessage = ref('')
+let flashTimer = null
+const showFlash = message => {
+  flashMessage.value = message
+  if (flashTimer) window.clearTimeout(flashTimer)
+  flashTimer = window.setTimeout(() => { flashMessage.value = '' }, 6000)
+}
 const savingCategory = ref(false)
 const creatingCategory = ref(false)
 const categoryNameDraft = ref('')
@@ -330,7 +342,8 @@ const onFileSelected = async event => {
   uploading.value = true
   error.value = ''
   try {
-    const created = await uploadAgentKnowledgeDocument(agentKey.value, selectedFile, categoryId)
+    const created = await uploadAgentKnowledgeDocument(agentKey.value, selectedFile, categoryId, manualReview.value)
+    showFlash(manualReview.value ? '已提交人工审核：索引完成后进入待审，审批通过才对检索生效' : '上传成功，索引完成后自动发布')
     await loadDocuments()
     const createdGroup = fileGroups.value.find(group => group.versions.some(version => version.id === created.id))
     if (createdGroup?.versions.length > 1) expandedGroups.value = new Set([...expandedGroups.value, createdGroup.key])
@@ -462,6 +475,10 @@ onBeforeUnmount(() => { if (refreshTimer) window.clearInterval(refreshTimer) })
 .page-header p { margin: 0; color: var(--sk-label-2); font-size: 12px; }
 .eyebrow { display: flex; align-items: center; gap: 5px; color: var(--zwx-primary); font-size: 10px; line-height: 1.4; font-weight: 800; letter-spacing: 1px; }
 .header-actions, .agent-select { display: flex; align-items: center; gap: 8px; }
+.manual-review-toggle { display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 10px; border: 1px solid var(--sk-separator); border-radius: 999px; font-size: 11px; color: var(--sk-text-secondary, #5b6472); cursor: pointer; user-select: none; }
+.manual-review-toggle input { accent-color: #6d5bd0; cursor: pointer; }
+.manual-review-toggle.checked { border-color: #6d5bd0; color: #6d5bd0; font-weight: 600; }
+.upload-flash { margin: 0; font-size: 11px; color: #2e7d32; max-width: 220px; line-height: 1.35; }
 .agent-select { height: 40px; min-width: 178px; padding: 0 10px; border: 1px solid var(--sk-separator); border-radius: 7px; background: var(--sk-surface); }
 .agent-select > span:first-child { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 6px; background: var(--zwx-primary-soft); color: var(--zwx-primary); }
 .agent-copy { display: grid; flex: 1; gap: 1px; }.agent-copy small { color: var(--sk-label-3); font-size: 9px; }.agent-copy select { max-width: 142px; border: 0; outline: 0; background: transparent; color: var(--sk-label); font-size: 12px; font-weight: 650; }

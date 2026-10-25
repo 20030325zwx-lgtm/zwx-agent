@@ -113,6 +113,10 @@ app:
       enabled: true
       model: gte-rerank-v2
       timeout-ms: 1200
+  notify:
+    n8n:
+      # 知识文档进入待审时推送 n8n 监听工作流（document-review-watch）；留空禁用事件推送
+      review-webhook-url: ${APP_NOTIFY_N8N_REVIEW_WEBHOOK_URL:}
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}

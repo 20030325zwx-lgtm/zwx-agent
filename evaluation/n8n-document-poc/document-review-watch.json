@@ -1,0 +1,298 @@
+{
+  "name": "Aster 文档待审监听（真实业务）",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aster-document-review-notify",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "1d5f716b-418e-4848-8812-8df55ba98642",
+      "name": "接收待审事件",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "82aa2df4-cb50-4d76-b8d4-67c95e9e8fd2",
+      "position": [
+        -380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8123/api/auth/token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uIzyXF4W3Pavv6a1",
+          "name": "Aster Workflow Service"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "id": "c0307167-5a83-4c1c-9a69-28344e719003",
+      "name": "获取工作流令牌",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('接收待审事件').first().json.body.documentId }}/resume-info?agentKey={{ $('接收待审事件').first().json.body.agentKey }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { resumeUrl: $execution.resumeUrl, n8nExecutionId: String($execution.id) } }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {},
+      "id": "f12dacda-b779-43d1-97ec-596c303f121b",
+      "name": "登记恢复地址",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        60,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "options": {},
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": 7,
+        "resumeUnit": "days"
+      },
+      "id": "b6f53748-dc03-49d5-a96b-0e8947222bdf",
+      "name": "等待审批决定",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "webhookId": "f1cdd9cc-6130-40a3-ae77-f48629136ca6",
+      "position": [
+        280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://host.docker.internal:8123/api/ai/agent-knowledge/documents/{{ $('接收待审事件').first().json.body.documentId }}/workflow-status?agentKey={{ $('接收待审事件').first().json.body.agentKey }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('获取工作流令牌').first().json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {},
+      "id": "fb6bbb72-ba6d-48a3-b459-7247b5337e26",
+      "name": "查询审批结果",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e2f6698b-4b33-498e-af6a-4475edbf74df",
+              "leftValue": "={{ $json.lifecycleStatus === 'ACTIVE' || $json.lifecycleStatus === 'REJECTED' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "typeValidation": "loose",
+        "options": {}
+      },
+      "id": "9d55d0a0-8927-440f-9ec1-e4c48ff717cb",
+      "name": "审批已有结果？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "695ad33f-9b79-40d7-875f-7d6d6d70f667",
+              "name": "documentId",
+              "value": "={{ $('接收待审事件').first().json.body.documentId }}",
+              "type": "string"
+            },
+            {
+              "id": "a91958e2-e7be-438c-9684-1b58c49ba730",
+              "name": "finalStatus",
+              "value": "={{ $json.lifecycleStatus }}",
+              "type": "string"
+            },
+            {
+              "id": "acf4b7ef-df87-4e83-b168-14cc5899f063",
+              "name": "message",
+              "value": "审批决定已由 Aster 后端实名落库，n8n 仅收尾",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1a69c787-bc54-45f4-9cdd-7c5f041831d1",
+      "name": "流程收尾",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        940,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=等待审批超时（7 天）或流程未完成；documentId={{ $('接收待审事件').first().json.body.documentId }}，当前状态={{ $json.lifecycleStatus }}"
+      },
+      "id": "148b702a-6a3f-41f1-9577-b78ae925b839",
+      "name": "等待审批超时，执行失败",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        940,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "接收待审事件": {
+      "main": [
+        [
+          {
+            "node": "获取工作流令牌",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取工作流令牌": {
+      "main": [
+        [
+          {
+            "node": "登记恢复地址",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "登记恢复地址": {
+      "main": [
+        [
+          {
+            "node": "等待审批决定",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "等待审批决定": {
+      "main": [
+        [
+          {
+            "node": "查询审批结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询审批结果": {
+      "main": [
+        [
+          {
+            "node": "审批已有结果？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "审批已有结果？": {
+      "main": [
+        [
+          {
+            "node": "流程收尾",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "等待审批超时，执行失败",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

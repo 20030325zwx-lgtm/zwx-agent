@@ -1,0 +1,13 @@
+日期：2026-10-25
+问题现象：新增 N8nReviewEventNotifier 后 mvn test 中 4 个 @SpringBootTest 上下文加载失败，报
+  "Failed to instantiate [N8nReviewEventNotifier]: No default constructor found"，
+但该类 @Value 构造器完整存在；错误信息同时指向 "AgentKnowledgeDocumentService 2.class"。
+影响范围：所有 @SpringBootTest（contextLoads、ZwxManusTest、WebSearchToolTest、PgVectorVectorStoreConfigTest）。
+原因：target/classes 里残留 207 个 macOS/IDE 复制产生的 "X 2.class" 陈旧重复类（src 无对应文件）。
+  Spring 组件扫描按字节码内部类名读取了旧副本（如 AgentKnowledgeDocumentService 2.class），
+  其中的旧构造器签名与新代码冲突，导致 Bean 实例化走了错误构造器。
+解决方式：find target/classes target/test-classes -name "* 2.class" -delete 后重跑，上下文恢复正常。
+  （与 2026-10-24 Flyway 迁移残留 target/classes 旧副本属同类问题。）
+验证结果：mvn test 228 个测试全绿（0 失败 0 错误 1 跳过）。
+后续注意事项：IDE 里复制过源文件后如遇"构造器明明存在却报 No default constructor"，
+  先查 target/classes 是否有 " 2.class" 残留；必要时 mvn clean 再构建。

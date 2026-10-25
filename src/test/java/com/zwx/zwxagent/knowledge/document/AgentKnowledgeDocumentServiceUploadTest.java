@@ -48,7 +48,7 @@ class AgentKnowledgeDocumentServiceUploadTest {
                 mock(DocumentParsingModule.class), mock(DoclingServeChunkingService.class), mock(MineruDocumentParser.class),
                 mock(MineruBlockParser.class), mock(StructuredKnowledgeChunker.class), new com.fasterxml.jackson.databind.ObjectMapper(),
                 "mineru", mock(PlatformTransactionManager.class), mock(AgentKnowledgeReviewLogService.class),
-                mock(N8nResumeNotifier.class));
+                mock(N8nResumeNotifier.class), mock(N8nReviewEventNotifier.class));
 
         service.upload("default", "love", new MockMultipartFile("file", "sample.md", "text/markdown", "# Test\nKnowledge content".getBytes()), "admin");
 

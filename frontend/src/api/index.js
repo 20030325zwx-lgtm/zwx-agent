@@ -133,10 +133,11 @@ export const fetchAuthBlobUrl = async path => {
   return URL.createObjectURL(response.data)
 }
 
-export const uploadAgentKnowledgeDocument = (agentKey, file, categoryId = null) => {
+export const uploadAgentKnowledgeDocument = (agentKey, file, categoryId = null, autoPublish = true) => {
   const formData = new FormData()
   formData.append('agentKey', agentKey)
   if (categoryId) formData.append('categoryId', categoryId)
+  formData.append('autoPublish', String(autoPublish))
   formData.append('file', file)
   return request.post('/ai/agent-knowledge/documents', formData).then(response => response.data)
 }

@@ -28,7 +28,7 @@
 
 ## 遗留事项
 
-1. 未配 `SEARCH_API_API_KEY` 前 web_search 走 DuckDuckGo 兜底（国内常不可达，工具返回指引）；key 与主项目 `search-api.api-key` 同源，配置方法见 ACCEPTANCE §5。
+1. ~~未配 `SEARCH_API_API_KEY` 前 web_search 走 DuckDuckGo 兜底~~ **已解决（2026-10-26 下午，见下方追加）**：服务自动读取本仓库 `search-api.api-key`，无需再单独配 key。
 2. kb 组默认无 token，会收到 401/403 指引；配 `ASTER_AGENT_TOKEN`（需知识库权限账号）后可用。
 3. db 组未配 `ASTER_DB_URL`（凭据在 application-local.yml，未复制进新仓库——凭用户按 ACCEPTANCE §5 自行注入）。
 4. SSE 端点暂无鉴权（内网部署前提）；github 写操作、web_crawl、Streamable HTTP 为后续路线（设计文档 §5）。
@@ -38,3 +38,25 @@
 - 服务常驻中：`/Users/zhuwenxuan/Desktop/agent/aster-mcp`，端口 8124（与 8123 主服务、8127 图片、8128 文档 MCP 不冲突）。
 - 重启/停止：`./scripts/launchctl.sh restart|stop`；构建前先 stop 亦可（端口占用仅警告不影响）。
 - 明早验收直接看 `aster-mcp/docs/ACCEPTANCE.md`（5 分钟路径）。
+
+## 追加：搜索 key 单一来源（2026-10-26 下午）
+
+**改动内容**（全部在 `aster-mcp` 仓库，主仓库仍零代码改动）
+- `aster-agent/src/main/resources/application.yml`：新增 `spring.config.import: optional:file:${ASTER_MAIN_LOCAL_YML:~/Desktop/agent/yu-ai-agent/src/main/resources/application-local.yml}`；web 组改为
+  `provider: ${SEARCH_API_PROVIDER:${search-api.provider:searchapi}}`、`api-key: ${SEARCH_API_API_KEY:${search-api.api-key:}}`。
+  优先级=本服务显式环境变量 → 主项目同名配置 → 内置默认；密钥不复制进 aster-mcp 任何文件（遵守本仓库"不外抄 secret"约束）。
+- README（配置表 + 新增「密钥单一来源」小节 + 已知边界 2）、docs/ACCEPTANCE.md（§5 搜索行改为"已默认生效"、§6 排查行）同步。
+
+**为什么不做成 shell 注入**：`launchctl submit` 的作业里 `bash scripts/xxx.sh` 会被 macOS 以 `Operation not permitted`（exit 126）拒绝执行 `~/Desktop` 下的脚本，而直接 `exec java -jar` 可以；因此把读取动作放进 Spring 配置层，launchctl/run.sh/IDE 三种启动方式都天然生效，脚本保持原样。
+
+**验证结果**
+- `./scripts/build.sh` 通过；`./scripts/launchctl.sh install` 后 health UP，PID 91697。
+- `GET /` 配置状态显示 `provider tavily 已配置 key`（tavily 来自主项目本地配置，不是本服务默认 searchapi）。
+- stdio 实调 `web_search`（query=Spring AI MCP server 1.1 release）：`isError=false`，返回 spring.io 等真实结果，不再走 DuckDuckGo 兜底。
+
+**遗留事项**
+- db 组沿用同样机制在技术上可行（导入的文件已含 `spring.datasource.*`），但**故意没做**：当前 SSE 端点无鉴权，自动接上主库凭据等于开一个无鉴权的库查询入口。顺序应为"先补入站 token 校验 → 再考虑 db"。
+- kb 组 `ASTER_AGENT_TOKEN` 仍需人工登录换取；`ASTER_AGENT_KEY` 默认 `test`（n8n ingestion 试点范围，`CurrentActor` 同时接受 `test`/`super`），要看超级智能体的知识库需显式设为 `super`。
+
+**环境注意事项**
+- 主项目 `application-local.yml` 仍是只读引用：不修改、不提交、不打印值；换 key 只需改主项目那一份，本服务重启即跟随。

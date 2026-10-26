@@ -135,6 +135,13 @@ app:
       max-concurrent-runs: ${APP_RUN_QUOTA_CONCURRENT:2}
       hourly-runs: ${APP_RUN_QUOTA_HOURLY:30}
       daily-token-budget: ${APP_RUN_QUOTA_TOKEN_BUDGET:2000000}
+  retention:
+    # 数据保留（默认关闭）：清理执行事件、瘦身过期 run 大字段、清理工具调用账本；删除属破坏性操作
+    enabled: ${APP_RETENTION_ENABLED:false}
+    execution-event-days: ${APP_RETENTION_EVENT_DAYS:90}
+    run-detail-days: ${APP_RETENTION_RUN_DETAIL_DAYS:180}
+    tool-call-days: ${APP_RETENTION_TOOL_CALL_DAYS:365}
+    cron: "0 30 3 * * *"
   rag:
     rerank:
       # 总开关：false 或未配置 DashScope api-key 时自动降级为向量原始顺序

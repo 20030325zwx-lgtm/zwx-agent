@@ -99,7 +99,12 @@ export const connectSSE = (url, params, onMessage, onError) => {
         signal: controller.signal
       })
       if (!response.ok || !response.body) {
-        const error = new Error(`SSE request failed with status ${response.status}`)
+        let detail = `SSE request failed with status ${response.status}`
+        try {
+          const node = JSON.parse(await response.text())
+          if (node?.message) detail = node.message
+        } catch { /* 非 JSON 响应保留默认文案 */ }
+        const error = new Error(detail)
         error.status = response.status
         throw error
       }

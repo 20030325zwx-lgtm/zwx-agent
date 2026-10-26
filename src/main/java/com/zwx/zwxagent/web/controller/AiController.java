@@ -144,6 +144,9 @@ public class AiController {
     private com.zwx.zwxagent.agent.observability.AgentMetrics agentMetrics;
 
     @Resource
+    private com.zwx.zwxagent.agent.execution.RunQuotaService runQuotaService;
+
+    @Resource
     private BuiltInSkillRegistry builtInSkillRegistry;
 
     @Resource
@@ -438,6 +441,8 @@ public class AiController {
                                       @RequestParam(required = false) List<String> imageObjectKey,
                                       @RequestParam(required = false) String clientRequestId) {
         agentConversationService.ensureConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
+        // 每用户配额：并发 run / 小时频率 / 24h token 预算，超限 429（在会话锁之前，快速拒绝）
+        runQuotaService.checkRunAllowed(actor.userId());
         var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
         if (conversationLease == null) throw new com.zwx.zwxagent.chat.conversation.ConversationBusyException();
         long userMessageId;
@@ -656,6 +661,8 @@ public class AiController {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.CONFLICT, "This run has already finished");
         }
+        // 恢复同样受并发与频率约束：续跑会继续消耗模型与工具成本
+        runQuotaService.checkRunAllowed(actor.userId());
         var conversationLease = conversationLockManager.tryAcquire(
                 actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
         if (conversationLease == null) throw new com.zwx.zwxagent.chat.conversation.ConversationBusyException();

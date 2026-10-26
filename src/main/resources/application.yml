@@ -128,6 +128,13 @@ app:
       enabled: ${APP_TOOLS_CONFIRMATION_ENABLED:true}
       # 需要确认的工具名；mcp:* 表示全部 MCP 动态工具。文件/PDF 产出是交付物，默认不拦截
       required-tools: ${APP_TOOLS_CONFIRMATION_REQUIRED:executeTerminalCommand,executeDatabaseQuery,queryExternalDatabase,downloadResource,mcp:*}
+  run:
+    quota:
+      # 每用户配额限流：并发 run 数 / 每小时新建 run 数 / 24 小时 token 预算（0 关闭 token 口径）
+      enabled: ${APP_RUN_QUOTA_ENABLED:true}
+      max-concurrent-runs: ${APP_RUN_QUOTA_CONCURRENT:2}
+      hourly-runs: ${APP_RUN_QUOTA_HOURLY:30}
+      daily-token-budget: ${APP_RUN_QUOTA_TOKEN_BUDGET:2000000}
   rag:
     rerank:
       # 总开关：false 或未配置 DashScope api-key 时自动降级为向量原始顺序

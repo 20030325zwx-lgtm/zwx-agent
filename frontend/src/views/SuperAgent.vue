@@ -629,10 +629,26 @@ const attachManusStream = (stream, answerIndex) => {
       messages.value[answerIndex].content += event.data
     }
   }
-  stream.onerror = () => handleManusStreamError(answerIndex)
+  stream.onerror = error => handleManusStreamError(answerIndex, error)
 }
-const handleManusStreamError = answerIndex => {
+const handleManusStreamError = (answerIndex, error) => {
   const answer = messages.value[answerIndex]
+  // 配额拒绝（429）：不重连，直接把服务端原因展示给用户
+  if (error?.status === 429) {
+    eventSource?.close()
+    eventSource = null
+    activeTurnStart = -1
+    connectionStatus.value = 'error'
+    const reason = error.message || '触发用量配额限制，请稍后再试'
+    if (answer && !answer.content) answer.content = reason
+    if (activeRun.value) {
+      activeRun.value.status = 'FAILED'
+      activeRun.value.canCancel = false
+      activeRun.value.canResume = false
+    }
+    settleCompanion('error', reason, 4000)
+    return
+  }
   const lastEventId = eventSource?.lastEventId || null
   eventSource?.close()
   eventSource = null

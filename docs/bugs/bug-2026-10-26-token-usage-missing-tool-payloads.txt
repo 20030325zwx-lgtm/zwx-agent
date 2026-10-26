@@ -1,0 +1,19 @@
+日期：2026-10-26
+问题现象：新建的 token 计量台账里，worker 一段 avgMessageChars=435，却对应 promptTokens≈10700/次；
+  字符量与真实 token 数差 20 倍以上，计量数据无法解释成本去向，按它排序优化方向会全错。
+影响范围：TokenUsageAdvisor 的全部构成字段（messageChars/messageCount 之外的工具载荷完全漏计）；
+  连带使"该收敛工具 schema / 该压缩历史 / 该上缓存"的优先级判断失去依据。
+原因：Spring AI 的消息实现里，工具循环最重的两段都不在 getText() 中——
+  1) ToolResponseMessage.getText() 返回空串，真实结果在 getResponses()[i].responseData()；
+  2) 携带工具调用的 AssistantMessage.getText() 也是空，参数在 getToolCalls()[i].arguments()。
+  advisor 第一版按 Message::getText 逐条求长度，正好把这两段读成 0，于是"每轮整段重发的工具结果"在台账上隐身。
+解决方式：TokenUsageAdvisor.observe() 增加 toolResultChars 维度，除 getText() 外显式累加
+  AssistantMessage.getToolCalls() 的 name+arguments 与 ToolResponseMessage.getResponses() 的 name+responseData；
+  TokenUsageService.CallSample/Phase 同步补 avgToolResultChars / maxToolResultChars，前端「用量」标签页展示。
+  同一 getText() 盲点在 MemoryCompressionHook.totalChars() 里造成更严重的后果，另见
+  bug-2026-10-26-memory-compression-never-fires.txt。
+验证结果：TokenUsageAdvisorTest 5 例、TokenUsageServiceTest 4 例全绿；补计后同题重跑得到自洽分解
+  （worker·调研员#1：工具结果 33637 字/次，占提示词字符量 89%，单次 37763 字 ≈ 9937 prompt token，
+   与 Usage 回报值同量级），详见 docs/design/2026-10-26-token-usage-accounting.md 第 3 节。
+后续注意事项：任何按字符量给消息定预算的代码都不能只调 getText()；
+  本项目已出现两处同类盲点，新增记账/截断/摘要逻辑时优先复用 totalChars 或 TokenUsageAdvisor 的计数写法。

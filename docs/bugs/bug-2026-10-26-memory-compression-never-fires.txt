@@ -1,0 +1,39 @@
+日期：2026-10-26
+问题现象：工作记忆压缩自 2026-10 起配置为开启（app.agent.memory.compression-enabled=true、context-budget=24000、
+  recent-keep=6），但超级智能体联网调研一轮实测到 worker 单次提示词 37763 字、峰值 65065 字仍从未压缩，
+  日志里没有一条 [memory] 工作记忆压缩完成。等于"设计了刹车却没接上皮带"。
+影响范围：所有走 ToolCallAgent 工具循环的 worker 子任务——一次联网调研 62k prompt token 中 95% 来自这一段，
+  且随步数近似平方增长；planner/verifier/aggregator 无工具循环，不受影响。
+原因（两处叠加，任一单独修好都不生效）：
+  1) 预算指标读不到真实体量：MemoryCompressionHook.totalChars() 只累加 Message.getText()，
+     而 ToolResponseMessage.getText() 为空、工具参数在 AssistantMessage.getToolCalls() 里（同类盲点见
+     bug-2026-10-26-token-usage-missing-tool-payloads.txt）。3 万字的工具结果被算成几百字，
+     beforeThink 的 totalChars(history) <= contextBudget 恒成立，压缩判断永远提前返回。
+  2) 活引用被换掉：BaseAgent.newRunContext() 把 messageList 字段引用交给 hook 上下文（注释即"转换型 hook 经它改写消息历史"），
+     但 ToolCallAgent.act() 原先执行 setMessageList(toolExecutionResult.conversationHistory()) 整体替换字段。
+     即使压缩触发，history.subList().clear() 改的是已经脱离的旧 List，agent 下一步用的仍是新列表——压缩结果被丢弃。
+     hook 管线在 Spring 上下文里装配（AgentHooks.install），单测中 pipeline() 为 null，所以这两条都无法被既有单测发现。
+解决方式：
+  1) totalChars() 补计工具载荷：AssistantMessage 的 toolCalls.name+arguments、ToolResponseMessage 的 responses.name+responseData；
+  2) act() 改调 replaceHistory()（ToolCallAgent.java:223、251），原地 clear()+addAll() 保持 List 实例不变；
+     同时 act() 里 hook 改写工具结果后的回写分支由"复制新表再 setMessageList"改为 history.set(size-1, ...) 原地替换；
+  3) 全仓核查确认 setMessageList 只剩 replaceHistory 的空表兜底分支一处，其余站点（ToolCallAgent:125/156/279、ZwxManus:50）
+     均为原地 add()，活引用契约在全仓成立。
+验证结果：MemoryCompressionHookTest 由 5 例增至 7 例全绿——
+  新增 totalCharsCountsToolPayloadsInvisibleToGetText（同一份历史 getText() 求和 < 100 字，
+  totalChars 必须等于 responseData+name+arguments 之和，锁死第 1 条回归）与
+  toolHeavyHistoryOverBudgetTriggersCompression（8 组"助手工具调用+工具响应"超预算时 beforeThink 真的压缩、
+  摘要落到表头，锁死第 2 条的判断链路）；既有 5 例（含工具配对不拆散、LLM 失败降级、预算内不动）不回归。
+  后端全量 254 项测试通过（0 失败 0 错误 1 跳过）。
+  真实生效证据：重启后首次出现 [memory] 工作记忆压缩完成 日志（一轮调研内触发 3 次，均为"摘要 已注入"），
+  修复前该日志在同类任务里从未出现过一次。worker 单次调用的工具结果字数由 33637 降到 12708~21622（−36%~−62%），
+  单次调用 prompt 由 9937 降到 4622~6729。
+  但整轮成本未稳定下降：同一道题重跑 3 次为 75652 / 88583 / 47765 prompt token（基线 62494），
+  差异主要来自 worker 调用轮数（基线 6 轮 → 8/9/16 轮）与规划器把 1 个子任务变 2 个后触发的返工，
+  返工一次的成本（+1.2 万~+2.6 万）足以吃掉压缩收益。压缩导致的轮数膨胀与来源链接丢失（某次返工的质检意见
+  正是"缺少 Redis 诞生背景与许可证节点"）尚需用固定评测集判定，未在本条修复范围内结论化。
+后续注意事项：
+  - 压缩生效后每次压缩会多一次摘要 LLM 调用（输入按 MAX_BLOCK_CHARS=12000 截断，摘要注入 ≤800 字），
+    净收益为正的前提是历史体量远超预算——若未来把 context-budget 调小，需重新核对这次调用是否反而划算；
+  - ToolResultTruncationHook 只截单条结果（8000 字/条），对"多轮累计"没有约束，不能替代压缩；两者叠加才是完整防线；
+  - hook 上下文里的 messageHistory 是活引用契约：任何新增代码不得对 agent 的消息历史做整体替换赋值。

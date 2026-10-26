@@ -220,7 +220,7 @@ public class ToolCallAgent extends ReActAgent {
         Prompt prompt = new Prompt(getMessageList(), this.chatOptions);
         ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(prompt, toolCallChatResponse);
         // 记录消息上下文，conversationHistory 已经包含了助手消息和工具调用返回的结果
-        setMessageList(toolExecutionResult.conversationHistory());
+        replaceHistory(toolExecutionResult.conversationHistory());
         ToolResponseMessage toolResponseMessage = (ToolResponseMessage) CollUtil.getLast(toolExecutionResult.conversationHistory());
         List<ToolExecution> executions = new java.util.ArrayList<>(toolResponseMessage.getResponses().stream()
                 .map(response -> new ToolExecution(response.name(), toolArguments(response.name()), response.responseData()))
@@ -231,20 +231,32 @@ public class ToolCallAgent extends ReActAgent {
             AgentHooks.pipeline().fireAfterToolCalls(runContext, executions);
             if (!executions.equals(beforeHooks)) {
                 toolResponseMessage = rebuildToolResponseMessage(toolResponseMessage, executions);
-                List<Message> history = new java.util.ArrayList<>(getMessageList());
+                List<Message> history = getMessageList();
                 history.set(history.size() - 1, toolResponseMessage);
-                setMessageList(history);
             }
         }
         lastToolExecutions = executions;
-        if (AgentHooks.pipeline() != null) {
-            AgentHooks.pipeline().fireAfterToolCalls(runContext, lastToolExecutions);
-        }
         String results = toolResponseMessage.getResponses().stream()
                 .map(response -> "工具 " + response.name() + " 返回的结果：" + response.responseData())
                 .collect(Collectors.joining("\n"));
         log.info(results);
         return results;
+    }
+
+    /**
+     * 原地替换消息历史，保持 List 实例不变。
+     * BaseAgent 会把同一个 List 引用交给 hook 上下文（工作记忆压缩/注入靠它改写历史），
+     * 一旦整体替换字段，hook 改到的就是已经脱离的旧列表，压缩永远不会生效。
+     */
+    private void replaceHistory(List<Message> conversationHistory) {
+        List<Message> live = getMessageList();
+        if (live == null) {
+            setMessageList(new java.util.ArrayList<>(conversationHistory));
+            return;
+        }
+        List<Message> copy = new java.util.ArrayList<>(conversationHistory);
+        live.clear();
+        live.addAll(copy);
     }
 
     /** 从模型响应中提取计划调用的工具（可变视图，供 hook 审查与转换）。 */

@@ -95,13 +95,31 @@ public class MemoryCompressionHook implements AgentHook {
         return blockEnd;
     }
 
+    /**
+     * 历史总字符数。必须计入工具载荷：ToolResponseMessage.getText() 是空的，
+     * 真正的体量在 responses[].responseData 与助手消息的 toolCalls.arguments 里，
+     * 只算 getText() 会把 3 万字的工具结果读成几百字，预算永远触发不了。
+     */
     static int totalChars(List<Message> history) {
         int total = 0;
         for (Message message : history) {
-            String text = message.getText();
-            total += text == null ? 0 : text.length();
+            total += textLength(message.getText());
+            if (message instanceof AssistantMessage assistant) {
+                for (AssistantMessage.ToolCall call : assistant.getToolCalls()) {
+                    total += textLength(call.name()) + textLength(call.arguments());
+                }
+            }
+            if (message instanceof ToolResponseMessage toolResponse) {
+                for (ToolResponseMessage.ToolResponse response : toolResponse.getResponses()) {
+                    total += textLength(response.name()) + textLength(response.responseData());
+                }
+            }
         }
         return total;
+    }
+
+    private static int textLength(String value) {
+        return value == null ? 0 : value.length();
     }
 
     static String serialize(List<Message> block) {

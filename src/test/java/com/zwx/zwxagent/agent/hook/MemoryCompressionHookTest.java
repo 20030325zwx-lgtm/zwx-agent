@@ -94,6 +94,42 @@ class MemoryCompressionHookTest {
         assertTrue(MemoryCompressionHook.totalChars(history) <= 24000);
     }
 
+    @Test
+    void totalCharsCountsToolPayloadsInvisibleToGetText() {
+        String payload = "搜索结果正文".repeat(1000);
+        List<Message> history = new ArrayList<>();
+        history.add(new UserMessage("子任务"));
+        history.add(new AssistantMessage("", Map.of(),
+                List.of(new AssistantMessage.ToolCall("t1", "function", "searchWeb", "{\"query\":\"valkey\"}"))));
+        history.add(new ToolResponseMessage(List.of(
+                new ToolResponseMessage.ToolResponse("t1", "searchWeb", payload)), Map.of()));
+
+        int plainText = history.stream().mapToInt(message -> message.getText().length()).sum();
+        assertTrue(plainText < 100, "工具结果的 getText() 本身读不到正文，这正是旧口径失效的原因");
+        assertEquals(payload.length() + "searchWeb".length() * 2 + "{\"query\":\"valkey\"}".length() + "子任务".length(),
+                MemoryCompressionHook.totalChars(history));
+    }
+
+    @Test
+    void toolHeavyHistoryOverBudgetTriggersCompression() {
+        List<Message> history = new ArrayList<>();
+        history.add(new UserMessage("子任务"));
+        for (int i = 0; i < 8; i++) {
+            history.add(new AssistantMessage("", Map.of(),
+                    List.of(new AssistantMessage.ToolCall("t" + i, "function", "searchWeb", "{\"q\":" + i + "}"))));
+            history.add(new ToolResponseMessage(List.of(new ToolResponseMessage.ToolResponse(
+                    "t" + i, "searchWeb", "结果正文".repeat(1500))), Map.of()));
+        }
+        int before = MemoryCompressionHook.totalChars(history);
+        assertTrue(before > 24000, "8 轮搜索结果的真实规模应远超预算：" + before);
+
+        hook("已检索到 Redis 与 Valkey 的许可差异").beforeThink(AgentRunContext.builder().messageHistory(history).build());
+
+        assertTrue(MemoryCompressionHook.totalChars(history) < before, "预算判定必须看见工具载荷并据此压缩");
+        assertTrue(history.getFirst() instanceof UserMessage
+                && ((UserMessage) history.getFirst()).getText().startsWith(MemoryCompressionHook.SUMMARY_PREFIX));
+    }
+
     private static void assertUserMessageWithText(Message message, String expected) {
         assertTrue(message instanceof UserMessage);
         assertEquals(expected, ((UserMessage) message).getText());

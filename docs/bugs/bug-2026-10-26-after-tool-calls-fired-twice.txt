@@ -1,0 +1,27 @@
+日期：2026-10-26
+问题现象：每次工具执行完成后，afterToolCalls 切点被触发两次。实测库证据：run 95ccf075-8d7d-4019-bdbb-3ab64be08009
+  同一分钟内 12 次 searchWeb 调用留下 24 条 phase='tool' 轨迹事件，按 (summary, detail) 分组每条恰好 2 次。
+  凡在 afterToolCalls 里做记账/计费/计数或写轨迹的逻辑都会翻倍。
+影响范围：所有注册了 afterToolCalls 的 hook——ExecutionTraceHook 的轨迹事件翻倍；ToolResultTruncationHook 因截断幂等
+  未表现出错误，但"转换型 hook 第二次改写的结果不会回写消息历史"是语义漏洞：第一次改的结果已落进历史，
+  第二次改的只作用在 lastToolExecutions 上，模型实际收到的仍是第一次的结果——同一切点两次触发给出两套结论。
+  单测环境下 AgentHooks.pipeline() 为 null，切点全程 no-op，因此该重复无法被单测发现。
+原因：ToolCallAgent.act() 里存在两处 fireAfterToolCalls 调用——
+  一处包在 `if (AgentHooks.pipeline() != null)` 内、位于"hook 原地修改 → 回写消息历史"分支之前（保留的一处，ToolCallAgent.java:231）；
+  另一处在其后 `lastToolExecutions = executions;` 之后重复触发。两处都走同一个 runContext、同一份 executions，
+  后加的一处未与回写分支合并，形成重复。
+解决方式：删除 `lastToolExecutions = executions;` 之后的重复触发块，保留带"修改检测 + 原地回写"的那一次；
+  该块同时把回写路径从"复制新 List 再 setMessageList"改为 history.set(size-1, …) 原地替换
+  （整体替换会切断 hook 的活引用，见 bug-2026-10-26-memory-compression-never-fires.txt）。
+  现在 act() 全路径只有一处 fireAfterToolCalls，且改完必回写。
+验证结果：ToolCallAgentHookTest 3 例 + MemoryCompressionHookTest 7 例 + TokenUsageAdvisorTest 5 例 +
+  TokenUsageServiceTest 4 例 + BaseAgentTerminationTest 4 例 + AgentRunViewTest 2 例全绿，
+  后端全量测试套件通过；改动后 act() 内 fireAfterToolCalls 出现次数由 2 降为 1。
+  待重启后的真实重跑再核对：同一道题的 tool 轨迹事件数应等于真实工具调用数，不再翻倍。
+后续注意事项：
+  - 本次未加 act() 的重复触发单测：ToolCallAgent 不在 Spring 上下文时 pipeline() 为 null，act() 又依赖
+    ToolCallingManager 从 chatOptions 解析 callback，构造桩成本高且脆；改以"全仓唯一一处调用点"作为静态保证，
+    并用真实重跑的轨迹条数作验收。
+  - 顺带发现：超级智能体（graph）路径下 agent_execution_event 完全没有事件——今日三个 agent_run 的轨迹行数均为 0，
+    说明 ExecutionTraceHook 依赖的 context.runId() 在图执行路径里没被赋值。属独立的未接线问题，未在本次修复范围内，
+    记入 docs/context/session-2026-10-26-token-usage-accounting.md 遗留事项。

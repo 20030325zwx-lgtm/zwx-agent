@@ -24,7 +24,7 @@
           <template v-if="activeRun">
             <RunHeader :run="activeRun" :goal="activeGoal" :has-conversation="messages.length > 0" :refreshing="refreshingRun"
               @resume="resumeActiveRun" @cancel="stopGeneration" @open-conversation="conversationOpen = true"
-              @refresh="refreshActiveRun" />
+              @refresh="refreshActiveRun" @export="exportRun" />
             <div v-if="activeRun.canDecideConfirmation && activeRun.pendingConfirmations?.length"
               class="confirmation-banner" role="status">
               <span class="confirmation-text">
@@ -129,7 +129,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import { BookOpen, ChevronDown, Database, Globe2, MessageSquare, PanelRightOpen, Workflow } from 'lucide-vue-next'
 import AgentCompanion from '../components/AgentCompanion.vue'
@@ -145,10 +145,11 @@ import RunInspector from '../components/workspace/RunInspector.vue'
 import RunPhases from '../components/workspace/RunPhases.vue'
 import RunTimeline from '../components/workspace/RunTimeline.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
-import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listWorkspaceFiles, uploadManusImage } from '../api'
+import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listManusWebSources, listWorkspaceFiles, uploadManusImage } from '../api'
 
 useHead({ title: '超级智能体 - Aster', meta: [{ name: 'description', content: 'Aster 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
+const route = useRoute()
 const messages = ref([])
 const chatId = ref('')
 const conversations = ref([])
@@ -358,7 +359,7 @@ const refreshConversations = async () => {
   try { conversations.value = await listManusConversations() }
   finally { historyLoading.value = false }
 }
-const loadRunsForConversation = async conversationId => {
+const loadRunsForConversation = async (conversationId, preferredRunId = null) => {
   if (!conversationId) {
     activeRun.value = null
     activeAnswerIndex.value = -1
@@ -372,7 +373,8 @@ const loadRunsForConversation = async conversationId => {
       activeAnswerIndex.value = -1
       return
     }
-    const detail = await getManusRun(conversationId, runs[0].id)
+    const chosenId = preferredRunId && runs.some(run => run.id === preferredRunId) ? preferredRunId : runs[0].id
+    const detail = await getManusRun(conversationId, chosenId)
     if (chatId.value !== conversationId) return
     const index = messages.value.findIndex(message => !message.isUser
       && ((detail.assistantMessageId != null && String(message.id) === String(detail.assistantMessageId))
@@ -821,9 +823,67 @@ watch(conversationOpen, open => {
 })
 const useTemplate = prompt => composerRef.value?.submit(prompt)
 const resendMessage = ({ content }) => sendMessage(content)
+// 任务结果导出：把计划、事件、回答、引用与联网参考组装为 Markdown 下载（纯客户端，不落服务端）
+const exportRun = async () => {
+  const run = activeRun.value
+  if (!run?.id || !chatId.value) return
+  try {
+    const [detail, webSources] = await Promise.all([
+      getManusRun(chatId.value, run.id),
+      listManusWebSources(chatId.value, run.id).catch(() => [])
+    ])
+    const lines = []
+    lines.push(`# 任务结果：${(detail.input || '').slice(0, 80)}`)
+    lines.push('')
+    lines.push(`- Run ID：${detail.id}`)
+    lines.push(`- 状态：${detail.status} · 验收：${detail.verification?.status || '—'}`)
+    lines.push(`- 时间：${detail.createdAt || '—'} ~ ${detail.updatedAt || '—'}`)
+    if (detail.plan?.length) {
+      lines.push('')
+      lines.push('## 计划')
+      detail.plan.forEach(step => lines.push(`- [${step.roleLabel || step.role}] ${step.title}`))
+    }
+    if (detail.events?.length) {
+      lines.push('')
+      lines.push('## 执行过程')
+      detail.events.forEach(event => lines.push(`- (${event.phase || ''}/${event.agent || ''}) ${event.summary || ''}`))
+    }
+    lines.push('')
+    lines.push('## 最终回答')
+    lines.push(activeAnswer.value || '（无回答）')
+    const ragSources = (activeRagTrace.value?.candidates || []).filter(candidate => candidate.selected)
+    if (ragSources.length) {
+      lines.push('')
+      lines.push('## 知识库引用')
+      ragSources.forEach(source => lines.push(`- ${source.filename || ''}#${source.chunkIndex ?? ''}`))
+    }
+    if (webSources.length) {
+      lines.push('')
+      lines.push('## 联网参考')
+      webSources.forEach(source => lines.push(`- [${source.title || source.url}](${source.url})`))
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `aster-run-${(run.id || 'result').slice(0, 8)}.md`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Unable to export run:', error)
+  }
+}
 onMounted(async () => {
   await refreshConversations()
-  if (conversations.value.length) await selectConversation(conversations.value[0])
+  // run 深链：/super-agent?conversationId=…&runId=…（首页任务流/分享入口）
+  const queryRunId = typeof route.query.runId === 'string' ? route.query.runId : ''
+  const queryConversationId = typeof route.query.conversationId === 'string' ? route.query.conversationId : ''
+  const linkedConversation = queryConversationId
+    ? conversations.value.find(conversation => conversation.id === queryConversationId) : null
+  if (linkedConversation) {
+    await selectConversation(linkedConversation)
+    if (queryRunId) await loadRunsForConversation(queryConversationId, queryRunId)
+  } else if (conversations.value.length) await selectConversation(conversations.value[0])
   else await createConversation()
   if (!messages.value.length && !activeRun.value) {
     setCompanion('listening', '你好，我是星枢，有什么可以帮你？')

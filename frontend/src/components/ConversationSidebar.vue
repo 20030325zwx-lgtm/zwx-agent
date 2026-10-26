@@ -9,19 +9,26 @@
     <div class="conversation-list" aria-label="历史会话">
       <p v-if="loading" class="history-state">正在加载...</p>
       <p v-else-if="!conversations.length" class="history-state">还没有历史对话</p>
-      <div v-for="conversation in conversations" :key="conversation.id" class="conversation-row">
-        <button class="conversation-item" :class="{ active: conversation.id === activeId }" type="button" :title="conversation.title" @click="$emit('select', conversation)">
-          <span class="conversation-title">{{ conversation.title }}</span>
-          <span class="conversation-time">{{ formatUpdatedAt(conversation.updatedAt) }}</span>
-        </button>
-        <button class="delete-button" type="button" title="删除会话" aria-label="删除会话" @click.stop="$emit('delete', conversation)">×</button>
-      </div>
+      <template v-else>
+        <template v-for="group in groupedConversations" :key="group.label">
+          <div class="group-label">{{ group.label }}</div>
+          <div v-for="conversation in group.items" :key="conversation.id" class="conversation-row">
+            <button class="conversation-item" :class="{ active: conversation.id === activeId }" type="button" :title="conversation.title" @click="$emit('select', conversation)">
+              <span class="conversation-title">{{ conversation.title }}</span>
+              <span class="conversation-time">{{ formatUpdatedAt(conversation.updatedAt) }}</span>
+            </button>
+            <button class="delete-button" type="button" title="删除会话" aria-label="删除会话" @click.stop="$emit('delete', conversation)">×</button>
+          </div>
+        </template>
+      </template>
     </div>
   </aside>
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   conversations: { type: Array, default: () => [] },
   activeId: { type: String, default: '' },
   loading: { type: Boolean, default: false },
@@ -32,6 +39,25 @@ defineProps({
 })
 
 defineEmits(['create', 'select', 'delete', 'close'])
+
+// 按时间分组：今天 / 最近 7 天 / 更早（后端已按 updatedAt 倒序返回）
+const groupedConversations = computed(() => {
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const weekAgo = startOfToday - 6 * 24 * 3600 * 1000
+  const groups = [
+    { label: '今天', items: [] },
+    { label: '最近 7 天', items: [] },
+    { label: '更早', items: [] }
+  ]
+  for (const conversation of props.conversations) {
+    const time = new Date(conversation.updatedAt || conversation.createdAt || 0).getTime()
+    if (time >= startOfToday) groups[0].items.push(conversation)
+    else if (time >= weekAgo) groups[1].items.push(conversation)
+    else groups[2].items.push(conversation)
+  }
+  return groups.filter(group => group.items.length)
+})
 
 const formatUpdatedAt = (value) => {
   const date = new Date(value)
@@ -120,6 +146,15 @@ const formatUpdatedAt = (value) => {
   font-weight: 650;
   letter-spacing: 0.05em;
 }
+
+.group-label {
+  margin: 10px 10px 4px;
+  color: var(--sk-label-3);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.group-label:first-child { margin-top: 0; }
 
 .conversation-list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 12px; }
 

@@ -340,6 +340,13 @@ public class ManusAgentController {
         return handle.emitter();
     }
 
+    /** 跨会话最近任务（首页任务流）：深链直达 /super-agent?conversationId=…&runId=…。 */
+    @GetMapping("/manus/runs/recent")
+    public List<AgentRunSummary> listRecentManusRuns(CurrentActor actor, @RequestParam(defaultValue = "8") int limit) {
+        return agentRunService.findRecentRuns(actor.tenantId(), actor.userId(), Math.min(Math.max(limit, 1), 30))
+                .stream().map(AgentRunSummary::from).toList();
+    }
+
     @GetMapping("/manus/conversations/{conversationId}/runs")
     public List<AgentRunSummary> listManusRuns(CurrentActor actor, @PathVariable String conversationId,
                                                @RequestParam(defaultValue = "30") int limit) {

@@ -166,6 +166,16 @@ public class AgentRunService {
                 """, runMapper(), tenantId, userId, conversationId, Math.max(1, limit));
     }
 
+    /** 跨会话的最近任务（首页任务流）：按更新时间倒序，过滤无输入的空 run。 */
+    public List<AgentRun> findRecentRuns(String tenantId, String userId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT * FROM agent_run
+                WHERE tenant_id = ? AND user_id = ? AND agent_key = 'super' AND input IS NOT NULL AND input <> ''
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """, runMapper(), tenantId, userId, Math.max(1, limit));
+    }
+
     public Optional<AgentRun> findLatestResumable(String tenantId, String userId, String conversationId) {
         return jdbcTemplate.query("""
                 SELECT * FROM agent_run

@@ -92,6 +92,22 @@
       </div>
     </section>
 
+    <!-- 最近任务：跨会话任务流，深链直达任务现场 -->
+    <section v-if="recentRuns.length" class="recent-runs" aria-label="最近任务">
+      <header class="recent-header">
+        <h2>最近任务</h2>
+        <span>点击任务回到它的执行现场</span>
+      </header>
+      <div class="recent-grid">
+        <button v-for="run in recentRuns" :key="run.id" type="button" class="recent-card"
+          @click="router.push({ path: '/super-agent', query: { conversationId: run.conversationId, runId: run.id } })">
+          <span class="recent-status" :class="statusTone(run.status)">{{ statusLabel(run.status) }}</span>
+          <strong>{{ run.input?.slice(0, 46) || '（无标题任务）' }}{{ (run.input || '').length > 46 ? '…' : '' }}</strong>
+          <small>{{ formatRunTime(run.updatedAt) }}</small>
+        </button>
+      </div>
+    </section>
+
     <footer class="catalog-footer">Aster · 让每次对话都有可靠的下一步</footer>
   </div>
 </template>
@@ -102,6 +118,7 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import { ArrowRight, BookOpen, Image as ImageIcon, Sparkles, Workflow, Wrench } from 'lucide-vue-next'
 import AsterAvatar from '../components/AsterAvatar.vue'
+import { listRecentManusRuns } from '../api'
 import { AGENT_LIST } from '../config/agents'
 
 useHead({
@@ -114,7 +131,18 @@ useHead({
 
 const router = useRouter()
 const query = ref('')
+const recentRuns = ref([])
 const agents = AGENT_LIST
+const loadRecentRuns = async () => {
+  try { recentRuns.value = await listRecentManusRuns(8) }
+  catch (error) { console.error('Unable to load recent runs:', error) }
+}
+const statusLabel = status => ({ RUNNING: '执行中', COMPLETED: '已完成', INTERRUPTED: '已中断', FAILED: '失败' }[status] || '任务')
+const statusTone = status => ({ RUNNING: 'running', COMPLETED: 'done', INTERRUPTED: 'warn', FAILED: 'error' }[status] || 'idle')
+const formatRunTime = value => {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
 const searchInput = ref(null)
 const heroRef = ref(null)
 const phrases = ['可靠的下一步。', '清晰的执行计划。', '更聪明的协作。']
@@ -180,6 +208,7 @@ const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)')
 
 onMounted(() => {
   document.addEventListener('keydown', focusSearch)
+  loadRecentRuns()
   if (!reduceMotion()) {
     phraseTimer = window.setInterval(() => {
       activePhrase.value = (activePhrase.value + 1) % phrases.length
@@ -951,6 +980,27 @@ onBeforeUnmount(() => {
   font-size: 12px;
   text-align: center;
 }
+
+/* ── 最近任务 ───────────────────────────────────────── */
+.recent-runs { max-width: 1180px; margin: 8px auto 0; padding: 0 24px; }
+.recent-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.recent-header h2 { margin: 0; font-size: 16px; font-weight: 750; color: var(--sk-label); }
+.recent-header span { color: var(--sk-label-3); font-size: 11.5px; }
+.recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.recent-card {
+  display: grid; gap: 6px; justify-items: start;
+  border: 1px solid var(--sk-separator); border-radius: 13px; padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.86); text-align: left; cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+.recent-card:hover { border-color: var(--zwx-primary-ring); box-shadow: 0 8px 20px rgba(37, 99, 235, 0.1); transform: translateY(-2px); }
+.recent-card strong { color: var(--sk-label); font-size: 12.5px; line-height: 1.5; }
+.recent-card small { color: var(--sk-label-3); font-size: 10.5px; }
+.recent-status { border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 700; background: var(--sk-fill); color: var(--sk-label-2); }
+.recent-status.running { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+.recent-status.done { background: rgba(34, 197, 94, 0.12); color: #15803d; }
+.recent-status.warn { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+.recent-status.error { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
 
 /* ── 响应式 ─────────────────────────────────────────── */
 @media (prefers-reduced-motion: no-preference) {

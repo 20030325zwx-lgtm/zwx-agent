@@ -18,6 +18,9 @@
       <button v-if="run?.id" type="button" class="action" :disabled="refreshing" title="刷新任务状态" @click="emit('refresh')">
         <RotateCw :size="13" :class="{ spin: refreshing }" />刷新
       </button>
+      <button v-if="run?.id && run?.status !== 'RUNNING'" type="button" class="action" title="导出任务结果为 Markdown" @click="emit('export')">
+        <Download :size="13" />导出
+      </button>
       <button v-if="run?.canResume" type="button" class="action primary" @click="emit('resume')">
         <Play :size="14" />继续任务
       </button>
@@ -33,7 +36,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { MessageSquare, Play, RotateCw, Square } from 'lucide-vue-next'
+import { Download, MessageSquare, Play, RotateCw, Square } from 'lucide-vue-next'
 
 const props = defineProps({
   run: { type: Object, default: null },
@@ -41,7 +44,7 @@ const props = defineProps({
   hasConversation: { type: Boolean, default: false },
   refreshing: { type: Boolean, default: false }
 })
-const emit = defineEmits(['resume', 'cancel', 'open-conversation', 'refresh'])
+const emit = defineEmits(['resume', 'cancel', 'open-conversation', 'refresh', 'export'])
 
 const statusLabel = computed(() => ({
   RUNNING: '执行中',

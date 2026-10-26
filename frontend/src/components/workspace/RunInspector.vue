@@ -23,10 +23,21 @@
         </article>
         <button type="button" class="link-button" @click="emit('open-conversation')">在对话中查看完整引用</button>
       </template>
-      <div v-else class="panel-empty">
+      <template v-if="webSources.length">
+        <header class="web-sources-header">联网参考 · {{ webSources.length }}</header>
+        <a v-for="source in webSources" :key="source.url" class="web-source-card" :href="source.url"
+          target="_blank" rel="noopener noreferrer">
+          <Globe2 :size="13" />
+          <div>
+            <strong>{{ source.title || source.url }}</strong>
+            <small>{{ source.kind === 'scrape' ? '已抓取' : '搜索结果' }}<template v-if="source.retrievedAt"> · {{ formatTime(source.retrievedAt) }}</template></small>
+          </div>
+        </a>
+      </template>
+      <div v-if="!sources.length && !webSources.length" class="panel-empty">
         <BookOpen :size="18" />
         <span>本轮未使用知识库引用</span>
-        <small>开启“检索知识库”后，召回切片会显示在这里。</small>
+        <small>开启“检索知识库”后，召回切片会显示在这里；联网搜索的结果链接也会出现在这里。</small>
       </div>
     </div>
 
@@ -126,8 +137,8 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Activity, BookOpen, Download, FileText, FolderOpen, Gauge, PanelRightClose, Wrench } from 'lucide-vue-next'
-import { listManusToolCalls } from '../../api'
+import { Activity, BookOpen, Download, FileText, FolderOpen, Gauge, Globe2, PanelRightClose, Wrench } from 'lucide-vue-next'
+import { listManusToolCalls, listManusWebSources } from '../../api'
 
 const props = defineProps({
   sources: { type: Array, default: () => [] },
@@ -141,8 +152,10 @@ const activeTab = ref('sources')
 const toolCalls = ref([])
 const toolCallsLoadedFor = ref('')
 const toolCallsLoading = ref(false)
+const webSources = ref([])
+const webSourcesLoadedFor = ref('')
 const tabs = computed(() => [
-  { key: 'sources', label: '来源', count: props.sources.length },
+  { key: 'sources', label: '来源', count: props.sources.length + webSources.value.length },
   { key: 'files', label: '文件', count: props.files.length },
   { key: 'usage', label: '用量', count: props.run?.tokenUsage?.phases?.length || 0 },
   { key: 'tools', label: '工具', count: toolCalls.value.length },
@@ -164,12 +177,27 @@ const loadToolCalls = async () => {
     toolCallsLoading.value = false
   }
 }
+const loadWebSources = async () => {
+  const runId = props.run?.id
+  const conversationId = props.conversationId
+  if (!runId || !conversationId) return
+  if (webSourcesLoadedFor.value === runId) return
+  try {
+    webSources.value = await listManusWebSources(conversationId, runId)
+    webSourcesLoadedFor.value = runId
+  } catch (error) {
+    console.error('Unable to load web sources:', error)
+  }
+}
 watch(() => [activeTab.value, props.run?.id], ([tab]) => {
   if (tab === 'tools') loadToolCalls()
+  if (tab === 'sources') loadWebSources()
 })
 watch(() => props.run?.id, () => {
   toolCalls.value = []
   toolCallsLoadedFor.value = ''
+  webSources.value = []
+  webSourcesLoadedFor.value = ''
 })
 
 const usage = computed(() => props.run?.tokenUsage || null)
@@ -263,6 +291,13 @@ const formatTime = value => {
 .tool-call-card .status-pill.failed, .tool-call-card .status-pill.unknown { background: rgba(239, 68, 68, 0.1); color: #b91c1c; }
 .tool-call-card .tool-args { display: -webkit-box; overflow: hidden; margin: 5px 0 0; color: var(--sk-label-2); font: 9.5px ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.5; word-break: break-all; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .tool-call-card small { display: block; margin-top: 4px; overflow: hidden; color: var(--sk-label-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+.web-sources-header { margin-top: 4px; color: var(--sk-label-3); font-size: 10.5px; font-weight: 700; }
+.web-source-card { display: flex; align-items: center; gap: 8px; border: 1px solid var(--sk-separator); border-radius: 11px; padding: 8px 10px; background: #fff; color: var(--zwx-primary); text-decoration: none; }
+.web-source-card:hover { border-color: var(--zwx-primary-ring); background: var(--zwx-primary-soft); }
+.web-source-card > div { display: grid; min-width: 0; gap: 2px; }
+.web-source-card strong { overflow: hidden; color: var(--sk-label); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.web-source-card small { color: var(--sk-label-3); font-size: 10px; }
 
 .link-button { justify-self: start; border: 0; padding: 2px 0; background: transparent; color: var(--zwx-primary); font-size: 11px; cursor: pointer; }
 

@@ -147,6 +147,9 @@ public class AiController {
     private com.zwx.zwxagent.agent.execution.RunQuotaService runQuotaService;
 
     @Resource
+    private com.zwx.zwxagent.agent.execution.WebSourceService webSourceService;
+
+    @Resource
     private BuiltInSkillRegistry builtInSkillRegistry;
 
     @Resource
@@ -622,6 +625,16 @@ public class AiController {
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
         return agentToolCallLedgerService.auditForRun(runId, Math.min(Math.max(limit, 1), 500));
+    }
+
+    /** run 的联网引用：从幂等账本提取搜索结果与抓取页面的 URL/标题/时间，供前端参考链接展示。 */
+    @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/web-sources")
+    public List<com.zwx.zwxagent.agent.execution.WebSourceService.WebSource> listManusWebSources(
+            CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
+        agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        return webSourceService.sourcesForRun(runId);
     }
 
     /** 用户对挂起 run 的待确认工具做决定；决定后前端调用既有 resume 接口继续执行。 */

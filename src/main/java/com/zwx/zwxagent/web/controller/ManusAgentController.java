@@ -28,8 +28,10 @@ import com.zwx.zwxagent.platform.settings.AppConfigurationService;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
 import com.zwx.zwxagent.platform.workspace.WorkspaceService;
 import jakarta.annotation.Resource;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -141,6 +143,10 @@ public class ManusAgentController {
     @Resource
     private WebSourceService webSourceService;
 
+    /** 批 2 闲聊短路开关：命中候选且用户未勾选开关时单轮直达。provider 关闭时无意图决策，本开关不生效。 */
+    @Value("${app.intent.short-circuit-enabled:true}")
+    private boolean shortCircuitEnabled;
+
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -235,6 +241,16 @@ public class ManusAgentController {
             // 由模型基于图片分析与自身知识直接作答（worker 知识约束已分级，未覆盖时不会草草结束）。
             prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "意图识别",
                     "summary", decision.summary(effect.action())));
+            // 批 2 闲聊短路：高置信纯闲聊 + 用户未勾选任何开关 → 单轮直达回答，跳过 RAG/联网/图编排。
+            // 门禁：意图评测集 12/12（2026-10-26 r2）达标后启用；开关关闭或用户显式勾选时不短路。
+            if (shortCircuitEnabled && decision.recommend() == IntentDecision.Recommendation.SHORT_CIRCUIT_CANDIDATE
+                    && !knowledgeSearch && !webSearch && imageObjectKeys.isEmpty()) {
+                runQuotaService.checkRunAllowed(actor.userId());
+                String summary = "闲聊直达：命中闲聊短路（置信 " + String.format("%.2f", decision.intentConfidence())
+                        + "），本轮跳过知识库检索、联网搜索与多智能体编排";
+                return casualChat(actor, conversationId, message, userMessageId, conversationLease,
+                        toJson(java.util.Map.of("phase", "plan", "agent", "意图识别", "summary", summary)));
+            }
         }
         AgentKnowledgeRagResult knowledge;
         McpTools mcpTools = null;
@@ -489,6 +505,56 @@ public class ManusAgentController {
 
     private ChatModel chatModelFor(String userId) {
         return dynamicChatModelFactory.model(appConfigurationService.resolve(userId, AppConfigurationService.CHAT));
+    }
+
+    /**
+     * 批 2 闲聊短路的单轮直达路径：不走图编排，不建 agent_run，
+     * 直接流式回答并按既有链路持久化消息（runId 为空，token 台账不含闲聊轮）。
+     */
+    private SseEmitter casualChat(CurrentActor actor, String conversationId, String message, long userMessageId,
+                                  AutoCloseable conversationLease, String prefaceActivity) {
+        SseEmitter emitter = new SseEmitter(java.util.concurrent.TimeUnit.MINUTES.toMillis(2));
+        agentExecutor.execute(() -> {
+            try {
+                emitter.send(SseEmitter.event().name("activity").data(prefaceActivity));
+                StringBuilder answer = new StringBuilder();
+                ChatClient.builder(chatModelFor(actor.userId())).build()
+                        .prompt().user(message).stream().content()
+                        .toStream()
+                        .forEach(chunk -> {
+                            if (chunk == null || chunk.isEmpty()) return;
+                            answer.append(chunk);
+                            try {
+                                emitter.send(chunk);
+                            } catch (Exception sendError) {
+                                throw new IllegalStateException(sendError);
+                            }
+                        });
+                emitter.send(SseEmitter.event().data("[DONE]"));
+                emitter.complete();
+                completeManusRun(actor, conversationId, userMessageId, null, "{}", null,
+                        new ManusGraphOrchestrator.ManusRunResult(answer.toString(), List.of(), true, "COMPLETED", null));
+            } catch (Exception exception) {
+                try {
+                    emitter.send(SseEmitter.event().name("generation-error")
+                            .data(com.zwx.zwxagent.common.ErrorMessages.describe(exception)));
+                    emitter.send(SseEmitter.event().data("回答失败：" + com.zwx.zwxagent.common.ErrorMessages.describe(exception)));
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    emitter.complete();
+                } catch (Exception ignored) {
+                    emitter.complete();
+                }
+                completeManusRun(actor, conversationId, userMessageId, null, "{}", null,
+                        new ManusGraphOrchestrator.ManusRunResult("", List.of(), false, "INTERRUPTED",
+                                exception.getMessage()));
+            } finally {
+                try {
+                    conversationLease.close();
+                } catch (Exception ignored) {
+                }
+            }
+        });
+        return emitter;
     }
 
     private void manageManusEmitter(SseEmitter emitter, com.zwx.zwxagent.agent.graph.RunStream stream) {

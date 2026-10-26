@@ -76,6 +76,9 @@ class JevIntentRouterTest {
                 .isEqualTo(IntentDecision.Recommendation.AUTO_WEB);
         assertThat(new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 0.05, 10).recommend())
                 .isEqualTo(IntentDecision.Recommendation.SHORT_CIRCUIT_CANDIDATE);
+        // 批 2 收紧：模型仍认为可能需要知识库（needs_knowledge ≥ 0.3）时不短路
+        assertThat(new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 0.45, 10).recommend())
+                .isEqualTo(IntentDecision.Recommendation.FALLBACK);
         assertThat(new IntentDecision("工具任务", 0.9, 1.5, 0.7, 0.1, 10).recommend())
                 .isEqualTo(IntentDecision.Recommendation.FALLBACK);
         assertThat(new IntentDecision("知识库问答", 0.4, 0.3, 0.5, 0.6, 10).recommend())
@@ -104,7 +107,7 @@ class JevIntentRouterTest {
 
         // 短路候选与低置信：一律维持用户开关
         assertThat(new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 0.05, 10).applyTo(false, false).knowledgeSearch()).isFalse();
-        assertThat(new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 0.05, 10).applyTo(false, false).action()).contains("批 2 未启用");
+        assertThat(new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 0.05, 10).applyTo(false, false).action()).contains("闲聊短路候选");
         assertThat(new IntentDecision("工具任务", 0.55, 1.5, 0.4, 0.3, 10).applyTo(false, false).action()).contains("维持用户开关");
     }
 

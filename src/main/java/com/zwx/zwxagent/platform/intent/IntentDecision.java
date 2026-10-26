@@ -17,6 +17,8 @@ public record IntentDecision(String intent, double intentConfidence, double comp
     static final double HIGH_CONFIDENCE = 0.7;
     static final double SHORT_CIRCUIT_CONFIDENCE = 0.85;
     static final double KNOWLEDGE_NEED_PROBABILITY = 0.8;
+    /** 批 2 收紧（2026-10-26 重评）：闲聊短路只覆盖纯打招呼/寒暄类；模型仍认为可能需要知识库时不短路。 */
+    static final double SHORT_CIRCUIT_KNOWLEDGE_CEILING = 0.3;
 
     public Recommendation recommend() {
         boolean highConfidence = intentConfidence >= HIGH_CONFIDENCE;
@@ -26,7 +28,8 @@ public record IntentDecision(String intent, double intentConfidence, double comp
         if (highConfidence && "联网查询".equals(intent)) {
             return Recommendation.AUTO_WEB;
         }
-        if ("闲聊问答".equals(intent) && intentConfidence >= SHORT_CIRCUIT_CONFIDENCE && complexity <= 0.5) {
+        if ("闲聊问答".equals(intent) && intentConfidence >= SHORT_CIRCUIT_CONFIDENCE && complexity <= 0.5
+                && needsKnowledge < SHORT_CIRCUIT_KNOWLEDGE_CEILING) {
             return Recommendation.SHORT_CIRCUIT_CANDIDATE;
         }
         return Recommendation.FALLBACK;
@@ -41,7 +44,7 @@ public record IntentDecision(String intent, double intentConfidence, double comp
             case AUTO_WEB -> webSearch
                     ? new SwitchAdjustment(knowledgeSearch, webSearch, "联网搜索已开启（维持用户勾选）")
                     : new SwitchAdjustment(knowledgeSearch, true, "已自动开启联网搜索（原为关闭）");
-            case SHORT_CIRCUIT_CANDIDATE -> new SwitchAdjustment(knowledgeSearch, webSearch, "短路候选（批 2 未启用），维持用户开关");
+            case SHORT_CIRCUIT_CANDIDATE -> new SwitchAdjustment(knowledgeSearch, webSearch, "命中闲聊短路候选，是否直达由批 2 门禁决定");
             case FALLBACK -> new SwitchAdjustment(knowledgeSearch, webSearch, "维持用户开关");
         };
     }

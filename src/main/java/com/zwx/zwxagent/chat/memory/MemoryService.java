@@ -95,6 +95,67 @@ public class MemoryService {
         return rankFacts(recent, userPrompt, limit);
     }
 
+    // ---- 用户治理：查看 / 新增 / 编辑 / 删除自己被记住的事实（按 tenant + user 归属隔离）----
+
+    /** 列出当前用户在指定智能体下被记住的事实（最近优先）。 */
+    public List<MemoryFactView> listFacts(String tenantId, String userId, String agentKey, int limit) {
+        if (isBlank(tenantId) || isBlank(userId)) return List.of();
+        try {
+            return jdbcTemplate.query("""
+                            SELECT id, agent_key, fact, source_conversation_id, created_at, last_seen_at
+                            FROM agent_memory_fact
+                            WHERE tenant_id = ? AND user_id = ? AND (?::text IS NULL OR agent_key = ?)
+                            ORDER BY last_seen_at DESC, id DESC LIMIT ?
+                            """,
+                    (resultSet, index) -> new MemoryFactView(
+                            resultSet.getLong("id"),
+                            resultSet.getString("agent_key"),
+                            resultSet.getString("fact"),
+                            resultSet.getString("source_conversation_id"),
+                            resultSet.getTimestamp("created_at") == null ? null : resultSet.getTimestamp("created_at").toInstant(),
+                            resultSet.getTimestamp("last_seen_at") == null ? null : resultSet.getTimestamp("last_seen_at").toInstant()),
+                    tenantId, userId, agentKey, agentKey, Math.max(1, Math.min(limit, 500)));
+        } catch (Exception cause) {
+            log.warn("[memory] 治理列表查询失败：{}", cause.getMessage());
+            return List.of();
+        }
+    }
+
+    /** 手工新增一条事实（如用户主动要求记住的偏好）；与既有事实哈希冲突时更新 last_seen。 */
+    public void addFact(String tenantId, String userId, String agentKey, String fact) {
+        upsertFact(tenantId, agentKey, userId, "manual", fact);
+    }
+
+    /** 编辑事实内容并重算哈希；目标哈希与既有事实冲突时返回 false（幂等去重保护）。 */
+    public boolean updateFact(String tenantId, String userId, long id, String fact) {
+        String normalized = normalizeFact(fact);
+        if (normalized.isEmpty()) return false;
+        try {
+            return jdbcTemplate.update("""
+                            UPDATE agent_memory_fact SET fact = ?, fact_hash = ?, last_seen_at = CURRENT_TIMESTAMP
+                            WHERE id = ? AND tenant_id = ? AND user_id = ?
+                            """, normalized, sha256Hex(normalized), id, tenantId, userId) > 0;
+        } catch (org.springframework.dao.DuplicateKeyException cause) {
+            return false;
+        }
+    }
+
+    /** 删除一条事实；只允许删除本人租户与归属下的事实。 */
+    public boolean deleteFact(String tenantId, String userId, long id) {
+        try {
+            return jdbcTemplate.update(
+                    "DELETE FROM agent_memory_fact WHERE id = ? AND tenant_id = ? AND user_id = ?",
+                    id, tenantId, userId) > 0;
+        } catch (Exception cause) {
+            log.warn("[memory] 事实删除失败：{}", cause.getMessage());
+            return false;
+        }
+    }
+
+    public record MemoryFactView(long id, String agentKey, String fact, String sourceConversationId,
+                                 java.time.Instant createdAt, java.time.Instant lastSeenAt) {
+    }
+
     void upsertFact(String tenantId, String agentKey, String userId, String conversationId, String fact) {
         String normalized = normalizeFact(fact);
         if (normalized.isEmpty()) return;

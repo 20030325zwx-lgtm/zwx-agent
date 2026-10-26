@@ -200,6 +200,12 @@ export const getManusRun = (conversationId, runId) =>
 export const listWorkspaceFiles = (agentKey, conversationId, limit = 200) =>
   request.get('/ai/workspace/files', { params: { agentKey, conversationId, limit } }).then(response => response.data)
 
+export const listMemoryFacts = (agentKey = null, limit = 100) =>
+  request.get('/ai/memory/facts', { params: { agentKey: agentKey || undefined, limit } }).then(response => response.data)
+export const addMemoryFact = (agentKey, fact) => request.post('/ai/memory/facts', { agentKey, fact }).then(response => response.data)
+export const updateMemoryFact = (id, fact) => request.put(`/ai/memory/facts/${id}`, { fact }).then(response => response.data)
+export const deleteMemoryFact = id => request.delete(`/ai/memory/facts/${id}`).then(response => response.data)
+
 export const listMcpServers = () => request.get('/ai/mcp/servers').then(response => response.data)
 export const createMcpServer = payload => request.post('/ai/mcp/servers', payload).then(response => response.data)
 export const updateMcpServer = (id, payload) => request.put(`/ai/mcp/servers/${id}`, payload).then(response => response.data)

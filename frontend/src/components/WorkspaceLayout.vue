@@ -47,7 +47,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Cpu, Database, LogOut, PlugZap, Settings2, Sparkles } from 'lucide-vue-next'
+import { Brain, Cpu, Database, LogOut, PlugZap, Settings2, Sparkles } from 'lucide-vue-next'
 import AgentSettingsMenu from './AgentSettingsMenu.vue'
 import { getCurrentUser, logout } from '../api/auth'
 
@@ -64,7 +64,8 @@ const navItems = [
   { name: 'ModelSettings', label: '模型', icon: Cpu },
   { name: 'SkillSettings', label: 'Skill', icon: Settings2 },
   { name: 'McpSettings', label: 'MCP', icon: PlugZap },
-  { name: 'KnowledgeAdmin', label: '知识库', icon: Database }
+  { name: 'KnowledgeAdmin', label: '知识库', icon: Database },
+  { name: 'MemorySettings', label: '记忆', icon: Brain }
 ]
 
 const activeIndex = computed(() => Math.max(0, navItems.findIndex(item => isActive(item))))

@@ -48,6 +48,15 @@ const routes = [
           title: '知识库管理 - Aster',
           description: '查看各智能体的私有知识文档、版本状态与实际向量切片。'
         }
+      },
+      {
+        path: 'memory-settings',
+        name: 'MemorySettings',
+        component: () => import('../views/MemorySettings.vue'),
+        meta: {
+          title: '记忆管理 - Aster',
+          description: '查看、修正与删除智能体跨会话记住的关于你的事实。'
+        }
       }
     ]
   },

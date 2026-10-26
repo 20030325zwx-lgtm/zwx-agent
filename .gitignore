@@ -43,3 +43,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# CI intent eval result
+evaluation/eval-sets/ci-intent-result.json

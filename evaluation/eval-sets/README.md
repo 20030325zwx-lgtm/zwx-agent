@@ -31,3 +31,10 @@
 - 新增用例必须带 `notes`（判定依据或模糊点说明）；改标注要改版本号并在本文件记录变更。
 - 评测集 JSON 是唯一事实来源，基线结果 JSON 与评测集版本对应，不覆盖旧基线。
 - 重跑方式：`python3 evaluation/eval-sets/run_baseline.py`（需要 `application-local.yml` 中的 DashScope Key 与本地后端在线）。
+
+## 门禁（2026-10-27 接入）
+
+- `.github/workflows/ci.yml` 三个 job：后端 `mvn test`、前端 `npm run build`、意图评测门禁。
+- 意图门禁脚本 [run_intent_gate.py](./run_intent_gate.py)：只跑意图 12 例（不依赖本地后端），通过数 < 11 时退出码 1 阻断；无 `DASHSCOPE_API_KEY` secret 时跳过不阻断（fork/PR 友好）。
+- 门禁脚本与 `QwenIntentRouter` 的系统提示词必须同源：改任一侧都要同步另一侧并重跑基线。
+- RAG 15 例依赖本地后端 + 已入库语料 + 真实 embedding 调用，暂不进 CI，改动检索策略时本地跑 `run_baseline.py` 并附结果。

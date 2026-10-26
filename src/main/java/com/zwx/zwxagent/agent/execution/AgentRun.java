@@ -17,6 +17,7 @@ public record AgentRun(String id,
                        String knowledgeContext,
                        String ragTraceJson,
                        String tokenUsageJson,
+                       String pendingConfirmation,
                        GraphCheckpoint checkpoint,
                        String errorMessage,
                        int resumeCount,
@@ -26,6 +27,11 @@ public record AgentRun(String id,
     public boolean resumable() {
         return "INTERRUPTED".equals(status) || "FAILED".equals(status)
                 || ("RUNNING".equals(status) && checkpoint != null && checkpoint.lastNode() != null);
+    }
+
+    /** run 是否正挂起等待工具确认（挂起期间 status=INTERRUPTED + pending_confirmation 非空）。 */
+    public boolean awaitingConfirmation() {
+        return pendingConfirmation != null && !pendingConfirmation.isBlank();
     }
 
     public String displayAnswer() {

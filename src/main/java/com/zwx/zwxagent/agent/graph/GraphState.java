@@ -31,6 +31,8 @@ final class GraphState {
     static final String RESUME_FROM = "resume_from";
     /** 当前 run 标识（replace） */
     static final String RUN_ID = "run_id";
+    /** 有副作用工具等待用户确认：待确认工具名列表；非空时质检与交付节点直接早退（replace） */
+    static final String PENDING_CONFIRMATION = "pending_confirmation";
 
     private GraphState() {
     }

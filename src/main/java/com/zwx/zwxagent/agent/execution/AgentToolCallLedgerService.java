@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 工具调用幂等账本：
@@ -93,6 +95,18 @@ public class AgentToolCallLedgerService {
                 UPDATE agent_tool_call SET status = 'FAILED', result = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND status = 'PENDING'
                 """, truncate(result), id);
+    }
+
+    /** run 的工具调用审计清单（幂等账本只读视图）：工具、参数摘要、状态与时间，供运行检查器展示。 */
+    public List<Map<String, Object>> auditForRun(String runId, int limit) {
+        return jdbcTemplate.queryForList("""
+                SELECT tool_name, LEFT(arguments, 400) AS arguments, status,
+                       LEFT(COALESCE(result, ''), 300) AS result_preview, created_at, updated_at
+                FROM agent_tool_call
+                WHERE run_id = ?
+                ORDER BY id
+                LIMIT ?
+                """, runId, Math.max(1, limit));
     }
 
     private String truncate(String value) {

@@ -78,6 +78,7 @@ public class ManusGraphOrchestrator {
     private final AgentRunService agentRunService;
     private final AgentToolCallLedgerService toolCallLedger;
     private final com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage;
+    private final com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private CompiledGraph compiledGraph;
@@ -88,7 +89,7 @@ public class ManusGraphOrchestrator {
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor) {
-        this(dashscopeChatModel, workerExecutor, null, null, null);
+        this(dashscopeChatModel, workerExecutor, null, null, null, null);
     }
 
     @Autowired
@@ -97,12 +98,14 @@ public class ManusGraphOrchestrator {
                                   Executor workerExecutor,
                                   AgentRunService agentRunService,
                                   AgentToolCallLedgerService toolCallLedger,
-                                  com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage) {
+                                  com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage,
+                                  com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService) {
         this.chatModel = dashscopeChatModel;
         this.workerExecutor = workerExecutor;
         this.agentRunService = agentRunService;
         this.toolCallLedger = toolCallLedger;
         this.tokenUsage = tokenUsage;
+        this.toolConfirmationService = toolConfirmationService;
     }
 
     @PostConstruct
@@ -119,7 +122,7 @@ public class ManusGraphOrchestrator {
     }
 
     private GraphInstance buildGraph(ChatModel graphChatModel) throws Exception {
-        WorkersNode workersNode = new WorkersNode(graphChatModel, workerExecutor, tokenUsage);
+        WorkersNode workersNode = new WorkersNode(graphChatModel, workerExecutor, tokenUsage, toolConfirmationService);
         StateGraph graph = new StateGraph(this::newState);
         graph.addNode(NODE_RESUME_ROUTER, AsyncNodeAction.node_async(state -> Map.of()));
         graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel, tokenUsage)));
@@ -162,7 +165,8 @@ public class ManusGraphOrchestrator {
                 Map.entry(GraphState.FINAL_ANSWER, new ReplaceStrategy()),
                 Map.entry(GraphState.RUN_CONTEXT, new ReplaceStrategy()),
                 Map.entry(GraphState.RESUME_FROM, new ReplaceStrategy()),
-                Map.entry(GraphState.RUN_ID, new ReplaceStrategy())));
+                Map.entry(GraphState.RUN_ID, new ReplaceStrategy()),
+                Map.entry(GraphState.PENDING_CONFIRMATION, new ReplaceStrategy())));
         return state;
     }
 
@@ -343,6 +347,10 @@ public class ManusGraphOrchestrator {
         List<String> activities = new ArrayList<>();
         AtomicBoolean finalized = new AtomicBoolean(false);
         String finalAnswer = "";
+        String effectiveRunId = request.runId() == null ? "" : request.runId();
+        if (toolConfirmationService != null && !effectiveRunId.isBlank()) {
+            toolConfirmationService.registerRun(effectiveRunId);
+        }
         try {
             if (request.ragTraceJson() != null && !request.ragTraceJson().isBlank()) {
                 stream.send("rag-trace", request.ragTraceJson());
@@ -446,9 +454,11 @@ public class ManusGraphOrchestrator {
                     persistCheckpoint(request, completedNode, state, streamedAnswer);
                 }
             }
-            boolean completed = !stopped.get() && finalAnswer != null && !finalAnswer.isBlank();
+            boolean pendingConfirmation = pendingConfirmationOf(effectiveRunId);
+            boolean completed = !stopped.get() && !pendingConfirmation && finalAnswer != null && !finalAnswer.isBlank();
             String answer = completed ? finalAnswer : completedAnswer(finalAnswer, streamedAnswer, stopped.get());
             String status = completed ? "COMPLETED" : "INTERRUPTED";
+            if (pendingConfirmation) publishPendingConfirmation(stream, effectiveRunId);
             persist(request, answer, activities, completed, status, null, finalized);
             publishTokenUsage(stream, request.runId());
             sendDone(stream, completed);
@@ -461,6 +471,29 @@ public class ManusGraphOrchestrator {
             stream.send("generation-error", com.zwx.zwxagent.common.ErrorMessages.describe(exception));
             stream.sendMessage("任务已中止：" + com.zwx.zwxagent.common.ErrorMessages.describe(exception));
             stream.complete();
+        } finally {
+            if (toolConfirmationService != null) toolConfirmationService.releaseRun(effectiveRunId);
+        }
+    }
+
+    private boolean pendingConfirmationOf(String runId) {
+        return toolConfirmationService != null && runId != null && !runId.isBlank()
+                && toolConfirmationService.isRunRegistered(runId)
+                && !toolConfirmationService.pendingOf(runId).isEmpty();
+    }
+
+    /** 挂起收尾：推送 confirmation-required 事件并把待确认清单落库，前端弹确认框，决定后走既有 resume 链路。 */
+    private void publishPendingConfirmation(RunStream stream, String runId) {
+        try {
+            List<Map<String, String>> confirmations = toolConfirmationService.pendingOf(runId).stream()
+                    .map(pending -> Map.of("tool", pending.toolName(),
+                            "argumentsSummary", pending.argumentsSummary() == null ? "" : pending.argumentsSummary()))
+                    .toList();
+            String json = objectMapper.writeValueAsString(java.util.Map.of("runId", runId, "confirmations", confirmations));
+            stream.send("confirmation-required", json);
+            if (agentRunService != null) agentRunService.markPendingConfirmation(runId, json);
+        } catch (Exception exception) {
+            log.warn("待确认清单发布失败；runId={}", runId, exception);
         }
     }
 
@@ -511,6 +544,9 @@ public class ManusGraphOrchestrator {
     @SuppressWarnings("unchecked")
     private void persistCheckpoint(ManusRunRequest request, String node, OverAllState state, StringBuilder streamedAnswer) {
         if (agentRunService == null || request.runId() == null || request.runId().isBlank()) return;
+        // 等待工具确认的 run 不落节点检查点：最后一个检查点保持在 planner，
+        // 这样确认后的 resume 会从 workers 重跑（已成功的工具调用由幂等账本回放，不会重复副作用）。
+        if (pendingConfirmationOf(request.runId())) return;
         try {
             List<PlanStep> plan = state.value(GraphState.PLAN)
                     .map(value -> (List<PlanStep>) value).orElse(List.of());

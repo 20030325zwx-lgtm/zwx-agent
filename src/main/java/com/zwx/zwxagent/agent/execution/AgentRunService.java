@@ -124,9 +124,19 @@ public class AgentRunService {
         String ownerInstance = instanceRegistry == null ? null : instanceRegistry.currentInstanceId();
         jdbcTemplate.update("""
                 UPDATE agent_run SET status = 'RUNNING', error_message = NULL, owner_instance = ?,
+                    pending_confirmation = NULL,
                     resume_count = resume_count + 1, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """, ownerInstance, runId);
+    }
+
+    /** run 挂起等待工具确认：记录待确认清单（JSON），决定并恢复后由 restart 清空。 */
+    public void markPendingConfirmation(String runId, String pendingJson) {
+        if (runId == null || runId.isBlank() || pendingJson == null || pendingJson.isBlank()) return;
+        jdbcTemplate.update("""
+                UPDATE agent_run SET pending_confirmation = CAST(? AS jsonb), updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, pendingJson, runId);
     }
 
     public void markInterrupted(String runId, String reason) {
@@ -217,6 +227,7 @@ public class AgentRunService {
                 rs.getString("knowledge_context"),
                 rs.getString("rag_trace_json"),
                 rs.getString("token_usage"),
+                rs.getString("pending_confirmation"),
                 checkpoint,
                 rs.getString("error_message"),
                 rs.getInt("resume_count"),

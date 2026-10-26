@@ -79,6 +79,25 @@
       </div>
     </div>
 
+    <div v-else-if="activeTab === 'tools'" class="tab-panel">
+      <template v-if="toolCalls.length">
+        <article v-for="(call, index) in toolCalls" :key="index" class="tool-call-card">
+          <header>
+            <Wrench :size="13" />
+            <strong>{{ call.tool_name }}</strong>
+            <em class="status-pill" :class="String(call.status || '').toLowerCase()">{{ call.status }}</em>
+          </header>
+          <p v-if="call.arguments" class="tool-args">{{ call.arguments }}</p>
+          <small>{{ formatTime(call.created_at) }}<template v-if="call.result_preview"> · {{ call.result_preview }}</template></small>
+        </article>
+      </template>
+      <div v-else class="panel-empty">
+        <Wrench :size="18" />
+        <span>本 run 还没有工具调用记录</span>
+        <small>工具开始执行后，这里会显示幂等账本中的调用审计（工具、参数摘要、状态）。</small>
+      </div>
+    </div>
+
     <div v-else class="tab-panel run-meta">
       <template v-if="run">
         <dl>
@@ -106,23 +125,52 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { Activity, BookOpen, Download, FileText, FolderOpen, Gauge, PanelRightClose } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { Activity, BookOpen, Download, FileText, FolderOpen, Gauge, PanelRightClose, Wrench } from 'lucide-vue-next'
+import { listManusToolCalls } from '../../api'
 
 const props = defineProps({
   sources: { type: Array, default: () => [] },
   files: { type: Array, default: () => [] },
-  run: { type: Object, default: null }
+  run: { type: Object, default: null },
+  conversationId: { type: String, default: '' }
 })
 const emit = defineEmits(['resume', 'cancel', 'open-conversation', 'collapse'])
 
 const activeTab = ref('sources')
+const toolCalls = ref([])
+const toolCallsLoadedFor = ref('')
+const toolCallsLoading = ref(false)
 const tabs = computed(() => [
   { key: 'sources', label: '来源', count: props.sources.length },
   { key: 'files', label: '文件', count: props.files.length },
   { key: 'usage', label: '用量', count: props.run?.tokenUsage?.phases?.length || 0 },
+  { key: 'tools', label: '工具', count: toolCalls.value.length },
   { key: 'run', label: '运行' }
 ])
+
+const loadToolCalls = async () => {
+  const runId = props.run?.id
+  const conversationId = props.conversationId
+  if (!runId || !conversationId || toolCallsLoading.value) return
+  if (toolCallsLoadedFor.value === runId) return
+  toolCallsLoading.value = true
+  try {
+    toolCalls.value = await listManusToolCalls(conversationId, runId)
+    toolCallsLoadedFor.value = runId
+  } catch (error) {
+    console.error('Unable to load tool call audit:', error)
+  } finally {
+    toolCallsLoading.value = false
+  }
+}
+watch(() => [activeTab.value, props.run?.id], ([tab]) => {
+  if (tab === 'tools') loadToolCalls()
+})
+watch(() => props.run?.id, () => {
+  toolCalls.value = []
+  toolCallsLoadedFor.value = ''
+})
 
 const usage = computed(() => props.run?.tokenUsage || null)
 const topPhaseTokens = computed(() => Math.max(1, ...(usage.value?.phases || []).map(phase => phase.promptTokens || 0)))
@@ -151,6 +199,11 @@ const formatDate = value => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+const formatTime = value => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 </script>
 
@@ -201,6 +254,15 @@ const formatDate = value => {
 .file-card strong { overflow: hidden; color: var(--sk-label); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .file-card small { color: var(--sk-label-3); font-size: 10px; }
 .file-card .download { margin-left: auto; flex: 0 0 auto; }
+
+.tool-call-card { border: 1px solid var(--sk-separator); border-radius: 11px; padding: 8px 10px; background: #fff; }
+.tool-call-card header { display: flex; align-items: center; gap: 5px; color: var(--zwx-primary); }
+.tool-call-card strong { overflow: hidden; color: var(--sk-label); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-call-card .status-pill { flex: 0 0 auto; margin-left: auto; border-radius: 999px; padding: 1px 7px; background: var(--sk-fill); color: var(--sk-label-2); font-size: 9px; font-style: normal; }
+.tool-call-card .status-pill.succeeded { background: rgba(52, 199, 89, 0.12); color: #1d7a3d; }
+.tool-call-card .status-pill.failed, .tool-call-card .status-pill.unknown { background: rgba(239, 68, 68, 0.1); color: #b91c1c; }
+.tool-call-card .tool-args { display: -webkit-box; overflow: hidden; margin: 5px 0 0; color: var(--sk-label-2); font: 9.5px ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.5; word-break: break-all; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.tool-call-card small { display: block; margin-top: 4px; overflow: hidden; color: var(--sk-label-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 
 .link-button { justify-self: start; border: 0; padding: 2px 0; background: transparent; color: var(--zwx-primary); font-size: 11px; cursor: pointer; }
 

@@ -25,6 +25,14 @@
             <RunHeader :run="activeRun" :goal="activeGoal" :has-conversation="messages.length > 0" :refreshing="refreshingRun"
               @resume="resumeActiveRun" @cancel="stopGeneration" @open-conversation="conversationOpen = true"
               @refresh="refreshActiveRun" />
+            <div v-if="activeRun.canDecideConfirmation && activeRun.pendingConfirmations?.length"
+              class="confirmation-banner" role="status">
+              <span class="confirmation-text">
+                ⏸ 任务已暂停：等待确认
+                <strong>{{ activeRun.pendingConfirmations.map(item => item.tool).join('、') }}</strong>
+              </span>
+              <button type="button" class="confirmation-action" @click="confirmationDialogOpen = true">查看并确认</button>
+            </div>
             <RunPhases :run="activeRun" :answer="activeAnswer" :simple="simpleMode" />
             <div v-if="!simpleMode" class="workspace-section">
               <PlanBoard :run="activeRun" />
@@ -88,6 +96,7 @@
         </div>
 
         <RunInspector v-if="activeRun && inspectorOpen" :sources="activeSources" :files="workspaceFiles" :run="activeRun"
+          :conversation-id="chatId"
           @resume="resumeActiveRun" @cancel="stopGeneration" @open-conversation="conversationOpen = true"
           @collapse="inspectorOpen = false" />
         <button v-else-if="activeRun" class="inspector-rail" type="button" title="展开工作区面板" aria-label="展开工作区面板" @click="inspectorOpen = true">
@@ -104,6 +113,16 @@
       confirm-text="删除"
       @confirm="confirmDelete"
       @cancel="pendingDelete = null"
+    />
+    <ConfirmDialog
+      :open="confirmationDialogOpen"
+      :danger="false"
+      title="工具执行确认"
+      :message="confirmationDialogMessage"
+      confirm-text="允许执行"
+      cancel-text="拒绝"
+      @confirm="decidePendingConfirmation(true)"
+      @cancel="decidePendingConfirmation(false)"
     />
   </div>
 </template>
@@ -126,7 +145,7 @@ import RunInspector from '../components/workspace/RunInspector.vue'
 import RunPhases from '../components/workspace/RunPhases.vue'
 import RunTimeline from '../components/workspace/RunTimeline.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
-import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listWorkspaceFiles, uploadManusImage } from '../api'
+import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listWorkspaceFiles, uploadManusImage } from '../api'
 
 useHead({ title: '超级智能体 - Aster', meta: [{ name: 'description', content: 'Aster 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -147,6 +166,8 @@ const workspaceFiles = ref([])
 const composerRef = ref(null)
 const conversationDrawerRef = ref(null)
 const refreshingRun = ref(false)
+const confirmationDialogOpen = ref(false)
+const decidingConfirmation = ref(false)
 let runPollTimer = null
 const INSPECTOR_STORAGE_KEY = 'aster_super_agent_inspector_open'
 const inspectorOpen = ref(localStorage.getItem(INSPECTOR_STORAGE_KEY) !== 'false')
@@ -270,6 +291,16 @@ const parseTokenUsage = value => {
   }
 }
 
+const parsePendingConfirmations = value => {
+  if (!value) return []
+  try {
+    const node = typeof value === 'string' ? JSON.parse(value) : value
+    return Array.isArray(node?.confirmations) ? node.confirmations : []
+  } catch {
+    return []
+  }
+}
+
 const normalizeRun = (run, messageIndex = -1) => ({
   id: run?.id || '',
   status: run?.status || 'RUNNING',
@@ -282,6 +313,8 @@ const normalizeRun = (run, messageIndex = -1) => ({
   verification: run?.verification || { status: '', feedback: '' },
   canResume: run?.canResume === true && run?.status !== 'RUNNING',
   canCancel: run?.canCancel === true,
+  canDecideConfirmation: run?.canDecideConfirmation === true,
+  pendingConfirmations: parsePendingConfirmations(run?.pendingConfirmation),
   resumeCount: run?.resumeCount || 0,
   userMessageId: run?.userMessageId ?? null,
   assistantMessageId: run?.assistantMessageId ?? null,
@@ -570,6 +603,25 @@ const attachManusStream = (stream, answerIndex) => {
     }
     settleCompanion('idle', '任务已中断', 1800)
   })
+  stream.addEventListener('confirmation-required', event => {
+    try {
+      const payload = JSON.parse(event.data)
+      if (activeRun.value) {
+        activeRun.value.pendingConfirmations = payload.confirmations || []
+        activeRun.value.canDecideConfirmation = true
+        if (payload.runId) activeRun.value.id = payload.runId
+        activeRun.value.status = 'INTERRUPTED'
+        activeRun.value.canCancel = false
+        activeRun.value.canResume = true
+      }
+      const answer = messages.value[answerIndex]
+      if (answer) answer.status = 'INTERRUPTED'
+      confirmationDialogOpen.value = true
+      settleCompanion('idle', '任务已暂停：等待工具确认', 2600)
+    } catch (error) {
+      console.error('Unable to parse tool confirmation request:', error)
+    }
+  })
   stream.onmessage = event => {
     if (event.data === '[DONE]') { finishStream(); return }
     if (event.data && messages.value[answerIndex]) {
@@ -709,6 +761,43 @@ const resumeActiveRun = () => {
   if (!message.runId) message.runId = run.id
   activeAnswerIndex.value = index
   continueMessage({ message, index })
+}
+const confirmationDialogMessage = computed(() => {
+  const items = activeRun.value?.pendingConfirmations || []
+  if (!items.length) return '智能体请求执行有副作用的操作，等待你的确认。'
+  return '智能体请求执行以下有副作用的操作：'
+    + items.map(item => ` ${item.tool}${item.argumentsSummary ? `（${item.argumentsSummary}）` : ''}`).join('；')
+    + '。允许后任务将从原计划继续执行；拒绝后智能体会改用其他方式或说明受限。'
+})
+const decidePendingConfirmation = async approved => {
+  const run = activeRun.value
+  const runId = run?.id
+  if (!runId || !chatId.value || decidingConfirmation.value) return
+  decidingConfirmation.value = true
+  try {
+    await decideManusConfirmation(chatId.value, runId, null, approved ? 'APPROVED' : 'DENIED')
+    confirmationDialogOpen.value = false
+    if (run) {
+      run.pendingConfirmations = []
+      run.canDecideConfirmation = false
+    }
+    if (approved) {
+      if (run) {
+        run.status = 'RUNNING'
+        run.canCancel = true
+        run.canResume = false
+      }
+      setCompanion('thinking', '已确认，正在继续执行任务')
+      resumeActiveRun()
+    } else {
+      settleCompanion('idle', '已拒绝该工具，任务保持暂停', 2400)
+    }
+  } catch (error) {
+    console.error('Unable to record confirmation decision:', error)
+    confirmationDialogOpen.value = false
+  } finally {
+    decidingConfirmation.value = false
+  }
 }
 watch(conversationOpen, open => {
   if (!open) return
@@ -899,6 +988,33 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
 .template-icon { display: grid; width: 30px; height: 30px; place-items: center; margin-bottom: 3px; border-radius: 9px; background: var(--zwx-primary-soft); color: var(--zwx-primary); }
 .template-card strong { font-size: 12.5px; font-weight: 700; }
 .template-card > span:last-child { color: var(--sk-label-2); font-size: 10.5px; line-height: 1.5; }
+
+.confirmation-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid #f5d48a;
+  border-radius: 12px;
+  background: #fff8e6;
+  font-size: 12px;
+  color: #7a5a10;
+}
+.confirmation-text strong { font-weight: 700; }
+.confirmation-action {
+  flex-shrink: 0;
+  border: 1px solid #e2b93b;
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: #fff;
+  color: #7a5a10;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.confirmation-action:hover { background: #fdf1cd; }
 
 .conversation-toggle {
   display: inline-flex;

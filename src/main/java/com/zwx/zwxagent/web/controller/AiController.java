@@ -135,6 +135,12 @@ public class AiController {
     private com.zwx.zwxagent.agent.execution.AgentRunService agentRunService;
 
     @Resource
+    private com.zwx.zwxagent.agent.execution.AgentToolCallLedgerService agentToolCallLedgerService;
+
+    @Resource
+    private com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService;
+
+    @Resource
     private BuiltInSkillRegistry builtInSkillRegistry;
 
     @Resource
@@ -596,6 +602,43 @@ public class AiController {
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
         return Map.of("cancelled", manusGraphOrchestrator.cancel(runId));
+    }
+
+    /** run 的工具调用审计清单：来自幂等账本（工具、参数摘要、执行状态），供运行检查器展示。 */
+    @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/tool-calls")
+    public List<Map<String, Object>> listManusToolCalls(CurrentActor actor, @PathVariable String conversationId,
+                                                        @PathVariable String runId,
+                                                        @RequestParam(defaultValue = "200") int limit) {
+        agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        return agentToolCallLedgerService.auditForRun(runId, Math.min(Math.max(limit, 1), 500));
+    }
+
+    /** 用户对挂起 run 的待确认工具做决定；决定后前端调用既有 resume 接口继续执行。 */
+    @PostMapping("/manus/conversations/{conversationId}/runs/{runId}/confirmation")
+    public Map<String, Object> decideManusConfirmation(CurrentActor actor, @PathVariable String conversationId,
+                                                       @PathVariable String runId,
+                                                       @RequestBody ConfirmationDecisionRequest request) {
+        com.zwx.zwxagent.agent.execution.AgentRun run = agentRunService
+                .findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        if (!run.awaitingConfirmation()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "This run is not awaiting tool confirmation");
+        }
+        String decision = request.decision() == null ? "" : request.decision().trim().toUpperCase();
+        if (!"APPROVED".equals(decision) && !"DENIED".equals(decision)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "decision must be APPROVED or DENIED");
+        }
+        String toolName = request.toolName() == null || request.toolName().isBlank() ? null : request.toolName().trim();
+        int updated = toolConfirmationService.decide(runId, toolName, decision);
+        return Map.of("updated", updated, "decision", decision);
+    }
+
+    public record ConfirmationDecisionRequest(String toolName, String decision) {
     }
 
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/resume")

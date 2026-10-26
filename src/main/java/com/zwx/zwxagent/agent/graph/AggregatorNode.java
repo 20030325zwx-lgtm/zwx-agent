@@ -45,6 +45,19 @@ public class AggregatorNode implements NodeAction {
     @Override
     public Map<String, Object> apply(OverAllState state) {
         tokenUsageRunId.set(state.value(GraphState.RUN_ID, ""));
+        List<String> pendingConfirmations = state.value(GraphState.PENDING_CONFIRMATION)
+                .map(value -> (List<String>) value)
+                .orElse(List.of());
+        if (!pendingConfirmations.isEmpty()) {
+            // 挂起等待确认：不调用模型生成正式回答，交付固定占位说明（run 收尾时标记 INTERRUPTED + 待确认）
+            String tools = String.join("、", pendingConfirmations);
+            String notice = "任务已暂停：智能体请求执行以下有副作用的操作，需要你确认后才能继续——"
+                    + tools + "。请在运行检查器中批准或拒绝，确认后任务将从原计划继续执行。";
+            var answerChunkSink = state.value(GraphState.RUN_CONTEXT, RunContext.class)
+                    .map(RunContext::answerChunkSink).orElse(null);
+            if (answerChunkSink != null) answerChunkSink.accept(notice);
+            return Map.of(GraphState.FINAL_ANSWER, notice);
+        }
         String input = state.value(GraphState.INPUT, "");
         List<String> results = state.value(GraphState.TASK_RESULTS)
                 .map(value -> (List<String>) value)

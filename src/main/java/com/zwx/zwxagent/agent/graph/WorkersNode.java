@@ -6,6 +6,7 @@ import com.zwx.zwxagent.agent.core.BaseAgent;
 import com.zwx.zwxagent.agent.core.ToolCallAgent;
 import com.zwx.zwxagent.agent.advisor.MyLoggerAdvisor;
 import com.zwx.zwxagent.agent.advisor.TokenUsageAdvisor;
+import com.zwx.zwxagent.agent.execution.ToolConfirmationService;
 import com.zwx.zwxagent.agent.observability.TokenUsageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -42,6 +43,8 @@ public class WorkersNode implements NodeAction {
     private final ChatModel chatModel;
     private final Executor workerExecutor;
     private final TokenUsageService tokenUsage;
+    /** 有副作用工具的人工确认服务；为 null（旧测试路径）时不启用确认门禁。 */
+    private final ToolConfirmationService confirmationService;
 
     /** 当前运行中尚未结束的子 agent，供客户端断开时联动停止。 */
     private final Map<String, List<ToolCallAgent>> activeWorkers = new ConcurrentHashMap<>();
@@ -75,9 +78,15 @@ public class WorkersNode implements NodeAction {
     }
 
     public WorkersNode(ChatModel chatModel, Executor workerExecutor, TokenUsageService tokenUsage) {
+        this(chatModel, workerExecutor, tokenUsage, null);
+    }
+
+    public WorkersNode(ChatModel chatModel, Executor workerExecutor, TokenUsageService tokenUsage,
+                       ToolConfirmationService confirmationService) {
         this.chatModel = chatModel;
         this.workerExecutor = workerExecutor;
         this.tokenUsage = tokenUsage;
+        this.confirmationService = confirmationService;
     }
 
     @Override
@@ -111,6 +120,7 @@ public class WorkersNode implements NodeAction {
         List<String> results = new ArrayList<>();
         for (int index = 0; index < plan.size(); index++) {
             if (stopCheck.getAsBoolean()) break;
+            if (confirmationPending(runId)) break;
             PlanStep step = plan.get(index);
             final int stepNumber = index + 1;
             // 每个子任务独立 ChatClient：计量切面据此把 token 归到具体角色与序号
@@ -124,7 +134,7 @@ public class WorkersNode implements NodeAction {
             events.add(startEvent);
             streamEvent(activitySink, startEvent);
             FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
-                    runWorker(step, stepNumber, tools, verificationFeedback, workerClient, stopCheck, context, runKey, activitySink, originalRequest));
+                    runWorker(step, stepNumber, tools, verificationFeedback, workerClient, stopCheck, context, runKey, runId, activitySink, originalRequest));
             futures.add(task);
             activeTasks.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(task);
             try {
@@ -176,15 +186,34 @@ public class WorkersNode implements NodeAction {
                     if (tasks.isEmpty()) activeTasks.remove(runKey, tasks);
                 }
             }
+            // 某个 worker 请求了工具确认：叫停其余 worker，run 随后挂起等待用户决定
+            if (confirmationPending(runId)) {
+                events.add(ActivityEvent.of("work", "执行器", "任务已暂停：等待用户确认工具执行"));
+                streamEvent(activitySink, ActivityEvent.of("work", "执行器", "任务已暂停：等待用户确认工具执行"));
+                stopAll(runKey);
+                break;
+            }
         }
-        return Map.of(GraphState.TASK_RESULTS, results,
-                GraphState.ACTIVITIES, activities,
-                GraphState.SSE_EVENTS, events);
+        Map<String, Object> output = new java.util.HashMap<>();
+        output.put(GraphState.TASK_RESULTS, results);
+        output.put(GraphState.ACTIVITIES, activities);
+        output.put(GraphState.SSE_EVENTS, events);
+        if (confirmationPending(runId)) {
+            output.put(GraphState.PENDING_CONFIRMATION, confirmationService.pendingOf(runId).stream()
+                    .map(ToolConfirmationService.PendingConfirmation::toolName).toList());
+        }
+        return output;
+    }
+
+    private boolean confirmationPending(String runId) {
+        return confirmationService != null && runId != null && !runId.isBlank()
+                && confirmationService.isRunRegistered(runId)
+                && !confirmationService.pendingOf(runId).isEmpty();
     }
 
     private WorkerOutcome runWorker(PlanStep step, int stepNumber, ToolCallback[] allTools,
                                     String feedback, ChatClient workerClient, BooleanSupplier stopCheck,
-                                    RunContext runContext, String runKey, Consumer<ActivityEvent> activitySink,
+                                    RunContext runContext, String runKey, String runId, Consumer<ActivityEvent> activitySink,
                                     String originalRequest) {
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             return WorkerOutcome.stopped(step.title());
@@ -219,6 +248,10 @@ public class WorkersNode implements NodeAction {
                 : feedback + "\n开始执行你的子任务，需要时调用工具。");
         worker.setMaxSteps(WORKER_MAX_STEPS);
         worker.setChatClient(workerClient);
+        if (runId != null && !runId.isBlank()) {
+            // hook 上下文携带真实 runId：工具确认/账本等 run 级状态据此关联
+            worker.setHookRunId(runId);
+        }
         activeWorkers.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(worker);
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             worker.stopForClientDisconnect();

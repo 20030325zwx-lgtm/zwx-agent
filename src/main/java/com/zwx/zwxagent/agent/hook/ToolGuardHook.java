@@ -1,6 +1,7 @@
 package com.zwx.zwxagent.agent.hook;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zwx.zwxagent.agent.execution.ToolConfirmationService;
 import com.zwx.zwxagent.capability.tools.ToolGuardPolicy;
 import com.zwx.zwxagent.capability.tools.UrlAccessPolicy;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +17,8 @@ import java.util.Set;
  * 按「工具名 → 参数策略」对计划调用做预检，越权参数抛 HookAbortException 短路本 step。
  * 工具内部校验（resolveWithin / UrlAccessPolicy / 本策略）保留为第二道防线，本 hook 是统一入口与审计点。
  * 未登记工具默认拒绝；配置 allowlist 只表示管理员显式允许该工具名，不替代工具自身的参数与资源授权。
+ * 在策略校验之后追加副作用工具的人工确认门禁：仅对图编排注册过的 run 生效，
+ * 未确认时抛 ToolConfirmationRequiredException，run 由编排层挂起等待用户决定。
  */
 @Slf4j
 @Component
@@ -25,18 +28,21 @@ public class ToolGuardHook implements AgentHook {
     private final Set<String> terminalAllowlist;
     private final Set<String> allowedUnregisteredTools;
     private final UrlAccessPolicy urlAccessPolicy;
+    private final ToolConfirmationService confirmationService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ToolGuardHook(@Value("${app.agent.hook.tool-guard-enabled:true}") boolean enabled,
                          @Value("${app.tools.terminal-allowlist:}") String terminalAllowlist,
                          @Value("${app.agent.hook.allowed-unregistered-tools:}") String allowedUnregisteredTools,
-                         UrlAccessPolicy urlAccessPolicy) {
+                         UrlAccessPolicy urlAccessPolicy,
+                         ToolConfirmationService confirmationService) {
         this.enabled = enabled;
         this.terminalAllowlist = terminalAllowlist == null || terminalAllowlist.isBlank()
                 ? Set.of() : java.util.Arrays.stream(terminalAllowlist.split(","))
                         .map(String::trim).filter(value -> !value.isEmpty()).collect(java.util.stream.Collectors.toUnmodifiableSet());
         this.allowedUnregisteredTools = parseNames(allowedUnregisteredTools);
         this.urlAccessPolicy = urlAccessPolicy;
+        this.confirmationService = confirmationService;
     }
 
     @Override
@@ -62,7 +68,26 @@ public class ToolGuardHook implements AgentHook {
                         call.name(), argumentSummary(call.arguments()), reason);
                 throw new HookAbortException("工具 " + call.name() + " 被安全策略拦截：" + reason);
             }
+            confirmationGate(context, call);
         }
+    }
+
+    /** 副作用工具确认门禁：已拒绝→受控终止；待确认→登记请求并挂起等待用户决定。 */
+    private void confirmationGate(AgentRunContext context, PlannedToolCall call) {
+        if (confirmationService == null || !confirmationService.isEnabled()) return;
+        String runId = context.runId();
+        if (runId == null || !confirmationService.isRunRegistered(runId)) return;
+        String toolName = call.name();
+        if (confirmationService.isApproved(runId, toolName)) return;
+        if (confirmationService.isDenied(runId, toolName)) {
+            throw new HookAbortException("用户已拒绝在本轮任务中执行工具 " + toolName + "，请改用其他方式完成子任务，或直接说明受限");
+        }
+        if (!confirmationService.requiresConfirmation(toolName)) return;
+        confirmationService.markPending(runId, toolName, argumentSummary(call.arguments()));
+        log.info("[tool-guard] 工具调用等待用户确认 runId={} tool={} argsSummary={}",
+                runId, toolName, argumentSummary(call.arguments()));
+        throw new ToolConfirmationRequiredException(
+                "工具 " + toolName + " 属于有副作用的操作，需要用户确认后才能执行；任务已暂停等待确认");
     }
 
     /** @return null=放行；非 null=拒绝原因 */

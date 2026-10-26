@@ -174,6 +174,12 @@ export const reconnectManusRun = (conversationId, runId, lastEventId = null) => 
 export const cancelManusRun = (conversationId, runId) => request.post(
   `/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/cancel`
 ).then(response => response.data)
+export const decideManusConfirmation = (conversationId, runId, toolName, decision) => request.post(
+  `/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/confirmation`,
+  { toolName, decision }
+).then(response => response.data)
+export const listManusToolCalls = (conversationId, runId, limit = 200) =>
+  request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/tool-calls`, { params: { limit } }).then(response => response.data)
 export const createManusConversation = () => request.post('/ai/manus/conversations').then(response => response.data)
 export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)

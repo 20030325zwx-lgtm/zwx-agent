@@ -53,6 +53,18 @@ public class VerifierNode implements NodeAction {
     @Override
     public Map<String, Object> apply(OverAllState state) {
         tokenUsageRunId.set(state.value(GraphState.RUN_ID, ""));
+        List<String> pendingConfirmations = state.value(GraphState.PENDING_CONFIRMATION)
+                .map(value -> (List<String>) value)
+                .orElse(List.of());
+        if (!pendingConfirmations.isEmpty()) {
+            // run 挂起等待工具确认：不做质检，避免对半成品结果给出 pass/revise
+            return Map.of(GraphState.VERIFICATION_STATUS, "paused",
+                    GraphState.VERIFICATION_FEEDBACK, "",
+                    GraphState.REVISION, state.value(GraphState.REVISION, 0),
+                    GraphState.ACTIVITIES, List.of("任务已暂停：等待用户确认工具执行"),
+                    GraphState.SSE_EVENTS, List.of(ActivityEvent.of("verify", "质检员",
+                            "任务已暂停：等待用户确认工具执行，确认后将继续执行本计划")));
+        }
         String input = state.value(GraphState.INPUT, "");
         List<PlanStep> plan = state.value(GraphState.PLAN)
                 .map(value -> (List<PlanStep>) value)

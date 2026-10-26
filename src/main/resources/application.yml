@@ -107,6 +107,12 @@ app:
       recent-keep: 6
       # 长期事实提取（批次 C L3）：LLM 成本考虑默认关
       extraction-enabled: false
+  tools:
+    confirmation:
+      # 有副作用工具的人工确认（仅图编排 run 生效）：请求执行时 run 挂起，用户批准后从原计划继续
+      enabled: ${APP_TOOLS_CONFIRMATION_ENABLED:true}
+      # 需要确认的工具名；mcp:* 表示全部 MCP 动态工具。文件/PDF 产出是交付物，默认不拦截
+      required-tools: ${APP_TOOLS_CONFIRMATION_REQUIRED:executeTerminalCommand,executeDatabaseQuery,queryExternalDatabase,downloadResource,mcp:*}
   rag:
     rerank:
       # 总开关：false 或未配置 DashScope api-key 时自动降级为向量原始顺序

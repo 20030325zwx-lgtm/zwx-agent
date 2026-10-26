@@ -64,11 +64,18 @@ public abstract class BaseAgent {
     private volatile String stopReason;
     private volatile AgentRunContext activeRunContext;
 
+    /** 图编排路径下由创建方设置的真实 runId：hook 上下文据此关联确认/账本等 run 级状态；为空时 hook 上下文使用随机 id。 */
+    private volatile String hookRunId;
+
     /** run 归属身份（租户/智能体/会话），创建方在 run 前设置；缺省 null 时依赖身份的 hook 自动跳过。 */
     private volatile AgentRunIdentity runIdentity;
 
     public void setRunIdentity(AgentRunIdentity identity) {
         this.runIdentity = identity;
+    }
+
+    public void setHookRunId(String hookRunId) {
+        this.hookRunId = hookRunId;
     }
 
     /** 当前 run 的 hook 上下文；脱离 run() 生命周期直接调用 step() 时返回 null。 */
@@ -81,15 +88,18 @@ public abstract class BaseAgent {
     /** 构建本次 run 的上下文；子类可重写补充 agentKey / tenantId / conversationId。 */
     protected AgentRunContext newRunContext(String userPrompt) {
         AgentRunIdentity identity = runIdentity;
-        return AgentRunContext.builder()
+        AgentRunContext.Builder builder = AgentRunContext.builder()
                 .agentName(name)
                 .userPrompt(userPrompt)
                 .tenantId(identity == null ? null : identity.tenantId())
                 .agentKey(identity == null ? null : identity.agentKey())
                 .conversationId(identity == null ? null : identity.conversationId())
                 // 工作记忆活引用：转换型 hook（记忆压缩/注入）经它改写消息历史
-                .messageHistory(messageList)
-                .build();
+                .messageHistory(messageList);
+        if (hookRunId != null && !hookRunId.isBlank()) {
+            builder.runId(hookRunId);
+        }
+        return builder.build();
     }
 
     private void fireBeforeRun(AgentRunContext context) {

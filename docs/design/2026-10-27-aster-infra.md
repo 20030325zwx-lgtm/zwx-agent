@@ -1,6 +1,8 @@
 # aster-infra 基础设施服务设计（沙箱 / 出网网关 / 模型网关三合一）
 
 > 2026-10-27 新建。实现放在同级独立仓库 `~/Desktop/agent/aster-infra/`（独立 git，模式对齐 aster-mcp）；本设计文档归主仓库 `docs/design/`。
+>
+> **实施状态（2026-10-27）**：期 1 已交付——`/sandbox` 全量 + `/egress` search/fetch。单测 48/48；冒烟宿主模式与容器化模式各 17/17（含 sibling 沙箱、断网验证、超时熔断、产物回路、护栏、searxng 搜索、指标）；孤儿容器启动清扫实测生效。实现与设计的差异：artifact 下载端点为 `GET /api/sandbox/artifact/{runId}?path=<相对路径>`（原设计 `<id>`）；docker 存活探针用 `docker info` 而非 `docker version`（模板在 client 结构上执行会报错）。
 
 ## 目标
 
@@ -66,7 +68,7 @@ POST /api/sandbox/exec
 - **孤儿容器治理**：所有容器打 `asterinfra.run=<id>` label；服务启动时与每 5 分钟按 label 清扫已退出/超龄容器（`docker ps -a --filter label=asterinfra.run`）。`--rm` 只覆盖正常路径：Java 侧崩溃后没人 `docker kill`、或 OrbStack/VM 重启，都会留下残留容器，清扫器是兜底。
 - 硬限制（**容器参数级强制是真正的安全边界**；主服务侧 `ToolGuardPolicy` 字符串策略保留为第一道低成本预筛，纵深防御而非废弃）：`--network none`（默认断网）、`--memory 256m`、`--cpus 1`、`--pids-limit 64`、`--read-only` + 可写 tmpfs `/tmp` 与工作目录、超时强杀、单机并发容器上限（默认 2，超出 409）。
 - 镜像：`python:3.12-slim`、`node:22-slim`，以及自建 `aster-sandbox-cli`（ubuntu-slim + 常用 CLI：coreutils/grep/find/jq/ripgrep 等），由仓库内 `docker/` 构建脚本统一烧制——迁移 `TerminalOperationTool` 的白名单命令后，命令集只增不减。
-- 工作区：每次 exec 分配 `sandbox/workspaces/<runId>/` 临时目录挂载进容器；`files` 入参预写文件；结束后 artifacts 从该目录收集（上限：50 个/单文件 10MB），供 `GET /api/sandbox/artifact/<id>`（带 token）下载；目录 TTL 回收（默认 1h）。
+- 工作区：每次 exec 分配 `sandbox/workspaces/<runId>/` 临时目录挂载进容器；`files` 入参预写文件；结束后 artifacts 从该目录收集（上限：50 个/单文件 10MB），供 `GET /api/sandbox/artifact/{runId}?path=<相对路径>`（带 token，runId 与 path 双重越界校验）下载；目录 TTL 回收（默认 1h）。
 - 主服务接入：`ToolFactory` 新增 `SandboxTerminalTool`，与现 `TerminalOperationTool` 同签名同描述；`app.sandbox.mode = local | infra`（默认 local 不变，切换即迁移，保留 local 作为显式降级开关）。Windows 分支随迁移自然消亡。
 - aster-mcp 接入：新增 `tools/sandbox` 组（组级开关沿用其 ToolboxConfig 模式），工具 `sandbox_run(lang, code)`。
 

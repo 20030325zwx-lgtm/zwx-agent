@@ -1,52 +1,51 @@
 package com.zwx.zwxagent.web.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwx.zwxagent.agent.execution.AgentRunSummary;
 import com.zwx.zwxagent.agent.execution.AgentRunView;
+import com.zwx.zwxagent.agent.execution.AgentRunService;
+import com.zwx.zwxagent.agent.execution.AgentToolCallLedgerService;
+import com.zwx.zwxagent.agent.execution.RunQuotaService;
+import com.zwx.zwxagent.agent.execution.ToolConfirmationService;
+import com.zwx.zwxagent.agent.execution.WebSourceService;
 import com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator;
-import com.zwx.zwxagent.platform.intent.IntentDecision;
-import com.zwx.zwxagent.platform.settings.AppConfigurationService;
-import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
+import com.zwx.zwxagent.capability.mcp.McpTools;
+import com.zwx.zwxagent.capability.tools.ToolFactory;
+import com.zwx.zwxagent.capability.tools.ToolSandbox;
 import com.zwx.zwxagent.chat.conversation.AgentConversationMessage;
 import com.zwx.zwxagent.chat.conversation.AgentConversationService;
 import com.zwx.zwxagent.chat.conversation.AgentConversationSummary;
-import com.zwx.zwxagent.platform.security.CurrentActor;
-import com.zwx.zwxagent.knowledge.document.AgentKnowledgeDocument;
-import com.zwx.zwxagent.knowledge.document.AgentKnowledgeDocumentService;
-import com.zwx.zwxagent.knowledge.document.AgentKnowledgeDocumentDetail;
-import com.zwx.zwxagent.knowledge.retrieval.AgentKnowledgeRagService;
+import com.zwx.zwxagent.chat.conversation.ConversationLockManager;
+import com.zwx.zwxagent.knowledge.image.ImageAnalysisService;
 import com.zwx.zwxagent.knowledge.retrieval.AgentKnowledgeRagResult;
-import com.zwx.zwxagent.capability.skills.BuiltInSkillRegistry;
-import com.zwx.zwxagent.capability.skills.SkillConfigurationRequest;
-import com.zwx.zwxagent.capability.skills.SkillCatalogItem;
-import com.zwx.zwxagent.capability.skills.SkillRepository;
-import com.zwx.zwxagent.capability.mcp.McpConnectionTestResult;
-import com.zwx.zwxagent.capability.mcp.McpServerConfiguration;
-import com.zwx.zwxagent.capability.mcp.McpServerConfigurationRequest;
-import com.zwx.zwxagent.capability.mcp.McpServerConfigurationService;
-import com.zwx.zwxagent.capability.mcp.McpTools;
+import com.zwx.zwxagent.knowledge.retrieval.AgentKnowledgeRagService;
+import com.zwx.zwxagent.knowledge.storage.AgentImageStorageService;
+import com.zwx.zwxagent.platform.intent.IntentDecision;
+import com.zwx.zwxagent.platform.intent.IntentRouter;
+import com.zwx.zwxagent.platform.security.CurrentActor;
+import com.zwx.zwxagent.platform.settings.AppConfigurationService;
+import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
+import com.zwx.zwxagent.platform.workspace.WorkspaceService;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.http.MediaType;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.core.io.FileSystemResource;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -60,9 +59,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+/**
+ * 超级智能体接口：SSE 对话与 run 生命周期（确认/恢复/取消/审计/联网引用）、会话与消息、
+ * 图片、工作区文件。原 AiController manus 组拆分，路径保持不变。
+ */
 @RestController
 @RequestMapping("/ai")
-public class AiController {
+public class ManusAgentController {
 
     private static final String SUPER_AGENT_KEY = "super";
     private static final String SUPER_DEFAULT_TITLE = "新的超级智能体对话";
@@ -76,13 +79,13 @@ public class AiController {
             });
 
     @Resource
-    private com.zwx.zwxagent.capability.tools.ToolFactory toolFactory;
+    private ToolFactory toolFactory;
 
     @Resource
-    private com.zwx.zwxagent.capability.tools.ToolSandbox toolSandbox;
+    private ToolSandbox toolSandbox;
 
     @Resource
-    private com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService;
+    private WorkspaceService workspaceService;
 
     @Resource
     private AppConfigurationService appConfigurationService;
@@ -91,300 +94,52 @@ public class AiController {
     private DynamicChatModelFactory dynamicChatModelFactory;
 
     @Resource
-    private com.zwx.zwxagent.knowledge.storage.AgentImageStorageService agentImageStorageService;
+    private AgentImageStorageService agentImageStorageService;
 
     @Resource
-    private com.zwx.zwxagent.knowledge.image.ImageAnalysisService imageAnalysisService;
-
-    @Resource
-    private AgentKnowledgeDocumentService agentKnowledgeDocumentService;
-
-    @Resource
-    private com.zwx.zwxagent.platform.security.ReviewAccessGuard reviewAccessGuard;
-
-    @Resource
-    private com.zwx.zwxagent.knowledge.document.AgentReviewerAssignmentService reviewerAssignmentService;
-
-    @Resource
-    private com.zwx.zwxagent.knowledge.document.AgentKnowledgeReviewLogService reviewLogService;
+    private ImageAnalysisService imageAnalysisService;
 
     @Resource
     private AgentConversationService agentConversationService;
 
     @Resource
-    private McpServerConfigurationService mcpServerConfigurationService;
+    private com.zwx.zwxagent.capability.mcp.McpServerConfigurationService mcpServerConfigurationService;
 
     @Resource
     private AgentKnowledgeRagService agentKnowledgeRagService;
 
     @Resource
     private ObjectMapper objectMapper;
-    @Resource
-    private com.zwx.zwxagent.platform.intent.IntentRouter intentRouter;
 
     @Resource
-    private com.zwx.zwxagent.chat.conversation.ConversationLockManager conversationLockManager;
+    private IntentRouter intentRouter;
+
+    @Resource
+    private ConversationLockManager conversationLockManager;
 
     @Resource(name = "agentExecutor")
     private java.util.concurrent.Executor agentExecutor;
 
     @Resource
-    private com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator manusGraphOrchestrator;
+    private ManusGraphOrchestrator manusGraphOrchestrator;
 
     @Resource
-    private com.zwx.zwxagent.agent.execution.AgentRunService agentRunService;
+    private AgentRunService agentRunService;
 
     @Resource
-    private com.zwx.zwxagent.agent.execution.AgentToolCallLedgerService agentToolCallLedgerService;
+    private AgentToolCallLedgerService agentToolCallLedgerService;
 
     @Resource
-    private com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService;
+    private ToolConfirmationService toolConfirmationService;
 
     @Resource
     private com.zwx.zwxagent.agent.observability.AgentMetrics agentMetrics;
 
     @Resource
-    private com.zwx.zwxagent.agent.execution.RunQuotaService runQuotaService;
+    private RunQuotaService runQuotaService;
 
     @Resource
-    private com.zwx.zwxagent.agent.execution.WebSourceService webSourceService;
-
-    @Resource
-    private BuiltInSkillRegistry builtInSkillRegistry;
-
-    @Resource
-    private SkillRepository skillRepository;
-
-    @Resource(name = "ragExecutor")
-    private java.util.concurrent.Executor ragExecutor;
-
-    @GetMapping("/skills/catalog")
-    public List<SkillCatalogItem> listSkillCatalog(CurrentActor actor, @RequestParam String agentKey) {
-        return builtInSkillRegistry.catalogWithConfiguration(actor.tenantId(), agentKey);
-    }
-
-    @PostMapping("/skills/config")
-    public List<SkillCatalogItem> saveSkillConfiguration(CurrentActor actor, @RequestBody SkillConfigurationRequest request) {
-        actor.requireAdmin();
-        if (request == null || request.agentKey() == null || request.enabledSkillIds() == null) throw new IllegalArgumentException("Invalid Skill configuration");
-        builtInSkillRegistry.saveConfiguration(actor.tenantId(), request.agentKey(), request.enabledSkillIds());
-        return builtInSkillRegistry.catalogWithConfiguration(actor.tenantId(), request.agentKey());
-    }
-
-    @PostMapping("/skills/reload")
-    public List<SkillCatalogItem> reloadSkills(CurrentActor actor, @RequestParam String agentKey) {
-        actor.requireAdmin();
-        skillRepository.reload();
-        return builtInSkillRegistry.catalogWithConfiguration(actor.tenantId(), agentKey);
-    }
-
-    @PostMapping(value = "/agent-knowledge/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public AgentKnowledgeDocument uploadAgentKnowledgeDocument(CurrentActor actor, @RequestParam String agentKey,
-                                                               @RequestPart("file") MultipartFile file,
-                                                               @RequestParam(required = false) String categoryId,
-                                                               @RequestParam(defaultValue = "true") boolean autoPublish,
-                                                               @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        AgentKnowledgeDocument document = agentKnowledgeDocumentService.upload(actor.tenantId(), agentKey, file,
-                actor.username(), categoryId, autoPublish, normalizeIdempotencyKey(idempotencyKey));
-        agentKnowledgeDocumentService.indexDocument(document.id());
-        return document;
-    }
-
-    private String normalizeIdempotencyKey(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        String key = raw.trim();
-        if (!key.matches("[A-Za-z0-9_-]{1,64}"))
-            throw new IllegalArgumentException("Idempotency-Key must be 1-64 characters of letters, digits, _ or -");
-        return key;
-    }
-
-    @GetMapping("/agent-knowledge/documents")
-    public List<AgentKnowledgeDocument> listAgentKnowledgeDocuments(CurrentActor actor, @RequestParam String agentKey) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        return agentKnowledgeDocumentService.listDocuments(actor.tenantId(), agentKey);
-    }
-
-    @GetMapping("/agent-knowledge/categories")
-    public List<com.zwx.zwxagent.knowledge.document.AgentKnowledgeCategory> listAgentKnowledgeCategories(CurrentActor actor,
-                                                                                          @RequestParam String agentKey) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        return agentKnowledgeDocumentService.listCategories(actor.tenantId(), agentKey);
-    }
-
-    @PostMapping("/agent-knowledge/categories")
-    public com.zwx.zwxagent.knowledge.document.AgentKnowledgeCategory createAgentKnowledgeCategory(
-            CurrentActor actor, @RequestBody CreateKnowledgeCategoryRequest request) {
-        actor.requireAdmin();
-        return agentKnowledgeDocumentService.createCategory(actor.tenantId(), request.agentKey(), request.name(), actor.username());
-    }
-
-    @PostMapping("/agent-knowledge/documents/{documentId}/category")
-    public AgentKnowledgeDocument moveAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
-                                                             @RequestParam String agentKey,
-                                                             @RequestParam String categoryId) {
-        actor.requireAdmin();
-        return agentKnowledgeDocumentService.moveDocument(actor.tenantId(), agentKey, documentId, categoryId);
-    }
-
-    public record CreateKnowledgeCategoryRequest(String agentKey, String name) {
-    }
-
-    @GetMapping("/agent-knowledge/chunks/{chunkId}")
-    public com.zwx.zwxagent.knowledge.document.AgentKnowledgeChunkPreview getAgentKnowledgeChunk(
-            CurrentActor actor, @PathVariable String chunkId, @RequestParam String agentKey,
-            @RequestParam(required = false) String documentId,
-            @RequestParam(required = false) String blockId) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        return agentKnowledgeDocumentService.getChunk(actor.tenantId(), agentKey, chunkId, documentId, blockId)
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
-                        org.springframework.http.HttpStatus.NOT_FOUND, "Knowledge chunk not found"));
-    }
-
-    @GetMapping("/agent-knowledge/documents/{documentId}")
-    public AgentKnowledgeDocumentDetail getAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        return agentKnowledgeDocumentService.getDocument(actor.tenantId(), agentKey, documentId);
-    }
-
-    @GetMapping("/agent-knowledge/documents/{documentId}/workflow-status")
-    public java.util.Map<String, Object> getWorkflowDocumentStatus(CurrentActor actor, @PathVariable String documentId,
-                                                            @RequestParam String agentKey) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        var document = agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-        java.util.Map<String, Object> status = new java.util.LinkedHashMap<>(objectMapper.convertValue(document, java.util.Map.class));
-        status.putAll(agentKnowledgeDocumentService.indexMetrics(documentId));
-        return status;
-    }
-
-    @PostMapping("/agent-knowledge/documents/{documentId}/verify-retrieval")
-    public Map<String, Object> verifyWorkflowDocumentRetrieval(CurrentActor actor, @PathVariable String documentId,
-                                                               @RequestParam String agentKey,
-                                                               @RequestBody Map<String, String> request) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-        String query = request.getOrDefault("query", "").trim();
-        if (query.isBlank()) throw new IllegalArgumentException("query is required");
-        List<Map<String, Object>> matches = agentKnowledgeRagService.verifyDocument(actor.tenantId(), agentKey, documentId, query).stream()
-                .map(document -> Map.<String, Object>of("content", document.getText(), "metadata", document.getMetadata(),
-                        "score", document.getScore() == null ? 0.0 : document.getScore())).toList();
-        return Map.of("matched", !matches.isEmpty(), "matches", matches);
-    }
-
-    @GetMapping("/agent-knowledge/documents/{documentId}/content")
-    public ResponseEntity<byte[]> getAgentKnowledgeDocumentContent(CurrentActor actor, @PathVariable String documentId,
-                                                                   @RequestParam String agentKey) {
-        actor.requireAdmin();
-        var content = agentKnowledgeDocumentService.readDocumentFile(actor.tenantId(), agentKey, documentId);
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(content.contentType()))
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        ContentDisposition.inline().filename(content.filename(), StandardCharsets.UTF_8).build().toString())
-                .body(content.bytes());
-    }
-
-    @PostMapping("/agent-knowledge/documents/{documentId}/publish")
-    public AgentKnowledgeDocument publishAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
-                                                                 @RequestParam String agentKey) {
-        reviewAccessGuard.requireReviewAccess(actor, agentKey);
-        agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-        agentKnowledgeDocumentService.publish(documentId, actor, "API");
-        return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-    }
-
-    @PostMapping("/agent-knowledge/documents/{documentId}/reject")
-    public AgentKnowledgeDocument rejectAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
-                                                                @RequestParam String agentKey,
-                                                                @RequestBody(required = false) Map<String, String> request) {
-        reviewAccessGuard.requireReviewAccess(actor, agentKey);
-        agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-        agentKnowledgeDocumentService.reject(documentId, request == null ? "" : request.get("reviewNote"), actor, "API");
-        return agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-    }
-
-    @GetMapping("/agent-knowledge/documents/{documentId}/review-log")
-    public List<com.zwx.zwxagent.knowledge.document.AgentKnowledgeReviewLogService.ReviewLogEntry> getReviewLog(
-            CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
-        reviewAccessGuard.requireReviewAccess(actor, agentKey);
-        agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-        return reviewLogService.listByDocument(actor.tenantId(), agentKey, documentId);
-    }
-
-    /**
-     * n8n 人工审核暂停前登记恢复地址；恢复 URL 属机密，只接受登记，永不回显。
-     */
-    @PostMapping("/agent-knowledge/documents/{documentId}/resume-info")
-    public Map<String, Object> storeResumeInfo(CurrentActor actor, @PathVariable String documentId,
-                                               @RequestParam String agentKey,
-                                               @RequestBody Map<String, Object> request) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        String resumeUrl = request.getOrDefault("resumeUrl", "").toString().trim();
-        if (resumeUrl.isBlank()) throw new IllegalArgumentException("resumeUrl is required");
-        String n8nExecutionId = request.getOrDefault("n8nExecutionId", "").toString().trim();
-        String expiresAtRaw = request.getOrDefault("expiresAt", "").toString().trim();
-        java.time.Instant expiresAt = expiresAtRaw.isBlank() ? null : java.time.Instant.parse(expiresAtRaw);
-        agentKnowledgeDocumentService.storeResumeInfo(actor.tenantId(), agentKey, documentId, resumeUrl,
-                n8nExecutionId.isBlank() ? null : n8nExecutionId, expiresAt);
-        return Map.of("stored", true);
-    }
-
-    /**
-     * n8n 侧追加审计事件（当前仅 TIMEOUT）；只记审计，不改变文档状态。
-     */
-    @PostMapping("/agent-knowledge/documents/{documentId}/review-events")
-    public Map<String, Object> recordReviewEvent(CurrentActor actor, @PathVariable String documentId,
-                                                 @RequestParam String agentKey,
-                                                 @RequestBody Map<String, String> request) {
-        actor.requireKnowledgeWorkflowAccess(agentKey);
-        String action = request.getOrDefault("action", "").trim();
-        if (!"TIMEOUT".equals(action)) {
-            throw new IllegalArgumentException("Only TIMEOUT review events are accepted from workflow identities");
-        }
-        agentKnowledgeDocumentService.recordReviewEvent(actor.tenantId(), agentKey, documentId, action,
-                actor, "N8N", request.getOrDefault("note", ""), request.getOrDefault("n8nExecutionId", ""));
-        return Map.of("recorded", true);
-    }
-
-    @GetMapping("/agent-reviewers")
-    public List<com.zwx.zwxagent.knowledge.document.AgentReviewerAssignmentService.ReviewerAssignment> listReviewers(
-            CurrentActor actor, @RequestParam(required = false) String agentKey) {
-        actor.requireAdmin();
-        return reviewerAssignmentService.list(actor.tenantId(), agentKey);
-    }
-
-    public record ReviewerAssignRequest(String agentKey, String username) {
-    }
-
-    @PostMapping("/agent-reviewers")
-    public com.zwx.zwxagent.knowledge.document.AgentReviewerAssignmentService.ReviewerAssignment assignReviewer(
-            CurrentActor actor, @RequestBody ReviewerAssignRequest request) {
-        actor.requireAdmin();
-        if (request == null || request.agentKey() == null || request.agentKey().isBlank()
-                || request.username() == null || request.username().isBlank()) {
-            throw new IllegalArgumentException("agentKey and username are required");
-        }
-        return reviewerAssignmentService.assign(actor, actor.tenantId(), request.agentKey().trim(), request.username().trim());
-    }
-
-    @DeleteMapping("/agent-reviewers/{assignmentId}")
-    public void unassignReviewer(CurrentActor actor, @PathVariable String assignmentId) {
-        actor.requireAdmin();
-        reviewerAssignmentService.unassign(assignmentId);
-    }
-
-    @PostMapping("/agent-knowledge/documents/{documentId}/reindex")
-    public AgentKnowledgeDocument reindexAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
-        actor.requireAdmin();
-        AgentKnowledgeDocument document = agentKnowledgeDocumentService.getDocumentRecordForScope(actor.tenantId(), agentKey, documentId);
-        agentKnowledgeDocumentService.indexDocument(documentId);
-        return document;
-    }
-
-    @org.springframework.web.bind.annotation.DeleteMapping("/agent-knowledge/documents/{documentId}")
-    public void deleteAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
-        actor.requireAdmin();
-        agentKnowledgeDocumentService.deleteDocument(actor.tenantId(), agentKey, documentId);
-    }
+    private WebSourceService webSourceService;
 
     private String toJson(Object value) {
         try {
@@ -629,7 +384,7 @@ public class AiController {
 
     /** run 的联网引用：从幂等账本提取搜索结果与抓取页面的 URL/标题/时间，供前端参考链接展示。 */
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/web-sources")
-    public List<com.zwx.zwxagent.agent.execution.WebSourceService.WebSource> listManusWebSources(
+    public List<WebSourceService.WebSource> listManusWebSources(
             CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
         agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
@@ -700,7 +455,7 @@ public class AiController {
                         null, null, List.of(), List.of(), List.of(), List.of(), 0, null, null, null, null)
                 : run.checkpoint();
         String resumeFrom = com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.resumeNode(checkpoint);
-        org.slf4j.LoggerFactory.getLogger(AiController.class).debug(
+        org.slf4j.LoggerFactory.getLogger(ManusAgentController.class).debug(
                 "resume manus run; runId={}, lastNode={}, resumeFrom={}, planSize={}, resultSize={}",
                 runId, checkpoint.lastNode(), resumeFrom, checkpoint.plan().size(), checkpoint.taskResults().size());
         com.zwx.zwxagent.agent.graph.GraphCheckpoint resumeCheckpoint =
@@ -795,38 +550,9 @@ public class AiController {
             }
             agentRunService.finish(runId, result.status(), result.answer(), result.error(), messageId);
         } catch (RuntimeException persistenceError) {
-            org.slf4j.LoggerFactory.getLogger(AiController.class)
+            org.slf4j.LoggerFactory.getLogger(ManusAgentController.class)
                     .error("Failed to persist super agent turn; conversationId={}, runId={}", conversationId, runId, persistenceError);
         }
-    }
-
-    @GetMapping("/mcp/servers")
-    public List<McpServerConfiguration> listMcpServers(CurrentActor actor) {
-        return mcpServerConfigurationService.list(actor.tenantId());
-    }
-
-    @PostMapping("/mcp/servers")
-    public McpServerConfiguration createMcpServer(CurrentActor actor, @RequestBody McpServerConfigurationRequest request) {
-        actor.requireAdmin();
-        return mcpServerConfigurationService.create(actor.tenantId(), request);
-    }
-
-    @PutMapping("/mcp/servers/{id}")
-    public McpServerConfiguration updateMcpServer(CurrentActor actor, @PathVariable long id, @RequestBody McpServerConfigurationRequest request) {
-        actor.requireAdmin();
-        return mcpServerConfigurationService.update(actor.tenantId(), id, request);
-    }
-
-    @DeleteMapping("/mcp/servers/{id}")
-    public void deleteMcpServer(CurrentActor actor, @PathVariable long id) {
-        actor.requireAdmin();
-        mcpServerConfigurationService.delete(actor.tenantId(), id);
-    }
-
-    @PostMapping("/mcp/servers/{id}/test")
-    public McpConnectionTestResult testMcpServer(CurrentActor actor, @PathVariable long id) {
-        actor.requireAdmin();
-        return mcpServerConfigurationService.test(actor.tenantId(), id);
     }
 
     @PostMapping("/manus/conversations")
@@ -884,7 +610,7 @@ public class AiController {
 
     /** 会话工作区文件清单（design/plans/09 批次 A）。 */
     @GetMapping("/workspace/files")
-    public List<com.zwx.zwxagent.platform.workspace.WorkspaceService.FileEntry> listWorkspaceFiles(
+    public List<WorkspaceService.FileEntry> listWorkspaceFiles(
             CurrentActor actor, @RequestParam String agentKey, @RequestParam String conversationId,
             @RequestParam(defaultValue = "200") int limit) {
         if (!agentConversationService.hasConversation(actor.tenantId(), actor.userId(), agentKey, conversationId)) {
@@ -892,15 +618,4 @@ public class AiController {
         }
         return workspaceService.listFiles(actor.tenantId(), agentKey, conversationId, Math.min(Math.max(limit, 1), 500));
     }
-
-
-    @org.springframework.web.bind.annotation.PostMapping("/rag-evaluations/{messageId}/judgments")
-    public ResponseEntity<Void> judgeRagCandidate(CurrentActor actor, @PathVariable long messageId,
-                                                   @org.springframework.web.bind.annotation.RequestBody RagJudgmentRequest request) {
-        boolean saved = agentConversationService.saveRagJudgment(actor.tenantId(), actor.userId(), request.agentKey(),
-                messageId, request.candidateId(), request.judgment());
-        return saved ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
-    }
-
-    public record RagJudgmentRequest(String agentKey, String candidateId, String judgment) { }
 }

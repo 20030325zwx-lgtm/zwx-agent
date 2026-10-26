@@ -55,7 +55,7 @@ server:
 # 指标内容不含用户/租户标识，仅系统与聚合业务计数
 management:
   server:
-    port: 8124
+    port: 8135
   endpoints:
     web:
       exposure:

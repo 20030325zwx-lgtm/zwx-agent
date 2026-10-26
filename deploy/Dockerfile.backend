@@ -7,6 +7,6 @@ COPY ${JAR_FILE} app.jar
 
 RUN mkdir -p /app/temp
 
-EXPOSE 8123 8124
+EXPOSE 8123 8135
 
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

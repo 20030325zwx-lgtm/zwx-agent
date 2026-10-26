@@ -236,7 +236,7 @@ public class ManusAgentController {
             var effect = decision.applyTo(effectiveKnowledgeSearch, effectiveWebSearch);
             effectiveKnowledgeSearch = effect.knowledgeSearch();
             effectiveWebSearch = effect.webSearch();
-            if (agentMetrics != null) agentMetrics.intentDecision(String.valueOf(effect.action()));
+            if (agentMetrics != null) agentMetrics.intentDecision(decision.recommend().name().toLowerCase());
             // 图片消息与文本同规则：知识类意图按图片分析改写检索词检索；随便问则不检索，
             // 由模型基于图片分析与自身知识直接作答（worker 知识约束已分级，未覆盖时不会草草结束）。
             prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "意图识别",

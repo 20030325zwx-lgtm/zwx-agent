@@ -5,7 +5,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 智能体业务指标（Micrometer）：run 结果分布、工具拦截/确认、检索空命中、意图分流、配额拒绝。
- * 只承载聚合计数与结果枚举，不携带用户/租户标识；经独立管理端口 8124 暴露给 Prometheus。
+ * 只承载聚合计数与结果枚举，不携带用户/租户标识；经独立管理端口 8135 暴露给 Prometheus。
  */
 @Component
 public class AgentMetrics {

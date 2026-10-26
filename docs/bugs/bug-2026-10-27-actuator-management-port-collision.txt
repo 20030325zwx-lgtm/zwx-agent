@@ -1,0 +1,32 @@
+日期：2026-10-27
+主题：actuator 管理端口连续两次撞本地已占用端口（8124→8125→8135）
+
+问题现象：
+为接入 actuator/Prometheus 给主服务加独立管理端口，初选 8124 启动失败
+（APPLICATION FAILED TO START: Port 8124 was already in use）；改 8125 后
+/actuator 返回 404（curl 命中 OrbStack 端口转发而非后端 Tomcat）。
+
+影响范围：
+仅本地部署与 compose 部署的监控端口选择；不影响业务功能。
+
+原因：
+1. 8124 被常驻的本机 MCP 子服务占用（java -jar aster-agent-mcp-server-*.jar，10-26 启动）。
+2. 8125 被 aster-infra 容器的 127.0.0.1:8125->8125 端口转发占用：后端 Tomcat 虽在 *:8125
+   监听成功，但 curl 127.0.0.1 优先命中 OrbStack 转发，返回容器内 404，具有隐蔽性。
+3. 另发现管理端点默认被 Spring Security 拦截（401），需在 SecurityConfig 显式放行 /actuator/**。
+
+解决方式：
+- 管理端口定为 8135（lsof -iTCP:8135 -sTCP:LISTEN 验证空闲），同步修改：
+  application.yml、Dockerfile.backend EXPOSE、compose expose+healthcheck、prometheus.yml target。
+- SecurityConfig PUBLIC_PATHS 增加 /actuator/**（管理端口不对外发布；指标不含用户/租户标识）。
+
+验证结果：
+/actuator/health 返回整体 UP（db/objectStorage UP、docling UNKNOWN 不拉低整体）；
+/actuator/prometheus 正常输出 agent_* 业务计数；compose 健康检查路径可用。
+
+后续注意事项：
+1. 本机 812x-813x 段被 MCP 子服务、aster-infra 容器、OrbStack 转发密集占用，
+   新增本地端口前务必 lsof + docker ps 双重确认。
+2. 404 隐蔽性教训：端口被 Docker/OrbStack 转发抢占时服务本身能启动成功，
+   必须用「实际 curl 返回内容」而非「端口监听存在」验证。
+3. 若未来把管理端口发布到公网，/actuator/** 的匿名放行必须重审（当前仅限本机/内网）。

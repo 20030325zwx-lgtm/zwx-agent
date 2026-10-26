@@ -28,7 +28,10 @@ public class SecurityConfig {
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/doc.html",
-            "/webjars/**"
+            "/webjars/**",
+            // 管理端口（独立 server.port=8135，不对外发布）上的健康检查与 Prometheus 抓取；
+            // 该端口不经过 /api 前缀，指标不含用户/租户标识。若把管理端口发布到公网，必须另加网络层认证。
+            "/actuator/**"
     );
 
     @Bean

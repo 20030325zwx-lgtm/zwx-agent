@@ -77,6 +77,7 @@ public class ManusGraphOrchestrator {
     private final Executor workerExecutor;
     private final AgentRunService agentRunService;
     private final AgentToolCallLedgerService toolCallLedger;
+    private final com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private CompiledGraph compiledGraph;
@@ -87,7 +88,7 @@ public class ManusGraphOrchestrator {
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor) {
-        this(dashscopeChatModel, workerExecutor, null, null);
+        this(dashscopeChatModel, workerExecutor, null, null, null);
     }
 
     @Autowired
@@ -95,11 +96,13 @@ public class ManusGraphOrchestrator {
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor,
                                   AgentRunService agentRunService,
-                                  AgentToolCallLedgerService toolCallLedger) {
+                                  AgentToolCallLedgerService toolCallLedger,
+                                  com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage) {
         this.chatModel = dashscopeChatModel;
         this.workerExecutor = workerExecutor;
         this.agentRunService = agentRunService;
         this.toolCallLedger = toolCallLedger;
+        this.tokenUsage = tokenUsage;
     }
 
     @PostConstruct
@@ -116,13 +119,13 @@ public class ManusGraphOrchestrator {
     }
 
     private GraphInstance buildGraph(ChatModel graphChatModel) throws Exception {
-        WorkersNode workersNode = new WorkersNode(graphChatModel, workerExecutor);
+        WorkersNode workersNode = new WorkersNode(graphChatModel, workerExecutor, tokenUsage);
         StateGraph graph = new StateGraph(this::newState);
         graph.addNode(NODE_RESUME_ROUTER, AsyncNodeAction.node_async(state -> Map.of()));
-        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel)));
+        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel, tokenUsage)));
         graph.addNode(NODE_WORKERS, AsyncNodeAction.node_async(workersNode));
-        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel)));
-        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel)));
+        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel, tokenUsage)));
+        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel, tokenUsage)));
         graph.addEdge(StateGraph.START, NODE_RESUME_ROUTER);
         graph.addConditionalEdges(NODE_RESUME_ROUTER, AsyncEdgeAction.edge_async(this::routeResume),
                 Map.of(NODE_PLANNER, NODE_PLANNER, NODE_WORKERS, NODE_WORKERS,
@@ -387,6 +390,11 @@ public class ManusGraphOrchestrator {
                             stream.sendMessage(chunk);
                         }
                     }, activitySink, webSearchEnabled);
+            if (tokenUsage != null) {
+                // 私有知识块规模：同一段会被每个 worker 与交付节点各带一份，是复制型成本的乘数
+                tokenUsage.bindContext(request.runId(),
+                        request.knowledgeContext() == null ? 0 : request.knowledgeContext().length());
+            }
             Map<String, Object> inputs = Map.of(
                     GraphState.INPUT, request.message(),
                     GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext(),
@@ -442,12 +450,14 @@ public class ManusGraphOrchestrator {
             String answer = completed ? finalAnswer : completedAnswer(finalAnswer, streamedAnswer, stopped.get());
             String status = completed ? "COMPLETED" : "INTERRUPTED";
             persist(request, answer, activities, completed, status, null, finalized);
+            publishTokenUsage(stream, request.runId());
             sendDone(stream, completed);
         } catch (Exception exception) {
             log.error("manus graph 执行失败", exception);
             String answer = completedAnswer(finalAnswer, streamedAnswer, stopped.get());
             String status = stopped.get() ? "INTERRUPTED" : "FAILED";
             persist(request, answer, activities, false, status, exception.getMessage(), finalized);
+            publishTokenUsage(stream, request.runId());
             stream.send("generation-error", com.zwx.zwxagent.common.ErrorMessages.describe(exception));
             stream.sendMessage("任务已中止：" + com.zwx.zwxagent.common.ErrorMessages.describe(exception));
             stream.complete();
@@ -545,6 +555,29 @@ public class ManusGraphOrchestrator {
                     answer, List.copyOf(activities), completed, status, error));
         } catch (Exception persistenceError) {
             log.error("failed to persist manus run result; runId={}, status={}", request.runId(), status, persistenceError);
+        }
+    }
+
+    /**
+     * run 收尾发布 token 账目：落库 + 推 usage 事件，随后释放台账。
+     * 计量属于观测面，任何失败都不得影响已完成的回答。
+     */
+    private void publishTokenUsage(RunStream stream, String runId) {
+        if (tokenUsage == null || runId == null || runId.isBlank()) return;
+        try {
+            int prompt = tokenUsage.promptTokens(runId);
+            int completion = tokenUsage.completionTokens(runId);
+            int calls = tokenUsage.calls(runId);
+            if (calls == 0) return;
+            String usageJson = tokenUsage.usageJson(runId);
+            if (agentRunService != null) {
+                agentRunService.recordTokenUsage(runId, usageJson, prompt, completion, calls);
+            }
+            stream.send("usage", usageJson);
+        } catch (Exception exception) {
+            log.warn("token 计量发布失败；runId={}", runId, exception);
+        } finally {
+            tokenUsage.release(runId);
         }
     }
 

@@ -23,6 +23,7 @@
 - [知识文档上传幂等键](./2026-10-24-knowledge-upload-idempotency.md)
 - [知识文档人工审批入口](./2026-10-24-knowledge-approval-entry.md)
 - [Jev 意图分流层（批 0/1 已实施）](./2026-10-25-jev-intent-routing.md)
+- [超级智能体 token 计量（A 档 ①）](./2026-10-26-token-usage-accounting.md)
 - [MCP 连接管理与工具授权](./2026-10-21-mcp-connection-management.md)
 - [改造实施方案索引](./plans/README.md)
 

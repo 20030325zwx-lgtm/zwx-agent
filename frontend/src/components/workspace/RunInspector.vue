@@ -48,6 +48,37 @@
       </div>
     </div>
 
+    <div v-else-if="activeTab === 'usage'" class="tab-panel token-usage">
+      <template v-if="usage">
+        <dl class="usage-total">
+          <div><dt>输入</dt><dd>{{ formatNumber(usage.promptTokens) }}</dd></div>
+          <div><dt>输出</dt><dd>{{ formatNumber(usage.completionTokens) }}</dd></div>
+          <div><dt>调用</dt><dd>{{ usage.calls || 0 }} 次</dd></div>
+          <div><dt>知识上下文</dt><dd>{{ formatNumber(usage.ragContextChars) }} 字</dd></div>
+        </dl>
+        <article v-for="phase in usage.phases" :key="phase.phase" class="phase-card">
+          <header>
+            <strong>{{ phase.phase }}</strong>
+            <em>{{ promptShare(phase) }}%</em>
+          </header>
+          <div class="phase-bar"><span :style="{ width: `${phaseShare(phase)}%` }" /></div>
+          <small>
+            输入 {{ formatNumber(phase.promptTokens) }} · 输出 {{ formatNumber(phase.completionTokens) }} · {{ phase.calls }} 次
+          </small>
+          <p>
+            <span>工具结果 {{ formatNumber(phase.avgToolResultChars) }} 字（峰值 {{ formatNumber(phase.maxToolResultChars) }}）</span>
+            <span>工具 {{ phase.maxToolCount }} 个 / {{ formatNumber(phase.avgToolSchemaChars) }} 字</span>
+            <span>正文 {{ formatNumber(phase.avgMessageChars) }} 字 × {{ phase.avgMessageCount }} 条 · 系统词 {{ formatNumber(phase.avgSystemChars) }} 字</span>
+          </p>
+        </article>
+      </template>
+      <div v-else class="panel-empty">
+        <Gauge :size="18" />
+        <span>本轮还没有用量统计</span>
+        <small>任务结束后，这里会显示每个阶段的输入/输出 Token 和提示词构成。</small>
+      </div>
+    </div>
+
     <div v-else class="tab-panel run-meta">
       <template v-if="run">
         <dl>
@@ -76,7 +107,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { Activity, BookOpen, Download, FileText, FolderOpen, PanelRightClose } from 'lucide-vue-next'
+import { Activity, BookOpen, Download, FileText, FolderOpen, Gauge, PanelRightClose } from 'lucide-vue-next'
 
 const props = defineProps({
   sources: { type: Array, default: () => [] },
@@ -89,8 +120,18 @@ const activeTab = ref('sources')
 const tabs = computed(() => [
   { key: 'sources', label: '来源', count: props.sources.length },
   { key: 'files', label: '文件', count: props.files.length },
+  { key: 'usage', label: '用量', count: props.run?.tokenUsage?.phases?.length || 0 },
   { key: 'run', label: '运行' }
 ])
+
+const usage = computed(() => props.run?.tokenUsage || null)
+const topPhaseTokens = computed(() => Math.max(1, ...(usage.value?.phases || []).map(phase => phase.promptTokens || 0)))
+const totalPromptTokens = computed(() => (usage.value?.phases || [])
+  .reduce((sum, phase) => sum + (phase.promptTokens || 0), 0) || usage.value?.promptTokens || 0)
+const phaseShare = phase => Math.round(((phase.promptTokens || 0) / topPhaseTokens.value) * 100)
+const promptShare = phase => totalPromptTokens.value
+  ? Math.round(((phase.promptTokens || 0) / totalPromptTokens.value) * 100)
+  : 0
 
 const verificationLabel = computed(() => ({
   pass: '已验收',
@@ -99,6 +140,7 @@ const verificationLabel = computed(() => ({
 }[props.run?.verification?.status] || '—'))
 
 const fileName = path => (path || '').split('/').pop()
+const formatNumber = value => (Number.isFinite(value) ? value : 0).toLocaleString('zh-CN')
 const formatSize = size => {
   if (!Number.isFinite(size) || size <= 0) return '0 B'
   if (size < 1024) return `${size} B`
@@ -165,6 +207,20 @@ const formatDate = value => {
 .panel-empty { display: grid; justify-items: center; gap: 5px; border: 1px dashed var(--sk-separator); border-radius: 12px; padding: 24px 12px; color: var(--sk-label-3); text-align: center; }
 .panel-empty span { color: var(--sk-label-2); font-size: 11.5px; font-weight: 600; }
 .panel-empty small { font-size: 10.5px; line-height: 1.5; }
+
+.token-usage dl { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0; border: 1px solid var(--sk-separator); border-radius: 11px; padding: 3px 10px; background: #fff; }
+.token-usage dl > div { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; }
+.token-usage dt { color: var(--sk-label-3); font-size: 10.5px; }
+.token-usage dd { overflow: hidden; margin: 0; color: var(--sk-label); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+.phase-card { border: 1px solid var(--sk-separator); border-radius: 11px; padding: 9px 10px; background: #fff; }
+.phase-card header { display: flex; justify-content: space-between; gap: 8px; }
+.phase-card strong { overflow: hidden; color: var(--sk-label); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.phase-card em { flex: 0 0 auto; color: var(--zwx-primary); font-size: 10.5px; font-style: normal; font-weight: 650; }
+.phase-bar { height: 4px; border-radius: 999px; margin: 7px 0 6px; background: var(--sk-fill); overflow: hidden; }
+.phase-bar span { display: block; height: 100%; border-radius: 999px; background: var(--zwx-primary); }
+.phase-card small { display: block; color: var(--sk-label-2); font-size: 10.5px; }
+.phase-card p { display: grid; gap: 2px; margin: 5px 0 0; color: var(--sk-label-3); font-size: 10px; line-height: 1.5; }
 
 .run-meta dl { display: grid; gap: 0; margin: 0; border: 1px solid var(--sk-separator); border-radius: 11px; padding: 3px 10px; background: #fff; }
 .run-meta dl > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; }

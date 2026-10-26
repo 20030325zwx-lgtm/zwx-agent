@@ -30,6 +30,7 @@ public record AgentRunView(String id,
                            int partialAnswerLength,
                            int finalAnswerLength,
                            String errorMessage,
+                           String tokenUsage,
                            Instant createdAt,
                            Instant updatedAt) {
 
@@ -68,6 +69,7 @@ public record AgentRunView(String id,
                 partialAnswer == null ? 0 : partialAnswer.length(),
                 finalAnswer == null ? 0 : finalAnswer.length(),
                 run.errorMessage(),
+                run.tokenUsageJson(),
                 run.createdAt(),
                 run.updatedAt());
     }

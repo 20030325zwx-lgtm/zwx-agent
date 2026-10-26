@@ -36,7 +36,7 @@ class VerifierRoutingTest {
         state.updateState(java.util.Map.of(
                 GraphState.REVISION, VerifierNode.MAX_REVISIONS,
                 GraphState.VERIFICATION_STATUS, "revise"));
-        var result = new VerifierNode(org.mockito.Mockito.mock(org.springframework.ai.chat.model.ChatModel.class)).apply(state);
+        var result = new VerifierNode(org.mockito.Mockito.mock(org.springframework.ai.chat.model.ChatModel.class), null).apply(state);
         Assertions.assertEquals("unverified", result.get(GraphState.VERIFICATION_STATUS));
         Assertions.assertTrue(((java.util.List<?>) result.get(GraphState.ACTIVITIES)).getFirst().toString().contains("未进行二次验收"));
     }

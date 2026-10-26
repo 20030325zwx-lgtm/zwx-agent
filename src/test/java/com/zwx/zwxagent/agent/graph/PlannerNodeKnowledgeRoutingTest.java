@@ -16,7 +16,7 @@ class PlannerNodeKnowledgeRoutingTest {
     @Test
     void sendsKnowledgeQuestionsToOneGeneralWorkerWithoutCallingPlannerModel() throws Exception {
         ChatModel chatModel = mock(ChatModel.class);
-        PlannerNode planner = new PlannerNode(chatModel);
+        PlannerNode planner = new PlannerNode(chatModel, null);
         OverAllState state = new OverAllState(Map.of(
                 GraphState.INPUT, "比较宁夏北部与南部",
                 GraphState.RUN_CONTEXT, RunContext.of(new org.springframework.ai.tool.ToolCallback[0],

@@ -94,6 +94,22 @@ public class AgentRunService {
                 """, partialAnswer, runId);
     }
 
+    /**
+     * 落 token 账目。数值列累加（跨重启续跑的每一段都计入），token_usage 存最近一次的分解。
+     */
+    public void recordTokenUsage(String runId, String usageJson, int promptTokens, int completionTokens, int calls) {
+        if (runId == null || runId.isBlank()) return;
+        jdbcTemplate.update("""
+                UPDATE agent_run SET
+                    prompt_tokens = COALESCE(prompt_tokens, 0) + ?,
+                    completion_tokens = COALESCE(completion_tokens, 0) + ?,
+                    llm_calls = COALESCE(llm_calls, 0) + ?,
+                    token_usage = COALESCE(CAST(? AS jsonb), token_usage),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, promptTokens, completionTokens, calls, usageJson, runId);
+    }
+
     public void finish(String runId, String status, String answer, String error, Long assistantMessageId) {
         jdbcTemplate.update("""
                 UPDATE agent_run SET status = ?, final_answer = COALESCE(?, final_answer),
@@ -200,6 +216,7 @@ public class AgentRunService {
                 rs.getString("history_context"),
                 rs.getString("knowledge_context"),
                 rs.getString("rag_trace_json"),
+                rs.getString("token_usage"),
                 checkpoint,
                 rs.getString("error_message"),
                 rs.getInt("resume_count"),

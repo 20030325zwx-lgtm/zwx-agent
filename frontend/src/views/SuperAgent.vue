@@ -260,6 +260,16 @@ const mapMessage = message => ({
   ragTrace: parseRagTrace(message.ragRetrievalTrace)
 })
 
+const parseTokenUsage = value => {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
 const normalizeRun = (run, messageIndex = -1) => ({
   id: run?.id || '',
   status: run?.status || 'RUNNING',
@@ -276,6 +286,7 @@ const normalizeRun = (run, messageIndex = -1) => ({
   userMessageId: run?.userMessageId ?? null,
   assistantMessageId: run?.assistantMessageId ?? null,
   errorMessage: run?.errorMessage || '',
+  tokenUsage: parseTokenUsage(run?.tokenUsage),
   webSearch: run?.webSearch !== false,
   createdAt: run?.createdAt || null,
   updatedAt: run?.updatedAt || null,
@@ -401,6 +412,7 @@ const refreshActiveRun = async () => {
     if ((detail.taskResults?.length || 0) < (run.taskResults?.length || 0)) updated.taskResults = run.taskResults
     if ((detail.plan?.length || 0) < (run.plan?.length || 0)) updated.plan = run.plan
     if (!detail.verification?.status && run.verification?.status) updated.verification = run.verification
+    if (!updated.tokenUsage && run.tokenUsage) updated.tokenUsage = run.tokenUsage
     activeRun.value = updated
     if (previousStatus === 'RUNNING' && ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(updated.status)) {
       await recoverFinishedRun(conversationId, updated)
@@ -532,6 +544,13 @@ const attachManusStream = (stream, answerIndex) => {
     try { messages.value[answerIndex].ragTrace = JSON.parse(event.data) }
     catch (error) { console.error('RAG retrieval trace unavailable:', error) }
     if (!messages.value[answerIndex]?.content) setCompanion('working', '已检索知识库，正在整理依据')
+  })
+  stream.addEventListener('usage', event => {
+    try {
+      if (activeRun.value) activeRun.value.tokenUsage = parseTokenUsage(event.data)
+    } catch (error) {
+      console.error('Unable to parse run token usage:', error)
+    }
   })
   stream.addEventListener('activity', event => {
     const answer = messages.value[answerIndex]

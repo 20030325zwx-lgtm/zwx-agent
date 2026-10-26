@@ -3,6 +3,8 @@ package com.zwx.zwxagent.agent.graph;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
 import com.zwx.zwxagent.agent.advisor.MyLoggerAdvisor;
+import com.zwx.zwxagent.agent.advisor.TokenUsageAdvisor;
+import com.zwx.zwxagent.agent.observability.TokenUsageService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +13,7 @@ import org.springframework.ai.chat.model.ChatModel;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 质检节点：对照用户请求与计划核对工作者结果，
@@ -37,14 +40,19 @@ public class VerifierNode implements NodeAction {
 
     private final ChatClient chatClient;
 
-    public VerifierNode(ChatModel chatModel) {
+    /** 计量归属的 run：节点实例按 run 创建，apply 时从图状态绑定。 */
+    private final AtomicReference<String> tokenUsageRunId = new AtomicReference<>("");
+
+    public VerifierNode(ChatModel chatModel, TokenUsageService tokenUsage) {
         this.chatClient = ChatClient.builder(chatModel)
-                .defaultAdvisors(new MyLoggerAdvisor())
+                .defaultAdvisors(new MyLoggerAdvisor(),
+                        new TokenUsageAdvisor("verifier", tokenUsage, tokenUsageRunId::get))
                 .build();
     }
 
     @Override
     public Map<String, Object> apply(OverAllState state) {
+        tokenUsageRunId.set(state.value(GraphState.RUN_ID, ""));
         String input = state.value(GraphState.INPUT, "");
         List<PlanStep> plan = state.value(GraphState.PLAN)
                 .map(value -> (List<PlanStep>) value)

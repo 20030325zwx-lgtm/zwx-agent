@@ -5,6 +5,8 @@ import com.alibaba.cloud.ai.graph.action.NodeAction;
 import com.zwx.zwxagent.agent.core.BaseAgent;
 import com.zwx.zwxagent.agent.core.ToolCallAgent;
 import com.zwx.zwxagent.agent.advisor.MyLoggerAdvisor;
+import com.zwx.zwxagent.agent.advisor.TokenUsageAdvisor;
+import com.zwx.zwxagent.agent.observability.TokenUsageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -39,6 +41,7 @@ public class WorkersNode implements NodeAction {
 
     private final ChatModel chatModel;
     private final Executor workerExecutor;
+    private final TokenUsageService tokenUsage;
 
     /** 当前运行中尚未结束的子 agent，供客户端断开时联动停止。 */
     private final Map<String, List<ToolCallAgent>> activeWorkers = new ConcurrentHashMap<>();
@@ -71,9 +74,10 @@ public class WorkersNode implements NodeAction {
         }
     }
 
-    public WorkersNode(ChatModel chatModel, Executor workerExecutor) {
+    public WorkersNode(ChatModel chatModel, Executor workerExecutor, TokenUsageService tokenUsage) {
         this.chatModel = chatModel;
         this.workerExecutor = workerExecutor;
+        this.tokenUsage = tokenUsage;
     }
 
     @Override
@@ -89,6 +93,7 @@ public class WorkersNode implements NodeAction {
         BooleanSupplier stopCheck = context == null ? () -> false : context.stopCheck();
         String runKey = context == null || context.conversationId() == null
                 ? java.util.UUID.randomUUID().toString() : context.conversationId();
+        String runId = state.value(GraphState.RUN_ID, "");
         Consumer<ActivityEvent> activitySink = context == null ? null : context.activitySink();
         ToolCallback[] tools = context == null ? new ToolCallback[0] : context.tools();
         if (context != null && stopCheck.getAsBoolean()) {
@@ -100,9 +105,6 @@ public class WorkersNode implements NodeAction {
         } else {
             verificationFeedback = "";
         }
-        ChatClient sharedClient = ChatClient.builder(chatModel)
-                .defaultAdvisors(new MyLoggerAdvisor())
-                .build();
         List<ActivityEvent> events = new ArrayList<>();
         List<FutureTask<WorkerOutcome>> futures = new ArrayList<>();
         List<String> activities = new ArrayList<>();
@@ -111,12 +113,18 @@ public class WorkersNode implements NodeAction {
             if (stopCheck.getAsBoolean()) break;
             PlanStep step = plan.get(index);
             final int stepNumber = index + 1;
+            // 每个子任务独立 ChatClient：计量切面据此把 token 归到具体角色与序号
+            ChatClient workerClient = ChatClient.builder(chatModel)
+                    .defaultAdvisors(new MyLoggerAdvisor(),
+                            new TokenUsageAdvisor("worker·" + step.role().displayName() + "#" + stepNumber,
+                                    tokenUsage, () -> runId))
+                    .build();
             ActivityEvent startEvent = ActivityEvent.of("work", step.role().displayName(),
                     "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title());
             events.add(startEvent);
             streamEvent(activitySink, startEvent);
             FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
-                    runWorker(step, stepNumber, tools, verificationFeedback, sharedClient, stopCheck, context, runKey, activitySink, originalRequest));
+                    runWorker(step, stepNumber, tools, verificationFeedback, workerClient, stopCheck, context, runKey, activitySink, originalRequest));
             futures.add(task);
             activeTasks.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(task);
             try {
@@ -175,7 +183,7 @@ public class WorkersNode implements NodeAction {
     }
 
     private WorkerOutcome runWorker(PlanStep step, int stepNumber, ToolCallback[] allTools,
-                                    String feedback, ChatClient sharedClient, BooleanSupplier stopCheck,
+                                    String feedback, ChatClient workerClient, BooleanSupplier stopCheck,
                                     RunContext runContext, String runKey, Consumer<ActivityEvent> activitySink,
                                     String originalRequest) {
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
@@ -210,7 +218,7 @@ public class WorkersNode implements NodeAction {
                 ? "开始执行你的子任务，需要时调用工具。"
                 : feedback + "\n开始执行你的子任务，需要时调用工具。");
         worker.setMaxSteps(WORKER_MAX_STEPS);
-        worker.setChatClient(sharedClient);
+        worker.setChatClient(workerClient);
         activeWorkers.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(worker);
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             worker.stopForClientDisconnect();

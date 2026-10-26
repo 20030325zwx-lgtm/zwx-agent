@@ -29,13 +29,15 @@ public class ToolGuardHook implements AgentHook {
     private final Set<String> allowedUnregisteredTools;
     private final UrlAccessPolicy urlAccessPolicy;
     private final ToolConfirmationService confirmationService;
+    private final com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ToolGuardHook(@Value("${app.agent.hook.tool-guard-enabled:true}") boolean enabled,
                          @Value("${app.tools.terminal-allowlist:}") String terminalAllowlist,
                          @Value("${app.agent.hook.allowed-unregistered-tools:}") String allowedUnregisteredTools,
                          UrlAccessPolicy urlAccessPolicy,
-                         ToolConfirmationService confirmationService) {
+                         ToolConfirmationService confirmationService,
+                         com.zwx.zwxagent.agent.observability.AgentMetrics metrics) {
         this.enabled = enabled;
         this.terminalAllowlist = terminalAllowlist == null || terminalAllowlist.isBlank()
                 ? Set.of() : java.util.Arrays.stream(terminalAllowlist.split(","))
@@ -43,6 +45,7 @@ public class ToolGuardHook implements AgentHook {
         this.allowedUnregisteredTools = parseNames(allowedUnregisteredTools);
         this.urlAccessPolicy = urlAccessPolicy;
         this.confirmationService = confirmationService;
+        this.metrics = metrics;
     }
 
     @Override
@@ -66,6 +69,7 @@ public class ToolGuardHook implements AgentHook {
                 log.warn("[tool-guard] 拦截工具调用 agent={} conversation={} step={} tool={} argsSummary={} 原因={}",
                         context.agentKey(), context.conversationId(), context.currentStep(),
                         call.name(), argumentSummary(call.arguments()), reason);
+                if (metrics != null) metrics.toolDenied(call.name(), reason);
                 throw new HookAbortException("工具 " + call.name() + " 被安全策略拦截：" + reason);
             }
             confirmationGate(context, call);
@@ -80,6 +84,7 @@ public class ToolGuardHook implements AgentHook {
         String toolName = call.name();
         if (confirmationService.isApproved(runId, toolName)) return;
         if (confirmationService.isDenied(runId, toolName)) {
+            if (metrics != null) metrics.toolDenied(toolName, "user-denied");
             throw new HookAbortException("用户已拒绝在本轮任务中执行工具 " + toolName + "，请改用其他方式完成子任务，或直接说明受限");
         }
         if (!confirmationService.requiresConfirmation(toolName)) return;

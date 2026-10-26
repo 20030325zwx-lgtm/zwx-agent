@@ -30,17 +30,25 @@ public class ToolConfirmationService {
     private final boolean enabled;
     private final Set<String> requiredTools;
     private final JdbcTemplate jdbcTemplate;
+    private final com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
 
     private final ConcurrentHashMap<String, RunScope> scopes = new ConcurrentHashMap<>();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ToolConfirmationService(@Value("${app.tools.confirmation.enabled:true}") boolean enabled,
                                    @Value("${app.tools.confirmation.required-tools:executeTerminalCommand,executeDatabaseQuery,queryExternalDatabase,downloadResource,mcp:*}") String requiredTools,
                                    JdbcTemplate jdbcTemplate) {
+        this(enabled, requiredTools, jdbcTemplate, null);
+    }
+
+    public ToolConfirmationService(boolean enabled, String requiredTools, JdbcTemplate jdbcTemplate,
+                                   com.zwx.zwxagent.agent.observability.AgentMetrics metrics) {
         this.enabled = enabled;
         this.requiredTools = requiredTools == null || requiredTools.isBlank()
                 ? Set.of() : java.util.Arrays.stream(requiredTools.split(","))
                 .map(String::trim).filter(value -> !value.isEmpty()).collect(Collectors.toUnmodifiableSet());
         this.jdbcTemplate = jdbcTemplate;
+        this.metrics = metrics;
     }
 
     public boolean isEnabled() {
@@ -152,6 +160,7 @@ public class ToolConfirmationService {
             }
         }
         log.info("工具确认决定已记录；runId={}, tool={}, decision={}, updated={}", runId, toolName, decision, updated);
+        if (metrics != null) metrics.toolConfirmationDecided(decision);
         return updated;
     }
 

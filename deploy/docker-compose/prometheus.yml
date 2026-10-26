@@ -1,0 +1,10 @@
+# Prometheus 抓取配置：后端管理端口（health/metrics/prometheus），不经过主端口 /api 与 JWT
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: aster-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8124"]

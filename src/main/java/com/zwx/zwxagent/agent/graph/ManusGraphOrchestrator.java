@@ -79,6 +79,7 @@ public class ManusGraphOrchestrator {
     private final AgentToolCallLedgerService toolCallLedger;
     private final com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage;
     private final com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService;
+    private final com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private CompiledGraph compiledGraph;
@@ -89,7 +90,7 @@ public class ManusGraphOrchestrator {
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor) {
-        this(dashscopeChatModel, workerExecutor, null, null, null, null);
+        this(dashscopeChatModel, workerExecutor, null, null, null, null, null);
     }
 
     @Autowired
@@ -99,13 +100,15 @@ public class ManusGraphOrchestrator {
                                   AgentRunService agentRunService,
                                   AgentToolCallLedgerService toolCallLedger,
                                   com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage,
-                                  com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService) {
+                                  com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService,
+                                  com.zwx.zwxagent.agent.observability.AgentMetrics metrics) {
         this.chatModel = dashscopeChatModel;
         this.workerExecutor = workerExecutor;
         this.agentRunService = agentRunService;
         this.toolCallLedger = toolCallLedger;
         this.tokenUsage = tokenUsage;
         this.toolConfirmationService = toolConfirmationService;
+        this.metrics = metrics;
     }
 
     @PostConstruct
@@ -458,7 +461,11 @@ public class ManusGraphOrchestrator {
             boolean completed = !stopped.get() && !pendingConfirmation && finalAnswer != null && !finalAnswer.isBlank();
             String answer = completed ? finalAnswer : completedAnswer(finalAnswer, streamedAnswer, stopped.get());
             String status = completed ? "COMPLETED" : "INTERRUPTED";
-            if (pendingConfirmation) publishPendingConfirmation(stream, effectiveRunId);
+            if (pendingConfirmation) {
+                publishPendingConfirmation(stream, effectiveRunId);
+                if (metrics != null) metrics.runPausedForConfirmation();
+            }
+            if (metrics != null) metrics.runFinished(status);
             persist(request, answer, activities, completed, status, null, finalized);
             publishTokenUsage(stream, request.runId());
             sendDone(stream, completed);
@@ -466,6 +473,7 @@ public class ManusGraphOrchestrator {
             log.error("manus graph 执行失败", exception);
             String answer = completedAnswer(finalAnswer, streamedAnswer, stopped.get());
             String status = stopped.get() ? "INTERRUPTED" : "FAILED";
+            if (metrics != null) metrics.runFinished(status);
             persist(request, answer, activities, false, status, exception.getMessage(), finalized);
             publishTokenUsage(stream, request.runId());
             stream.send("generation-error", com.zwx.zwxagent.common.ErrorMessages.describe(exception));

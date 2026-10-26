@@ -51,6 +51,21 @@ server:
   servlet:
     context-path: /api
   max-http-request-header-size: 16KB
+# 管理端点走独立端口：健康检查与 Prometheus 指标不经过主端口的 /api 前缀与 JWT 安全链；
+# 指标内容不含用户/租户标识，仅系统与聚合业务计数
+management:
+  server:
+    port: 8124
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  health:
+    defaults:
+      enabled: true
 spring.servlet.multipart:
   max-file-size: 10MB
   max-request-size: 10MB

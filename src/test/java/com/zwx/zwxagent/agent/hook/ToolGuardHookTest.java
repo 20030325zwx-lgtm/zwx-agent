@@ -25,7 +25,7 @@ class ToolGuardHookTest {
     }
 
     private ToolGuardHook hook(boolean enabled) {
-        return new ToolGuardHook(enabled, "", "", new UrlAccessPolicy(), confirmationService());
+        return new ToolGuardHook(enabled, "", "", new UrlAccessPolicy(), confirmationService(), new com.zwx.zwxagent.agent.observability.AgentMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
     }
 
     private AgentRunContext context() {
@@ -78,7 +78,7 @@ class ToolGuardHookTest {
     void legitimateCallsPass() {
         UrlAccessPolicy urlPolicy = mock(UrlAccessPolicy.class);
         when(urlPolicy.validateHttpUrl(anyString())).thenAnswer(invocation -> URI.create(invocation.getArgument(0)));
-        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy, confirmationService());
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy, confirmationService(), null);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "readFile", "{\"fileName\": \"notes/report.txt\"}"),
                 new PlannedToolCall("id-2", "function", "executeTerminalCommand", "{\"command\": \"grep -rn TODO .\"}"),
@@ -91,7 +91,7 @@ class ToolGuardHookTest {
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "someFutureTool", "{\"path\": \"/etc/passwd\"}"));
         assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), calls));
-        ToolGuardHook registered = new ToolGuardHook(true, "", "someFutureTool", new UrlAccessPolicy(), confirmationService());
+        ToolGuardHook registered = new ToolGuardHook(true, "", "someFutureTool", new UrlAccessPolicy(), confirmationService(), null);
         assertDoesNotThrow(() -> registered.beforeToolCalls(context(), calls));
     }
 
@@ -151,7 +151,7 @@ class ToolGuardHookTest {
         AgentRunContext runContext = AgentRunContext.builder().tenantId("default").agentKey("super")
                 .conversationId("conv-1").runId("run-42").build();
         service.registerRun("run-42");
-        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), service);
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), service, null);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"ls\"}"));
         ToolConfirmationRequiredException exception = assertThrows(ToolConfirmationRequiredException.class,
@@ -173,7 +173,7 @@ class ToolGuardHookTest {
         service.registerRun("run-43");
         service.markPending("run-43", "executeTerminalCommand", "keys=[command], chars=4");
         service.decide("run-43", "executeTerminalCommand", ToolConfirmationService.DECISION_APPROVED);
-        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy, service);
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy, service, null);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"ls\"}"));
         assertDoesNotThrow(() -> hook.beforeToolCalls(runContext, calls));
@@ -195,7 +195,7 @@ class ToolGuardHookTest {
         AgentRunContext runContext = AgentRunContext.builder().tenantId("default").agentKey("super")
                 .conversationId("conv-1").runId("run-44").build();
         disabled.registerRun("run-44");
-        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), disabled);
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), disabled, null);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"ls\"}"));
         assertDoesNotThrow(() -> hook.beforeToolCalls(runContext, calls));

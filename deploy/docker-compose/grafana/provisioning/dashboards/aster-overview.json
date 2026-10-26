@@ -1,0 +1,102 @@
+{
+  "uid": "aster-overview",
+  "title": "Aster 智能体总览",
+  "tags": ["aster"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Run 结果（1h）",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (outcome) (increase(agent_run_finished_total[1h]))", "legendFormat": "{{outcome}}" }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "挂起等待确认（1h）",
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "sum(increase(agent_run_paused_total{reason=\"tool-confirmation\"}[1h]))" }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "检索空命中（1h）",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "sum(increase(agent_rag_recall_empty_total[1h]))" }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "工具拦截（1h）",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (reason) (increase(agent_tool_denied_total[1h]))", "legendFormat": "{{reason}}" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "RAG 降级（按原因）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (reason) (increase(agent_rag_degraded_total[5m]))", "legendFormat": "{{reason}}" }]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "意图分流动作",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (action) (increase(agent_intent_decision_total[5m]))", "legendFormat": "{{action}}" }]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "HTTP 请求延迟 P95（主端口）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket[5m])))",
+        "legendFormat": "{{uri}}"
+      }]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "JVM 堆内存",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "used" },
+        { "expr": "sum(jvm_memory_max_bytes{area=\"heap\"})", "legendFormat": "max" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "数据库连接池（HikariCP）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        { "expr": "hikaricp_connections_active", "legendFormat": "active" },
+        { "expr": "hikaricp_connections_idle", "legendFormat": "idle" },
+        { "expr": "hikaricp_connections_pending", "legendFormat": "pending" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "配额拒绝（1h）",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "datasource": { "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (kind) (increase(agent_quota_rejected_total[1h]))", "legendFormat": "{{kind}}" }]
+    }
+  ]
+}

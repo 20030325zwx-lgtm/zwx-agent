@@ -15,11 +15,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -37,8 +33,6 @@ import java.util.function.Consumer;
 public abstract class BaseAgent {
 
     private static final long MAX_RUN_MILLIS = TimeUnit.MINUTES.toMillis(5);
-    private static final int MAX_SAME_TOOL_RESULT_CALLS = 53;
-    private static final int MAX_NO_PROGRESS_ROUNDS = 5;
     private static final java.util.concurrent.ScheduledExecutorService STEP_WATCHDOG =
             java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
                 Thread thread = new Thread(runnable, "agent-step-watchdog");
@@ -154,6 +148,7 @@ public abstract class BaseAgent {
         AgentRunContext runContext = newRunContext(userPrompt);
         activeRunContext = runContext;
         List<String> results = new ArrayList<>();
+        ToolLoopGuard loopGuard = new ToolLoopGuard();
         try {
             fireBeforeRun(runContext);
             // 执行循环
@@ -166,6 +161,14 @@ public abstract class BaseAgent {
                 fireBeforeStep(runContext);
                 String stepResult = step();
                 fireAfterStep(runContext, stepResult);
+                // 工具循环防护：同步路径同样拦截参数循环与连续空转，避免 worker 烧满步数
+                String loopStopReason = loopGuard.observe(lastToolExecutions()).orElse(null);
+                if (loopStopReason != null) {
+                    fireOnInterrupted(runContext, loopStopReason);
+                    results.add("任务已按策略终止：" + loopStopReason);
+                    state = AgentState.FINISHED;
+                    break;
+                }
                 String result = "Step " + stepNumber + ": " + stepResult;
                 results.add(result);
             }
@@ -244,9 +247,7 @@ public abstract class BaseAgent {
             StringBuilder answer = new StringBuilder();
             boolean hasUserVisibleResponse = false;
             long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(MAX_RUN_MILLIS);
-            Map<String, Integer> sameToolResultCounts = new HashMap<>();
-            Set<String> observedToolResults = new HashSet<>();
-            int noProgressRounds = 0;
+            ToolLoopGuard loopGuard = new ToolLoopGuard();
             try {
                 fireBeforeRun(runContext);
                 // 执行循环
@@ -278,24 +279,8 @@ public abstract class BaseAgent {
                     if (streamStepAsActivity()) {
                         activities.add(result);
                         sseEmitter.send(SseEmitter.event().name("activity").data(result));
-                        boolean madeProgress = false;
-                        for (ToolExecution execution : lastToolExecutions()) {
-                            String resultFingerprint = execution.name() + "\n" + normalize(execution.result());
-                            int duplicateCount = sameToolResultCounts.merge(resultFingerprint, 1, Integer::sum);
-                            if (duplicateCount >= MAX_SAME_TOOL_RESULT_CALLS) {
-                                requestStop("同一工具返回相同结果已累计 " + MAX_SAME_TOOL_RESULT_CALLS + " 次");
-                                break;
-                            }
-                            if (isMeaningful(execution.result()) && observedToolResults.add(resultFingerprint)) {
-                                madeProgress = true;
-                            }
-                        }
-                        if (stopReason != null) break;
-                        noProgressRounds = madeProgress ? 0 : noProgressRounds + 1;
-                        if (noProgressRounds >= MAX_NO_PROGRESS_ROUNDS) {
-                            requestStop("连续 " + MAX_NO_PROGRESS_ROUNDS + " 轮没有获得新的有效结果");
-                            break;
-                        }
+                        // 工具循环防护：参数循环或连续空转时受控停止，收尾走统一的中断摘要
+                        loopGuard.observe(lastToolExecutions()).ifPresent(BaseAgent.this::requestStop);
                     } else {
                         sseEmitter.send(stepResult);
                         answer.append(stepResult);

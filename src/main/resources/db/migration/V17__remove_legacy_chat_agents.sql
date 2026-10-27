@@ -11,8 +11,12 @@ DELETE FROM agent_skill_configuration WHERE agent_key IN ('love', 'travel', 'tes
 DELETE FROM agent_memory_fact WHERE agent_key IN ('love', 'travel', 'test');
 
 -- 下线智能体的私有知识库数据。
-DELETE FROM agent_knowledge_vector
-WHERE metadata ->> 'agentKey' IN ('love', 'travel', 'test');
+-- agent_knowledge_vector 由 PgVectorStore 在应用启动时（initializeSchema）创建，
+-- Flyway 迁移阶段可能尚不存在，因此用 IF 守卫（与 V6 的处理方式一致）。
+IF to_regclass('public.agent_knowledge_vector') IS NOT NULL THEN
+    DELETE FROM agent_knowledge_vector
+    WHERE metadata ->> 'agentKey' IN ('love', 'travel', 'test');
+END IF;
 DELETE FROM agent_knowledge_document WHERE agent_key IN ('love', 'travel', 'test');
 DELETE FROM agent_knowledge_category WHERE agent_key IN ('love', 'travel', 'test');
 

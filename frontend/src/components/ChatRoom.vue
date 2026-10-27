@@ -35,11 +35,16 @@
           </div>
           <div v-else class="message-content markdown-content">
             <section v-if="hasAgentTrace(msg)" class="agent-trace" aria-label="执行过程">
-              <header v-if="turnStatusLabel(msg, index)" class="trace-status">
-                <span v-if="isTurnWorking(index)" class="status-live" aria-hidden="true"></span>
-                <span>{{ turnStatusLabel(msg, index) }}</span>
+              <header class="trace-status">
+                <button type="button" class="trace-toggle" :aria-expanded="traceExpanded(index) ? 'true' : 'false'"
+                  @click="toggleTrace(index)">
+                  <span v-if="isTurnWorking(index)" class="status-live" aria-hidden="true"></span>
+                  <span>{{ turnStatusLabel(msg, index) || `执行了 ${msg.activities.length} 步` }}</span>
+                  <span v-if="msg.activities?.length" class="trace-count">{{ msg.activities.length }} 步</span>
+                  <ChevronDown :size="13" class="trace-chevron" :class="{ rotated: traceExpanded(index) }" />
+                </button>
               </header>
-              <ol v-if="msg.activities?.length" class="trace-steps">
+              <ol v-if="msg.activities?.length && traceExpanded(index)" class="trace-steps">
                 <li v-for="(activity, activityIndex) in msg.activities" :key="`step-${index}-${activityIndex}`" class="trace-step">
                   <button type="button" class="step-line" :class="{ 'has-detail': stepDetail(activity) }"
                     :aria-expanded="expandedStepKey === `${index}-${activityIndex}` ? 'true' : 'false'"
@@ -124,6 +129,9 @@
             </div>
           </div>
           <time class="message-time">{{ formatTime(msg.time) }}</time>
+          <div v-if="!msg.isUser && msg.content" class="ai-message-actions">
+            <button type="button" title="复制回答" aria-label="复制回答" @click="copyMessage(msg.content)">⧉ 复制</button>
+          </div>
           <div v-if="!msg.isUser && msg.status === 'INTERRUPTED' && connectionStatus !== 'connecting'" class="continue-row">
             <span class="continue-hint">回答被中断，已保留部分内容</span>
             <button type="button" class="continue-button" @click="emit('continue-message', { message: msg, index })">继续生成 ▸</button>
@@ -175,7 +183,7 @@ import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
 import CitationPreview from './CitationPreview.vue'
 import AsterAvatar from './AsterAvatar.vue'
-import { BookOpen, BookOpenCheck, ChevronRight, CircleDot, FileText, Globe2, ListChecks, Paperclip, Search, ShieldCheck, Square } from 'lucide-vue-next'
+import { BookOpen, BookOpenCheck, ChevronDown, ChevronRight, CircleDot, FileText, Globe2, ListChecks, Paperclip, Search, ShieldCheck, Square } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment } from '../api'
 
@@ -321,8 +329,18 @@ const renderMarkdown = content => DOMPurify.sanitize(marked.parse(stripInlineCit
 
 // ── 智能体时间线：状态行 + 步骤条目（参考 ZCode 式执行视图） ──
 const expandedStepKey = ref('')
+const expandedTraces = ref([])
 const nowTick = ref(Date.now())
 let tickTimer = null
+
+// 执行中的时间线默认展开；结束/历史消息默认折叠为一行摘要，点击可展开
+const traceExpanded = index => isTurnWorking(index) || expandedTraces.value.includes(index)
+const toggleTrace = index => {
+  const list = expandedTraces.value
+  const position = list.indexOf(index)
+  if (position >= 0) list.splice(position, 1)
+  else list.push(index)
+}
 
 const stepPhaseIcons = { plan: ListChecks, work: Search, verify: ShieldCheck }
 const stepPhaseAgents = { plan: '规划', work: '执行', verify: '校验' }
@@ -633,6 +651,25 @@ onBeforeUnmount(() => {
 .message-time { display: block; margin-top: 7px; color: var(--sk-label-3); font-size: 11px; }
 .user-message .message-time { text-align: right; }
 
+.ai-message-actions { display: flex; margin-top: 5px; opacity: 0; transition: opacity 0.15s ease; }
+.message-wrapper:hover .ai-message-actions, .ai-message-actions:focus-within { opacity: 1; }
+
+.ai-message-actions button {
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 9px;
+  background: transparent;
+  color: var(--sk-label-3);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.ai-message-actions button:hover { background: var(--sk-fill); color: var(--sk-label); }
+
+@media (hover: none) {
+  .ai-message-actions { opacity: 1; }
+}
+
 .message-actions {
   position: absolute;
   z-index: 1;
@@ -701,15 +738,31 @@ onBeforeUnmount(() => {
 /* ── 智能体时间线 ───────────────────────────────────── */
 .agent-trace { display: grid; gap: 2px; margin-bottom: 12px; }
 
-.trace-status {
+.trace-status { display: grid; }
+
+.trace-toggle {
   display: flex;
+  width: max-content;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
-  padding: 2px 0 7px;
+  border: 0;
+  border-radius: 8px;
+  margin-left: -6px;
+  padding: 3px 8px 3px 6px;
+  background: transparent;
   color: var(--sk-label-2);
   font-size: 12.5px;
   font-weight: 650;
+  text-align: left;
+  cursor: pointer;
 }
+
+.trace-toggle:hover { background: var(--sk-fill); }
+.trace-count { color: var(--sk-label-3); font-weight: 500; }
+
+.trace-chevron { color: var(--sk-label-3); transition: transform 0.15s ease; }
+.trace-chevron.rotated { transform: rotate(180deg); }
 
 .status-live {
   width: 7px;

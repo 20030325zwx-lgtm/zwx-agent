@@ -187,8 +187,10 @@ export const listManusToolCalls = (conversationId, runId, limit = 200) =>
   request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/tool-calls`, { params: { limit } }).then(response => response.data)
 export const listManusWebSources = (conversationId, runId) =>
   request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/web-sources`).then(response => response.data)
-export const createManusConversation = () => request.post('/ai/manus/conversations').then(response => response.data)
+export const createManusConversation = (projectId = null) => request.post('/ai/manus/conversations', { projectId }).then(response => response.data)
 export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
+export const listProjects = () => request.get('/ai/projects').then(response => response.data)
+export const createProject = payload => request.post('/ai/projects', payload).then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteManusConversation = conversationId => request.delete(`/ai/manus/conversations/${conversationId}`)
 export const getManusFileUrl = (conversationId, path) =>

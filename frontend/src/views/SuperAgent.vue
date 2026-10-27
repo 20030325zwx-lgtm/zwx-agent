@@ -1,6 +1,11 @@
 <template>
   <div class="super-layout">
-    <ConversationSidebar title="超级智能体" mark="✦" theme="travel" :conversations="conversations" :active-id="chatId" :loading="historyLoading" :open="sidebarOpen" @create="createConversation" @select="selectConversation" @delete="requestDelete" @close="sidebarOpen = false" />
+    <ConversationSidebar title="超级智能体" mark="✦" theme="travel"
+      :conversations="conversations" :projects="projects" :active-id="chatId"
+      :selected-project-id="selectedProjectId" :loading="historyLoading"
+      :workspace-creating="workspaceCreating" :workspace-error="workspaceError" :open="sidebarOpen"
+      @create="createConversation" @create-workspace="createWorkspace" @select-project="selectProject"
+      @select="selectConversation" @delete="requestDelete" @close="sidebarOpen = false" />
     <main class="super-main">
       <header class="super-header">
         <div class="header-start">
@@ -145,7 +150,7 @@ import RunInspector from '../components/workspace/RunInspector.vue'
 import RunPhases from '../components/workspace/RunPhases.vue'
 import RunTimeline from '../components/workspace/RunTimeline.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
-import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listManusWebSources, listWorkspaceFiles, uploadManusImage } from '../api'
+import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listManusWebSources, listProjects, listWorkspaceFiles, uploadManusImage } from '../api'
 
 useHead({ title: '超级智能体 - Aster', meta: [{ name: 'description', content: 'Aster 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -153,6 +158,10 @@ const route = useRoute()
 const messages = ref([])
 const chatId = ref('')
 const conversations = ref([])
+const projects = ref([])
+const selectedProjectId = ref(null)
+const workspaceCreating = ref(false)
+const workspaceError = ref('')
 const connectionStatus = ref('disconnected')
 const historyLoading = ref(false)
 const messagesLoading = ref(false)
@@ -359,6 +368,7 @@ const refreshConversations = async () => {
   try { conversations.value = await listManusConversations() }
   finally { historyLoading.value = false }
 }
+const refreshProjects = async () => { projects.value = await listProjects() }
 const loadRunsForConversation = async (conversationId, preferredRunId = null) => {
   if (!conversationId) {
     activeRun.value = null
@@ -468,7 +478,7 @@ watch(() => `${activeRun.value?.id || ''}|${activeRun.value?.status || ''}`, sch
 
 const createConversation = async () => {
   if (connectionStatus.value === 'connecting') return
-  const conversation = await createManusConversation()
+  const conversation = await createManusConversation(selectedProjectId.value)
   await refreshConversations()
   chatId.value = conversation.id
   messages.value = []
@@ -479,10 +489,34 @@ const createConversation = async () => {
   sidebarOpen.value = false
   setCompanion('idle')
 }
+const selectProject = projectId => {
+  selectedProjectId.value = projectId || null
+}
+const createWorkspace = async payload => {
+  if (workspaceCreating.value) return
+  workspaceCreating.value = true
+  workspaceError.value = ''
+  try {
+    const project = await createProject(payload)
+    await refreshProjects()
+    selectedProjectId.value = project.id
+    await createConversation()
+  } catch (error) {
+    workspaceError.value = error.response?.data?.error || error.message || '工作区创建失败'
+  } finally {
+    workspaceCreating.value = false
+  }
+}
 const selectConversation = async conversation => {
-  if (connectionStatus.value === 'connecting' || conversation.id === chatId.value) { sidebarOpen.value = false; return }
+  if (connectionStatus.value === 'connecting') return
+  if (conversation.id === chatId.value) {
+    selectedProjectId.value = conversation.projectId || null
+    sidebarOpen.value = false
+    return
+  }
   messagesLoading.value = true
   chatId.value = conversation.id
+  selectedProjectId.value = conversation.projectId || null
   sidebarOpen.value = false
   setCompanion('idle')
   activeRun.value = null
@@ -874,7 +908,7 @@ const exportRun = async () => {
   }
 }
 onMounted(async () => {
-  await refreshConversations()
+  await Promise.all([refreshProjects(), refreshConversations()])
   // run 深链：/super-agent?conversationId=…&runId=…（首页任务流/分享入口）
   const queryRunId = typeof route.query.runId === 'string' ? route.query.runId : ''
   const queryConversationId = typeof route.query.conversationId === 'string' ? route.query.conversationId : ''

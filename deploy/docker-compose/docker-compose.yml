@@ -102,9 +102,11 @@ services:
       MINERU_TOKEN: ${MINERU_TOKEN:-}
       APP_MCP_ALLOW_PRIVATE_ENDPOINTS: "true"
       APP_TEMP_DIR: /app/temp
+      APP_PROJECT_WORKSPACE_ROOT: /app/projects
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./temp:/app/temp
+      - ${ASTER_PROJECTS_HOST_ROOT:-./projects}:/app/projects
       - ${APP_GLOBE_CONF:-/home/globe.conf}:/home/globe.conf:ro
     # 管理端口 8135（health/metrics/prometheus）只在 compose 网络内暴露，供 Prometheus 抓取
     expose:

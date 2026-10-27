@@ -629,13 +629,19 @@ public class ManusAgentController {
     }
 
     @PostMapping("/manus/conversations")
-    public AgentConversationSummary createManusConversation(CurrentActor actor) {
-        return agentConversationService.createConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, SUPER_DEFAULT_TITLE);
+    public AgentConversationSummary createManusConversation(CurrentActor actor,
+                                                             @RequestBody(required = false) CreateConversationRequest request) {
+        String projectId = request == null ? null : request.projectId();
+        return agentConversationService.createConversation(
+                actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, SUPER_DEFAULT_TITLE, projectId);
     }
 
     @GetMapping("/manus/conversations")
     public List<AgentConversationSummary> listManusConversations(CurrentActor actor) {
         return agentConversationService.listConversations(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY);
+    }
+
+    public record CreateConversationRequest(String projectId) {
     }
 
     @GetMapping("/manus/conversations/{conversationId}/messages")

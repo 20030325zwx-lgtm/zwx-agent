@@ -38,7 +38,8 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler({com.zwx.zwxagent.chat.conversation.AgentConversationService.DuplicateRequestException.class,
-            com.zwx.zwxagent.chat.conversation.ConversationBusyException.class})
+            com.zwx.zwxagent.chat.conversation.ConversationBusyException.class,
+            com.zwx.zwxagent.platform.workspace.ProjectWorkspaceConflictException.class})
     public ResponseEntity<Map<String, String>> handleDuplicateRequest(Exception exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", exception.getMessage()));
     }

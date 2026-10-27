@@ -1,6 +1,7 @@
 package com.zwx.zwxagent.chat.conversation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -16,10 +17,13 @@ public class AgentConversationService {
     private static final String DEFAULT_TITLE = "新的旅行规划";
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final ProjectWorkspaceService projectWorkspaceService;
 
-    public AgentConversationService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public AgentConversationService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+                                    ProjectWorkspaceService projectWorkspaceService) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.projectWorkspaceService = projectWorkspaceService;
     }
 
     public AgentConversationSummary createTravelConversation(String tenantId, String userId) {
@@ -67,10 +71,9 @@ public class AgentConversationService {
 
     public List<AgentConversationSummary> listTravelConversations(String tenantId, String userId) {
         return jdbcTemplate.query("""
-                SELECT id, title, created_at, updated_at FROM agent_conversation
+                SELECT id, title, project_id, created_at, updated_at FROM agent_conversation
                 WHERE tenant_id = ? AND user_id = ? AND agent_key = ? ORDER BY updated_at DESC
-                """, (rs, rowNum) -> new AgentConversationSummary(rs.getString("id"), rs.getString("title"),
-                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), tenantId, userId, TRAVEL);
+                """, (rs, rowNum) -> summary(rs), tenantId, userId, TRAVEL);
     }
 
     public List<AgentConversationMessage> getTravelMessages(String tenantId, String userId, String conversationId) {
@@ -125,11 +128,20 @@ public class AgentConversationService {
     }
 
     public AgentConversationSummary createConversation(String tenantId, String userId, String agentKey, String defaultTitle) {
+        return createConversation(tenantId, userId, agentKey, defaultTitle, null);
+    }
+
+    public AgentConversationSummary createConversation(String tenantId, String userId, String agentKey,
+                                                       String defaultTitle, String projectId) {
+        String normalizedProjectId = projectId == null || projectId.isBlank() ? null : projectId;
+        if (normalizedProjectId != null && !projectWorkspaceService.isOwned(tenantId, userId, normalizedProjectId)) {
+            throw new AccessDeniedException("Workspace does not belong to the current user");
+        }
         String id = UUID.randomUUID().toString();
-        jdbcTemplate.update("INSERT INTO agent_conversation (id, tenant_id, user_id, agent_key, title) VALUES (?, ?, ?, ?, ?)",
-                id, tenantId, userId, agentKey, defaultTitle);
-        return jdbcTemplate.queryForObject("SELECT id, title, created_at, updated_at FROM agent_conversation WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?",
-                (rs, rowNum) -> new AgentConversationSummary(rs.getString("id"), rs.getString("title"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()),
+        jdbcTemplate.update("INSERT INTO agent_conversation (id, tenant_id, user_id, agent_key, title, project_id) VALUES (?, ?, ?, ?, ?, ?)",
+                id, tenantId, userId, agentKey, defaultTitle, normalizedProjectId);
+        return jdbcTemplate.queryForObject("SELECT id, title, project_id, created_at, updated_at FROM agent_conversation WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?",
+                (rs, rowNum) -> summary(rs),
                 id, tenantId, userId, agentKey);
     }
 
@@ -343,8 +355,8 @@ public class AgentConversationService {
     }
 
     public List<AgentConversationSummary> listConversations(String tenantId, String userId, String agentKey) {
-        return jdbcTemplate.query("SELECT id, title, created_at, updated_at FROM agent_conversation WHERE tenant_id = ? AND user_id = ? AND agent_key = ? ORDER BY updated_at DESC",
-                (rs, rowNum) -> new AgentConversationSummary(rs.getString("id"), rs.getString("title"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()),
+        return jdbcTemplate.query("SELECT id, title, project_id, created_at, updated_at FROM agent_conversation WHERE tenant_id = ? AND user_id = ? AND agent_key = ? ORDER BY updated_at DESC",
+                (rs, rowNum) -> summary(rs),
                 tenantId, userId, agentKey);
     }
 
@@ -409,9 +421,13 @@ public class AgentConversationService {
 
     private AgentConversationSummary getTravelConversation(String tenantId, String userId, String id) {
         return jdbcTemplate.queryForObject("""
-                SELECT id, title, created_at, updated_at FROM agent_conversation WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?
-                """, (rs, rowNum) -> new AgentConversationSummary(rs.getString("id"), rs.getString("title"),
-                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), id, tenantId, userId, TRAVEL);
+                SELECT id, title, project_id, created_at, updated_at FROM agent_conversation WHERE id = ? AND tenant_id = ? AND user_id = ? AND agent_key = ?
+                """, (rs, rowNum) -> summary(rs), id, tenantId, userId, TRAVEL);
+    }
+
+    private AgentConversationSummary summary(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new AgentConversationSummary(rs.getString("id"), rs.getString("title"), rs.getString("project_id"),
+                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
     }
 
     private String toTitle(String message) {

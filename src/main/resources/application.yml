@@ -87,6 +87,9 @@ app:
   workspace:
     # 统一工作区根（design/plans/09 批次 A）；空 = {temp-dir}/workspaces
     root: ${APP_WORKSPACE_ROOT:}
+  project-workspace:
+    # 源码项目只能在此根目录下创建一级子目录；Docker 部署需挂载宿主机目录到该路径
+    root: ${APP_PROJECT_WORKSPACE_ROOT:${user.dir}/projects}
   skills:
     # markdown 技能目录（批次 B，相对后端工作目录）；目录为空或解析失败时回落内置 web-research
     dir: ${APP_SKILLS_DIR:skills}

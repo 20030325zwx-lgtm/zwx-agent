@@ -36,7 +36,7 @@
           <div v-else class="message-content markdown-content">
             <section v-if="hasAgentTrace(msg)" class="agent-trace" aria-label="执行过程">
               <header class="trace-status">
-                <button type="button" class="trace-toggle" :aria-expanded="traceExpanded(index) ? 'true' : 'false'"
+                <button type="button" class="trace-toggle" :class="traceTone(msg, index)" :aria-expanded="traceExpanded(index) ? 'true' : 'false'"
                   @click="toggleTrace(index)">
                   <span v-if="isTurnWorking(index)" class="status-live" aria-hidden="true"></span>
                   <span>{{ turnStatusLabel(msg, index) || `执行了 ${msg.activities.length} 步` }}</span>
@@ -340,6 +340,12 @@ const toggleTrace = index => {
   const position = list.indexOf(index)
   if (position >= 0) list.splice(position, 1)
   else list.push(index)
+}
+const traceTone = (msg, index) => {
+  if (isTurnWorking(index)) return 'working'
+  if (msg.status === 'INTERRUPTED') return 'warn'
+  if (msg.status === 'FAILED') return 'error'
+  return ''
 }
 
 const stepPhaseIcons = { plan: ListChecks, work: Search, verify: ShieldCheck }
@@ -760,6 +766,9 @@ onBeforeUnmount(() => {
 
 .trace-toggle:hover { background: var(--sk-fill); }
 .trace-count { color: var(--sk-label-3); font-weight: 500; }
+.trace-toggle.working { color: var(--zwx-primary); }
+.trace-toggle.warn { color: #b45309; }
+.trace-toggle.error { color: #b91c1c; }
 
 .trace-chevron { color: var(--sk-label-3); transition: transform 0.15s ease; }
 .trace-chevron.rotated { transform: rotate(180deg); }

@@ -59,9 +59,16 @@ public class AggregatorNode implements NodeAction {
             return Map.of(GraphState.FINAL_ANSWER, notice);
         }
         String input = state.value(GraphState.INPUT, "");
+        List<PlanStep> plan = state.value(GraphState.PLAN)
+                .map(value -> (List<PlanStep>) value)
+                .orElse(List.of());
         List<String> results = state.value(GraphState.TASK_RESULTS)
                 .map(value -> (List<String>) value)
                 .orElse(List.of());
+        // 返工轮会追加整轮结果：与计划对齐取最后一轮，避免上一轮的旧结论混进最终答案
+        if (!plan.isEmpty() && results.size() > plan.size()) {
+            results = List.copyOf(results.subList(results.size() - plan.size(), results.size()));
+        }
         String verificationStatus = state.value(GraphState.VERIFICATION_STATUS, "unverified");
         String knowledge = state.value(GraphState.RUN_CONTEXT, RunContext.class)
                 .map(RunContext::knowledgeContext).orElse("");

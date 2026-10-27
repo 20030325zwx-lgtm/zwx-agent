@@ -1,0 +1,28 @@
+# 会话交接：依赖计划与证据验收（P0 三项）（2026-10-28）
+
+## 本次改动
+
+按 GPT 给出的改进清单（参考 EvoFlow Plan 模式设计）完成三个 P0，设计文档 `docs/design/2026-10-28-dependency-plan-evidence-verification.md`：
+
+- **P0-1 依赖计划**：`PlanStep` 增加 `id/dependsOn/acceptance`；`PlanJsonParser.normalize` 按位置重编 id（s1..sn）、映射依赖引用、断环退化为并行；Planner 提示词要求输出 id/depends_on/acceptance 并说明"后续步骤用到上游产出时必须标 depends_on"；`WorkersNode.dependencyWaves` 按 Kahn 分层波次执行（波内并行、波间串行），上游结论压缩后注入下游任务提示，上游失败/跳过时下游标记跳过不执行。
+- **P0-2 选择性返工**：新增 `GraphState.REVISE_STEPS`；Verifier 的 verdict 可带 `steps`（0 起序号）点名返工；Workers 返工轮对未点名且结论可复用的步骤直接复用（发"复用上轮结果"事件）；checkpoint 增加 `reviseSteps` 字段并随 resume 恢复（未加 DB 列，进程重启后降级为全量重跑，用 11 参兼容构造保旧调用点）。
+- **P0-3 证据验收**：`VerifierNode.evidenceGaps` 结构化门禁——结果为空/失败/跳过/取消、承诺产出文件（author 角色或 detail/acceptance 匹配"生成|输出|导出|保存+文件|PDF|表格|文档"）但结果无文件名 → 不进模型直接 revise 并点名；模型评价改为逐条"计划+完成判据+结果摘要"核对；Workers/Verifier/Aggregator 在返工轮统一"与计划对齐取最后一轮"视图（TASK_RESULTS 追加语义下取末尾 plan.size() 条），避免旧轮结论串味。
+- 前端：RunInspector「计划」页签展示依赖（`依赖 01、02`）与验收判据；agent-trace 时间线自动呈现波次/复用/跳过事件。
+- `AgentRunView.PlanStepView` 增加 `id/dependsOn/acceptance`。
+
+## 验证结果
+
+- `mvn test`：327 通过、0 失败、1 跳过（新增 PlanJsonParser 依赖用例 4、WorkersNodeDependencyTest 6、VerifierNodeEvidenceTest 7）。
+- `mvn -DskipTests package` 成功；后端已 `launchctl kickstart -k` 重启，`GET /api/health` ok；`npm run build` 通过。
+- 建议真实任务验证："调研三个竞品并生成对比报告"应看到 s1 调研（并行）→ s2 报告依赖 s1、提示词含上游结论；author 步骤结论不含文件名时应触发"证据核对未通过"返工。
+
+## 遗留事项
+
+- 计划草稿/修订/激活的 Plan 模式交互（P1）、步骤级 checkpoint、工作区文件系统级证据核对未做。
+- `GraphCheckpoint.reviseSteps` 未持久化到 DB 列：进程重启后的返工恢复退化为全量重跑（与旧行为一致）；如需完整支持要加 Flyway 列。
+- P1 清单（跨会话任务中心、Goal 模式、Agent 能力组合、任务经验、预算控制、端到端评测集）见设计文档 §5。
+
+## 环境注意事项
+
+- 后端已用新 JAR 重启；前端 dev server 运行中。
+- 仓库有两个未跟踪的 Finder 副本垃圾文件（`docs/design/2026-10-25-jev-intent-routing 2.md`、`evaluation/eval-sets/run_intent_gate 2.py`，均为改动前旧版快照），可手动删除；`release/` 构建产物已加入 .gitignore。

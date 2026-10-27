@@ -23,6 +23,8 @@ final class GraphState {
     static final String VERIFICATION_STATUS = "verification_status";
     /** 质检反馈（replace） */
     static final String VERIFICATION_FEEDBACK = "verification_feedback";
+    /** 质检点名需要返工的子任务序号（0 起，对齐计划顺序；空表示全部重做）（replace） */
+    static final String REVISE_STEPS = "revise_steps";
     /** 最终交付答案（replace） */
     static final String FINAL_ANSWER = "final_answer";
     /** 每次运行的上下文（工具、知识、停止信号；replace） */

@@ -165,6 +165,7 @@ public class ManusGraphOrchestrator {
                 Map.entry(GraphState.REVISION, new ReplaceStrategy()),
                 Map.entry(GraphState.VERIFICATION_STATUS, new ReplaceStrategy()),
                 Map.entry(GraphState.VERIFICATION_FEEDBACK, new ReplaceStrategy()),
+                Map.entry(GraphState.REVISE_STEPS, new ReplaceStrategy()),
                 Map.entry(GraphState.FINAL_ANSWER, new ReplaceStrategy()),
                 Map.entry(GraphState.RUN_CONTEXT, new ReplaceStrategy()),
                 Map.entry(GraphState.RESUME_FROM, new ReplaceStrategy()),
@@ -515,6 +516,9 @@ public class ManusGraphOrchestrator {
         saved.put(GraphState.ACTIVITIES, checkpoint.activities());
         saved.put(GraphState.SSE_EVENTS, checkpoint.events());
         saved.put(GraphState.REVISION, checkpoint.revision());
+        if (!checkpoint.reviseSteps().isEmpty()) {
+            saved.put(GraphState.REVISE_STEPS, checkpoint.reviseSteps());
+        }
         if (checkpoint.verificationStatus() != null && !checkpoint.verificationStatus().isBlank()) {
             saved.put(GraphState.VERIFICATION_STATUS, checkpoint.verificationStatus());
         }
@@ -565,6 +569,9 @@ public class ManusGraphOrchestrator {
             List<ActivityEvent> events = state.value(GraphState.SSE_EVENTS)
                     .map(value -> (List<ActivityEvent>) value).orElse(List.of());
             String verification = state.value(GraphState.VERIFICATION_STATUS, "");
+            List<Integer> reviseSteps = state.value(GraphState.REVISE_STEPS)
+                    .map(value -> (List<Integer>) value)
+                    .orElse(List.of());
             GraphCheckpoint checkpoint = new GraphCheckpoint(
                     node,
                     nextNode(node, verification),
@@ -576,7 +583,8 @@ public class ManusGraphOrchestrator {
                     verification,
                     state.value(GraphState.VERIFICATION_FEEDBACK, ""),
                     state.value(GraphState.FINAL_ANSWER, ""),
-                    streamedAnswer.toString());
+                    streamedAnswer.toString(),
+                    reviseSteps);
             agentRunService.checkpoint(request.runId(), checkpoint);
         } catch (Exception exception) {
             log.warn("persist manus checkpoint failed; runId={}, node={}", request.runId(), node, exception);

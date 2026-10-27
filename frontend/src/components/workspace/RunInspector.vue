@@ -18,7 +18,10 @@
             <strong>{{ step.title }}</strong>
             <em class="state-chip">{{ stateLabel(step.state) }}</em>
           </header>
-          <p v-if="step.roleLabel" class="plan-role">{{ step.roleLabel }}</p>
+          <p class="plan-role">
+            {{ step.roleLabel || '—' }}<template v-if="stepDepsLabel(step)"> · 依赖 {{ stepDepsLabel(step) }}</template>
+          </p>
+          <p v-if="step.acceptance" class="plan-acceptance">验收：{{ step.acceptance }}</p>
           <p v-if="step.result" class="plan-result">{{ step.result }}</p>
           <p v-else-if="step.state === 'running'" class="plan-running">正在执行…</p>
         </article>
@@ -208,6 +211,13 @@ const planSteps = computed(() => {
   })
 })
 const stateLabel = state => ({ done: '完成', running: '执行中', pending: '待执行' }[state] || state)
+const stepDepsLabel = step => {
+  if (!step.dependsOn?.length) return ''
+  return step.dependsOn.map(dep => {
+    const target = planSteps.value.find(item => item.id === dep)
+    return target ? String(target.index + 1).padStart(2, '0') : dep
+  }).join('、')
+}
 
 const loadToolCalls = async () => {
   const runId = props.run?.id
@@ -326,6 +336,7 @@ const formatTime = value => {
 .plan-step.done .state-chip { background: rgba(34, 197, 94, 0.12); color: #15803d; }
 .plan-step.running .state-chip { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
 .plan-role { margin: 5px 0 0; color: var(--sk-label-3); font-size: 10px; }
+.plan-acceptance { display: -webkit-box; overflow: hidden; margin: 4px 0 0; color: var(--sk-label-2); font-size: 10.5px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .plan-result { display: -webkit-box; overflow: hidden; margin: 5px 0 0; border-top: 1px dashed var(--sk-separator); padding-top: 6px; color: var(--sk-label-2); font-size: 10.5px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .plan-running { margin: 5px 0 0; color: var(--zwx-primary); font-size: 10.5px; }
 

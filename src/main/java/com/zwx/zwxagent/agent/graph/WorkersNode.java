@@ -96,6 +96,9 @@ public class WorkersNode implements NodeAction {
                 .map(value -> (List<PlanStep>) value)
                 .orElse(List.of());
         String feedback = state.value(GraphState.VERIFICATION_FEEDBACK, "");
+        List<Integer> reviseSteps = state.value(GraphState.REVISE_STEPS)
+                .map(value -> (List<Integer>) value)
+                .orElse(List.of());
         // 用户原始请求必须下发给每个 worker：planner 的任务标题/要求可能不含具体问题，
         // 缺了它 worker 只能输出"我将要……"式的元描述，质检必然打回（2026-10-26 修复）。
         String originalRequest = state.value(GraphState.INPUT, "");
@@ -114,85 +117,148 @@ public class WorkersNode implements NodeAction {
         } else {
             verificationFeedback = "";
         }
-        List<ActivityEvent> events = new ArrayList<>();
-        List<FutureTask<WorkerOutcome>> futures = new ArrayList<>();
+        // 选择性返工：质检点名 reviseSteps 时，未点名的步骤直接复用上一轮结论，只重跑相关步骤
+        List<String> accumulated = state.value(GraphState.TASK_RESULTS)
+                .map(value -> (List<String>) value)
+                .orElse(List.of());
+        List<String> lastRound = accumulated.size() > plan.size()
+                ? List.copyOf(accumulated.subList(accumulated.size() - plan.size(), accumulated.size()))
+                : accumulated;
+        boolean selectiveRework = !reviseSteps.isEmpty() && lastRound.size() == plan.size();
+        List<String> results = new ArrayList<>(java.util.Collections.nCopies(plan.size(), ""));
         List<String> activities = new ArrayList<>();
-        List<String> results = new ArrayList<>();
-        for (int index = 0; index < plan.size(); index++) {
+        List<ActivityEvent> events = new ArrayList<>();
+        Set<Integer> settled = new java.util.HashSet<>();
+        Set<Integer> broken = new java.util.HashSet<>();
+        if (selectiveRework) {
+            for (int index = 0; index < plan.size(); index++) {
+                if (reviseSteps.contains(index) || !reusable(lastRound.get(index))) continue;
+                results.set(index, lastRound.get(index));
+                settled.add(index);
+                ActivityEvent reused = ActivityEvent.of("work", plan.get(index).role().displayName(),
+                        "复用上轮结果：" + plan.get(index).title());
+                events.add(reused);
+                streamEvent(activitySink, reused);
+            }
+            activities.add("质检点名返工 " + reviseSteps.size() + " 步，其余 " +
+                    (plan.size() - reviseSteps.stream().filter(i -> i != null && i >= 0 && i < plan.size()).count())
+                    + " 步复用上轮结果");
+        }
+        // 按依赖分波执行：每波内并行、波间串行；上游失败或被跳过的下游步骤直接跳过
+        for (List<Integer> wave : dependencyWaves(plan)) {
             if (stopCheck.getAsBoolean()) break;
             if (confirmationPending(runId)) break;
-            PlanStep step = plan.get(index);
-            final int stepNumber = index + 1;
-            // 每个子任务独立 ChatClient：计量切面据此把 token 归到具体角色与序号
-            ChatClient workerClient = ChatClient.builder(chatModel)
-                    .defaultAdvisors(new MyLoggerAdvisor(),
-                            new TokenUsageAdvisor("worker·" + step.role().displayName() + "#" + stepNumber,
-                                    tokenUsage, () -> runId))
-                    .build();
-            ActivityEvent startEvent = ActivityEvent.of("work", step.role().displayName(),
-                    "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title());
-            events.add(startEvent);
-            streamEvent(activitySink, startEvent);
-            FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
-                    runWorker(step, stepNumber, tools, verificationFeedback, workerClient, stopCheck, context, runKey, runId, activitySink, originalRequest));
-            futures.add(task);
-            activeTasks.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(task);
-            try {
-                workerExecutor.execute(task);
-            } catch (java.util.concurrent.RejectedExecutionException exception) {
-                task.cancel(false);
-                futures.remove(task);
-                List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(runKey);
-                if (tasks != null) {
-                    tasks.remove(task);
-                    if (tasks.isEmpty()) activeTasks.remove(runKey, tasks);
+            List<Integer> runnable = new ArrayList<>();
+            for (Integer index : wave) {
+                if (settled.contains(index)) continue;
+                PlanStep step = plan.get(index);
+                List<Integer> depIndices = step.dependsOn().stream()
+                        .map(dep -> indexOfId(plan, dep))
+                        .toList();
+                boolean upstreamBroken = depIndices.stream().anyMatch(dep -> broken.contains(dep));
+                if (upstreamBroken) {
+                    results.set(index, "【" + step.title() + "】上游任务失败或被跳过，本步骤未执行");
+                    broken.add(index);
+                    settled.add(index);
+                    activities.add("上游任务未完成，跳过子任务：" + step.title());
+                    ActivityEvent skipped = ActivityEvent.of("work", "执行器", "上游任务未完成，跳过：" + step.title());
+                    events.add(skipped);
+                    streamEvent(activitySink, skipped);
+                    continue;
                 }
-                activities.add("子任务未能启动：执行队列已满");
-                results.add("【" + step.title() + "】执行队列已满，未能启动");
-                ActivityEvent rejected = ActivityEvent.of("work", "执行器", "执行队列已满，子任务未能启动");
-                events.add(rejected);
-                streamEvent(activitySink, rejected);
+                runnable.add(index);
             }
-        }
-        for (FutureTask<WorkerOutcome> future : futures) {
-            try {
-                WorkerOutcome outcome = future.get();
-                activities.addAll(outcome.activities());
-                results.add(outcome.summary());
-                events.addAll(outcome.events());
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                futures.forEach(task -> task.cancel(true));
-                break;
-            } catch (ExecutionException exception) {
-                Throwable cause = exception.getCause() == null ? exception : exception.getCause();
-                log.warn("worker 执行失败：{}", cause.getMessage());
-                activities.add("子任务执行失败：" + cause.getMessage());
-                results.add("子任务失败：" + cause.getMessage());
-                ActivityEvent failure = ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(cause.getMessage(), 80));
-                events.add(failure);
-                streamEvent(activitySink, failure);
-            } catch (Exception exception) {
-                log.warn("worker 执行失败：{}", exception.getMessage());
-                activities.add("子任务执行失败：" + exception.getMessage());
-                results.add("子任务失败：" + exception.getMessage());
-                ActivityEvent failure = ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(exception.getMessage(), 80));
-                events.add(failure);
-                streamEvent(activitySink, failure);
-            } finally {
-                List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(runKey);
-                if (tasks != null) {
-                    tasks.remove(future);
-                    if (tasks.isEmpty()) activeTasks.remove(runKey, tasks);
+            List<FutureTask<WorkerOutcome>> futures = new ArrayList<>();
+            Map<FutureTask<WorkerOutcome>, Integer> futureIndex = new java.util.IdentityHashMap<>();
+            for (Integer index : runnable) {
+                PlanStep step = plan.get(index);
+                final int stepNumber = index + 1;
+                // 每个子任务独立 ChatClient：计量切面据此把 token 归到具体角色与序号
+                ChatClient workerClient = ChatClient.builder(chatModel)
+                        .defaultAdvisors(new MyLoggerAdvisor(),
+                                new TokenUsageAdvisor("worker·" + step.role().displayName() + "#" + stepNumber,
+                                        tokenUsage, () -> runId))
+                        .build();
+                String upstream = upstreamPrompt(plan, results,
+                        step.dependsOn().stream().map(dep -> indexOfId(plan, dep)).toList());
+                ActivityEvent startEvent = ActivityEvent.of("work", step.role().displayName(),
+                        "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title());
+                events.add(startEvent);
+                streamEvent(activitySink, startEvent);
+                FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
+                        runWorker(step, stepNumber, tools, verificationFeedback, workerClient, stopCheck,
+                                context, runKey, runId, activitySink, originalRequest, upstream));
+                futures.add(task);
+                futureIndex.put(task, index);
+                activeTasks.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(task);
+                try {
+                    workerExecutor.execute(task);
+                } catch (java.util.concurrent.RejectedExecutionException exception) {
+                    task.cancel(false);
+                    futures.remove(task);
+                    futureIndex.remove(task);
+                    List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(runKey);
+                    if (tasks != null) {
+                        tasks.remove(task);
+                        if (tasks.isEmpty()) activeTasks.remove(runKey, tasks);
+                    }
+                    results.set(index, "【" + step.title() + "】执行队列已满，未能启动");
+                    broken.add(index);
+                    settled.add(index);
+                    activities.add("子任务未能启动：执行队列已满");
+                    ActivityEvent rejected = ActivityEvent.of("work", "执行器", "执行队列已满，子任务未能启动");
+                    events.add(rejected);
+                    streamEvent(activitySink, rejected);
                 }
             }
-            // 某个 worker 请求了工具确认：叫停其余 worker，run 随后挂起等待用户决定
-            if (confirmationPending(runId)) {
-                events.add(ActivityEvent.of("work", "执行器", "任务已暂停：等待用户确认工具执行"));
-                streamEvent(activitySink, ActivityEvent.of("work", "执行器", "任务已暂停：等待用户确认工具执行"));
-                stopAll(runKey);
-                break;
+            for (FutureTask<WorkerOutcome> future : futures) {
+                Integer index = futureIndex.get(future);
+                try {
+                    WorkerOutcome outcome = future.get();
+                    if (index != null) results.set(index, outcome.summary());
+                    activities.addAll(outcome.activities());
+                    events.addAll(outcome.events());
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    futures.forEach(task -> task.cancel(true));
+                    break;
+                } catch (ExecutionException exception) {
+                    Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+                    log.warn("worker 执行失败：{}", cause.getMessage());
+                    if (index != null) {
+                        results.set(index, "子任务失败：" + cause.getMessage());
+                        broken.add(index);
+                    }
+                    activities.add("子任务执行失败：" + cause.getMessage());
+                    ActivityEvent failure = ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(cause.getMessage(), 80));
+                    events.add(failure);
+                    streamEvent(activitySink, failure);
+                } catch (Exception exception) {
+                    log.warn("worker 执行失败：{}", exception.getMessage());
+                    if (index != null) {
+                        results.set(index, "子任务失败：" + exception.getMessage());
+                        broken.add(index);
+                    }
+                    activities.add("子任务执行失败：" + exception.getMessage());
+                    ActivityEvent failure = ActivityEvent.of("work", "执行器", "子任务执行失败：" + compact(exception.getMessage(), 80));
+                    events.add(failure);
+                    streamEvent(activitySink, failure);
+                } finally {
+                    List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(runKey);
+                    if (tasks != null) {
+                        tasks.remove(future);
+                        if (tasks.isEmpty()) activeTasks.remove(runKey, tasks);
+                    }
+                }
+                // 某个 worker 请求了工具确认：叫停其余 worker，run 随后挂起等待用户决定
+                if (confirmationPending(runId)) {
+                    events.add(ActivityEvent.of("work", "执行器", "任务已暂停：等待用户确认工具执行"));
+                    streamEvent(activitySink, ActivityEvent.of("work", "执行器", "任务已暂停：等待用户确认工具执行"));
+                    stopAll(runKey);
+                    break;
+                }
             }
+            runnable.forEach(index -> settled.add(index));
         }
         Map<String, Object> output = new java.util.HashMap<>();
         output.put(GraphState.TASK_RESULTS, results);
@@ -205,6 +271,72 @@ public class WorkersNode implements NodeAction {
         return output;
     }
 
+    /** 上一轮结论可复用：非空且不是失败/跳过/取消/未启动。 */
+    private static boolean reusable(String result) {
+        if (result == null || result.isBlank()) return false;
+        return !(result.startsWith("子任务失败")
+                || result.contains("上游任务失败或被跳过")
+                || result.contains("执行队列已满，未能启动")
+                || result.endsWith("已取消"));
+    }
+
+    /** 依赖分波：第 n 波的依赖都在前 n-1 波；空 id/未知依赖视为无依赖；环按无依赖处理。 */
+    static List<List<Integer>> dependencyWaves(List<PlanStep> plan) {
+        int size = plan.size();
+        Map<String, Integer> idToIndex = new java.util.HashMap<>();
+        for (int index = 0; index < size; index++) {
+            String id = plan.get(index).id();
+            if (!id.isBlank()) idToIndex.putIfAbsent(id, index);
+        }
+        int[] memo = new int[size];
+        java.util.Arrays.fill(memo, -1);
+        boolean[] visiting = new boolean[size];
+        List<List<Integer>> waves = new ArrayList<>();
+        for (int index = 0; index < size; index++) {
+            int level = levelOf(plan, idToIndex, index, memo, visiting);
+            while (waves.size() <= level) waves.add(new ArrayList<>());
+            waves.get(level).add(index);
+        }
+        return waves;
+    }
+
+    private static int levelOf(List<PlanStep> plan, Map<String, Integer> idToIndex,
+                               int index, int[] memo, boolean[] visiting) {
+        if (memo[index] >= 0) return memo[index];
+        if (visiting[index]) return 0;
+        visiting[index] = true;
+        int level = 0;
+        for (String dep : plan.get(index).dependsOn()) {
+            Integer depIndex = idToIndex.get(dep);
+            if (depIndex == null || depIndex == index) continue;
+            level = Math.max(level, levelOf(plan, idToIndex, depIndex, memo, visiting) + 1);
+        }
+        visiting[index] = false;
+        memo[index] = level;
+        return level;
+    }
+
+    private static int indexOfId(List<PlanStep> plan, String id) {
+        if (id == null || id.isBlank()) return -1;
+        for (int index = 0; index < plan.size(); index++) {
+            if (id.equals(plan.get(index).id())) return index;
+        }
+        return -1;
+    }
+
+    /** 上游结论注入：依赖步骤的可复用结论压缩后随任务提示下发。 */
+    static String upstreamPrompt(List<PlanStep> plan, List<String> results, List<Integer> depIndices) {
+        StringBuilder builder = new StringBuilder();
+        for (Integer dep : depIndices) {
+            if (dep == null || dep < 0 || dep >= plan.size() || dep >= results.size()) continue;
+            String result = results.get(dep);
+            if (!reusable(result)) continue;
+            if (builder.length() > 0) builder.append('\n');
+            builder.append("- 【").append(plan.get(dep).title()).append("】").append(compact(result, 600));
+        }
+        return builder.length() == 0 ? "" : "上游任务结论（已完成的步骤产出，可直接引用，不得虚构）：\n" + builder + "\n\n";
+    }
+
     private boolean confirmationPending(String runId) {
         return confirmationService != null && runId != null && !runId.isBlank()
                 && confirmationService.isRunRegistered(runId)
@@ -214,7 +346,7 @@ public class WorkersNode implements NodeAction {
     private WorkerOutcome runWorker(PlanStep step, int stepNumber, ToolCallback[] allTools,
                                     String feedback, ChatClient workerClient, BooleanSupplier stopCheck,
                                     RunContext runContext, String runKey, String runId, Consumer<ActivityEvent> activitySink,
-                                    String originalRequest) {
+                                    String originalRequest, String upstreamContext) {
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             return WorkerOutcome.stopped(step.title());
         }
@@ -258,7 +390,9 @@ public class WorkersNode implements NodeAction {
         }
         try {
             String taskPrompt = (originalRequest == null || originalRequest.isBlank() ? "" : "【用户原始请求】\n" + originalRequest + "\n\n")
+                    + upstreamContext
                     + "子任务标题：" + step.title() + "\n子任务要求：" + step.detail()
+                    + (step.acceptance().isBlank() ? "" : "\n完成判据：" + step.acceptance())
                     + (knowledge.isBlank() ? "" : "\n\n" + knowledgePrompt(knowledge));
             log.info("启动 {}：{}", worker.getName(), step.title());
             String runLog = worker.run(taskPrompt);

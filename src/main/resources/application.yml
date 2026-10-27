@@ -90,6 +90,8 @@ app:
   project-workspace:
     # 源码项目只能在此根目录下创建一级子目录；Docker 部署需挂载宿主机目录到该路径
     root: ${APP_PROJECT_WORKSPACE_ROOT:${user.dir}/projects}
+    # local 可浏览本机目录；生产环境由 application-prod.yml 强制收敛为 root
+    selection-mode: ${APP_PROJECT_WORKSPACE_SELECTION_MODE:local}
   skills:
     # markdown 技能目录（批次 B，相对后端工作目录）；目录为空或解析失败时回落内置 web-research
     dir: ${APP_SKILLS_DIR:skills}

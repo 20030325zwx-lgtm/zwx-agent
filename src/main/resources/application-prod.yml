@@ -15,6 +15,10 @@ knife4j:
   enable: false
   production: true
 
+app:
+  project-workspace:
+    selection-mode: root
+
 logging:
   level:
     org.springframework.ai: INFO

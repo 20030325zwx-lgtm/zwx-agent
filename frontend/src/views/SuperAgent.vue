@@ -4,7 +4,9 @@
       :conversations="conversations" :projects="projects" :active-id="chatId"
       :selected-project-id="selectedProjectId" :loading="historyLoading"
       :workspace-creating="workspaceCreating" :workspace-error="workspaceError" :open="sidebarOpen"
-      @create="createConversation" @create-workspace="createWorkspace" @select-project="selectProject"
+      :directory-view="directoryView" :directory-loading="directoryLoading"
+      @create="createConversation" @create-workspace="createWorkspace" @browse-workspaces="browseWorkspaces"
+      @choose-workspace="chooseWorkspace" @select-project="selectProject"
       @select="selectConversation" @delete="requestDelete" @close="sidebarOpen = false" />
     <main class="super-main">
       <header class="super-header">
@@ -150,7 +152,7 @@ import RunInspector from '../components/workspace/RunInspector.vue'
 import RunPhases from '../components/workspace/RunPhases.vue'
 import RunTimeline from '../components/workspace/RunTimeline.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
-import { chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listManusWebSources, listProjects, listWorkspaceFiles, uploadManusImage } from '../api'
+import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listManusWebSources, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
 
 useHead({ title: '超级智能体 - Aster', meta: [{ name: 'description', content: 'Aster 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -162,6 +164,8 @@ const projects = ref([])
 const selectedProjectId = ref(null)
 const workspaceCreating = ref(false)
 const workspaceError = ref('')
+const directoryView = ref(null)
+const directoryLoading = ref(false)
 const connectionStatus = ref('disconnected')
 const historyLoading = ref(false)
 const messagesLoading = ref(false)
@@ -506,6 +510,26 @@ const createWorkspace = async payload => {
   } finally {
     workspaceCreating.value = false
   }
+}
+const browseWorkspaces = async path => {
+  directoryLoading.value = true
+  workspaceError.value = ''
+  try { directoryView.value = await browseProjectDirectories(path) }
+  catch (error) { workspaceError.value = error.response?.data?.error || error.message || '文件夹读取失败' }
+  finally { directoryLoading.value = false }
+}
+const chooseWorkspace = async path => {
+  if (workspaceCreating.value) return
+  workspaceCreating.value = true
+  workspaceError.value = ''
+  try {
+    const project = await selectProjectDirectory({ path })
+    await refreshProjects()
+    selectedProjectId.value = project.id
+    await createConversation()
+  } catch (error) {
+    workspaceError.value = error.response?.data?.error || error.message || '工作区选择失败'
+  } finally { workspaceCreating.value = false }
 }
 const selectConversation = async conversation => {
   if (connectionStatus.value === 'connecting') return

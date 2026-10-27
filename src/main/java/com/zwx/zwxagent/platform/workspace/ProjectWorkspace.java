@@ -6,6 +6,7 @@ public record ProjectWorkspace(
         String id,
         String name,
         String directoryName,
+        String pathScope,
         Instant createdAt,
         Instant updatedAt) {
 }

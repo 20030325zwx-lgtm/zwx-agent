@@ -71,24 +71,59 @@
       <form class="workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-dialog-title" @submit.prevent="submitWorkspace">
         <div class="dialog-header">
           <div>
-            <h2 id="workspace-dialog-title">新建工作区</h2>
-            <p>在默认工作区目录下创建文件夹</p>
+            <h2 id="workspace-dialog-title">{{ dialogTitle }}</h2>
+            <p>{{ dialogDescription }}</p>
           </div>
           <button class="icon-button dialog-close" type="button" title="关闭" aria-label="关闭" @click="closeWorkspaceForm"><X :size="18" /></button>
         </div>
-        <label class="form-field">
-          <span>名称</span>
-          <input ref="nameInput" v-model.trim="workspaceName" maxlength="80" autocomplete="off" placeholder="例如：Aster 官网" required>
-        </label>
-        <label class="form-field">
-          <span>文件夹</span>
-          <input v-model.trim="directoryName" maxlength="128" autocomplete="off" placeholder="例如：aster-website" required>
-        </label>
-        <p v-if="workspaceError" class="form-error" role="alert">{{ workspaceError }}</p>
-        <div class="dialog-actions">
-          <button type="button" class="secondary-button" @click="closeWorkspaceForm">取消</button>
-          <button type="submit" class="primary-button" :disabled="workspaceCreating">{{ workspaceCreating ? '创建中...' : '创建工作区' }}</button>
+
+        <div v-if="dialogMode === 'menu'" class="workspace-options">
+          <button type="button" @click="startSelectWorkspace">
+            <FolderOpen :size="20" /><span><strong>选择文件夹</strong><small>将已有项目登记为工作区</small></span><ChevronRight :size="17" />
+          </button>
+          <button type="button" @click="startCreateWorkspace">
+            <FolderPlus :size="20" /><span><strong>新建文件夹</strong><small>在默认工作区目录下创建</small></span><ChevronRight :size="17" />
+          </button>
         </div>
+
+        <template v-else-if="dialogMode === 'create'">
+          <label class="form-field">
+            <span>名称</span>
+            <input ref="nameInput" v-model.trim="workspaceName" maxlength="80" autocomplete="off" placeholder="例如：Aster 官网" required>
+          </label>
+          <label class="form-field">
+            <span>文件夹</span>
+            <input v-model.trim="directoryName" maxlength="128" autocomplete="off" placeholder="例如：aster-website" required>
+          </label>
+          <p v-if="workspaceError" class="form-error" role="alert">{{ workspaceError }}</p>
+          <div class="dialog-actions">
+            <button type="button" class="secondary-button" @click="dialogMode = 'menu'">返回</button>
+            <button type="submit" class="primary-button" :disabled="workspaceCreating">{{ workspaceCreating ? '创建中...' : '创建工作区' }}</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="path-bar">
+            <button class="icon-button" type="button" title="上一级" aria-label="上一级" :disabled="directoryView?.parentPath == null || directoryLoading" @click="browse(directoryView.parentPath)"><ArrowUp :size="16" /></button>
+            <span :title="directoryView?.displayPath">{{ directoryView?.displayPath || '正在读取...' }}</span>
+          </div>
+          <div class="directory-list" aria-label="可选择的文件夹">
+            <p v-if="directoryLoading" class="directory-state">正在读取文件夹...</p>
+            <div v-for="directory in directoryView?.directories || []" v-else :key="directory.path" class="directory-row" :class="{ selected: selectedDirectory?.path === directory.path }">
+              <button type="button" class="directory-select" @dblclick="browse(directory.path)" @click="selectedDirectory = directory"><Folder :size="17" /><span>{{ directory.name }}</span></button>
+              <button type="button" class="open-directory" title="进入文件夹" aria-label="进入文件夹" @click="browse(directory.path)"><ChevronRight :size="16" /></button>
+            </div>
+            <p v-if="!directoryLoading && directoryView && !directoryView.directories.length" class="directory-state">此文件夹中没有子文件夹</p>
+          </div>
+          <p class="selection-hint">{{ selectedDirectory ? `已选择：${selectedDirectory.name}` : directoryView?.selectable ? '可选择当前文件夹，或选择下方子文件夹' : '请选择一个子文件夹' }}</p>
+          <p v-if="workspaceError" class="form-error" role="alert">{{ workspaceError }}</p>
+          <div class="dialog-actions">
+            <button type="button" class="secondary-button" @click="dialogMode = 'menu'">返回</button>
+            <button type="button" class="primary-button" :disabled="workspaceCreating || directoryLoading || (!selectedDirectory && !directoryView?.selectable)" @click="chooseSelectedWorkspace">
+              {{ workspaceCreating ? '添加中...' : '添加工作区' }}
+            </button>
+          </div>
+        </template>
       </form>
     </div>
   </Teleport>
@@ -96,7 +131,7 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import { Folder, FolderPlus, Search, SquarePen, Trash2, X } from 'lucide-vue-next'
+import { ArrowUp, ChevronRight, Folder, FolderOpen, FolderPlus, Search, SquarePen, Trash2, X } from 'lucide-vue-next'
 
 const props = defineProps({
   conversations: { type: Array, default: () => [] },
@@ -106,13 +141,15 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   workspaceCreating: { type: Boolean, default: false },
   workspaceError: { type: String, default: '' },
+  directoryView: { type: Object, default: null },
+  directoryLoading: { type: Boolean, default: false },
   open: { type: Boolean, default: false },
   title: { type: String, default: '超级智能体' },
   mark: { type: String, default: 'AI' },
   theme: { type: String, default: 'travel' }
 })
 
-const emit = defineEmits(['create', 'create-workspace', 'select-project', 'select', 'delete', 'close'])
+const emit = defineEmits(['create', 'create-workspace', 'browse-workspaces', 'choose-workspace', 'select-project', 'select', 'delete', 'close'])
 const workspaceFormOpen = ref(false)
 const workspaceName = ref('')
 const directoryName = ref('')
@@ -120,19 +157,28 @@ const searchOpen = ref(false)
 const searchText = ref('')
 const searchInput = ref(null)
 const nameInput = ref(null)
+const dialogMode = ref('menu')
+const selectedDirectory = ref(null)
+const closeAfterCreate = ref(false)
+const dialogTitle = computed(() => dialogMode.value === 'menu' ? '添加工作区' : dialogMode.value === 'create' ? '新建工作区' : '选择文件夹')
+const dialogDescription = computed(() => dialogMode.value === 'menu'
+  ? '选择已有项目，或创建一个新的项目文件夹'
+  : dialogMode.value === 'create' ? '在默认工作区目录下创建文件夹' : '选择当前机器上允许访问的文件夹')
 
-const groups = computed(() => [
-  ...props.projects.map(project => ({
+const groups = computed(() => {
+  const projectGroups = props.projects.map(project => ({
     ...project,
     items: props.conversations.filter(item => item.projectId === project.id)
-  })),
-  {
+  }))
+  const unbound = props.conversations.filter(item => !item.projectId)
+  if (unbound.length) projectGroups.push({
     id: null,
     name: '未绑定工作区',
     directoryName: '',
-    items: props.conversations.filter(item => !item.projectId)
-  }
-])
+    items: unbound
+  })
+  return projectGroups
+})
 
 const visibleGroups = computed(() => {
   const keyword = searchText.value.toLocaleLowerCase('zh-CN')
@@ -146,16 +192,20 @@ const visibleGroups = computed(() => {
 })
 
 const openWorkspaceForm = async () => {
+  dialogMode.value = 'menu'
   workspaceFormOpen.value = true
-  await nextTick()
-  nameInput.value?.focus()
 }
 const closeWorkspaceForm = () => {
   if (props.workspaceCreating) return
   workspaceFormOpen.value = false
   workspaceName.value = ''
   directoryName.value = ''
+  selectedDirectory.value = null
 }
+const startCreateWorkspace = async () => { dialogMode.value = 'create'; await nextTick(); nameInput.value?.focus() }
+const startSelectWorkspace = () => { dialogMode.value = 'select'; selectedDirectory.value = null; emit('browse-workspaces', null) }
+const browse = path => { selectedDirectory.value = null; emit('browse-workspaces', path) }
+const chooseSelectedWorkspace = () => emit('choose-workspace', selectedDirectory.value?.path || props.directoryView?.currentPath)
 const submitWorkspace = () => {
   if (!workspaceName.value || !directoryName.value || props.workspaceCreating) return
   emit('create-workspace', { name: workspaceName.value, directoryName: directoryName.value })
@@ -177,7 +227,16 @@ watch(searchOpen, async open => {
   } else searchText.value = ''
 })
 watch(() => props.projects.length, (current, previous) => {
-  if (current > previous) closeWorkspaceForm()
+  if (current > previous) {
+    if (props.workspaceCreating) closeAfterCreate.value = true
+    else closeWorkspaceForm()
+  }
+})
+watch(() => props.workspaceCreating, creating => {
+  if (!creating && closeAfterCreate.value) {
+    closeAfterCreate.value = false
+    closeWorkspaceForm()
+  }
 })
 </script>
 
@@ -239,11 +298,28 @@ watch(() => props.projects.length, (current, previous) => {
 .dialog-header h2 { margin: 0 0 5px; color: #202125; font-size: 17px; font-weight: 700; }
 .dialog-header p { margin: 0; color: #85878c; font-size: 12px; }
 .dialog-close { margin: -5px -5px 0 0; }
+.workspace-options { display: grid; gap: 8px; }
+.workspace-options > button { display: grid; min-height: 64px; grid-template-columns: 24px minmax(0, 1fr) 18px; align-items: center; gap: 10px; border: 1px solid #d6e1ef; border-radius: 8px; padding: 10px 12px; background: #f8fbff; color: #49627f; text-align: left; }
+.workspace-options > button:hover { border-color: #b8cce6; background: #eff5fd; color: #284e7b; }
+.workspace-options span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.workspace-options strong { color: #283d59; font-size: 13px; }.workspace-options small { color: #8391a4; font-size: 11px; }
 .form-field { display: block; margin-bottom: 14px; }
 .form-field span { display: block; margin-bottom: 6px; color: #55575c; font-size: 12px; font-weight: 600; }
 .form-field input { width: 100%; box-sizing: border-box; height: 38px; border: 1px solid #d4d5d8; border-radius: 7px; padding: 0 10px; outline: none; color: #292a2e; font-size: 13px; }
 .form-field input:focus { border-color: #8c8e93; box-shadow: 0 0 0 3px rgba(0, 0, 0, .05); }
 .form-error { margin: -3px 0 12px; color: #c42e3b; font-size: 12px; }
+.path-bar { display: flex; height: 38px; align-items: center; gap: 6px; border: 1px solid #d4dfed; border-radius: 7px; padding: 0 7px; background: #f7faff; }
+.path-bar > span { overflow: hidden; min-width: 0; flex: 1; color: #52657e; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.path-bar .icon-button:disabled { opacity: .35; }
+.directory-list { height: 250px; overflow-y: auto; margin-top: 10px; border: 1px solid #dbe4f0; border-radius: 7px; padding: 5px; background: #fbfdff; }
+.directory-row { display: flex; align-items: center; border-radius: 6px; }
+.directory-row:hover { background: #edf3fb; }.directory-row.selected { background: #dfeafb; }
+.directory-select { display: flex; height: 34px; min-width: 0; flex: 1; align-items: center; gap: 8px; border: 0; padding: 0 7px; background: transparent; color: #52657e; text-align: left; }
+.directory-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.open-directory { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #8493a7; }
+.open-directory:hover { background: #d7e4f5; color: #365a86; }
+.directory-state { margin: 18px 10px; color: #8795a8; font-size: 12px; text-align: center; }
+.selection-hint { overflow: hidden; margin: 8px 2px 0; color: #718197; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .secondary-button, .primary-button { height: 36px; border-radius: 7px; padding: 0 14px; font-size: 13px; font-weight: 600; }
 .secondary-button { border: 1px solid #d7d8db; background: #fff; color: #4d4f54; }

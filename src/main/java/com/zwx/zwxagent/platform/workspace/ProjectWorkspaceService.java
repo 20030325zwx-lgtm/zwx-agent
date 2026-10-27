@@ -11,8 +11,11 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
+import java.util.stream.StreamSupport;
 
 @Service
 public class ProjectWorkspaceService {
@@ -22,21 +25,24 @@ public class ProjectWorkspaceService {
 
     private final JdbcTemplate jdbcTemplate;
     private final Path configuredRoot;
+    private final SelectionMode selectionMode;
 
     public ProjectWorkspaceService(JdbcTemplate jdbcTemplate,
-                                   @Value("${app.project-workspace.root:${user.dir}/projects}") String root) {
+                                   @Value("${app.project-workspace.root:${user.dir}/projects}") String root,
+                                   @Value("${app.project-workspace.selection-mode:local}") String selectionMode) {
         this.jdbcTemplate = jdbcTemplate;
         this.configuredRoot = Path.of(root).toAbsolutePath().normalize();
+        this.selectionMode = SelectionMode.parse(selectionMode);
     }
 
     public List<ProjectWorkspace> list(String tenantId, String userId) {
         return jdbcTemplate.query("""
-                SELECT id, name, directory_name, created_at, updated_at
+                SELECT id, name, directory_name, path_scope, created_at, updated_at
                 FROM agent_project
                 WHERE tenant_id = ? AND owner_user_id = ?
                 ORDER BY updated_at DESC, name ASC
                 """, (rs, rowNum) -> new ProjectWorkspace(
-                rs.getString("id"), rs.getString("name"), rs.getString("directory_name"),
+                rs.getString("id"), rs.getString("name"), rs.getString("directory_name"), rs.getString("path_scope"),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()),
                 tenantId, userId);
     }
@@ -49,14 +55,14 @@ public class ProjectWorkspaceService {
         String id = UUID.randomUUID().toString();
         try {
             jdbcTemplate.update("""
-                    INSERT INTO agent_project (id, tenant_id, owner_user_id, name, directory_name)
-                    VALUES (?, ?, ?, ?, ?)
-                    """, id, tenantId, userId, safeName, safeDirectoryName);
+                    INSERT INTO agent_project (id, tenant_id, owner_user_id, name, directory_name, path_scope, workspace_path)
+                    VALUES (?, ?, ?, ?, ?, 'ROOT', ?)
+                    """, id, tenantId, userId, safeName, safeDirectoryName, safeDirectoryName);
             return jdbcTemplate.queryForObject("""
-                    SELECT id, name, directory_name, created_at, updated_at
+                    SELECT id, name, directory_name, path_scope, created_at, updated_at
                     FROM agent_project WHERE id = ? AND tenant_id = ? AND owner_user_id = ?
                     """, (rs, rowNum) -> new ProjectWorkspace(
-                    rs.getString("id"), rs.getString("name"), rs.getString("directory_name"),
+                    rs.getString("id"), rs.getString("name"), rs.getString("directory_name"), rs.getString("path_scope"),
                     rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()),
                     id, tenantId, userId);
         } catch (DataIntegrityViolationException exception) {
@@ -65,6 +71,54 @@ public class ProjectWorkspaceService {
         } catch (RuntimeException exception) {
             deleteNewEmptyDirectory(createdDirectory);
             throw exception;
+        }
+    }
+
+    @Transactional
+    public ProjectWorkspace select(String tenantId, String userId, String path, String name) {
+        ResolvedSelection selection = resolveSelection(path);
+        String displayName = name == null || name.isBlank()
+                ? selection.realPath().getFileName().toString()
+                : requireDisplayName(name);
+        String id = UUID.randomUUID().toString();
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO agent_project
+                        (id, tenant_id, owner_user_id, name, directory_name, path_scope, workspace_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, id, tenantId, userId, displayName, selection.realPath().getFileName().toString(),
+                    selection.scope().name(), selection.storedPath());
+            return jdbcTemplate.queryForObject("""
+                    SELECT id, name, directory_name, path_scope, created_at, updated_at
+                    FROM agent_project WHERE id = ? AND tenant_id = ? AND owner_user_id = ?
+                    """, (rs, rowNum) -> new ProjectWorkspace(
+                    rs.getString("id"), rs.getString("name"), rs.getString("directory_name"), rs.getString("path_scope"),
+                    rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()),
+                    id, tenantId, userId);
+        } catch (DataIntegrityViolationException exception) {
+            throw new ProjectWorkspaceConflictException("该文件夹已经是工作区");
+        }
+    }
+
+    public WorkspaceDirectoryView browse(String path) {
+        try {
+            Path current = resolveBrowsePath(path);
+            List<WorkspaceDirectoryView.DirectoryEntry> directories;
+            try (var stream = Files.list(current)) {
+                directories = stream
+                        .filter(candidate -> Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS))
+                        .filter(candidate -> !Files.isSymbolicLink(candidate))
+                        .sorted(Comparator.comparing(candidate -> candidate.getFileName().toString().toLowerCase(Locale.ROOT)))
+                        .limit(500)
+                        .map(candidate -> new WorkspaceDirectoryView.DirectoryEntry(
+                                candidate.getFileName().toString(), toClientPath(candidate)))
+                        .toList();
+            }
+            Path parent = allowedParent(current);
+            return new WorkspaceDirectoryView(selectionMode.name().toLowerCase(Locale.ROOT), toClientPath(current),
+                    toDisplayPath(current), parent == null ? null : toClientPath(parent), isSelectable(current), directories);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("无法读取该文件夹", exception);
         }
     }
 
@@ -106,6 +160,82 @@ public class ProjectWorkspaceService {
         }
     }
 
+    private Path resolveBrowsePath(String value) throws IOException {
+        if (selectionMode == SelectionMode.ROOT) {
+            Path root = realRoot();
+            String relative = value == null ? "" : value.trim();
+            Path relativePath = Path.of(relative.isEmpty() ? "." : relative);
+            boolean hasTraversal = StreamSupport.stream(relativePath.spliterator(), false)
+                    .anyMatch(segment -> "..".equals(segment.toString()));
+            if (relativePath.isAbsolute() || relative.indexOf('\\') >= 0 || hasTraversal) {
+                throw new IllegalArgumentException("只能浏览配置的工作区根目录");
+            }
+            Path candidate = relative.isEmpty() ? root : root.resolve(relativePath).normalize();
+            Path real = requireRealDirectory(candidate);
+            if (!real.startsWith(root)) throw new IllegalArgumentException("目录越出了配置的工作区根目录");
+            return real;
+        }
+        String requested = value == null ? "" : value.trim();
+        Path start = requested.isEmpty() ? Path.of(System.getProperty("user.home")) : Path.of(requested);
+        if (!start.isAbsolute()) throw new IllegalArgumentException("本地目录必须使用绝对路径");
+        return requireRealDirectory(start);
+    }
+
+    private ResolvedSelection resolveSelection(String path) {
+        try {
+            Path real = resolveBrowsePath(path);
+            if (!isSelectable(real)) throw new IllegalArgumentException("请选择一个文件夹");
+            if (selectionMode == SelectionMode.ROOT) {
+                Path root = realRoot();
+                String relative = root.relativize(real).toString().replace('\\', '/');
+                if (relative.isEmpty()) throw new IllegalArgumentException("不能将工作区根目录本身登记为项目");
+                return new ResolvedSelection(PathScope.ROOT, relative, real);
+            }
+            return new ResolvedSelection(PathScope.LOCAL, real.toString(), real);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("无法选择该文件夹", exception);
+        }
+    }
+
+    private Path requireRealDirectory(Path candidate) throws IOException {
+        if (Files.isSymbolicLink(candidate)) throw new IllegalArgumentException("不能选择符号链接目录");
+        Path real = candidate.toRealPath();
+        if (!Files.isDirectory(real, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("请选择一个存在的文件夹");
+        return real;
+    }
+
+    private Path realRoot() throws IOException {
+        Files.createDirectories(configuredRoot);
+        return configuredRoot.toRealPath();
+    }
+
+    private Path allowedParent(Path current) throws IOException {
+        Path parent = current.getParent();
+        if (selectionMode == SelectionMode.LOCAL) return parent;
+        Path root = realRoot();
+        return current.equals(root) ? null : parent;
+    }
+
+    private boolean isSelectable(Path current) throws IOException {
+        return selectionMode == SelectionMode.LOCAL || !current.equals(realRoot());
+    }
+
+    private String toClientPath(Path path) {
+        if (selectionMode == SelectionMode.LOCAL) return path.toString();
+        try {
+            String relative = realRoot().relativize(path).toString().replace('\\', '/');
+            return relative;
+        } catch (IOException exception) {
+            throw new IllegalStateException("无法解析工作区路径", exception);
+        }
+    }
+
+    private String toDisplayPath(Path path) {
+        if (selectionMode == SelectionMode.LOCAL) return path.toString();
+        String relative = toClientPath(path);
+        return relative.isEmpty() ? "/" : "/" + relative;
+    }
+
     private String requireDisplayName(String value) {
         String normalized = value == null ? "" : value.trim();
         if (normalized.isEmpty() || normalized.length() > MAX_NAME_LENGTH || containsControlCharacter(normalized)) {
@@ -135,5 +265,22 @@ public class ProjectWorkspaceService {
         } catch (IOException ignored) {
             // The directory was created by this request; leave it intact if it is no longer empty.
         }
+    }
+
+    private enum SelectionMode {
+        LOCAL, ROOT;
+
+        private static SelectionMode parse(String value) {
+            try {
+                return valueOf(value == null ? "LOCAL" : value.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException("app.project-workspace.selection-mode 只能是 local 或 root");
+            }
+        }
+    }
+
+    private enum PathScope { LOCAL, ROOT }
+
+    private record ResolvedSelection(PathScope scope, String storedPath, Path realPath) {
     }
 }

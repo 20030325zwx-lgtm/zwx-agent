@@ -18,7 +18,42 @@ class ProjectWorkspaceServiceTest {
     Path tempDir;
 
     private ProjectWorkspaceService service() {
-        return new ProjectWorkspaceService(mock(JdbcTemplate.class), tempDir.toString());
+        return new ProjectWorkspaceService(mock(JdbcTemplate.class), tempDir.toString(), "root");
+    }
+
+    @Test
+    void rootModeBrowsesOnlyInsideConfiguredRoot() throws Exception {
+        Files.createDirectory(tempDir.resolve("alpha"));
+        Files.createDirectory(tempDir.resolve("alpha").resolve("child"));
+
+        WorkspaceDirectoryView root = service().browse("");
+        assertEquals("root", root.mode());
+        assertEquals("", root.currentPath());
+        assertEquals("/", root.displayPath());
+        assertEquals(null, root.parentPath());
+        assertEquals(false, root.selectable());
+        assertEquals("alpha", root.directories().getFirst().path());
+
+        WorkspaceDirectoryView alpha = service().browse("alpha");
+        assertEquals("/alpha", alpha.displayPath());
+        assertEquals("", alpha.parentPath());
+        assertTrue(alpha.selectable());
+        assertEquals("alpha/child", alpha.directories().getFirst().path());
+        assertThrows(IllegalArgumentException.class, () -> service().browse("../outside"));
+        assertThrows(IllegalArgumentException.class, () -> service().browse("/tmp"));
+    }
+
+    @Test
+    void localModeAcceptsExistingAbsoluteDirectory() throws Exception {
+        Path project = Files.createDirectory(tempDir.resolve("local-project"));
+        ProjectWorkspaceService service = new ProjectWorkspaceService(
+                mock(JdbcTemplate.class), tempDir.resolve("unused").toString(), "local");
+
+        WorkspaceDirectoryView view = service.browse(project.toString());
+        assertEquals("local", view.mode());
+        assertEquals(project.toRealPath().toString(), view.currentPath());
+        assertTrue(view.selectable());
+        assertThrows(IllegalArgumentException.class, () -> service.browse("relative/path"));
     }
 
     @Test

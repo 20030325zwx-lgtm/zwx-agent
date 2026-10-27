@@ -191,6 +191,8 @@ export const createManusConversation = (projectId = null) => request.post('/ai/m
 export const listManusConversations = () => request.get('/ai/manus/conversations').then(response => response.data)
 export const listProjects = () => request.get('/ai/projects').then(response => response.data)
 export const createProject = payload => request.post('/ai/projects', payload).then(response => response.data)
+export const browseProjectDirectories = (path = null) => request.get('/ai/projects/directories', { params: { path: path || undefined } }).then(response => response.data)
+export const selectProjectDirectory = payload => request.post('/ai/projects/select', payload).then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteManusConversation = conversationId => request.delete(`/ai/manus/conversations/${conversationId}`)
 export const getManusFileUrl = (conversationId, path) =>

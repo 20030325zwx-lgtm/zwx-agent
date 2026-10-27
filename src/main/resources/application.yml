@@ -96,6 +96,8 @@ app:
     write-lease-minutes: ${APP_PROJECT_WORKSPACE_WRITE_LEASE_MINUTES:30}
     # build/test/lint 单次任务最长执行时间
     task-timeout-seconds: ${APP_PROJECT_WORKSPACE_TASK_TIMEOUT_SECONDS:900}
+    # Git 项目按 run 创建的受管 worktree 根目录；不要放在源码项目内部
+    worktree-root: ${APP_PROJECT_WORKSPACE_WORKTREE_ROOT:${java.io.tmpdir}/aster-worktrees}
   skills:
     # markdown 技能目录（批次 B，相对后端工作目录）；目录为空或解析失败时回落内置 web-research
     dir: ${APP_SKILLS_DIR:skills}
@@ -137,7 +139,7 @@ app:
       # 有副作用工具的人工确认（仅图编排 run 生效）：请求执行时 run 挂起，用户批准后从原计划继续
       enabled: ${APP_TOOLS_CONFIRMATION_ENABLED:true}
       # 需要确认的工具名；mcp:* 表示全部 MCP 动态工具。文件/PDF 产出是交付物，默认不拦截
-      required-tools: ${APP_TOOLS_CONFIRMATION_REQUIRED:applyProjectPatch,runProjectTask,executeTerminalCommand,executeDatabaseQuery,queryExternalDatabase,downloadResource,mcp:*}
+      required-tools: ${APP_TOOLS_CONFIRMATION_REQUIRED:applyProjectPatch,runProjectTask,commitProjectChanges,executeTerminalCommand,executeDatabaseQuery,queryExternalDatabase,downloadResource,mcp:*}
   run:
     quota:
       # 每用户配额限流：并发 run 数 / 每小时新建 run 数 / 24 小时 token 预算（0 关闭 token 口径）

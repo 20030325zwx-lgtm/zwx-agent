@@ -93,6 +93,9 @@ public class ManusAgentController {
     private com.zwx.zwxagent.platform.workspace.ProjectExecutionLockService projectExecutionLockService;
 
     @Resource
+    private com.zwx.zwxagent.platform.workspace.RunWorkspaceService runWorkspaceService;
+
+    @Resource
     private AppConfigurationService appConfigurationService;
 
     @Resource
@@ -644,6 +647,7 @@ public class ManusAgentController {
                     .error("Failed to persist super agent turn; conversationId={}, runId={}", conversationId, runId, persistenceError);
         } finally {
             projectExecutionLockService.release(runId);
+            runWorkspaceService.finish(runId, result.status());
         }
     }
 

@@ -16,6 +16,7 @@
 - 代码 harness 第一阶段完成：绑定项目的对话会装配 `coder` 只读工具，可列目录树、ripgrep 搜索、读取源码、查看 Git status/diff；路径守卫拒绝绝对路径、穿越、符号链接与常见敏感文件，生成目录默认排除。
 - 代码 harness 第二阶段完成：`applyProjectPatch` 经人工确认后执行 `git apply --check` 与受控写入，返回当前 diff；V29 增加项目单写者租约，run 完成/中断时释放并带过期兜底，恢复执行沿用同一 run 身份与幂等工具账本。
 - 代码 harness 第三阶段完成：`listProjectTasks` 探测 Maven、Gradle 及根目录/一级子目录 Node build/test/lint，`runProjectTask` 只接受探测出的任务 ID；执行经人工确认和项目写租约，使用参数数组、精简环境、超时与输出上限。
+- 代码 harness 第四阶段完成：V30 持久化 run checkout；Git 项目默认从当前 HEAD 创建 `aster/run-*` 独立分支与受管 worktree，恢复时复用，非 Git 目录保持 DIRECT；`commitProjectChanges` 仅在当前 checkout 暂存并本地提交，拒绝敏感/超大文件，关闭 hooks、签名且不提供 push。
 
 ## 核心决策
 
@@ -36,4 +37,4 @@
 
 ## 下一步
 
-继续完成 Git commit 与按 run 隔离的 worktree；生产部署时显式设置 `ASTER_PROJECTS_HOST_ROOT` 为宿主机允许根。
+后续补充 worktree 生命周期管理 UI、变更文件/Diff/检查结果专用面板，以及 OS/容器级构建沙箱；生产部署时显式设置 `ASTER_PROJECTS_HOST_ROOT` 为宿主机允许根。

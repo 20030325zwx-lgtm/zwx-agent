@@ -24,14 +24,21 @@ public class ProjectCodeWriteTool {
     private final ProjectPathGuard guard;
     private final ProjectExecutionLockService lockService;
     private final ProjectCodeReadTool readTool;
+    private final boolean directMode;
 
     public ProjectCodeWriteTool(String projectId, String projectName, Path projectRoot, String runId,
                                 ProjectExecutionLockService lockService) {
+        this(projectId, projectName, projectRoot, runId, lockService, true);
+    }
+
+    public ProjectCodeWriteTool(String projectId, String projectName, Path projectRoot, String runId,
+                                ProjectExecutionLockService lockService, boolean directMode) {
         this.projectId = projectId;
         this.runId = runId;
         this.guard = new ProjectPathGuard(projectRoot);
         this.lockService = lockService;
         this.readTool = new ProjectCodeReadTool(projectName, projectRoot);
+        this.directMode = directMode;
     }
 
     @Tool(description = "Apply a unified Git patch to the current project after validating every project-relative path. The operation modifies source files and requires user confirmation.")
@@ -41,15 +48,15 @@ public class ProjectCodeWriteTool {
         if (!Files.exists(guard.root().resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
             return "Error applying project patch: the current project is not a Git repository";
         }
-        lockService.acquire(projectId, runId);
+        if (directMode) lockService.acquire(projectId, runId);
         CommandResult check = gitApply(patch, true);
         if (!check.success()) {
-            lockService.release(runId);
+            if (directMode) lockService.release(runId);
             return "Error applying project patch: patch check failed\n" + check.output();
         }
         CommandResult apply = gitApply(patch, false);
         if (!apply.success()) {
-            lockService.release(runId);
+            if (directMode) lockService.release(runId);
             return "Error applying project patch: " + apply.output();
         }
         return "Patch applied successfully. Current project diff:\n" + readTool.getProjectDiff();

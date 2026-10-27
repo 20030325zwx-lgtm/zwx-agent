@@ -26,7 +26,7 @@ public class PlannerNode implements NodeAction {
             - researcher：联网调研员（搜索、抓取网页、下载公开资料）
             - author：文档撰写员（读写文件、生成 PDF 交付物）
             - analyst：数据分析员（只读 SQL 查询、白名单命令分析数据）
-            - coder：代码工程师（浏览、搜索和分析当前项目源码与 Git 变更）
+            - coder：代码工程师（浏览、修改、构建检查并提交当前项目源码）
             - general：通用助理（可用全部工具）
             规则：
             1. 简单请求只拆 1 个子任务，不要过度拆分。

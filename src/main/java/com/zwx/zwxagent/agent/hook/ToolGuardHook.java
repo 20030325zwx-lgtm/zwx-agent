@@ -118,6 +118,8 @@ public class ToolGuardHook implements AgentHook {
             case "listProjectTasks" -> null;
             case "runProjectTask" -> text(args, "taskId") == null || text(args, "taskId").isBlank()
                     ? "taskId is required" : null;
+            case "commitProjectChanges" -> text(args, "message") == null || text(args, "message").isBlank()
+                    ? "commit message is required" : null;
             case "executeDatabaseQuery" -> com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql"));
             case "queryExternalDatabase" -> firstNonBlank(
                     com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql")),
@@ -155,7 +157,7 @@ public class ToolGuardHook implements AgentHook {
                     "downloadResource", "scrapeWebPage", "searchWeb", "webSearch", "executeDatabaseQuery",
                     "queryExternalDatabase", "listProjectTree", "searchProjectCode", "readProjectFile",
                     "getProjectGitStatus", "getProjectDiff", "applyProjectPatch", "listProjectTasks",
-                    "runProjectTask" -> true;
+                    "runProjectTask", "commitProjectChanges" -> true;
             default -> false;
         };
     }

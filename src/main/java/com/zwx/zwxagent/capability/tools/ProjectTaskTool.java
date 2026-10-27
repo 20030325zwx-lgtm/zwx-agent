@@ -35,14 +35,21 @@ public class ProjectTaskTool {
     private final ProjectExecutionLockService lockService;
     private final int timeoutSeconds;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final boolean directMode;
 
     public ProjectTaskTool(String projectId, Path projectRoot, String runId,
                            ProjectExecutionLockService lockService, int timeoutSeconds) {
+        this(projectId, projectRoot, runId, lockService, timeoutSeconds, true);
+    }
+
+    public ProjectTaskTool(String projectId, Path projectRoot, String runId,
+                           ProjectExecutionLockService lockService, int timeoutSeconds, boolean directMode) {
         this.projectId = projectId;
         this.runId = runId;
         this.guard = new ProjectPathGuard(projectRoot);
         this.lockService = lockService;
         this.timeoutSeconds = Math.max(10, timeoutSeconds);
+        this.directMode = directMode;
     }
 
     @Tool(description = "List detected build, test and lint tasks for the current project. Run this before runProjectTask to obtain an allowed task id.")
@@ -60,7 +67,7 @@ public class ProjectTaskTool {
     public String runProjectTask(@ToolParam(description = "Exact task id returned by listProjectTasks") String taskId) {
         ProjectTask task = detectTasks().get(taskId == null ? "" : taskId.trim());
         if (task == null) return "Error: unknown project task id; call listProjectTasks first";
-        lockService.acquire(projectId, runId);
+        if (directMode) lockService.acquire(projectId, runId);
         long started = System.nanoTime();
         CommandResult result = execute(task);
         long elapsed = Duration.ofNanos(System.nanoTime() - started).toSeconds();

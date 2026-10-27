@@ -65,8 +65,8 @@ public class QwenIntentRouter implements IntentRouter {
             }
             Optional<IntentDecision> decision = Optional.of(parse(response.body(), latencyMs));
             decision.ifPresent(value -> log.info(
-                    "qwen intent classified (自报置信，非校准): intent={}, confidence={}, complexity={}, needsKnowledge={}, latencyMs={}",
-                    value.intent(), value.intentConfidence(), value.complexity(), value.needsKnowledge(), value.latencyMs()));
+                    "qwen intent classified (自报置信，非校准): intent={}, confidence={}, complexity={}, latencyMs={}",
+                    value.intent(), value.intentConfidence(), value.complexity(), value.latencyMs()));
             return decision;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -80,10 +80,10 @@ public class QwenIntentRouter implements IntentRouter {
     Map<String, Object> buildRequest(String message) {
         String systemPrompt = """
                 你是意图识别器。对用户消息做判断后，只输出一个 JSON 对象，禁止输出任何其他文字或代码块标记。字段：
-                intent：取值只能是 知识库问答、联网查询、工具任务、闲聊问答 之一；
+                intent：取值只能是 工作任务、联网查询、闲聊问答 之一；
+                工作任务包括读取或分析资料、操作项目、生成或处理文件、写代码以及其他需要执行的任务；
                 confidence：0 到 1 的数字，你对意图判断的把握；
-                complexity：0 到 2 的数字（0=单轮可答，1=需要多步骤，2=需要研究分析）；
-                needs_knowledge：0 到 1 的数字，回答该问题需要检索私有知识库的概率。
+                complexity：0 到 2 的数字（0=单轮可答，1=需要多步骤，2=需要研究分析）。
                 """;
         return Map.of(
                 "model", model,
@@ -110,7 +110,6 @@ public class QwenIntentRouter implements IntentRouter {
                 node.path("confidence").asDouble(0),
                 node.path("complexity").asDouble(0),
                 0,
-                node.path("needs_knowledge").asDouble(0.5),
                 latencyMs);
     }
 }

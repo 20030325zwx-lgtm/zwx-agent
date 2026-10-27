@@ -17,7 +17,7 @@ import java.util.Optional;
 
 /**
  * TypeSafe Jev（System One 决策模型）意图分流器。
- * 一次请求三问并行：意图 choice + 复杂度 score + 是否需要私有知识库 noul。
+ * 一次请求两问并行：意图 choice + 复杂度 score。
  * 批 0 为观察模式：结论仅用于日志与前端展示，不改变任何执行行为（见 docs/design/2026-10-25-jev-intent-routing.md）。
  * 任何异常返回 empty——分流失败绝不阻断主链路。
  */
@@ -27,7 +27,6 @@ public class JevIntentRouter implements IntentRouter {
 
     private static final String INTENT_QUESTION = "intent";
     private static final String COMPLEXITY_QUESTION = "complexity";
-    private static final String KNOWLEDGE_QUESTION = "needs_knowledge";
 
     private final boolean enabled;
     private final String baseUrl;
@@ -72,8 +71,8 @@ public class JevIntentRouter implements IntentRouter {
             }
             Optional<IntentDecision> decision = Optional.of(parse(response.body(), latencyMs));
             decision.ifPresent(value -> log.info(
-                    "jev intent classified: intent={}, confidence={}, complexity={}, needsKnowledge={}, latencyMs={}",
-                    value.intent(), value.intentConfidence(), value.complexity(), value.needsKnowledge(), value.latencyMs()));
+                    "jev intent classified: intent={}, confidence={}, complexity={}, latencyMs={}",
+                    value.intent(), value.intentConfidence(), value.complexity(), value.latencyMs()));
             return decision;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -84,7 +83,7 @@ public class JevIntentRouter implements IntentRouter {
         }
     }
 
-    /** 请求体三问并行：意图 choice / 复杂度 score / 是否需要私有知识库 noul。 */
+    /** 请求体两问并行：意图 choice / 复杂度 score。 */
     Map<String, Object> buildRequest(String message) {
         return Map.of(
                 "model", model,
@@ -94,23 +93,16 @@ public class JevIntentRouter implements IntentRouter {
                                 "type", "choice",
                                 "instructions", "用户这条消息的主要意图是什么",
                                 "criteria", Map.of(
-                                        "知识库问答", "询问私有资料、手册、规范、项目文档中的内容",
                                         "联网查询", "需要实时信息、新闻、行情、外部网站数据",
-                                        "工具任务", "生成文件、处理文档、写代码、多步骤操作",
-                                        "闲聊问答", "打招呼、常识问答、闲聊，无需资料和工具")),
+                                        "工作任务", "读取或分析资料、操作项目、生成或处理文件、写代码、多步骤操作",
+                                        "闲聊问答", "打招呼、常识问答、闲聊，无需执行任务")),
                         COMPLEXITY_QUESTION, Map.of(
                                 "type", "score",
                                 "instructions", "处理这条消息需要多复杂",
-                                "criteria", List.of("单轮可答", "需要多步骤", "需要研究分析")),
-                        KNOWLEDGE_QUESTION, Map.of(
-                                "type", "noul",
-                                "instructions", "回答这个问题是否需要检索私有知识库？",
-                                "criteria", Map.of(
-                                        "true", "需要检索私有知识库",
-                                        "false", "不需要检索私有知识库"))));
+                                "criteria", List.of("单轮可答", "需要多步骤", "需要研究分析"))));
     }
 
-    /** 响应字段名以 docs.typesafe.ai/api/system-one.md 为准：answers.{name}.{choice/confidence/score/noul}。 */
+    /** 响应字段名以 docs.typesafe.ai/api/system-one.md 为准：answers.{name}.{choice/confidence/score}。 */
     IntentDecision parse(String responseBody, long latencyMs) throws Exception {
         JsonNode answers = objectMapper.readTree(responseBody).path("answers");
         JsonNode intent = answers.path(INTENT_QUESTION);
@@ -119,7 +111,6 @@ public class JevIntentRouter implements IntentRouter {
                 intent.path("confidence").asDouble(0),
                 answers.path(COMPLEXITY_QUESTION).path("score").asDouble(0),
                 answers.path(COMPLEXITY_QUESTION).path("confidence").asDouble(0),
-                answers.path(KNOWLEDGE_QUESTION).path("noul").asDouble(0.5),
                 latencyMs);
     }
 }

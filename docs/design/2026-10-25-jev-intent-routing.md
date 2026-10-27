@@ -1,10 +1,10 @@
 # Jev 意图分流层（2026-10-25）
 
-> 状态：批 0（观察模式）实施中。目标：在超级智能体建图之前，用 TypeSafe Jev（System One 决策模型）做一次低成本意图识别，为"自动开 knowledgeSearch/webSearch 开关"和"闲聊短路"攒决策依据。**批 0 不改变任何行为**——只调用、只记录、只在前端展示。
+> 状态：已实施，并于 2026-10-27 调整。知识库与联网检索完全由用户开关控制；当前意图层只识别工作任务、联网查询和闲聊问答，不改写检索开关。
 
 ## 1. 背景与动机
 
-当前意图分发是隐式的三处机制（Planner 拆解 / workers function calling / 用户手动勾选 `knowledgeSearch`/`webSearch`）。代价：意图靠用户告诉系统，勾漏了检索不到（2026-10-25 G60 会话中 verifier 曾质检"未读知识库"返工，多烧两轮 LLM）；简单问题也要过完整图。
+当前意图分发由 Planner 拆解、workers function calling 和用户开关共同完成。意图识别只做粗粒度执行分流；`knowledgeSearch` 是明确的用户选择，不由分类模型推断。
 
 Jev 是 TypeSafe 的 System One 决策模型（RLCD 训练，返回结构化判断 + 校准概率，非生成式）。选择它而非 qwen 结构化输出的决定性原因：**分流层必须足够便宜才成立**（用 qwen 做前置路由会吃掉短路省下的成本），且**自动开关需要真校准概率**（LLM 自报置信度不可信）。另外 DashScope 配额 2026-10-25 已被 embedding 打出 429，独立厂商反而分摊风险。
 
@@ -19,30 +19,29 @@ Jev 是 TypeSafe 的 System One 决策模型（RLCD 训练，返回结构化判�
 
 ```
 intent (choice): {
-  "知识库问答": "询问私有资料、手册、规范、项目文档中的内容",
   "联网查询":   "需要实时信息、新闻、行情、外部网站数据",
-  "工具任务":   "生成文件、处理文档、写代码、多步骤操作",
-  "闲聊问答":   "打招呼、常识问答、闲聊，无需资料和工具"
+  "工作任务":   "读取或分析资料、操作项目、生成或处理文件、写代码、多步骤操作",
+  "闲聊问答":   "打招呼、常识问答、闲聊，无需执行任务"
 }
 complexity (score): ["单轮可答", "需要多步骤", "需要研究分析"]
-needs_knowledge (noul): "回答这个问题是否需要检索私有知识库？"
 ```
 
 ## 4. 决策表（阈值待观察期校准）
 
 | 条件 | 批 1 起的动作 | 批 0 行为 |
 | --- | --- | --- |
-| intent 置信 ≥ 0.7 且 = 知识库问答（或 needs_knowledge ≥ 0.8） | 自动开 knowledgeSearch | 仅记录+展示 |
-| intent 置信 ≥ 0.7 且 = 联网查询 | 自动开 webSearch | 仅记录+展示 |
+| intent = 联网查询 | 保持用户 webSearch 开关 | 仅记录+展示 |
 | intent = 闲聊问答 且 complexity ≤ 0.5 且 intent 置信 ≥ 0.85 | 短路候选（批 2，需评测门禁） | 仅记录+展示 |
-| 置信 0.5~0.7 | 只自动开检索类开关 | 仅记录+展示 |
-| 置信 < 0.5 | 完全回退现状 | 仅记录+展示 |
+| intent = 工作任务 | 进入正常编排 | 仅记录+展示 |
+| 其他或低置信 | 完全回退正常编排 | 仅记录+展示 |
+
+`knowledgeSearch` 与 `webSearch` 在所有分支中都保持用户传入值，不受意图识别结果影响。
 
 ## 5. 工程落点
 
 - 新包 `platform/intent/`：`IntentRouter` 接口（`Optional<IntentDecision> classify(String message)`）+ **两个实现**：`JevIntentRouter`（TypeSafe System One，需 Key）与 `QwenIntentRouter`（DashScope 兼容模式对照实现，复用现有 Key；LLM 自报置信非校准）。`IntentRouterConfig` 按 `app.intent.provider`（none/jev/qwen）选择 primary 暴露。**任何异常（禁用/无 Key/超时/解析失败）返回 empty，调用方按现状行为执行**——降级即现状。
 - 配置 `app.intent.*`：`provider`（none/jev/qwen）；`jev.*`：enabled/base-url/api-key（`${TYPESAFE_API_KEY:}`，留空即实际禁用）/model（jev-latest）/timeout-ms（1500）；`qwen.*`：base-url/model/timeout-ms（2500），api-key 复用 `spring.ai.dashscope.api-key`。路由是基础设施，不进用户模型配置层。
-- 可观测：决策以 `activity` 事件（phase=plan，agent=意图识别）推给前端，格式如"意图：知识库问答（置信 0.92）· 复杂度 0.4 · 建议自动开启知识库检索 → 观察模式不改变行为"；后端同步打 INFO 日志攒对照数据。通道：`ManusRunRequest` 新增可空 `prefaceActivity` 字段，由 orchestrator 在 `run` 事件后发出。
+- 可观测：决策以 `activity` 事件（phase=plan，agent=意图识别）推给前端，格式如"意图：工作任务（置信 0.92）· 复杂度 0.4 · 维持用户开关"；后端同步打 INFO 日志。通道：`ManusRunRequest` 的可空 `prefaceActivity` 字段，由 orchestrator 在 `run` 事件后发出。
 - 决策建议计算为纯函数 `recommend(decision)`，批 1 直接消费。
 - 已知账号约束：该 DashScope 账号的 qwen-turbo 模型被限流（429），意图路由本地配置使用 qwen-plus（实测 0.5-1.3s）。
 
@@ -54,6 +53,13 @@ needs_knowledge (noul): "回答这个问题是否需要检索私有知识库？"
   2. **worker 知识约束从二值改分级**（核心）：原"必须且仅依据资料…不支持时说无法确认"会把模型锁死在检索结果上。新约束：资料优先并引用 → 未覆盖时区分**通用知识/图片内容/可推理问题（基于自身知识继续回答，注明来源不冒用引用）**与**公司内部事实/制度（如实说明无规定、建议向部门确认，不编造）**→ 任何情况不草草结束。e2e：差旅补贴（语料实际覆盖，命中手册#72 带引用）、办公区宠物规定（诚实"无明文规定"，不编造）、图片随便问（不检索+视觉作答）、年假回归（引用不变）。
 - **批 2（待做）**：闲聊短路，门禁条件——意图用例全过（r2 基线 12/12 已达成）+ 短路仅作用于 `intent=闲聊问答 && needsKnowledge < 0.3`（常识性问题若语料覆盖，判知识库问答并走检索，见 intent-011 重评）；上线前仍需短路回答 vs 图回答的质量抽查。
 - **批 3（可选）**：noul 高风险判断接入 ToolGuard 前置门控。
+
+### 2026-10-27 决策调整
+
+- 删除“知识库问答”意图和 `needs_knowledge` 问题。
+- “工具任务”更名为覆盖面更广的“工作任务”。
+- 删除 `AUTO_KNOWLEDGE` 和 `AUTO_WEB`，知识库与联网均只服从用户开关。
+- 历史批次记录描述当时行为，不再代表当前运行规则。
 
 ## 7. 风险与边界
 

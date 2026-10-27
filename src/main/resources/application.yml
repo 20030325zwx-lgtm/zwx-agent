@@ -167,7 +167,7 @@ app:
   intent:
     # 路由器选型：none（默认禁用）/ jev（TypeSafe System One）/ qwen（DashScope 对照实现）
     provider: ${APP_INTENT_PROVIDER:none}
-    # 批 2 闲聊短路：命中候选（高置信闲聊且 needsKnowledge<0.3）且用户未勾选开关时单轮直达；
+    # 闲聊短路：命中高置信纯闲聊且用户未勾选知识库/联网开关时单轮直达；
     # provider=none 时无决策、本开关无效果。门禁：意图评测 12/12（2026-10-26 r2）达标
     short-circuit-enabled: ${APP_INTENT_SHORT_CIRCUIT_ENABLED:true}
     jev:

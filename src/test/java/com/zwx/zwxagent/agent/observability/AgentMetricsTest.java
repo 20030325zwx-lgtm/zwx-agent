@@ -19,7 +19,7 @@ class AgentMetricsTest {
         metrics.toolConfirmationDecided("APPROVED");
         metrics.ragRecallEmpty("Super");
         metrics.ragDegraded("TIMEOUT");
-        metrics.intentDecision("AUTO_KNOWLEDGE");
+        metrics.intentDecision("FALLBACK");
         metrics.quotaRejected("token-budget");
         metrics.runPausedForConfirmation();
 
@@ -30,7 +30,7 @@ class AgentMetricsTest {
         Assertions.assertEquals(1.0, registry.get("agent.tool.confirmation").tag("decision", "approved").counter().count());
         Assertions.assertEquals(1.0, registry.get("agent.rag.recall.empty").tag("agent", "super").counter().count());
         Assertions.assertEquals(1.0, registry.get("agent.rag.degraded").tag("reason", "timeout").counter().count());
-        Assertions.assertEquals(1.0, registry.get("agent.intent.decision").tag("action", "auto_knowledge").counter().count());
+        Assertions.assertEquals(1.0, registry.get("agent.intent.decision").tag("action", "fallback").counter().count());
         Assertions.assertEquals(1.0, registry.get("agent.quota.rejected").tag("kind", "token-budget").counter().count());
     }
 

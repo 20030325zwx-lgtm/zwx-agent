@@ -231,8 +231,8 @@ public class ManusAgentController {
             conversationLease.close();
             throw exception;
         }
-        // 意图分流（批 1 生效）：分类前移到检索/工具装配之前，recommend() 只把开关打开、不关闭用户显式勾选；
-        // 覆盖未勾选开关时在活动事件中明示。禁用/无 Key/失败 → 维持原开关，行为与未引入该功能一致。
+        // 意图分流发生在检索/工具装配之前。知识库和联网均完全服从用户开关。
+        // 禁用/无 Key/失败时维持用户开关，行为与未引入该功能一致。
         boolean effectiveKnowledgeSearch = knowledgeSearch;
         boolean effectiveWebSearch = webSearch;
         String prefaceActivity = null;
@@ -243,8 +243,6 @@ public class ManusAgentController {
             effectiveKnowledgeSearch = effect.knowledgeSearch();
             effectiveWebSearch = effect.webSearch();
             if (agentMetrics != null) agentMetrics.intentDecision(decision.recommend().name().toLowerCase());
-            // 图片消息与文本同规则：知识类意图按图片分析改写检索词检索；随便问则不检索，
-            // 由模型基于图片分析与自身知识直接作答（worker 知识约束已分级，未覆盖时不会草草结束）。
             prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "意图识别",
                     "summary", decision.summary(effect.action())));
             // 批 2 闲聊短路：高置信纯闲聊 + 用户未勾选任何开关 → 单轮直达回答，跳过 RAG/联网/图编排。

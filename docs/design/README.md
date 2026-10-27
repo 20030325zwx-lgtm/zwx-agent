@@ -19,6 +19,7 @@
 - [仓库顶层目录整理](./2026-10-21-repo-layout.md)
 - [MCP 工具扩展：表格、文档与网页截图](./2026-10-22-mcp-tool-expansion.md)
 - [超级智能体工作台改造方案](./2026-10-22-super-agent-workspace.md)
+- [主机项目工作区与共建设计](./2026-10-27-host-project-workspace.md)
 - [回答引用定位到具体内容区域](./2026-10-23-citation-region-provenance.md)
 - [知识文档上传幂等键](./2026-10-24-knowledge-upload-idempotency.md)
 - [知识文档人工审批入口](./2026-10-24-knowledge-approval-entry.md)

@@ -287,7 +287,7 @@ public class ManusAgentController {
                     ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, retrievalQuery)
                     : new AgentKnowledgeRagResult("", List.of());
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
-            availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId, effectiveWebSearch)), Arrays.stream(mcpTools.callbacks()))
+            availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, effectiveWebSearch)), Arrays.stream(mcpTools.callbacks()))
                     .toArray(ToolCallback[]::new);
             historyContext = agentConversationService
                     .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
@@ -463,7 +463,7 @@ public class ManusAgentController {
         try {
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
             availableTools = Stream.concat(
-                            Arrays.stream(toolFactory.createTools(actor.tenantId(), SUPER_AGENT_KEY, conversationId, webSearch)),
+                            Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, webSearch)),
                             Arrays.stream(mcpTools.callbacks()))
                     .toArray(ToolCallback[]::new);
             runChatModel = chatModelFor(actor.userId());

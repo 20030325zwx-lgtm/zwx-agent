@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.StreamSupport;
 
@@ -131,6 +132,21 @@ public class ProjectWorkspaceService {
         return count != null && count > 0;
     }
 
+    /** 解析对话绑定项目的真实目录；真实路径仅供服务端工具使用。 */
+    public Optional<ResolvedProjectWorkspace> resolveForConversation(String tenantId, String userId,
+                                                                     String conversationId) {
+        return jdbcTemplate.query("""
+                SELECT p.id, p.name, p.path_scope, p.workspace_path
+                FROM agent_conversation c
+                JOIN agent_project p ON p.id = c.project_id
+                WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ?
+                  AND p.tenant_id = ? AND p.owner_user_id = ?
+                """, (rs, rowNum) -> new ResolvedProjectWorkspace(
+                rs.getString("id"), rs.getString("name"),
+                resolveStoredProjectPath(rs.getString("path_scope"), rs.getString("workspace_path"))),
+                conversationId, tenantId, userId, tenantId, userId).stream().findFirst();
+    }
+
     Path createDirectChild(String directoryName) {
         String safeDirectoryName = requireDirectoryName(directoryName);
         try {
@@ -194,6 +210,29 @@ public class ProjectWorkspaceService {
             return new ResolvedSelection(PathScope.LOCAL, real.toString(), real);
         } catch (IOException exception) {
             throw new IllegalArgumentException("无法选择该文件夹", exception);
+        }
+    }
+
+    private Path resolveStoredProjectPath(String scope, String storedPath) {
+        try {
+            if (PathScope.ROOT.name().equals(scope)) {
+                Path root = realRoot();
+                Path relative = Path.of(storedPath == null ? "" : storedPath);
+                boolean hasTraversal = StreamSupport.stream(relative.spliterator(), false)
+                        .anyMatch(segment -> "..".equals(segment.toString()));
+                if (relative.isAbsolute() || hasTraversal) throw new IllegalArgumentException("项目路径记录无效");
+                Path real = requireRealDirectory(root.resolve(relative).normalize());
+                if (!real.startsWith(root)) throw new IllegalArgumentException("项目目录越出了配置根目录");
+                return real;
+            }
+            if (!PathScope.LOCAL.name().equals(scope) || selectionMode != SelectionMode.LOCAL) {
+                throw new IllegalArgumentException("当前部署模式不能访问该本地项目");
+            }
+            Path local = Path.of(storedPath == null ? "" : storedPath);
+            if (!local.isAbsolute()) throw new IllegalArgumentException("本地项目路径记录无效");
+            return requireRealDirectory(local);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("项目目录不存在或无法访问", exception);
         }
     }
 

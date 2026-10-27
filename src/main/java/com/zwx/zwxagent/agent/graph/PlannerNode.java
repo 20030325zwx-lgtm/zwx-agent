@@ -26,6 +26,7 @@ public class PlannerNode implements NodeAction {
             - researcher：联网调研员（搜索、抓取网页、下载公开资料）
             - author：文档撰写员（读写文件、生成 PDF 交付物）
             - analyst：数据分析员（只读 SQL 查询、白名单命令分析数据）
+            - coder：代码工程师（浏览、搜索和分析当前项目源码与 Git 变更）
             - general：通用助理（可用全部工具）
             规则：
             1. 简单请求只拆 1 个子任务，不要过度拆分。
@@ -53,6 +54,7 @@ public class PlannerNode implements NodeAction {
         RunContext runContext = state.value(GraphState.RUN_CONTEXT, RunContext.class).orElse(null);
         String knowledge = runContext == null ? "" : runContext.knowledgeContext();
         boolean webSearchEnabled = runContext == null || runContext.webSearchEnabled();
+        boolean projectToolsEnabled = runContext != null && hasTool(runContext.tools(), "listProjectTree");
         String history = state.value(GraphState.HISTORY, "");
         if (!knowledge.isBlank()) {
             List<PlanStep> plan = List.of(new PlanStep("依据私有知识回答", WorkerRole.GENERAL,
@@ -67,7 +69,8 @@ public class PlannerNode implements NodeAction {
         String prompt = (history.isBlank() ? "" : "最近对话摘要：\n" + history + "\n\n")
                 + "用户请求：" + input
                 + (webSearchEnabled ? "" : "\n\n注意：本轮未开启联网搜索，researcher 角色不可用；"
-                + "不要规划搜索、抓取网页或下载网络资源。需要实时外部信息时，使用 general 并说明无法联网获取。");
+                + "不要规划搜索、抓取网页或下载网络资源。需要实时外部信息时，使用 general 并说明无法联网获取。")
+                + (projectToolsEnabled ? "" : "\n\n注意：当前对话没有绑定可访问的项目，coder 角色不可用；不要规划源码浏览或 Git 检查。");
         List<PlanStep> plan;
         String activity;
         try {
@@ -94,5 +97,13 @@ public class PlannerNode implements NodeAction {
                                 : "拆解为 " + plan.size() + " 个并行子任务：" + plan.stream()
                                 .map(step -> step.role().displayName() + "←" + step.title())
                                 .reduce((a, b) -> a + "；" + b).orElse(""))));
+    }
+
+    private static boolean hasTool(org.springframework.ai.tool.ToolCallback[] tools, String name) {
+        if (tools == null) return false;
+        for (org.springframework.ai.tool.ToolCallback tool : tools) {
+            if (tool != null && tool.getToolDefinition() != null && name.equals(tool.getToolDefinition().name())) return true;
+        }
+        return false;
     }
 }

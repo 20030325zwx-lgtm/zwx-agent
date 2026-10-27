@@ -12,6 +12,8 @@ public enum WorkerRole {
             SetOf("readFile", "writeFile", "generatePDF")),
     ANALYST("analyst", "分析员", "数据分析员：执行只读 SQL 查询与白名单命令分析数据",
             SetOf("executeDatabaseQuery", "queryExternalDatabase", "executeTerminalCommand")),
+    CODER("coder", "代码工程师", "代码工程师：浏览、搜索和分析当前项目源码与 Git 变更",
+            SetOf("listProjectTree", "searchProjectCode", "readProjectFile", "getProjectGitStatus", "getProjectDiff")),
     GENERAL("general", "通用助理", "通用助理：可以使用全部可用工具（含 MCP）",
             null);
 
@@ -66,6 +68,11 @@ public enum WorkerRole {
             case "executeDatabaseQuery" -> "查询数据库";
             case "queryExternalDatabase" -> "查询外部数据库";
             case "executeTerminalCommand" -> "执行命令";
+            case "listProjectTree" -> "浏览项目";
+            case "searchProjectCode" -> "搜索代码";
+            case "readProjectFile" -> "读取源码";
+            case "getProjectGitStatus" -> "查看 Git 状态";
+            case "getProjectDiff" -> "查看代码差异";
             case "" -> "处理任务";
             default -> "执行 " + toolName;
         };

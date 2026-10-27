@@ -110,6 +110,9 @@ public class ToolGuardHook implements AgentHook {
                     ToolGuardPolicy.relativePathViolation(text(args, "fileName")));
             case "scrapeWebPage" -> urlViolation(text(args, "url"));
             case "searchWeb", "webSearch" -> null;
+            case "listProjectTree" -> ToolGuardPolicy.relativePathViolation(text(args, "path"));
+            case "readProjectFile" -> ToolGuardPolicy.relativePathViolation(text(args, "fileName"));
+            case "searchProjectCode", "getProjectGitStatus", "getProjectDiff" -> null;
             case "executeDatabaseQuery" -> com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql"));
             case "queryExternalDatabase" -> firstNonBlank(
                     com.zwx.zwxagent.capability.tools.DatabaseQueryTool.validateSyntax(text(args, "sql")),
@@ -145,7 +148,8 @@ public class ToolGuardHook implements AgentHook {
         return switch (toolName) {
             case "executeTerminalCommand", "readFile", "writeFile", "generatePDF",
                     "downloadResource", "scrapeWebPage", "searchWeb", "webSearch", "executeDatabaseQuery",
-                    "queryExternalDatabase" -> true;
+                    "queryExternalDatabase", "listProjectTree", "searchProjectCode", "readProjectFile",
+                    "getProjectGitStatus", "getProjectDiff" -> true;
             default -> false;
         };
     }

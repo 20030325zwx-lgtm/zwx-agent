@@ -15,6 +15,7 @@ public class ToolFactory {
 
     private final ToolSandbox sandbox;
     private final com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService;
+    private final com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService projectWorkspaceService;
     private final UrlAccessPolicy urlAccessPolicy;
     private final WebSearchTool webSearchTool;
     private final boolean terminalEnabled;
@@ -30,6 +31,7 @@ public class ToolFactory {
 
     public ToolFactory(ToolSandbox sandbox,
                        com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService,
+                       com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService projectWorkspaceService,
                        UrlAccessPolicy urlAccessPolicy,
                        @Value("${search-api.api-key}") String searchApiKey,
                        @Value("${search-api.provider:searchapi}") String searchProvider,
@@ -45,6 +47,7 @@ public class ToolFactory {
                        @Value("${app.tools.db-query-external-enabled:false}") boolean dbQueryExternalEnabled) {
         this.sandbox = sandbox;
         this.workspaceService = workspaceService;
+        this.projectWorkspaceService = projectWorkspaceService;
         this.urlAccessPolicy = urlAccessPolicy;
         this.webSearchTool = new WebSearchTool(searchProvider, searchApiKey);
         this.terminalEnabled = terminalEnabled;
@@ -70,7 +73,14 @@ public class ToolFactory {
     public ToolCallback[] createTools(String tenantId, String agentKey, String conversationId,
                                       boolean webSearchEnabled) {
         Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
-        return buildTools(workDir, webSearchEnabled);
+        return buildTools(workDir, webSearchEnabled, null);
+    }
+
+    public ToolCallback[] createTools(String tenantId, String userId, String agentKey, String conversationId,
+                                      boolean webSearchEnabled) {
+        Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
+        var project = projectWorkspaceService.resolveForConversation(tenantId, userId, conversationId).orElse(null);
+        return buildTools(workDir, webSearchEnabled, project);
     }
 
     /** 旧签名（scope 目录）：保留给测试与 legacy 调用。 */
@@ -80,10 +90,11 @@ public class ToolFactory {
 
     public ToolCallback[] createTools(String scope, boolean webSearchEnabled) {
         Path workDir = sandbox.scopeDir(scope);
-        return buildTools(workDir, webSearchEnabled);
+        return buildTools(workDir, webSearchEnabled, null);
     }
 
-    private ToolCallback[] buildTools(Path workDir, boolean webSearchEnabled) {
+    private ToolCallback[] buildTools(Path workDir, boolean webSearchEnabled,
+                                      com.zwx.zwxagent.platform.workspace.ResolvedProjectWorkspace project) {
         java.util.List<Object> tools = new java.util.ArrayList<>();
         tools.add(new FileOperationTool(sandbox, workDir));
         if (webSearchEnabled) {
@@ -93,6 +104,7 @@ public class ToolFactory {
         }
         tools.add(new PDFGenerationTool(sandbox, workDir));
         tools.add(new CurrentTimeTool());
+        if (project != null) tools.add(new ProjectCodeReadTool(project.name(), project.root()));
         if (terminalEnabled) {
             tools.add(new TerminalOperationTool(workDir, terminalAllowlist));
         }

@@ -10,7 +10,27 @@
       </button>
     </div>
 
-    <div v-if="activeTab === 'sources'" class="tab-panel">
+    <div v-if="activeTab === 'plan'" class="tab-panel plan-panel">
+      <template v-if="planSteps.length">
+        <article v-for="step in planSteps" :key="step.index" class="plan-step" :class="step.state">
+          <header>
+            <span class="step-no">{{ String(step.index + 1).padStart(2, '0') }}</span>
+            <strong>{{ step.title }}</strong>
+            <em class="state-chip">{{ stateLabel(step.state) }}</em>
+          </header>
+          <p v-if="step.roleLabel" class="plan-role">{{ step.roleLabel }}</p>
+          <p v-if="step.result" class="plan-result">{{ step.result }}</p>
+          <p v-else-if="step.state === 'running'" class="plan-running">正在执行…</p>
+        </article>
+      </template>
+      <div v-else class="panel-empty">
+        <ListTree :size="18" />
+        <span>本轮没有多步计划</span>
+        <small>简单任务会直接回答；复杂任务拆解出的子任务与产出会显示在这里。</small>
+      </div>
+    </div>
+
+    <div v-else-if="activeTab === 'sources'" class="tab-panel">
       <template v-if="sources.length">
         <article v-for="source in sources" :key="source.documentId || `${source.filename}-${source.chunkIndex}`" class="source-card">
           <header>
@@ -21,7 +41,6 @@
           <p>{{ source.excerpt || '暂无切片摘录' }}</p>
           <small v-if="source.pageNumber">第 {{ source.pageNumber }} 页</small>
         </article>
-        <button type="button" class="link-button" @click="emit('open-conversation')">在对话中查看完整引用</button>
       </template>
       <template v-if="webSources.length">
         <header class="web-sources-header">联网参考 · {{ webSources.length }}</header>
@@ -137,7 +156,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Activity, BookOpen, Download, FileText, FolderOpen, Gauge, Globe2, PanelRightClose, Wrench } from 'lucide-vue-next'
+import { Activity, BookOpen, Download, FileText, FolderOpen, Gauge, Globe2, ListTree, PanelRightClose, Wrench } from 'lucide-vue-next'
 import { listManusToolCalls, listManusWebSources } from '../../api'
 
 const props = defineProps({
@@ -146,7 +165,7 @@ const props = defineProps({
   run: { type: Object, default: null },
   conversationId: { type: String, default: '' }
 })
-const emit = defineEmits(['resume', 'cancel', 'open-conversation', 'collapse'])
+const emit = defineEmits(['resume', 'cancel', 'collapse'])
 
 const activeTab = ref('sources')
 const toolCalls = ref([])
@@ -155,12 +174,40 @@ const toolCallsLoading = ref(false)
 const webSources = ref([])
 const webSourcesLoadedFor = ref('')
 const tabs = computed(() => [
+  { key: 'plan', label: '计划', count: planSteps.value.length },
   { key: 'sources', label: '来源', count: props.sources.length + webSources.value.length },
   { key: 'files', label: '文件', count: props.files.length },
   { key: 'usage', label: '用量', count: props.run?.tokenUsage?.phases?.length || 0 },
   { key: 'tools', label: '工具', count: toolCalls.value.length },
   { key: 'run', label: '运行' }
 ])
+
+// 计划页签：子任务进度与产出（原 PlanBoard 的状态推断逻辑）
+const planSteps = computed(() => {
+  const plan = props.run?.plan || []
+  if (!plan.length) return []
+  const results = props.run?.taskResults || []
+  const events = props.run?.events || []
+  const running = props.run?.status === 'RUNNING'
+  const startedIndex = summary => {
+    const match = /开始执行（(\d+)\s*\/\s*(\d+)）/.exec(summary || '')
+    return match ? Number(match[1]) - 1 : -1
+  }
+  const maxStartedIndex = events.reduce((max, event) => {
+    if (event.phase !== 'work') return max
+    return Math.max(max, startedIndex(event.summary))
+  }, -1)
+  return plan.map((step, index) => {
+    const result = (results[index] || '').replace(/\s+/g, ' ').trim()
+    let state = 'pending'
+    if (result) state = 'done'
+    else if (maxStartedIndex >= index && running) state = 'running'
+    else if (maxStartedIndex > index) state = 'done'
+    else if (!running && props.run?.status === 'COMPLETED') state = 'done'
+    return { ...step, index, result: result.length > 180 ? `${result.slice(0, 180)}…` : result, state }
+  })
+})
+const stateLabel = state => ({ done: '完成', running: '执行中', pending: '待执行' }[state] || state)
 
 const loadToolCalls = async () => {
   const runId = props.run?.id
@@ -269,6 +316,19 @@ const formatTime = value => {
 
 .tab-panel { display: grid; gap: 8px; min-height: 0; overflow-y: auto; padding-right: 2px; }
 
+.plan-panel { gap: 6px; }
+.plan-step { border: 1px solid var(--sk-separator); border-radius: 11px; padding: 9px 10px; background: #fff; }
+.plan-step.running { border-color: var(--zwx-primary-ring); box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1); }
+.plan-step header { display: flex; align-items: center; gap: 6px; }
+.step-no { color: var(--sk-label-3); font: 10px/1 ui-monospace, "SF Mono", Menlo, monospace; }
+.plan-step strong { overflow: hidden; flex: 1; color: var(--sk-label); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.state-chip { flex: 0 0 auto; border-radius: 999px; padding: 1px 7px; background: var(--sk-fill); color: var(--sk-label-2); font-size: 9px; font-style: normal; font-weight: 650; }
+.plan-step.done .state-chip { background: rgba(34, 197, 94, 0.12); color: #15803d; }
+.plan-step.running .state-chip { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+.plan-role { margin: 5px 0 0; color: var(--sk-label-3); font-size: 10px; }
+.plan-result { display: -webkit-box; overflow: hidden; margin: 5px 0 0; border-top: 1px dashed var(--sk-separator); padding-top: 6px; color: var(--sk-label-2); font-size: 10.5px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+.plan-running { margin: 5px 0 0; color: var(--zwx-primary); font-size: 10.5px; }
+
 .source-card, .file-card { border: 1px solid var(--sk-separator); border-radius: 11px; padding: 9px 10px; background: #fff; text-decoration: none; }
 .source-card header { display: flex; align-items: center; gap: 5px; color: var(--zwx-primary); }
 .source-card strong { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
@@ -298,8 +358,6 @@ const formatTime = value => {
 .web-source-card > div { display: grid; min-width: 0; gap: 2px; }
 .web-source-card strong { overflow: hidden; color: var(--sk-label); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .web-source-card small { color: var(--sk-label-3); font-size: 10px; }
-
-.link-button { justify-self: start; border: 0; padding: 2px 0; background: transparent; color: var(--zwx-primary); font-size: 11px; cursor: pointer; }
 
 .panel-empty { display: grid; justify-items: center; gap: 5px; border: 1px dashed var(--sk-separator); border-radius: 12px; padding: 24px 12px; color: var(--sk-label-3); text-align: center; }
 .panel-empty span { color: var(--sk-label-2); font-size: 11.5px; font-weight: 600; }

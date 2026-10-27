@@ -34,6 +34,26 @@
             <template v-else>{{ msg.content }}</template>
           </div>
           <div v-else class="message-content markdown-content">
+            <section v-if="hasAgentTrace(msg)" class="agent-trace" aria-label="执行过程">
+              <header v-if="turnStatusLabel(msg, index)" class="trace-status">
+                <span v-if="isTurnWorking(index)" class="status-live" aria-hidden="true"></span>
+                <span>{{ turnStatusLabel(msg, index) }}</span>
+              </header>
+              <ol v-if="msg.activities?.length" class="trace-steps">
+                <li v-for="(activity, activityIndex) in msg.activities" :key="`step-${index}-${activityIndex}`" class="trace-step">
+                  <button type="button" class="step-line" :class="{ 'has-detail': stepDetail(activity) }"
+                    :aria-expanded="expandedStepKey === `${index}-${activityIndex}` ? 'true' : 'false'"
+                    @click="toggleStep(index, activityIndex)">
+                    <component :is="stepIcon(activity)" :size="14" class="step-icon" aria-hidden="true" />
+                    <span class="step-agent">{{ stepAgent(activity) }}</span>
+                    <span class="step-dot" aria-hidden="true">·</span>
+                    <span class="step-summary">{{ activity.summary }}</span>
+                    <span v-if="stepDuration(msg, activityIndex)" class="step-duration">持续了 {{ stepDuration(msg, activityIndex) }}</span>
+                  </button>
+                  <pre v-if="expandedStepKey === `${index}-${activityIndex}` && stepDetail(activity)" class="step-detail">{{ activity.detail }}</pre>
+                </li>
+              </ol>
+            </section>
             <template v-if="msg.content">
               <div v-html="renderMarkdown(msg.content)"></div>
               <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="streaming-pulse" aria-label="正在生成"><i></i><i></i><i></i></span>
@@ -49,19 +69,6 @@
               <span class="citation-excerpt">{{ citation.regionLabel || citation.excerpt || (citation.chunkId ? '点击预览切片原文' : '未找到可预览的切片') }}</span>
               <ChevronRight :size="15" />
             </button>
-          </div>
-          <details v-if="msg.collapsibleActivities && msg.activities?.length" class="activity-trace activity-trace-collapsible" aria-label="AI 执行过程">
-            <summary>{{ activitySummary(msg.activities) }}</summary>
-            <div class="activity-details">
-              <details v-for="(activity, activityIndex) in msg.activities" :key="`${activity.label || activity}-${activityIndex}`">
-                <summary>{{ activity.label || `步骤 ${activityIndex + 1}` }}</summary>
-                <pre>{{ activity.detail || activity }}</pre>
-              </details>
-            </div>
-          </details>
-          <div v-else-if="msg.activities?.length" class="activity-trace" aria-label="AI 执行状态">
-            <span>执行过程</span>
-            <button v-for="(activity, activityIndex) in msg.activities" :key="`${activity.label || activity}-${activityIndex}`" type="button" :class="{ active: connectionStatus === 'connecting' && index === messages.length - 1 && activityIndex === msg.activities.length - 1 }" @click="openActivity(activity, msg)">{{ activity.label || activity }}</button>
           </div>
           <div v-if="msg.files?.length" class="message-files" aria-label="生成的文件">
             <a v-for="file in msg.files" :key="file.path" :href="file.url || undefined" target="_blank" rel="noopener noreferrer">
@@ -168,7 +175,7 @@ import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
 import CitationPreview from './CitationPreview.vue'
 import AsterAvatar from './AsterAvatar.vue'
-import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square } from 'lucide-vue-next'
+import { BookOpen, BookOpenCheck, ChevronRight, CircleDot, FileText, Globe2, ListChecks, Paperclip, Search, ShieldCheck, Square } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment } from '../api'
 
@@ -182,7 +189,7 @@ const props = defineProps({
   knowledgeSearchAvailable: { type: Boolean, default: false },
   hideInput: { type: Boolean, default: false }
 })
-const emit = defineEmits(['send-message', 'view-execution', 'edit-message', 'resend-message', 'continue-message', 'stop-generation'])
+const emit = defineEmits(['send-message', 'edit-message', 'resend-message', 'continue-message', 'stop-generation'])
 const agent = computed(() => getAgent(props.aiType))
 const quickPrompts = computed(() => agent.value.chat.quickPrompts)
 const emptyTitle = computed(() => agent.value.chat.emptyTitle)
@@ -312,6 +319,52 @@ const renderMarkdown = content => DOMPurify.sanitize(marked.parse(stripInlineCit
   gfm: true
 }))
 
+// ── 智能体时间线：状态行 + 步骤条目（参考 ZCode 式执行视图） ──
+const expandedStepKey = ref('')
+const nowTick = ref(Date.now())
+let tickTimer = null
+
+const stepPhaseIcons = { plan: ListChecks, work: Search, verify: ShieldCheck }
+const stepPhaseAgents = { plan: '规划', work: '执行', verify: '校验' }
+const stepIcon = activity => stepPhaseIcons[activity?.phase] || CircleDot
+const stepAgent = activity => activity?.agent || stepPhaseAgents[activity?.phase] || '步骤'
+const stepDetail = activity => (activity?.detail && activity.detail !== activity.summary ? activity.detail : '')
+const toggleStep = (index, activityIndex) => {
+  const key = `${index}-${activityIndex}`
+  expandedStepKey.value = expandedStepKey.value === key ? '' : key
+}
+const formatDuration = ms => {
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return `${totalSeconds} 秒`
+  return `${Math.floor(totalSeconds / 60)} 分 ${totalSeconds % 60} 秒`
+}
+const isTurnWorking = index => props.connectionStatus === 'connecting' && index === props.messages.length - 1
+const turnElapsedMs = (msg, index = -1) => {
+  if (!msg?.startedAt) return null
+  const working = index >= 0 ? isTurnWorking(index) : props.connectionStatus === 'connecting'
+  const end = msg.finishedAt || (working ? nowTick.value : null)
+  return end == null ? null : Math.max(0, end - msg.startedAt)
+}
+const turnStatusLabel = (msg, index) => {
+  const elapsed = turnElapsedMs(msg, index)
+  if (elapsed == null) return ''
+  const duration = formatDuration(elapsed)
+  if (!duration) return ''
+  if (isTurnWorking(index)) return `工作中 ${duration}`
+  if (msg.status === 'INTERRUPTED') return `已中断 · 用时 ${duration}`
+  if (msg.status === 'FAILED') return `执行失败 · 用时 ${duration}`
+  return `已完成 · 用时 ${duration}`
+}
+const hasAgentTrace = msg => (msg.activities?.length || 0) > 0 || !!turnStatusLabel(msg, -1)
+const stepDuration = (msg, activityIndex) => {
+  const activities = msg.activities || []
+  const at = activities[activityIndex]?.at
+  if (!at) return ''
+  const previousAt = activityIndex > 0 ? activities[activityIndex - 1]?.at : msg.startedAt
+  if (!previousAt) return ''
+  return formatDuration(at - previousAt)
+}
 const sendMessage = () => {
   if (props.connectionStatus === 'connecting') return
   if (!inputMessage.value.trim() && !selectedImages.value.length) return
@@ -323,10 +376,6 @@ const sendMessage = () => {
   clearSelectedImages()
   if (fileInput.value) fileInput.value.value = ''
 }
-const openActivity = (activity, message) => {
-  if (activity?.runId) emit('view-execution', { runId: activity.runId, message })
-}
-const activitySummary = activities => activities.at(-1)?.label || `已完成 ${activities.length} 项操作`
 const copyMessage = async content => {
   try { await navigator.clipboard.writeText(stripInlineCitations(content)) }
   catch (error) { console.error('Copy message failed:', error) }
@@ -359,12 +408,24 @@ const formatTime = timestamp => new Date(timestamp).toLocaleTimeString('zh-CN', 
 const scrollToBottom = async () => { await nextTick(); if (messagesContainer.value) messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight }
 watch(() => props.messages.length, scrollToBottom)
 watch(() => props.messages.map(message => message.content).join(''), scrollToBottom)
-watch(() => props.messages.map(message => (message.activities || []).join('|')).join(''), scrollToBottom)
+watch(() => props.messages.map(message => (message.activities || []).length).join('|'), scrollToBottom)
+watch(() => props.connectionStatus, status => {
+  if (status === 'connecting') {
+    nowTick.value = Date.now()
+    if (!tickTimer) tickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
+  } else if (tickTimer) {
+    clearInterval(tickTimer)
+    tickTimer = null
+  }
+}, { immediate: true })
 onMounted(() => {
   scrollToBottom()
   window.addEventListener('keydown', handleCitationKeydown)
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', handleCitationKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleCitationKeydown)
+  if (tickTimer) { clearInterval(tickTimer); tickTimer = null }
+})
 </script>
 
 <style scoped>
@@ -637,41 +698,70 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleCitationKeydow
 .thinking-dots i:nth-child(2) { animation-delay: 0.16s; }
 .thinking-dots i:nth-child(3) { animation-delay: 0.32s; }
 
-.activity-trace { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; color: var(--sk-label-2); font-size: 12px; }
-.activity-trace > span:first-child { color: var(--sk-label-3); }
+/* ── 智能体时间线 ───────────────────────────────────── */
+.agent-trace { display: grid; gap: 2px; margin-bottom: 12px; }
 
-.activity-trace button {
-  border: 0;
-  border-radius: 999px;
-  padding: 4px 10px;
-  background: var(--sk-fill);
-  color: inherit;
-  font: inherit;
-  text-align: left;
+.trace-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 7px;
+  color: var(--sk-label-2);
+  font-size: 12.5px;
+  font-weight: 650;
 }
 
-.activity-trace button:hover, .activity-trace button.active { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+.status-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--zwx-primary);
+  animation: trace-blink 1.05s ease-in-out infinite;
+}
 
-.activity-trace-collapsible { display: block; max-width: 100%; border: 0; color: var(--sk-label-2); }
-.activity-trace-collapsible > summary { cursor: pointer; width: max-content; max-width: 100%; list-style: none; }
-.activity-trace-collapsible > summary::-webkit-details-marker { display: none; }
-.activity-trace-collapsible > summary::after { content: '⌄'; display: inline-block; margin-left: 7px; color: var(--sk-label-3); transition: transform 0.15s ease; }
-.activity-trace-collapsible[open] > summary::after { transform: rotate(180deg); }
+.trace-steps { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 
-.activity-details { display: grid; gap: 7px; margin-top: 10px; }
-.activity-details details { border-left: 2px solid var(--sk-separator); padding: 2px 0 2px 10px; }
-.activity-details summary { cursor: pointer; color: var(--sk-label-2); }
-.activity-details pre {
+.step-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% + 12px);
+  margin-left: -6px;
+  border: 0;
+  border-radius: 8px;
+  padding: 3px 6px;
+  background: transparent;
+  color: var(--sk-label-3);
+  font-size: 12.5px;
+  line-height: 1.55;
+  text-align: left;
+  cursor: default;
+}
+
+.step-line.has-detail { cursor: pointer; }
+.step-line:hover { background: var(--sk-fill); color: var(--sk-label-2); }
+.step-icon { flex: 0 0 auto; }
+.step-agent { flex: 0 0 auto; font-weight: 650; }
+.step-dot { flex: 0 0 auto; }
+.step-summary { min-width: 0; }
+.step-duration { flex: 0 0 auto; }
+
+.step-detail {
   max-height: 240px;
   overflow: auto;
-  margin: 7px 0 2px;
-  padding: 9px;
+  margin: 2px 0 5px;
+  padding: 8px 10px;
   border-radius: 9px;
   background: var(--sk-fill);
   color: var(--sk-label-2);
   font: 11px/1.55 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+@keyframes trace-blink {
+  0%, 70%, 100% { opacity: 0.3; }
+  35% { opacity: 1; }
 }
 
 .message-files { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
@@ -1002,6 +1092,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleCitationKeydow
 
 @media (prefers-reduced-motion: reduce) {
   .streaming-pulse i, .thinking-dots i { animation: none; opacity: 0.75; }
+  .status-live { animation: none; opacity: 0.7; }
 }
 
 @media (max-width: 720px) {

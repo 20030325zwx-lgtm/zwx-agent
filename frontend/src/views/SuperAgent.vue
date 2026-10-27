@@ -28,71 +28,49 @@
       <div class="workspace-main" :class="{ 'inspector-collapsed': !inspectorOpen, 'no-inspector': !activeRun }">
         <div class="workspace-column">
           <section class="workspace-canvas" aria-label="任务工作台">
-          <template v-if="activeRun">
-            <RunHeader :run="activeRun" :goal="activeGoal" :has-conversation="messages.length > 0" :refreshing="refreshingRun"
-              @resume="resumeActiveRun" @cancel="stopGeneration" @open-conversation="conversationOpen = true"
-              @refresh="refreshActiveRun" @export="exportRun" />
-            <div v-if="activeRun.canDecideConfirmation && activeRun.pendingConfirmations?.length"
-              class="confirmation-banner" role="status">
-              <span class="confirmation-text">
-                ⏸ 任务已暂停：等待确认
-                <strong>{{ activeRun.pendingConfirmations.map(item => item.tool).join('、') }}</strong>
-              </span>
-              <button type="button" class="confirmation-action" @click="confirmationDialogOpen = true">查看并确认</button>
-            </div>
-            <RunPhases :run="activeRun" :answer="activeAnswer" :simple="simpleMode" />
-            <div v-if="!simpleMode" class="workspace-section">
-              <PlanBoard :run="activeRun" />
-            </div>
-            <div class="workspace-section">
-              <RunTimeline :run="activeRun" />
-            </div>
-            <div class="workspace-section">
-              <DeliverableView :answer="activeAnswer" :files="activeMessageFiles" :rag-trace="activeRagTrace"
-                :verification="activeRun.verification" :status="activeRun.status" :can-resume="activeRun.canResume"
-                agent-key="super" @open-conversation="conversationOpen = true" @resume="resumeActiveRun" />
-            </div>
-            <button v-if="messages.length" type="button" class="conversation-toggle" :aria-expanded="conversationOpen" @click="conversationOpen = !conversationOpen">
-              <MessageSquare :size="14" />
-              <span>会话记录 · {{ messages.length }} 条</span>
-              <ChevronDown :size="14" :class="{ rotated: conversationOpen }" />
-            </button>
-            <div v-if="conversationOpen && messages.length" ref="conversationDrawerRef" class="conversation-drawer">
-              <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" hide-input
-                knowledge-search-available attachments-enabled attachment-accept="image/jpeg,image/png,image/gif,image/webp"
-                @edit-message="cancelActiveStream" @resend-message="resendMessage"
-                @continue-message="continueMessage" @stop-generation="stopGeneration" />
-            </div>
-          </template>
-
-          <template v-else-if="messages.length">
-            <div class="legacy-chat">
-              <span class="legacy-kicker">历史对话 · 该轮没有可回放的运行记录</span>
-              <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" hide-input
-                knowledge-search-available attachments-enabled attachment-accept="image/jpeg,image/png,image/gif,image/webp"
-                @edit-message="cancelActiveStream" @resend-message="resendMessage"
-                @continue-message="continueMessage" @stop-generation="stopGeneration" />
-            </div>
-          </template>
-
-          <template v-else>
-            <div class="workspace-empty">
-              <span class="empty-avatar"><AsterAvatar /></span>
-              <span class="empty-kicker">Aster Workspace</span>
-              <h1>把目标交给星枢，先看计划，再看交付。</h1>
-              <p>描述你要完成的事情，星枢会拆解子任务、调用工具执行，并把结果、引用和文件整理在同一个任务现场。</p>
-              <div class="template-grid">
-                <button v-for="template in taskTemplates" :key="template.title" type="button" class="template-card" @click="useTemplate(template.prompt)">
-                  <span class="template-icon"><component :is="template.icon" :size="17" /></span>
-                  <strong>{{ template.title }}</strong>
-                  <span>{{ template.desc }}</span>
+            <template v-if="activeRun || messages.length">
+              <div v-if="activeRun?.id" class="canvas-actions" :class="{ 'with-banner': !!activeRun?.canDecideConfirmation && activeRun.pendingConfirmations?.length }">
+                <button type="button" :disabled="refreshingRun" title="刷新任务状态" aria-label="刷新任务状态" @click="refreshActiveRun">
+                  <RotateCw :size="14" :class="{ spin: refreshingRun }" />
+                </button>
+                <button type="button" title="导出任务结果为 Markdown" aria-label="导出任务结果" @click="exportRun">
+                  <Download :size="14" />
                 </button>
               </div>
-            </div>
-          </template>
+              <div v-if="activeRun?.canDecideConfirmation && activeRun.pendingConfirmations?.length"
+                class="confirmation-banner" role="status">
+                <span class="confirmation-text">
+                  ⏸ 任务已暂停：等待确认
+                  <strong>{{ activeRun.pendingConfirmations.map(item => item.tool).join('、') }}</strong>
+                </span>
+                <button type="button" class="confirmation-action" @click="confirmationDialogOpen = true">查看并确认</button>
+              </div>
+              <div class="canvas-conversation">
+                <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" hide-input
+                  knowledge-search-available attachments-enabled attachment-accept="image/jpeg,image/png,image/gif,image/webp"
+                  @edit-message="cancelActiveStream" @resend-message="resendMessage"
+                  @continue-message="continueMessage" @stop-generation="stopGeneration" />
+              </div>
+            </template>
 
-          <div v-if="messagesLoading" class="workspace-loading">正在恢复任务现场...</div>
-        </section>
+            <template v-else>
+              <div class="workspace-empty">
+                <span class="empty-avatar"><AsterAvatar /></span>
+                <span class="empty-kicker">Aster Workspace</span>
+                <h1>把目标交给星枢，先看计划，再看交付。</h1>
+                <p>描述你要完成的事情，星枢会拆解子任务、调用工具执行，并把结果、引用和文件整理在同一个任务现场。</p>
+                <div class="template-grid">
+                  <button v-for="template in taskTemplates" :key="template.title" type="button" class="template-card" @click="useTemplate(template.prompt)">
+                    <span class="template-icon"><component :is="template.icon" :size="17" /></span>
+                    <strong>{{ template.title }}</strong>
+                    <span>{{ template.desc }}</span>
+                  </button>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="messagesLoading" class="workspace-loading">正在恢复任务现场...</div>
+          </section>
 
           <footer class="workspace-composer-shell">
             <TaskComposer ref="composerRef" :connection-status="connectionStatus" attachments-enabled
@@ -104,7 +82,7 @@
 
         <RunInspector v-if="activeRun && inspectorOpen" :sources="activeSources" :files="workspaceFiles" :run="activeRun"
           :conversation-id="chatId"
-          @resume="resumeActiveRun" @cancel="stopGeneration" @open-conversation="conversationOpen = true"
+          @resume="resumeActiveRun" @cancel="stopGeneration"
           @collapse="inspectorOpen = false" />
         <button v-else-if="activeRun" class="inspector-rail" type="button" title="展开工作区面板" aria-label="展开工作区面板" @click="inspectorOpen = true">
           <PanelRightOpen :size="16" />
@@ -135,22 +113,17 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { BookOpen, ChevronDown, Database, Globe2, MessageSquare, PanelRightOpen, Workflow } from 'lucide-vue-next'
+import { BookOpen, Database, Download, Globe2, PanelRightOpen, RotateCw, Workflow } from 'lucide-vue-next'
 import AgentCompanion from '../components/AgentCompanion.vue'
 import AsterAvatar from '../components/AsterAvatar.vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import HomeButton from '../components/HomeButton.vue'
-import DeliverableView from '../components/workspace/DeliverableView.vue'
-import PlanBoard from '../components/workspace/PlanBoard.vue'
-import RunHeader from '../components/workspace/RunHeader.vue'
 import RunInspector from '../components/workspace/RunInspector.vue'
-import RunPhases from '../components/workspace/RunPhases.vue'
-import RunTimeline from '../components/workspace/RunTimeline.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
 import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listManusWebSources, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
 
@@ -175,10 +148,8 @@ const companionState = ref('idle')
 const companionCaption = ref('')
 const activeRun = ref(null)
 const activeAnswerIndex = ref(-1)
-const conversationOpen = ref(false)
 const workspaceFiles = ref([])
 const composerRef = ref(null)
-const conversationDrawerRef = ref(null)
 const refreshingRun = ref(false)
 const confirmationDialogOpen = ref(false)
 const decidingConfirmation = ref(false)
@@ -243,10 +214,10 @@ const parseActivity = data => {
   try {
     const event = JSON.parse(data)
     if (event && typeof event === 'object' && event.summary) {
-      return { label: event.agent ? `${event.agent} · ${event.summary}` : event.summary, detail: event.summary, phase: event.phase || 'work', agent: event.agent || '' }
+      return { phase: event.phase || 'work', agent: event.agent || '', summary: event.summary, detail: event.summary }
     }
   } catch { /* 旧格式纯文本兜底 */ }
-  return { label: activityLabel(data), detail: data, phase: 'work', agent: '' }
+  return { phase: 'work', agent: '', summary: activityLabel(data), detail: data }
 }
 const mapFiles = (conversationId, fileAttachments) => {
   try {
@@ -286,7 +257,6 @@ const mapMessage = message => ({
   isUser: message.role === 'USER',
   time: new Date(message.createdAt).getTime(),
   activities: [],
-  collapsibleActivities: message.role === 'ASSISTANT',
   status: message.status,
   runId: message.executionRunId,
   files: mapFiles(chatId.value, message.fileAttachments),
@@ -294,6 +264,33 @@ const mapMessage = message => ({
   imageUrls: [],
   ragTrace: parseRagTrace(message.ragRetrievalTrace)
 })
+
+// ── 智能体时间线：封存本轮实时轨迹，历史重载后回填到对应回答消息 ──
+const sealActiveAnswer = () => {
+  const answer = messages.value[activeAnswerIndex.value]
+  if (answer && !answer.isUser && answer.startedAt && !answer.finishedAt) answer.finishedAt = Date.now()
+}
+const captureLiveTrace = () => {
+  const answer = messages.value[activeAnswerIndex.value]
+  if (!answer || answer.isUser) return null
+  return {
+    runId: answer.runId || null,
+    status: answer.status || null,
+    activities: answer.activities?.length ? answer.activities : null,
+    startedAt: answer.startedAt || null,
+    finishedAt: answer.finishedAt || null
+  }
+}
+const restoreLiveTrace = trace => {
+  if (!trace) return
+  const answers = [...messages.value].reverse().filter(message => !message.isUser)
+  const target = answers[0]
+  if (!target) return
+  if (trace.activities?.length) target.activities = trace.activities
+  if (trace.startedAt && !target.startedAt) target.startedAt = trace.startedAt
+  if (trace.finishedAt) target.finishedAt = trace.finishedAt
+  if (trace.status) target.status = trace.status
+}
 
 const parseTokenUsage = value => {
   if (!value) return null
@@ -348,25 +345,6 @@ const activeSources = computed(() => {
   const selected = candidates.filter(candidate => candidate.selected)
   return selected.length ? selected : candidates
 })
-const activeGoal = computed(() => {
-  const run = activeRun.value
-  if (!run) return ''
-  if (run.messageIndex >= 0) {
-    for (let index = run.messageIndex; index >= 0; index--) {
-      if (messages.value[index]?.isUser) return messages.value[index].content
-    }
-  }
-  if (run.input) return run.input
-  const lastUser = [...messages.value].reverse().find(message => message.isUser)
-  return lastUser?.content || ''
-})
-const simpleMode = computed(() => {
-  const run = activeRun.value
-  if (!run || run.status !== 'COMPLETED') return false
-  if ((run.plan || []).length > 1) return false
-  return !activeMessageFiles.value.length && !activeSources.value.length
-})
-
 const refreshConversations = async () => {
   historyLoading.value = true
   try { conversations.value = await listManusConversations() }
@@ -393,9 +371,23 @@ const loadRunsForConversation = async (conversationId, preferredRunId = null) =>
     const index = messages.value.findIndex(message => !message.isUser
       && ((detail.assistantMessageId != null && String(message.id) === String(detail.assistantMessageId))
         || message.runId === detail.id))
+    if (index >= 0) {
+      const answer = messages.value[index]
+      if (answer) {
+        // 历史消息没有实时轨迹：用 run 的语义事件与起止时间补出时间线
+        if (!answer.activities.length && detail.events?.length) {
+          answer.activities = detail.events.map(event => ({
+            phase: event.phase || 'work', agent: event.agent || '', summary: event.summary || '', detail: event.summary || ''
+          }))
+        }
+        if (!answer.startedAt && detail.createdAt) {
+          answer.startedAt = new Date(detail.createdAt).getTime()
+          answer.finishedAt = detail.updatedAt ? new Date(detail.updatedAt).getTime() : null
+        }
+      }
+    }
     activeRun.value = normalizeRun(detail, index)
     activeAnswerIndex.value = index
-    if (index >= 0) conversationOpen.value = false
   } catch (error) {
     console.error('Unable to load run workspace:', error)
   }
@@ -428,9 +420,12 @@ const recoverFinishedRun = async (conversationId, run) => {
   connectionStatus.value = 'disconnected'
   activeTurnStart = -1
   reconnectAttempts = 0
+  sealActiveAnswer()
+  const liveTrace = captureLiveTrace()
   const history = await getManusConversationMessages(conversationId)
   if (chatId.value !== conversationId) return
   messages.value = history.map(mapMessage)
+  restoreLiveTrace(liveTrace)
   hydrateFileUrls(conversationId)
   let index = run.assistantMessageId != null
     ? messages.value.findIndex(message => String(message.id) === String(run.assistantMessageId))
@@ -488,7 +483,6 @@ const createConversation = async () => {
   messages.value = []
   activeRun.value = null
   activeAnswerIndex.value = -1
-  conversationOpen.value = false
   workspaceFiles.value = []
   sidebarOpen.value = false
   setCompanion('idle')
@@ -545,7 +539,6 @@ const selectConversation = async conversation => {
   setCompanion('idle')
   activeRun.value = null
   activeAnswerIndex.value = -1
-  conversationOpen.value = false
   workspaceFiles.value = []
   try {
     messages.value = (await getManusConversationMessages(conversation.id)).map(mapMessage)
@@ -596,12 +589,11 @@ const sendMessage = async payload => {
   cancelActiveStream()
   activeTurnStart = messages.value.length
   addMessage(message, true, imageObjectKeys)
-  messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], collapsibleActivities: true })
+  messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], startedAt: Date.now() })
   const answerIndex = messages.value.length - 1
   activeAnswerIndex.value = answerIndex
   activeRun.value = normalizeRun({ status: 'RUNNING', canCancel: true, input: message, createdAt: new Date().toISOString() }, answerIndex)
   activeRun.value.webSearch = webSearch
-  conversationOpen.value = false
   workspaceFiles.value = []
   const requestId = crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`
   connectionStatus.value = 'connecting'
@@ -649,9 +641,9 @@ const attachManusStream = (stream, answerIndex) => {
     const answer = messages.value[answerIndex]
     if (!answer) return
     const activity = parseActivity(event.data || '')
-    answer.activities.push({ label: activity.label, detail: activity.detail })
-    if (activeRun.value) activeRun.value.events.push({ phase: activity.phase, agent: activity.agent, summary: activity.detail || activity.label })
-    if (!answer.content) setCompanion('working', activity.label)
+    answer.activities.push({ phase: activity.phase, agent: activity.agent, summary: activity.summary, detail: activity.detail, at: Date.now() })
+    if (activeRun.value) activeRun.value.events.push({ phase: activity.phase, agent: activity.agent, summary: activity.summary })
+    if (!answer.content) setCompanion('working', activity.summary)
   })
   stream.addEventListener('interrupted', () => {
     const answer = messages.value[answerIndex]
@@ -701,6 +693,8 @@ const handleManusStreamError = (answerIndex, error) => {
     connectionStatus.value = 'error'
     const reason = error.message || '触发用量配额限制，请稍后再试'
     if (answer && !answer.content) answer.content = reason
+    if (answer) answer.status = 'FAILED'
+    sealActiveAnswer()
     if (activeRun.value) {
       activeRun.value.status = 'FAILED'
       activeRun.value.canCancel = false
@@ -732,6 +726,7 @@ const handleManusStreamError = (answerIndex, error) => {
     activeRun.value.canResume = !!answer?.runId
   }
   if (answer && !answer.content) answer.content = '连接异常，正在恢复历史消息...'
+  if (answer) answer.status = 'FAILED'
   setTimeout(() => { finishStream().catch(error => console.error(error)) }, 1500)
 }
 const finishStream = async () => {
@@ -747,12 +742,15 @@ const finishStream = async () => {
   eventSource = null
   activeTurnStart = -1
   reconnectAttempts = 0
+  sealActiveAnswer()
+  const liveTrace = captureLiveTrace()
   const conversationId = chatId.value
   await refreshConversations()
   if (!conversationId || chatId.value !== conversationId) return
   const history = await getManusConversationMessages(conversationId)
   if (chatId.value !== conversationId) return
   messages.value = history.map(mapMessage)
+  restoreLiveTrace(liveTrace)
   hydrateFileUrls(conversationId)
   await loadRunsForConversation(conversationId)
   await refreshWorkspaceFiles(conversationId)
@@ -779,6 +777,8 @@ const stopGeneration = async () => {
     answer.status = 'INTERRUPTED'
     if (!answer.content) answer.content = '已停止生成。'
   }
+  sealActiveAnswer()
+  const liveTrace = captureLiveTrace()
   if (activeRun.value) {
     activeRun.value.status = 'INTERRUPTED'
     activeRun.value.canCancel = false
@@ -791,6 +791,7 @@ const stopGeneration = async () => {
     if (!chatId.value) return
     try {
       messages.value = (await getManusConversationMessages(chatId.value)).map(mapMessage)
+      restoreLiveTrace(liveTrace)
       hydrateFileUrls(chatId.value)
       await loadRunsForConversation(chatId.value)
       await refreshWorkspaceFiles(chatId.value)
@@ -810,6 +811,8 @@ const continueMessage = ({ message, index }) => {
   answer.activities = []
   answer.status = null
   answer.ragTrace = null
+  answer.startedAt = Date.now()
+  answer.finishedAt = null
   connectionStatus.value = 'connecting'
   reconnectAttempts = 0
   if (activeRun.value) {
@@ -875,10 +878,6 @@ const decidePendingConfirmation = async approved => {
     decidingConfirmation.value = false
   }
 }
-watch(conversationOpen, open => {
-  if (!open) return
-  nextTick(() => conversationDrawerRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-})
 const useTemplate = prompt => composerRef.value?.submit(prompt)
 const resendMessage = ({ content }) => sendMessage(content)
 // 任务结果导出：把计划、事件、回答、引用与联网参考组装为 Markdown 下载（纯客户端，不落服务端）
@@ -1043,19 +1042,52 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
 
 .workspace-canvas {
   position: relative;
+  display: flex;
   min-width: 0;
   min-height: 0;
   flex: 1;
-  overflow-y: auto;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--sk-separator);
   border-radius: 16px;
-  padding: 22px 24px 28px;
+  padding: 0;
   background: linear-gradient(180deg, rgba(251, 253, 255, 0.96), rgba(255, 255, 255, 0.98));
   box-shadow: 0 16px 40px rgba(45, 76, 132, 0.1);
-  scroll-behavior: smooth;
 }
 
-.workspace-section { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--sk-separator); }
+/* 主画布即会话：提问与回答都在对话流里，不再挂头部标题 */
+.canvas-conversation { flex: 1; min-height: 0; }
+.canvas-conversation > :deep(.chat-container) { background: transparent; }
+.canvas-conversation > :deep(.chat-messages) { padding-top: 18px; }
+
+.canvas-actions {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+}
+
+.canvas-actions button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--sk-separator);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: var(--sk-blur);
+  -webkit-backdrop-filter: var(--sk-blur);
+  color: var(--sk-label-2);
+  cursor: pointer;
+}
+
+.canvas-actions button:hover:not(:disabled) { border-color: var(--zwx-primary-ring); color: var(--zwx-primary); }
+.canvas-actions button:disabled { opacity: 0.6; cursor: default; }
+.canvas-actions .spin { animation: canvas-spin 0.9s linear infinite; }
+@keyframes canvas-spin { to { transform: rotate(360deg); } }
+.canvas-actions.with-banner { top: 62px; }
 
 .workspace-composer-shell {
   flex: 0 0 auto;
@@ -1081,13 +1113,10 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
 .inspector-rail:hover { border-color: var(--zwx-primary-ring); background: rgba(255, 255, 255, 0.92); color: var(--zwx-primary); }
 .inspector-rail span { writing-mode: vertical-rl; font-size: 10.5px; font-weight: 600; letter-spacing: 0.16em; }
 
-.legacy-chat { display: flex; height: 100%; min-height: 520px; flex-direction: column; }
-.legacy-kicker { flex: 0 0 auto; margin-bottom: 6px; color: var(--sk-label-3); font-size: 11px; }
-.legacy-chat > :deep(.chat-container) { flex: 1; border-radius: 12px; overflow: hidden; }
-
 .workspace-empty {
   display: flex;
   min-height: 100%;
+  flex: 1;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -1128,7 +1157,7 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 12px;
+  margin: 12px 16px 0;
   padding: 10px 14px;
   border: 1px solid #f5d48a;
   border-radius: 12px;
@@ -1150,33 +1179,6 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
 }
 .confirmation-action:hover { background: #fdf1cd; }
 
-.conversation-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 18px;
-  border: 1px solid var(--sk-separator);
-  border-radius: 999px;
-  padding: 6px 12px;
-  background: #fff;
-  color: var(--sk-label-2);
-  font-size: 11.5px;
-  cursor: pointer;
-}
-
-.conversation-toggle:hover { border-color: var(--zwx-primary-ring); color: var(--zwx-primary); }
-.conversation-toggle svg:last-child { transition: transform 0.18s ease; }
-.conversation-toggle svg.rotated { transform: rotate(180deg); }
-
-.conversation-drawer {
-  height: min(520px, 62vh);
-  margin-top: 12px;
-  overflow: hidden;
-  border: 1px solid var(--sk-separator);
-  border-radius: 14px;
-  background: #fff;
-}
-
 .workspace-loading {
   position: absolute;
   z-index: 3;
@@ -1196,7 +1198,6 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
 @media (prefers-reduced-motion: reduce) {
   .status.connecting::before { animation: none; opacity: 0.5; }
   .workspace-main { transition: none; }
-  .workspace-canvas { scroll-behavior: auto; }
   .template-card:hover { transform: none; }
 }
 
@@ -1219,6 +1220,5 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   .workspace-empty { padding: 20px 6px 30px; }
   .empty-avatar { width: 62px; height: 62px; border-radius: 17px; }
   .template-grid { grid-template-columns: 1fr; }
-  .conversation-drawer { height: min(480px, 58vh); }
 }
 </style>

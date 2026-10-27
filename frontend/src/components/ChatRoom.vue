@@ -34,31 +34,8 @@
             <template v-else>{{ msg.content }}</template>
           </div>
           <div v-else class="message-content markdown-content">
-            <section v-if="hasAgentTrace(msg)" class="agent-trace" aria-label="执行过程">
-              <header class="trace-status">
-                <button type="button" class="trace-toggle" :class="traceTone(msg, index)" :aria-expanded="traceExpanded(index) ? 'true' : 'false'"
-                  @click="toggleTrace(index)">
-                  <span v-if="isTurnWorking(index)" class="status-live" aria-hidden="true"></span>
-                  <span>{{ turnStatusLabel(msg, index) || `执行了 ${msg.activities.length} 步` }}</span>
-                  <span v-if="msg.activities?.length" class="trace-count">{{ msg.activities.length }} 步</span>
-                  <ChevronDown :size="13" class="trace-chevron" :class="{ rotated: traceExpanded(index) }" />
-                </button>
-              </header>
-              <ol v-if="msg.activities?.length && traceExpanded(index)" class="trace-steps">
-                <li v-for="(activity, activityIndex) in msg.activities" :key="`step-${index}-${activityIndex}`" class="trace-step">
-                  <button type="button" class="step-line" :class="{ 'has-detail': stepDetail(activity) }"
-                    :aria-expanded="expandedStepKey === `${index}-${activityIndex}` ? 'true' : 'false'"
-                    @click="toggleStep(index, activityIndex)">
-                    <component :is="stepIcon(activity)" :size="14" class="step-icon" aria-hidden="true" />
-                    <span class="step-agent">{{ stepAgent(activity) }}</span>
-                    <span class="step-dot" aria-hidden="true">·</span>
-                    <span class="step-summary">{{ activity.summary }}</span>
-                    <span v-if="stepDuration(msg, activityIndex)" class="step-duration">持续了 {{ stepDuration(msg, activityIndex) }}</span>
-                  </button>
-                  <pre v-if="expandedStepKey === `${index}-${activityIndex}` && stepDetail(activity)" class="step-detail">{{ activity.detail }}</pre>
-                </li>
-              </ol>
-            </section>
+            <AgentTrace v-if="msg.activities?.length || msg.startedAt" :message="msg" :index="index"
+              :working="isTurnWorking(index)" :now="nowTick" />
             <template v-if="msg.content">
               <div v-html="renderMarkdown(msg.content)"></div>
               <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="streaming-pulse" aria-label="正在生成"><i></i><i></i><i></i></span>
@@ -181,9 +158,10 @@ import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
+import AgentTrace from './AgentTrace.vue'
 import CitationPreview from './CitationPreview.vue'
 import AsterAvatar from './AsterAvatar.vue'
-import { BookOpen, BookOpenCheck, ChevronDown, ChevronRight, CircleDot, FileText, Globe2, ListChecks, Paperclip, Search, ShieldCheck, Square } from 'lucide-vue-next'
+import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
 import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment } from '../api'
 
@@ -228,11 +206,6 @@ const judgeCandidate = async (message, candidate, judgment) => {
   } finally {
     candidate.judgmentSaving = false
   }
-}
-const hydrateRagJudgments = trace => {
-  if (!trace?.judgments) return trace
-  trace.candidates?.forEach(candidate => { candidate.judgment = trace.judgments[candidate.documentId] || null })
-  return trace
 }
 
 const citationPreview = ref(null)
@@ -327,68 +300,11 @@ const renderMarkdown = content => DOMPurify.sanitize(marked.parse(stripInlineCit
   gfm: true
 }))
 
-// ── 智能体时间线：状态行 + 步骤条目（参考 ZCode 式执行视图） ──
-const expandedStepKey = ref('')
-const expandedTraces = ref([])
+// ── 智能体时间线：渲染在 AgentTrace.vue，这里只负责秒级刷新驱动与是否执行中的判定 ──
 const nowTick = ref(Date.now())
 let tickTimer = null
 
-// 执行中的时间线默认展开；结束/历史消息默认折叠为一行摘要，点击可展开
-const traceExpanded = index => isTurnWorking(index) || expandedTraces.value.includes(index)
-const toggleTrace = index => {
-  const list = expandedTraces.value
-  const position = list.indexOf(index)
-  if (position >= 0) list.splice(position, 1)
-  else list.push(index)
-}
-const traceTone = (msg, index) => {
-  if (isTurnWorking(index)) return 'working'
-  if (msg.status === 'INTERRUPTED') return 'warn'
-  if (msg.status === 'FAILED') return 'error'
-  return ''
-}
-
-const stepPhaseIcons = { plan: ListChecks, work: Search, verify: ShieldCheck }
-const stepPhaseAgents = { plan: '规划', work: '执行', verify: '校验' }
-const stepIcon = activity => stepPhaseIcons[activity?.phase] || CircleDot
-const stepAgent = activity => activity?.agent || stepPhaseAgents[activity?.phase] || '步骤'
-const stepDetail = activity => (activity?.detail && activity.detail !== activity.summary ? activity.detail : '')
-const toggleStep = (index, activityIndex) => {
-  const key = `${index}-${activityIndex}`
-  expandedStepKey.value = expandedStepKey.value === key ? '' : key
-}
-const formatDuration = ms => {
-  if (!Number.isFinite(ms) || ms <= 0) return ''
-  const totalSeconds = Math.round(ms / 1000)
-  if (totalSeconds < 60) return `${totalSeconds} 秒`
-  return `${Math.floor(totalSeconds / 60)} 分 ${totalSeconds % 60} 秒`
-}
 const isTurnWorking = index => props.connectionStatus === 'connecting' && index === props.messages.length - 1
-const turnElapsedMs = (msg, index = -1) => {
-  if (!msg?.startedAt) return null
-  const working = index >= 0 ? isTurnWorking(index) : props.connectionStatus === 'connecting'
-  const end = msg.finishedAt || (working ? nowTick.value : null)
-  return end == null ? null : Math.max(0, end - msg.startedAt)
-}
-const turnStatusLabel = (msg, index) => {
-  const elapsed = turnElapsedMs(msg, index)
-  if (elapsed == null) return ''
-  const duration = formatDuration(elapsed)
-  if (!duration) return ''
-  if (isTurnWorking(index)) return `工作中 ${duration}`
-  if (msg.status === 'INTERRUPTED') return `已中断 · 用时 ${duration}`
-  if (msg.status === 'FAILED') return `执行失败 · 用时 ${duration}`
-  return `已完成 · 用时 ${duration}`
-}
-const hasAgentTrace = msg => (msg.activities?.length || 0) > 0 || !!turnStatusLabel(msg, -1)
-const stepDuration = (msg, activityIndex) => {
-  const activities = msg.activities || []
-  const at = activities[activityIndex]?.at
-  if (!at) return ''
-  const previousAt = activityIndex > 0 ? activities[activityIndex - 1]?.at : msg.startedAt
-  if (!previousAt) return ''
-  return formatDuration(at - previousAt)
-}
 const sendMessage = () => {
   if (props.connectionStatus === 'connecting') return
   if (!inputMessage.value.trim() && !selectedImages.value.length) return
@@ -741,184 +657,6 @@ onBeforeUnmount(() => {
 .thinking-dots i:nth-child(2) { animation-delay: 0.16s; }
 .thinking-dots i:nth-child(3) { animation-delay: 0.32s; }
 
-/* ── 智能体时间线 ───────────────────────────────────── */
-.agent-trace { display: grid; gap: 2px; margin-bottom: 12px; }
-
-.trace-status { display: grid; }
-
-.trace-toggle {
-  display: flex;
-  width: max-content;
-  max-width: 100%;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  border-radius: 8px;
-  margin-left: -6px;
-  padding: 3px 8px 3px 6px;
-  background: transparent;
-  color: var(--sk-label-2);
-  font-size: 12.5px;
-  font-weight: 650;
-  text-align: left;
-  cursor: pointer;
-}
-
-.trace-toggle:hover { background: var(--sk-fill); }
-.trace-count { color: var(--sk-label-3); font-weight: 500; }
-.trace-toggle.working { color: var(--zwx-primary); }
-.trace-toggle.warn { color: #b45309; }
-.trace-toggle.error { color: #b91c1c; }
-
-.trace-chevron { color: var(--sk-label-3); transition: transform 0.15s ease; }
-.trace-chevron.rotated { transform: rotate(180deg); }
-
-.status-live {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--zwx-primary);
-  animation: trace-blink 1.05s ease-in-out infinite;
-}
-
-.trace-steps { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-
-.step-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: calc(100% + 12px);
-  margin-left: -6px;
-  border: 0;
-  border-radius: 8px;
-  padding: 3px 6px;
-  background: transparent;
-  color: var(--sk-label-3);
-  font-size: 12.5px;
-  line-height: 1.55;
-  text-align: left;
-  cursor: default;
-}
-
-.step-line.has-detail { cursor: pointer; }
-.step-line:hover { background: var(--sk-fill); color: var(--sk-label-2); }
-.step-icon { flex: 0 0 auto; }
-.step-agent { flex: 0 0 auto; font-weight: 650; }
-.step-dot { flex: 0 0 auto; }
-.step-summary { min-width: 0; }
-.step-duration { flex: 0 0 auto; }
-
-.step-detail {
-  max-height: 240px;
-  overflow: auto;
-  margin: 2px 0 5px;
-  padding: 8px 10px;
-  border-radius: 9px;
-  background: var(--sk-fill);
-  color: var(--sk-label-2);
-  font: 11px/1.55 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-@keyframes trace-blink {
-  0%, 70%, 100% { opacity: 0.3; }
-  35% { opacity: 1; }
-}
-
-.message-files { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
-
-.message-files a {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--sk-separator);
-  border-radius: 11px;
-  padding: 6px 9px;
-  background: var(--sk-surface);
-  color: var(--zwx-primary);
-  font-size: 12px;
-  text-decoration: none;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-}
-
-.message-files a:hover { background: var(--zwx-primary-soft); border-color: transparent; }
-.message-files span { overflow: hidden; max-width: 270px; text-overflow: ellipsis; white-space: nowrap; }
-.message-files small { border-radius: 5px; padding: 1px 5px; background: var(--zwx-primary-soft); color: var(--zwx-primary); font-size: 10px; font-weight: 650; }
-
-.message-references { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; margin-top: 13px; color: var(--sk-label-2); font-size: 12px; }
-.message-references > span { padding: 4px 0; }
-
-.reference-card {
-  max-width: min(100%, 520px);
-  border: 1px solid var(--sk-separator);
-  border-radius: 11px;
-  background: var(--sk-surface);
-}
-
-.reference-card summary { cursor: pointer; padding: 5px 8px; color: var(--sk-label-2); }
-.reference-card p { margin: 0; border-top: 1px solid var(--sk-separator); padding: 7px 9px; color: var(--sk-label-2); line-height: 1.55; white-space: pre-wrap; }
-
-.citation-preview { display: grid; gap: 8px; max-width: 760px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--sk-separator); }
-.citation-heading { display: flex; align-items: center; gap: 7px; color: var(--sk-label-2); font-size: 12px; }
-.citation-heading small { color: var(--sk-label-3); }
-.citation-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 18px;
-  gap: 2px 10px;
-  align-items: center;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--sk-separator);
-  border-radius: 12px;
-  background: var(--sk-surface);
-  color: var(--sk-label-2);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color .16s ease, background .16s ease;
-}
-.citation-card:hover { border-color: var(--zwx-primary); background: var(--zwx-primary-soft); }
-.citation-file { display: flex; align-items: center; gap: 5px; color: var(--zwx-primary); font-size: 12.5px; font-weight: 650; }
-.citation-file em { font-style: normal; color: var(--sk-label-3); font-weight: 500; }
-.citation-excerpt { grid-column: 1; overflow: hidden; color: var(--sk-label-3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.citation-card > svg { grid-column: 2; grid-row: 1 / span 2; color: var(--sk-label-3); }
-
-.citation-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1300;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(16, 24, 40, 0.38);
-  backdrop-filter: blur(8px);
-}
-.citation-modal {
-  display: flex;
-  flex-direction: column;
-  width: min(820px, 100%);
-  max-height: min(78vh, 760px);
-  overflow: hidden;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
-}
-.citation-modal header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid var(--sk-separator); }
-.citation-kicker { display: block; margin-bottom: 4px; color: var(--sk-label-3); font-size: 11px; letter-spacing: .08em; }
-.citation-modal header strong { color: var(--sk-label); font-size: 15px; }
-.citation-modal header strong em { margin-left: 4px; color: var(--zwx-primary); font-style: normal; }
-.citation-modal header button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: var(--sk-fill); color: var(--sk-label-2); cursor: pointer; }
-.citation-content { flex: 1; overflow: auto; margin: 0; padding: 18px 20px; background: #fbfcfe; color: var(--sk-label-2); font: 13px/1.75 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
-.citation-state { margin: 0; padding: 44px 20px; color: var(--sk-label-3); text-align: center; }
-.citation-state.error { color: #d9382c; }
-.citation-modal footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--sk-separator); color: var(--sk-label-3); font-size: 11px; }
-@media (max-width: 720px) {
-  .citation-excerpt { white-space: normal; }
-  .citation-modal-backdrop { padding: 12px; }
-  .citation-modal { max-height: 86vh; }
-}
-
 .trace-entry { position: relative; display: inline-flex; margin-top: 10px; }
 .rag-inspector { margin-top: 12px; border-top: 1px solid var(--sk-separator); color: var(--sk-label-2); font-size: 12px; }
 .rag-inspector > summary { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: 9px; padding: 8px 0; cursor: pointer; color: var(--zwx-primary); }
@@ -1154,7 +892,6 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .streaming-pulse i, .thinking-dots i { animation: none; opacity: 0.75; }
-  .status-live { animation: none; opacity: 0.7; }
 }
 
 @media (max-width: 720px) {

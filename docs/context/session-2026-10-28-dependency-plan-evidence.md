@@ -8,6 +8,13 @@
 - **任务级端到端评测**：`run_task_eval.py` + `task-eval-v1.json`，覆盖闲聊直达/知识库单步/多步依赖三路径；自动代用户授权计划门；SSE 按 spec 解析（多行 data 合并）。实测：task-003 2.4s ✅、task-001 27s ✅（验收 pass）、task-002 117s ✅（计划门触发、s2 依赖 s1、产出 .md 文件、验收 unverified 为一轮返工后的设计行为）。凭据读 `frontend/.env.local`（不回显），结果 JSON 已 gitignore。
 - 遗留：Goal 后台模式、任务经验复用、计划修订对话（当前修订=直接发新消息重新规划）、暗色主题等 P1/P2 项未做。
 
+## 追加改动三（10-28 深夜）：结构整理（零行为变更）
+
+- 前端：时间线从 ChatRoom 拆为独立组件 `AgentTrace.vue`（状态行/步骤条目/折叠逻辑与样式内聚），ChatRoom 回归纯消息渲染；删除无引用的 `hydrateRagJudgments`；清理迁移后的残留样式与 lucide 导入。
+- 后端：`WorkersNode` 选择性返工的统计逻辑重写为 `reviseTargets` 预过滤 + 计数变量，消除内联 stream 绕计算。
+- 清理 Finder 副本垃圾文件（`2026-10-25-jev-intent-routing 2.md`、`run_intent_gate 2.py`，均为改动前旧快照）。
+- 验证：mvn test 331 通过、打包重启 health ok、前端构建通过、评测冒烟 task-001（27s 验收 pass）与 task-003（闲聊直达）全过后才提交。
+
 ## 追加改动：时间线折叠与回答复制
 
 - ChatRoom：时间线在执行中默认展开、结束后折叠为「状态 + N 步」一行摘要（点击展开/收起，与 ZCode 行为一致），历史消息同样默认折叠；AI 回答新增悬停显示的「复制」按钮（触屏常显）。

@@ -124,25 +124,28 @@ public class WorkersNode implements NodeAction {
         List<String> lastRound = accumulated.size() > plan.size()
                 ? List.copyOf(accumulated.subList(accumulated.size() - plan.size(), accumulated.size()))
                 : accumulated;
-        boolean selectiveRework = !reviseSteps.isEmpty() && lastRound.size() == plan.size();
+        List<Integer> reviseTargets = reviseSteps.stream()
+                .filter(index -> index != null && index >= 0 && index < plan.size())
+                .toList();
+        boolean selectiveRework = !reviseTargets.isEmpty() && lastRound.size() == plan.size();
         List<String> results = new ArrayList<>(java.util.Collections.nCopies(plan.size(), ""));
         List<String> activities = new ArrayList<>();
         List<ActivityEvent> events = new ArrayList<>();
         Set<Integer> settled = new java.util.HashSet<>();
         Set<Integer> broken = new java.util.HashSet<>();
         if (selectiveRework) {
+            int reusedSteps = 0;
             for (int index = 0; index < plan.size(); index++) {
-                if (reviseSteps.contains(index) || !reusable(lastRound.get(index))) continue;
+                if (reviseTargets.contains(index) || !reusable(lastRound.get(index))) continue;
                 results.set(index, lastRound.get(index));
                 settled.add(index);
+                reusedSteps += 1;
                 ActivityEvent reused = ActivityEvent.of("work", plan.get(index).role().displayName(),
                         "复用上轮结果：" + plan.get(index).title());
                 events.add(reused);
                 streamEvent(activitySink, reused);
             }
-            activities.add("质检点名返工 " + reviseSteps.size() + " 步，其余 " +
-                    (plan.size() - reviseSteps.stream().filter(i -> i != null && i >= 0 && i < plan.size()).count())
-                    + " 步复用上轮结果");
+            activities.add("质检点名返工 " + reviseTargets.size() + " 步，复用上轮结果 " + reusedSteps + " 步");
         }
         // 按依赖分波执行：每波内并行、波间串行；上游失败或被跳过的下游步骤直接跳过
         for (List<Integer> wave : dependencyWaves(plan)) {

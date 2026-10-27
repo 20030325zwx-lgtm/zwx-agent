@@ -49,3 +49,4 @@ evaluation/eval-sets/ci-intent-result.json
 
 # 构建产物
 /release/
+evaluation/eval-sets/task-eval-result.json

@@ -41,3 +41,12 @@
 - 意图门禁脚本 [run_intent_gate.py](./run_intent_gate.py)：只跑意图 12 例（不依赖本地后端），通过数 < 11 时退出码 1 阻断；无 `DASHSCOPE_API_KEY` secret 时跳过不阻断（fork/PR 友好）。
 - 门禁脚本与 `QwenIntentRouter` 的系统提示词必须同源：改任一侧都要同步另一侧并重跑基线。
 - RAG 15 例依赖本地后端 + 已入库语料 + 真实 embedding 调用，暂不进 CI，改动检索策略时本地跑 `run_baseline.py` 并附结果。
+
+## 任务级端到端评测（2026-10-28 接入）
+
+- 脚本 [run_task_eval.py](./run_task_eval.py)：驱动本地后端跑真实任务，覆盖三条路径——闲聊直达（无 run/计划）、知识库单步（验收断言）、多步依赖任务（计划确认门自动授权 + 依赖波次 + 文件证据）。
+- 评测集 `task-eval-v1.json`：用例带 `expect` 断言（min/max_plan_steps、has_dependencies、expect_file、verification）。
+- 依赖：本地后端在线 + 真实模型；管理员凭据读 Git 忽略的 `frontend/.env.local`（与登录页自动填充同源），可用 `ASTER_USER/ASTER_PASS` 覆盖。
+- 运行：`python3 evaluation/eval-sets/run_task_eval.py [输出.json] [--only <case-id>] [--timeout 600]`；单例耗时 2s~3min，适合手动回归与夜间任务，**不进 CI**。
+- 2026-10-28 首次冒烟：task-001 ✅（27s，单步+验收通过）、task-002 ✅（117s，计划确认门触发+依赖波次+文件产出，验收 unverified 为一轮返工后的设计行为）、task-003 ✅（2.4s 闲聊直达）。
+- 结果 JSON 含回答与计划内容，已加入 .gitignore，不提交。

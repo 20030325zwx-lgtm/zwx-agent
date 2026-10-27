@@ -1,0 +1,44 @@
+{
+  "version": "task-eval-v1",
+  "description": "超级智能体任务级端到端评测：计划依赖、证据验收、闲聊直达三条路径。依赖本地后端与真实模型，手动/夜间执行，不进 CI 门禁。",
+  "cases": [
+    {
+      "id": "task-001-knowledge-single",
+      "task": "帮我查一下先维信息员工年假有多少天",
+      "web_search": false,
+      "knowledge": true,
+      "expect": {
+        "completed": true,
+        "max_plan_steps": 1,
+        "has_dependencies": false,
+        "verification": "pass"
+      },
+      "notes": "知识库可答的单轮任务：应单步直达、通过验收、不触发计划确认门"
+    },
+    {
+      "id": "task-002-research-report",
+      "task": "分别调研 GLM、Qwen、DeepSeek 三个国产大模型当前对外发布的最新版本号，整理成一份简短对比报告，保存为 Markdown 文件到工作区",
+      "web_search": true,
+      "knowledge": false,
+      "expect": {
+        "completed": true,
+        "min_plan_steps": 2,
+        "has_dependencies": true,
+        "expect_file": true,
+        "verification": "any"
+      },
+      "notes": "多步依赖任务：计划应有 depends_on 波次；报告类产出必须有可见文件名（证据门禁）"
+    },
+    {
+      "id": "task-003-casual-direct",
+      "task": "用一句话鼓励一下今天加班的我",
+      "web_search": false,
+      "knowledge": false,
+      "expect": {
+        "completed": true,
+        "casual_direct": true
+      },
+      "notes": "闲聊直达：不创建 run、不出计划，直接流式回答"
+    }
+  ]
+}

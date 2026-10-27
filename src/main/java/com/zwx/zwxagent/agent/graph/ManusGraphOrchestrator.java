@@ -52,6 +52,8 @@ public class ManusGraphOrchestrator {
     static final String NODE_WORKERS = "workers";
     static final String NODE_VERIFIER = "verifier";
     static final String NODE_AGGREGATOR = "aggregator";
+    /** 计划确认门：多步计划生成后暂停，等用户授权再执行（Plan 先对齐后执行）。 */
+    static final String NODE_PLAN_GATE = "plan_gate";
     static final String NODE_RESUME_ROUTER = "resume_router";
 
     private static final long MAX_RUN_MILLIS = TimeUnit.MINUTES.toMillis(5);
@@ -132,11 +134,14 @@ public class ManusGraphOrchestrator {
         graph.addNode(NODE_WORKERS, AsyncNodeAction.node_async(workersNode));
         graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel, tokenUsage)));
         graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel, tokenUsage)));
+        graph.addNode(NODE_PLAN_GATE, AsyncNodeAction.node_async(state -> Map.of()));
         graph.addEdge(StateGraph.START, NODE_RESUME_ROUTER);
         graph.addConditionalEdges(NODE_RESUME_ROUTER, AsyncEdgeAction.edge_async(this::routeResume),
-                Map.of(NODE_PLANNER, NODE_PLANNER, NODE_WORKERS, NODE_WORKERS,
-                        NODE_VERIFIER, NODE_VERIFIER, NODE_AGGREGATOR, NODE_AGGREGATOR));
-        graph.addEdge(NODE_PLANNER, NODE_WORKERS);
+                java.util.Map.of(NODE_PLANNER, NODE_PLANNER, NODE_WORKERS, NODE_WORKERS,
+                        NODE_AGGREGATOR, NODE_AGGREGATOR, StateGraph.END, StateGraph.END));
+        graph.addConditionalEdges(NODE_PLANNER, AsyncEdgeAction.edge_async(this::routeAfterPlanner),
+                java.util.Map.of(NODE_WORKERS, NODE_WORKERS, NODE_PLAN_GATE, NODE_PLAN_GATE));
+        graph.addEdge(NODE_PLAN_GATE, StateGraph.END);
         graph.addEdge(NODE_WORKERS, NODE_VERIFIER);
         graph.addConditionalEdges(NODE_VERIFIER, AsyncEdgeAction.edge_async(this::routeAfterVerifier),
                 Map.of(NODE_WORKERS, NODE_WORKERS, NODE_AGGREGATOR, NODE_AGGREGATOR));
@@ -199,11 +204,24 @@ public class ManusGraphOrchestrator {
     static String nextNode(String node, String verificationStatus) {
         return switch (node == null ? "" : node) {
             case NODE_PLANNER -> NODE_WORKERS;
+            case NODE_PLAN_GATE -> StateGraph.END;
             case NODE_WORKERS -> NODE_VERIFIER;
             case NODE_VERIFIER -> route(verificationStatus);
             case NODE_AGGREGATOR -> StateGraph.END;
             default -> NODE_PLANNER;
         };
+    }
+
+    /** 计划确认门：多步计划先挂起等待用户授权；单步任务直接执行。 */
+    static String planGateTarget(int planSize) {
+        return planSize > 1 ? NODE_PLAN_GATE : NODE_WORKERS;
+    }
+
+    private String routeAfterPlanner(OverAllState state) throws Exception {
+        List<PlanStep> plan = state.value(GraphState.PLAN)
+                .map(value -> (List<PlanStep>) value)
+                .orElse(List.of());
+        return planGateTarget(plan.size());
     }
 
     /** 根据最后一个已完成节点计算恢复入口；没有检查点时从 planner 重新开始。 */
@@ -414,6 +432,8 @@ public class ManusGraphOrchestrator {
                     GraphState.RUN_ID, request.runId() == null ? "" : request.runId());
             int sentActivities = 0;
             int sentEvents = request.resumeCheckpoint() == null ? 0 : request.resumeCheckpoint().events().size();
+            boolean planGated = false;
+            List<AgentRunView.PlanStepView> gatedPlan = List.of();
             RunnableConfig runnableConfig = RunnableConfig.builder()
                     .threadId(request.runId() == null || request.runId().isBlank()
                             ? java.util.UUID.randomUUID().toString()
@@ -453,14 +473,23 @@ public class ManusGraphOrchestrator {
                 if (NODE_AGGREGATOR.equals(output.node())) {
                     finalAnswer = state.value(GraphState.FINAL_ANSWER, "");
                 }
+                if (NODE_PLAN_GATE.equals(output.node())) {
+                    planGated = true;
+                    gatedPlan = planView;
+                }
                 String completedNode = completedNode(state);
                 if (completedNode != null) {
                     persistCheckpoint(request, completedNode, state, streamedAnswer);
                 }
             }
             boolean pendingConfirmation = pendingConfirmationOf(effectiveRunId);
-            boolean completed = !stopped.get() && !pendingConfirmation && finalAnswer != null && !finalAnswer.isBlank();
+            boolean completed = !stopped.get() && !pendingConfirmation && !planGated
+                    && finalAnswer != null && !finalAnswer.isBlank();
             String answer = completed ? finalAnswer : completedAnswer(finalAnswer, streamedAnswer, stopped.get());
+            if (planGated) {
+                answer = "已拆解出 " + gatedPlan.size() + " 步执行计划（含依赖顺序），请在工作区确认后开始执行；"
+                        + "直接回复修改意见也可以，我会重新规划。";
+            }
             String status = completed ? "COMPLETED" : "INTERRUPTED";
             if (pendingConfirmation) {
                 publishPendingConfirmation(stream, effectiveRunId);
@@ -468,6 +497,7 @@ public class ManusGraphOrchestrator {
             }
             if (metrics != null) metrics.runFinished(status);
             persist(request, answer, activities, completed, status, null, finalized);
+            if (planGated) publishPlanProposal(stream, effectiveRunId, gatedPlan);
             publishTokenUsage(stream, request.runId());
             sendDone(stream, completed);
         } catch (Exception exception) {
@@ -482,6 +512,16 @@ public class ManusGraphOrchestrator {
             stream.complete();
         } finally {
             if (toolConfirmationService != null) toolConfirmationService.releaseRun(effectiveRunId);
+        }
+    }
+
+    /** 计划确认挂起：推送 plan-proposed 事件并把 verification_status 标记为 plan_pending，授权后走既有 resume 链路。 */
+    private void publishPlanProposal(RunStream stream, String runId, List<AgentRunView.PlanStepView> plan) {
+        try {
+            stream.send("plan-proposed", objectMapper.writeValueAsString(plan));
+            if (agentRunService != null) agentRunService.markPlanPending(runId);
+        } catch (Exception exception) {
+            log.warn("计划确认事件发布失败；runId={}", runId, exception);
         }
     }
 
@@ -519,7 +559,9 @@ public class ManusGraphOrchestrator {
         if (!checkpoint.reviseSteps().isEmpty()) {
             saved.put(GraphState.REVISE_STEPS, checkpoint.reviseSteps());
         }
-        if (checkpoint.verificationStatus() != null && !checkpoint.verificationStatus().isBlank()) {
+        // plan_pending 只是计划确认门的挂起标记：授权续跑后不应再带入图状态
+        if (checkpoint.verificationStatus() != null && !checkpoint.verificationStatus().isBlank()
+                && !"plan_pending".equals(checkpoint.verificationStatus())) {
             saved.put(GraphState.VERIFICATION_STATUS, checkpoint.verificationStatus());
         }
         if (checkpoint.verificationFeedback() != null && !checkpoint.verificationFeedback().isBlank()) {

@@ -150,6 +150,16 @@ public class AgentRunService {
                 """, reason, runId);
     }
 
+    /** 计划确认门：计划已生成待授权，标记挂起状态供工作台展示计划卡片。 */
+    public void markPlanPending(String runId) {
+        if (runId == null || runId.isBlank()) return;
+        jdbcTemplate.update("""
+                UPDATE agent_run SET status = 'INTERRUPTED', verification_status = 'plan_pending',
+                                      error_message = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, runId);
+    }
+
     public void bindAssistantMessage(String runId, long assistantMessageId) {
         jdbcTemplate.update("UPDATE agent_run SET assistant_message_id = ? WHERE id = ?", assistantMessageId, runId);
     }

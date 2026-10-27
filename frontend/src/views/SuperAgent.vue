@@ -29,13 +29,22 @@
         <div class="workspace-column">
           <section class="workspace-canvas" aria-label="任务工作台">
             <template v-if="activeRun || messages.length">
-              <div v-if="activeRun?.id" class="canvas-actions" :class="{ 'with-banner': !!activeRun?.canDecideConfirmation && activeRun.pendingConfirmations?.length }">
+              <div v-if="activeRun?.id" class="canvas-actions" :class="{ 'with-banner': activeRun?.awaitingPlan || (!!activeRun?.canDecideConfirmation && activeRun.pendingConfirmations?.length) }">
                 <button type="button" :disabled="refreshingRun" title="刷新任务状态" aria-label="刷新任务状态" @click="refreshActiveRun">
                   <RotateCw :size="14" :class="{ spin: refreshingRun }" />
                 </button>
                 <button type="button" title="导出任务结果为 Markdown" aria-label="导出任务结果" @click="exportRun">
                   <Download :size="14" />
                 </button>
+              </div>
+              <div v-if="activeRun?.awaitingPlan" class="plan-gate-banner" role="status">
+                <span class="plan-gate-text">
+                  📋 已生成 <strong>{{ activeRun.plan?.length || 0 }}</strong> 步执行计划，等待你确认后开始执行
+                </span>
+                <span class="plan-gate-actions">
+                  <button type="button" class="plan-gate-secondary" @click="inspectorOpen = true">查看计划</button>
+                  <button type="button" class="plan-gate-primary" @click="resumeActiveRun">开始执行</button>
+                </span>
               </div>
               <div v-if="activeRun?.canDecideConfirmation && activeRun.pendingConfirmations?.length"
                 class="confirmation-banner" role="status">
@@ -325,6 +334,7 @@ const normalizeRun = (run, messageIndex = -1) => ({
   canResume: run?.canResume === true && run?.status !== 'RUNNING',
   canCancel: run?.canCancel === true,
   canDecideConfirmation: run?.canDecideConfirmation === true,
+  awaitingPlan: run?.awaitingPlan === true,
   pendingConfirmations: parsePendingConfirmations(run?.pendingConfirmation),
   resumeCount: run?.resumeCount || 0,
   userMessageId: run?.userMessageId ?? null,
@@ -623,6 +633,21 @@ const attachManusStream = (stream, answerIndex) => {
       }
     } catch (error) {
       console.error('Unable to parse run plan:', error)
+    }
+  })
+  stream.addEventListener('plan-proposed', event => {
+    try {
+      const plan = JSON.parse(event.data)
+      if (Array.isArray(plan) && activeRun.value) {
+        activeRun.value.plan = plan
+        activeRun.value.awaitingPlan = plan.length > 0
+        activeRun.value.status = 'INTERRUPTED'
+        activeRun.value.canCancel = false
+        activeRun.value.canResume = true
+      }
+      setCompanion('thinking', '计划已生成，等待你确认后执行')
+    } catch (error) {
+      console.error('Unable to parse plan proposal:', error)
     }
   })
   stream.addEventListener('rag-trace', event => {
@@ -1178,6 +1203,28 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   cursor: pointer;
 }
 .confirmation-action:hover { background: #fdf1cd; }
+
+.plan-gate-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--zwx-primary-ring);
+  border-radius: 12px;
+  background: var(--zwx-primary-soft);
+  font-size: 12px;
+  color: var(--zwx-primary);
+}
+
+.plan-gate-actions { display: flex; flex: 0 0 auto; gap: 7px; }
+
+.plan-gate-banner button { border-radius: 999px; padding: 5px 13px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.plan-gate-primary { border: 0; background: var(--zwx-primary); color: #fff; }
+.plan-gate-primary:hover { filter: brightness(1.05); }
+.plan-gate-secondary { border: 1px solid var(--zwx-primary-ring); background: #fff; color: var(--zwx-primary); }
+.plan-gate-secondary:hover { background: rgba(255, 255, 255, 0.8); }
 
 .workspace-loading {
   position: absolute;

@@ -269,7 +269,8 @@ const promptShare = phase => totalPromptTokens.value
 const verificationLabel = computed(() => ({
   pass: '已验收',
   unverified: '未验收',
-  revise: '已要求返工'
+  revise: '已要求返工',
+  plan_pending: '计划待确认'
 }[props.run?.verification?.status] || '—'))
 
 const fileName = path => (path || '').split('/').pop()

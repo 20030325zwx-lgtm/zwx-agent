@@ -10,12 +10,17 @@ import java.io.InputStreamReader;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.FileVisitResult;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import java.util.stream.Stream;
 
 /** 当前对话绑定项目的只读源码导航工具。 */
@@ -24,12 +29,19 @@ public class ProjectCodeReadTool {
     private static final int MAX_TREE_ENTRIES = 500;
     private static final int MAX_READ_CHARS = 100_000;
     private static final int MAX_COMMAND_CHARS = 40_000;
+    private static final long MAX_FALLBACK_FILE_BYTES = 2_000_000;
     private final String projectName;
     private final ProjectPathGuard guard;
+    private final String ripgrepCommand;
 
     public ProjectCodeReadTool(String projectName, Path projectRoot) {
+        this(projectName, projectRoot, "rg");
+    }
+
+    ProjectCodeReadTool(String projectName, Path projectRoot, String ripgrepCommand) {
         this.projectName = projectName;
         this.guard = new ProjectPathGuard(projectRoot);
+        this.ripgrepCommand = ripgrepCommand;
     }
 
     @Tool(description = "List the current project's directory tree from a project-relative path. Hidden secrets, .git internals, symlinks and generated dependency directories are excluded.")
@@ -47,7 +59,8 @@ public class ProjectCodeReadTool {
                     .filter(candidate -> !Files.isSymbolicLink(candidate))
                     .filter(candidate -> !guard.isSensitive(candidate))
                     .filter(candidate -> !isGeneratedPath(candidate))
-                    .sorted(Comparator.comparing(guard::relative))
+                    .sorted(Comparator.comparingInt((Path candidate) -> guard.root().relativize(candidate).getNameCount())
+                            .thenComparing(guard::relative))
                     .limit(MAX_TREE_ENTRIES + 1L)
                     .toList();
         } catch (IOException exception) {
@@ -64,9 +77,11 @@ public class ProjectCodeReadTool {
     @Tool(description = "Search text or regular expressions in source files of the current project. Returns project-relative paths and line numbers.")
     public String searchProjectCode(@ToolParam(description = "ripgrep regular expression to search for") String query) {
         if (query == null || query.isBlank() || query.length() > 500) return "Error: query must contain 1-500 characters";
-        return run(List.of("rg", "--line-number", "--no-heading", "--color", "never", "--hidden",
+        String result = run(List.of(ripgrepCommand, "--line-number", "--no-heading", "--color", "never", "--hidden",
                 "--glob", "!.git/**", "--glob", "!.env*", "--glob", "!node_modules/**",
                 "--glob", "!target/**", "--glob", "!dist/**", "--max-count", "100", "--", query, "."), 10);
+        if (result.startsWith("Error: required command is unavailable:")) return searchWithJava(query);
+        return result;
     }
 
     @Tool(description = "Read a UTF-8 source file from the current project by project-relative path. Output is bounded and sensitive files are denied.")
@@ -122,6 +137,59 @@ public class ProjectCodeReadTool {
             }) return true;
         }
         return false;
+    }
+
+    private String searchWithJava(String query) {
+        Pattern pattern;
+        try {
+            pattern = Pattern.compile(query);
+        } catch (PatternSyntaxException exception) {
+            return "Error: invalid search expression: " + exception.getDescription();
+        }
+        StringBuilder output = new StringBuilder();
+        int matches = 0;
+        try {
+            List<Path> files = new ArrayList<>();
+            Files.walkFileTree(guard.root(), new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                    if (!directory.equals(guard.root()) && (Files.isSymbolicLink(directory)
+                            || guard.isSensitive(directory) || isGeneratedPath(directory))) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                    if (attributes.isRegularFile() && !Files.isSymbolicLink(file)
+                            && !guard.isSensitive(file) && !isGeneratedPath(file)) files.add(file);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+            files.sort(Comparator.comparing(guard::relative));
+            for (Path file : files) {
+                if (Files.size(file) > MAX_FALLBACK_FILE_BYTES) continue;
+                try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                    String line;
+                    int lineNumber = 0;
+                    while ((line = reader.readLine()) != null) {
+                        lineNumber++;
+                        if (!pattern.matcher(line).find()) continue;
+                        String displayed = line.length() > 500 ? line.substring(0, 500) + "...[truncated]" : line;
+                        output.append(guard.relative(file)).append(':').append(lineNumber).append(':')
+                                .append(displayed).append('\n');
+                        matches++;
+                        if (matches >= 100 || output.length() >= MAX_COMMAND_CHARS) return output.toString();
+                    }
+                } catch (IOException ignored) {
+                    // Binary or non-UTF-8 files are not useful for the source fallback search.
+                }
+            }
+        } catch (IOException exception) {
+            return "Error searching project: " + exception.getMessage();
+        }
+        return output.isEmpty() ? "No results" : output.toString();
     }
 
     private String run(List<String> command, int timeoutSeconds) {

@@ -51,6 +51,30 @@ class ProjectCodeReadToolTest {
         assertTrue(tool.getProjectDiff().contains("+class App"));
     }
 
+    @Test
+    void rootListingKeepsTopLevelEntriesAheadOfDeepFiles() throws Exception {
+        Files.createDirectories(project.resolve("aaa/deep"));
+        for (int index = 0; index < 520; index++) {
+            Files.writeString(project.resolve("aaa/deep/file-" + index + ".txt"), "data");
+        }
+        Files.createDirectories(project.resolve("zzz-project"));
+
+        String tree = tool.listProjectTree(".");
+
+        assertTrue(tree.contains("D zzz-project"));
+        assertTrue(tree.contains("...[truncated at 500 entries]"));
+    }
+
+    @Test
+    void fallsBackToJavaSearchWhenRipgrepIsUnavailable() {
+        ProjectCodeReadTool withoutRipgrep = new ProjectCodeReadTool("demo", project, "missing-rg-command");
+
+        String result = withoutRipgrep.searchProjectCode("greeting");
+
+        assertTrue(result.contains("src/App.java:1"));
+        assertFalse(result.contains(".env"));
+    }
+
     private void run(String... command) throws Exception {
         Process process = new ProcessBuilder(command).directory(project.toFile()).start();
         if (process.waitFor() != 0) throw new IllegalStateException("git fixture command failed");

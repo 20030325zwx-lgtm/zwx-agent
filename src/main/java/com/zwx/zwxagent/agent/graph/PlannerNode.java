@@ -5,6 +5,7 @@ import com.alibaba.cloud.ai.graph.action.NodeAction;
 import com.zwx.zwxagent.agent.advisor.MyLoggerAdvisor;
 import com.zwx.zwxagent.agent.advisor.TokenUsageAdvisor;
 import com.zwx.zwxagent.agent.observability.TokenUsageService;
+import com.zwx.zwxagent.platform.intent.WorkspaceRequestDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
@@ -66,11 +67,23 @@ public class PlannerNode implements NodeAction {
                     GraphState.ACTIVITIES, List.of(activity),
                     GraphState.SSE_EVENTS, List.of(ActivityEvent.of("plan", "规划器", activity)));
         }
+        if (projectToolsEnabled && WorkspaceRequestDetector.referencesWorkspace(input)) {
+            List<PlanStep> plan = List.of(new PlanStep("检查当前工作区并回答", WorkerRole.CODER,
+                    "用户请求：" + input + "。优先检查绑定工作区中的本地目录和源码。"
+                            + "若请求中包含目录或项目名称，先用该名称作为精确相对路径调用 listProjectTree，"
+                            + "再读取 README、构建配置和相关源码；不要在完成本地检查前联网猜测同名项目。"));
+            String activity = "请求明确指向当前工作区，交由代码工程师优先检查本地项目";
+            return Map.of(GraphState.PLAN, plan,
+                    GraphState.ACTIVITIES, List.of(activity),
+                    GraphState.SSE_EVENTS, List.of(ActivityEvent.of("plan", "规划器", activity)));
+        }
         String prompt = (history.isBlank() ? "" : "最近对话摘要：\n" + history + "\n\n")
                 + "用户请求：" + input
                 + (webSearchEnabled ? "" : "\n\n注意：本轮未开启联网搜索，researcher 角色不可用；"
                 + "不要规划搜索、抓取网页或下载网络资源。需要实时外部信息时，使用 general 并说明无法联网获取。")
-                + (projectToolsEnabled ? "" : "\n\n注意：当前对话没有绑定可访问的项目，coder 角色不可用；不要规划源码浏览或 Git 检查。");
+                + (projectToolsEnabled
+                ? "\n\n当前对话已绑定可访问的工作区。请求涉及当前项目、目录、代码或仓库内名称时，优先使用 coder 检查本地内容，不能先联网猜测同名项目。"
+                : "\n\n注意：当前对话没有绑定可访问的项目，coder 角色不可用；不要规划源码浏览或 Git 检查。");
         List<PlanStep> plan;
         String activity;
         try {

@@ -96,6 +96,9 @@ public class ManusAgentController {
     private com.zwx.zwxagent.platform.workspace.RunWorkspaceService runWorkspaceService;
 
     @Resource
+    private com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService projectWorkspaceService;
+
+    @Resource
     private AppConfigurationService appConfigurationService;
 
     @Resource
@@ -236,6 +239,18 @@ public class ManusAgentController {
         boolean effectiveKnowledgeSearch = knowledgeSearch;
         boolean effectiveWebSearch = webSearch;
         String prefaceActivity = null;
+        boolean workspaceRequest = false;
+        if (com.zwx.zwxagent.platform.intent.WorkspaceRequestDetector.referencesWorkspace(message)) {
+            try {
+                workspaceRequest = projectWorkspaceService
+                        .resolveForConversation(actor.tenantId(), actor.userId(), conversationId)
+                        .isPresent();
+            } catch (RuntimeException exception) {
+                agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
+                conversationLease.close();
+                throw exception;
+            }
+        }
         var intentDecision = intentRouter.classify(message);
         if (intentDecision.isPresent()) {
             IntentDecision decision = intentDecision.get();
@@ -248,7 +263,7 @@ public class ManusAgentController {
             // 批 2 闲聊短路：高置信纯闲聊 + 用户未勾选任何开关 → 单轮直达回答，跳过 RAG/联网/图编排。
             // 门禁：意图评测集 12/12（2026-10-26 r2）达标后启用；开关关闭或用户显式勾选时不短路。
             if (shortCircuitEnabled && decision.recommend() == IntentDecision.Recommendation.SHORT_CIRCUIT_CANDIDATE
-                    && !knowledgeSearch && !webSearch && imageObjectKeys.isEmpty()) {
+                    && !workspaceRequest && !knowledgeSearch && !webSearch && imageObjectKeys.isEmpty()) {
                 runQuotaService.checkRunAllowed(actor.userId());
                 String summary = "闲聊直达：命中闲聊短路（置信 " + String.format("%.2f", decision.intentConfidence())
                         + "），本轮跳过知识库检索、联网搜索与多智能体编排";

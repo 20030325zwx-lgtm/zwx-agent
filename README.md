@@ -2,7 +2,7 @@
 
 **面向长任务的 AI 工作区与多智能体编排引擎。**
 
-由 [朱文轩](https://www.zhuwenxuan.online) 打造：规划、拆解、执行、恢复与交付，多智能体协作全程可观测、可干预。
+规划、拆解、执行、恢复与交付，多智能体协作全程可观测、可干预。
 
 **在线体验** → https://www.zhuwenxuan.online
 
@@ -112,5 +112,3 @@ Aster 是个人项目，源码可见。如需商用或二次分发，请先联�
 [GitHub Issues](https://github.com/20030325zwx-lgtm/zwx-agent/issues) · [www.zhuwenxuan.online](https://www.zhuwenxuan.online)
 
 ---
-
-Built by **朱文轩**

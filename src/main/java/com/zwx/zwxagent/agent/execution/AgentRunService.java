@@ -33,6 +33,8 @@ public class AgentRunService {
     };
     private static final TypeReference<List<ActivityEvent>> EVENT_LIST_TYPE = new TypeReference<>() {
     };
+    private static final TypeReference<List<Integer>> INT_LIST_TYPE = new TypeReference<>() {
+    };
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -75,12 +77,14 @@ public class AgentRunService {
                 UPDATE agent_run SET
                     last_node = ?, next_node = ?, plan = CAST(? AS jsonb),
                     task_results = CAST(? AS jsonb), activities = CAST(? AS jsonb), sse_events = CAST(? AS jsonb),
+                    revise_steps = CAST(? AS jsonb),
                     revision = ?, verification_status = ?, verification_feedback = ?,
                     final_answer = ?, partial_answer = CASE WHEN ? = '' THEN partial_answer ELSE ? END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND status = 'RUNNING'
                 """, checkpoint.lastNode(), checkpoint.nextNode(), json(checkpoint.plan()),
                 json(checkpoint.taskResults()), json(checkpoint.activities()), json(checkpoint.events()),
+                json(checkpoint.reviseSteps()),
                 checkpoint.revision(), checkpoint.verificationStatus(), checkpoint.verificationFeedback(),
                 checkpoint.finalAnswer(), nullToEmpty(checkpoint.partialAnswer()), nullToEmpty(checkpoint.partialAnswer()),
                 runId);
@@ -220,7 +224,8 @@ public class AgentRunService {
                 rs.getString("verification_status"),
                 rs.getString("verification_feedback"),
                 rs.getString("final_answer"),
-                rs.getString("partial_answer"));
+                rs.getString("partial_answer"),
+                read(rs.getString("revise_steps"), INT_LIST_TYPE));
         long assistantMessageId = rs.getLong("assistant_message_id");
         Long assistantId = rs.wasNull() ? null : assistantMessageId;
         return new AgentRun(

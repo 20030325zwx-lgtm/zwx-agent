@@ -16,6 +16,7 @@ public class ToolFactory {
     private final ToolSandbox sandbox;
     private final com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService;
     private final com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService projectWorkspaceService;
+    private final com.zwx.zwxagent.platform.workspace.ProjectExecutionLockService projectExecutionLockService;
     private final UrlAccessPolicy urlAccessPolicy;
     private final WebSearchTool webSearchTool;
     private final boolean terminalEnabled;
@@ -32,6 +33,7 @@ public class ToolFactory {
     public ToolFactory(ToolSandbox sandbox,
                        com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService,
                        com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService projectWorkspaceService,
+                       com.zwx.zwxagent.platform.workspace.ProjectExecutionLockService projectExecutionLockService,
                        UrlAccessPolicy urlAccessPolicy,
                        @Value("${search-api.api-key}") String searchApiKey,
                        @Value("${search-api.provider:searchapi}") String searchProvider,
@@ -48,6 +50,7 @@ public class ToolFactory {
         this.sandbox = sandbox;
         this.workspaceService = workspaceService;
         this.projectWorkspaceService = projectWorkspaceService;
+        this.projectExecutionLockService = projectExecutionLockService;
         this.urlAccessPolicy = urlAccessPolicy;
         this.webSearchTool = new WebSearchTool(searchProvider, searchApiKey);
         this.terminalEnabled = terminalEnabled;
@@ -73,14 +76,19 @@ public class ToolFactory {
     public ToolCallback[] createTools(String tenantId, String agentKey, String conversationId,
                                       boolean webSearchEnabled) {
         Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
-        return buildTools(workDir, webSearchEnabled, null);
+        return buildTools(workDir, webSearchEnabled, null, null);
     }
 
     public ToolCallback[] createTools(String tenantId, String userId, String agentKey, String conversationId,
                                       boolean webSearchEnabled) {
+        return createTools(tenantId, userId, agentKey, conversationId, null, webSearchEnabled);
+    }
+
+    public ToolCallback[] createTools(String tenantId, String userId, String agentKey, String conversationId,
+                                      String runId, boolean webSearchEnabled) {
         Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
         var project = projectWorkspaceService.resolveForConversation(tenantId, userId, conversationId).orElse(null);
-        return buildTools(workDir, webSearchEnabled, project);
+        return buildTools(workDir, webSearchEnabled, project, runId);
     }
 
     /** 旧签名（scope 目录）：保留给测试与 legacy 调用。 */
@@ -90,11 +98,12 @@ public class ToolFactory {
 
     public ToolCallback[] createTools(String scope, boolean webSearchEnabled) {
         Path workDir = sandbox.scopeDir(scope);
-        return buildTools(workDir, webSearchEnabled, null);
+        return buildTools(workDir, webSearchEnabled, null, null);
     }
 
     private ToolCallback[] buildTools(Path workDir, boolean webSearchEnabled,
-                                      com.zwx.zwxagent.platform.workspace.ResolvedProjectWorkspace project) {
+                                      com.zwx.zwxagent.platform.workspace.ResolvedProjectWorkspace project,
+                                      String runId) {
         java.util.List<Object> tools = new java.util.ArrayList<>();
         tools.add(new FileOperationTool(sandbox, workDir));
         if (webSearchEnabled) {
@@ -104,7 +113,13 @@ public class ToolFactory {
         }
         tools.add(new PDFGenerationTool(sandbox, workDir));
         tools.add(new CurrentTimeTool());
-        if (project != null) tools.add(new ProjectCodeReadTool(project.name(), project.root()));
+        if (project != null) {
+            tools.add(new ProjectCodeReadTool(project.name(), project.root()));
+            if (runId != null && !runId.isBlank()) {
+                tools.add(new ProjectCodeWriteTool(project.projectId(), project.name(), project.root(), runId,
+                        projectExecutionLockService));
+            }
+        }
         if (terminalEnabled) {
             tools.add(new TerminalOperationTool(workDir, terminalAllowlist));
         }

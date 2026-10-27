@@ -24,6 +24,7 @@ class ToolFactoryWebSearchTest {
         when(workspace.conversationRoot(anyString(), anyString(), anyString()))
                 .thenReturn(Files.createTempDirectory("tool-factory-test"));
         return new ToolFactory(sandbox, workspace, mock(com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService.class),
+                mock(com.zwx.zwxagent.platform.workspace.ProjectExecutionLockService.class),
                 mock(UrlAccessPolicy.class), "", "searchapi",
                 false, 1024 * 1024, "", mock(DataSource.class), false, "", "", 20, 5, false);
     }

@@ -14,6 +14,7 @@
 - 原生部署默认根为 `${user.dir}/projects`；Docker 使用 `/app/projects`，宿主机通过 `ASTER_PROJECTS_HOST_ROOT` 挂载。
 - 新增已有目录选择：本地模式从当前机器目录树选择绝对路径；生产 root 模式只能浏览配置根内的相对路径。两种模式均解析真实路径并拒绝符号链接，V28 持久化路径范围与规范化路径。
 - 代码 harness 第一阶段完成：绑定项目的对话会装配 `coder` 只读工具，可列目录树、ripgrep 搜索、读取源码、查看 Git status/diff；路径守卫拒绝绝对路径、穿越、符号链接与常见敏感文件，生成目录默认排除。
+- 代码 harness 第二阶段完成：`applyProjectPatch` 经人工确认后执行 `git apply --check` 与受控写入，返回当前 diff；V29 增加项目单写者租约，run 完成/中断时释放并带过期兜底，恢复执行沿用同一 run 身份与幂等工具账本。
 
 ## 核心决策
 
@@ -34,4 +35,4 @@
 
 ## 下一步
 
-继续完成受控 patch/diff、构建测试任务、Git commit 与按 run 隔离的 worktree；生产部署时显式设置 `ASTER_PROJECTS_HOST_ROOT` 为宿主机允许根。
+继续完成构建测试任务、Git commit 与按 run 隔离的 worktree；生产部署时显式设置 `ASTER_PROJECTS_HOST_ROOT` 为宿主机允许根。

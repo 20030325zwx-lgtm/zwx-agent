@@ -36,6 +36,26 @@ public final class ProjectPathGuard {
         }
     }
 
+    public Path resolveForWrite(String relativePath) {
+        String value = normalizeRelative(relativePath);
+        if (value.isEmpty()) throw new IllegalArgumentException("必须指定项目文件路径");
+        Path candidate = root.resolve(value).normalize();
+        if (!candidate.startsWith(root)) throw new IllegalArgumentException("路径越出了项目目录");
+        rejectSymlinkSegments(candidate);
+        Path parent = candidate.getParent();
+        if (parent == null || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalArgumentException("目标文件的父目录不存在");
+        }
+        try {
+            if (!parent.toRealPath(LinkOption.NOFOLLOW_LINKS).startsWith(root)) {
+                throw new IllegalArgumentException("路径越出了项目目录");
+            }
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("目标目录无法访问", exception);
+        }
+        return candidate;
+    }
+
     public String relative(Path path) {
         return root.relativize(path).toString().replace('\\', '/');
     }

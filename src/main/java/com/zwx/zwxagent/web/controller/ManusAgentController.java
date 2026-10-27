@@ -90,6 +90,9 @@ public class ManusAgentController {
     private WorkspaceService workspaceService;
 
     @Resource
+    private com.zwx.zwxagent.platform.workspace.ProjectExecutionLockService projectExecutionLockService;
+
+    @Resource
     private AppConfigurationService appConfigurationService;
 
     @Resource
@@ -287,8 +290,6 @@ public class ManusAgentController {
                     ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, retrievalQuery)
                     : new AgentKnowledgeRagResult("", List.of());
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
-            availableTools = Stream.concat(Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, effectiveWebSearch)), Arrays.stream(mcpTools.callbacks()))
-                    .toArray(ToolCallback[]::new);
             historyContext = agentConversationService
                     .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
                     .filter(historyMessage -> historyMessage.id() != userMessageId)
@@ -319,7 +320,21 @@ public class ManusAgentController {
             conversationLease.close();
             throw exception;
         }
+        try {
+            availableTools = Stream.concat(
+                            Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
+                                    conversationId, runId, effectiveWebSearch)),
+                            Arrays.stream(activeMcpTools.callbacks()))
+                    .toArray(ToolCallback[]::new);
+        } catch (RuntimeException exception) {
+            agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
+            agentRunService.finish(runId, "FAILED", null, exception.getMessage(), null);
+            activeMcpTools.close();
+            conversationLease.close();
+            throw exception;
+        }
         Runnable cleanup = () -> {
+            projectExecutionLockService.release(runId);
             activeMcpTools.close();
             conversationLease.close();
         };
@@ -463,7 +478,8 @@ public class ManusAgentController {
         try {
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
             availableTools = Stream.concat(
-                            Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, webSearch)),
+                            Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
+                                    conversationId, runId, webSearch)),
                             Arrays.stream(mcpTools.callbacks()))
                     .toArray(ToolCallback[]::new);
             runChatModel = chatModelFor(actor.userId());
@@ -487,6 +503,7 @@ public class ManusAgentController {
         agentRunService.restart(runId);
         String ragTraceJson = run.ragTraceJson() == null ? "{}" : run.ragTraceJson();
         Runnable cleanup = () -> {
+            projectExecutionLockService.release(runId);
             activeMcpTools.close();
             conversationLease.close();
         };
@@ -625,6 +642,8 @@ public class ManusAgentController {
         } catch (RuntimeException persistenceError) {
             org.slf4j.LoggerFactory.getLogger(ManusAgentController.class)
                     .error("Failed to persist super agent turn; conversationId={}, runId={}", conversationId, runId, persistenceError);
+        } finally {
+            projectExecutionLockService.release(runId);
         }
     }
 

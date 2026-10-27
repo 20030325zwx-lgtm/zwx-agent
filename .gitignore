@@ -46,3 +46,6 @@ build/
 
 # CI intent eval result
 evaluation/eval-sets/ci-intent-result.json
+
+# 构建产物
+/release/

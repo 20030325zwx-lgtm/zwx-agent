@@ -18,7 +18,7 @@ import java.util.Optional;
 /**
  * TypeSafe Jev（System One 决策模型）意图分流器。
  * 一次请求两问并行：意图 choice + 复杂度 score。
- * 批 0 为观察模式：结论仅用于日志与前端展示，不改变任何执行行为（见 docs/design/2026-10-25-jev-intent-routing.md）。
+ * 意图只区分工作任务/闲聊问答并产出闲聊短路候选；检索开关与是否联网均不由意图改写。
  * 任何异常返回 empty——分流失败绝不阻断主链路。
  */
 @Slf4j
@@ -93,9 +93,8 @@ public class JevIntentRouter implements IntentRouter {
                                 "type", "choice",
                                 "instructions", "用户这条消息的主要意图是什么",
                                 "criteria", Map.of(
-                                        "联网查询", "需要实时信息、新闻、行情、外部网站数据",
-                                        "工作任务", "读取或分析资料、操作项目、生成或处理文件、写代码、多步骤操作",
-                                        "闲聊问答", "打招呼、常识问答、闲聊，无需执行任务")),
+                                        "工作任务", "读取或分析资料、查找公司制度流程或文档内容、操作项目、生成或处理文件、写代码、多步骤操作",
+                                        "闲聊问答", "打招呼、常识问答、闲聊，无需执行任务或查阅资料；是否需要联网不由意图判断")),
                         COMPLEXITY_QUESTION, Map.of(
                                 "type", "score",
                                 "instructions", "处理这条消息需要多复杂",

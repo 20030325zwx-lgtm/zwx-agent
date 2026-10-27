@@ -2,7 +2,8 @@ package com.zwx.zwxagent.platform.intent;
 
 /**
  * 一次意图识别的结论（Jev System One / qwen 对照返回 + 延迟）。
- * 知识库与联网是否启用完全由用户开关决定，意图识别只负责分类和闲聊短路。
+ * 意图只区分工作任务/闲聊问答；知识库与联网开关完全由用户决定，联网工具在开关开启时是否真正使用由编排提示词决定。
+ * 意图识别只负责分类和闲聊短路。
  */
 public record IntentDecision(String intent, double intentConfidence, double complexity,
                              double complexityConfidence, long latencyMs) {

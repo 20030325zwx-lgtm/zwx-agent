@@ -168,10 +168,10 @@ app:
     # 路由器选型：none（默认禁用）/ jev（TypeSafe System One）/ qwen（DashScope 对照实现）
     provider: ${APP_INTENT_PROVIDER:none}
     # 闲聊短路：命中高置信纯闲聊且用户未勾选知识库/联网开关时单轮直达；
-    # provider=none 时无决策、本开关无效果。门禁：意图评测 12/12（2026-10-26 r2）达标
+    # provider=none 时无决策、本开关无效果。门禁：意图评测通过率达标（见 evaluation/eval-sets/README.md）
     short-circuit-enabled: ${APP_INTENT_SHORT_CIRCUIT_ENABLED:true}
     jev:
-      # 意图分流（批 0 观察模式）：api-key 留空即禁用，不改变任何现有行为
+      # 意图只分工作任务/闲聊问答；api-key 留空即禁用，路由失败/禁用均维持用户开关原行为
       enabled: ${APP_INTENT_JEV_ENABLED:true}
       base-url: ${APP_INTENT_JEV_BASE_URL:https://api.typesafe.ai}
       api-key: ${TYPESAFE_API_KEY:}

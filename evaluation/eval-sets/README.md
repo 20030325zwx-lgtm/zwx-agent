@@ -2,15 +2,16 @@
 
 ## 当前版本
 
-- 评测集：[knowledge-intent-eval-v1.json](./knowledge-intent-eval-v1.json)（27 例：意图 12 + RAG 15；2026-10-27 起意图仅分为工作任务、联网查询、闲聊问答，知识库由用户开关控制）
+- 评测集：[knowledge-intent-eval-v1.json](./knowledge-intent-eval-v1.json)（27 例：意图 12 + RAG 15；2026-10-27 起意图仅分为工作任务、闲聊问答，联网查询分类删除——联网由用户开关与编排提示词决定）
 - 基线：
   - [baseline-2026-10-26.json](./baseline-2026-10-26.json)：r1（intent-011 改标前），意图 11/12、RAG 15/15
-  - [baseline-2026-10-26-r2.json](./baseline-2026-10-26-r2.json)：r2（当前标注下），**意图 12/12、RAG 15/15**
+  - [baseline-2026-10-26-r2.json](./baseline-2026-10-26-r2.json)：r2（旧三分类标注下），**意图 12/12、RAG 15/15**
+  - [baseline-2026-10-27-two-class.json](./baseline-2026-10-27-two-class.json)：r3（当前两分类标注下，意图部分；RAG 未重跑）
 - 基线脚本：[run_baseline.py](./run_baseline.py)（意图走 DashScope 兼容模式 + QwenIntentRouter 同款系统提示词；RAG 走 `POST /ai/agent-knowledge/documents/{id}/verify-retrieval`；`python3 run_baseline.py <输出路径>` 可指定结果文件）
 
 ## 用途
 
-1. **意图分流批 2（闲聊短路）的门禁**：短路开启前，意图用例必须达到约定通过率（当前基线 11/12，唯一失败为刻意保留的题面模糊点 intent-011，见下）。
+1. **意图闲聊短路的门禁**：意图用例必须达到约定通过率，通过数回落需先复盘题面再恢复短路。
 2. **意图题面校准**：失败用例暴露 criteria 措辞边界，修改 `QwenIntentRouter`/`JevIntentRouter` 的题面后重跑对比。
 3. **RAG 检索策略对比**：改造检索（混合检索、重排）前后重跑 RAG 用例，命中/未命中对比是改造有效性的直接证据。
 4. **回归门禁**：改动意图提示词、检索参数后必须重跑并附结果。
@@ -24,6 +25,7 @@
 
 - 意图平均延迟约 1.17s（qwen-plus，自报置信非校准）；r2 基线意图 12/12、RAG 15/15。
 - **2026-10-27 路由口径调整**：删除知识库意图和知识需求评分，“工具任务”更名为“工作任务”；intent-011 恢复为闲聊问答。旧基线 JSON 保留当时口径，仅供历史对照，需重新生成新基线后才能代表当前分类效果。
+- **2026-10-27 删除联网查询分类**：意图只分工作任务/闲聊问答；intent-003/004（天气、金价）改标闲聊问答，intent-010（竞品调研）改标工作任务。联网与否由用户开关决定，开关开启时由编排提示词按任务自行决定是否真正搜索。r3 基线以此口径重跑（见上）。
 - **批 2 闲聊短路已于 2026-10-27 启用**（代码层）：命中候选且用户未勾选开关时单轮直达，跳过 RAG/联网/图编排；`app.intent.short-circuit-enabled` 可关。注意观察期局限：本地 52 次 run 均在 `intent.provider=none` 下产生，无真实路由数据，启用依据为评测门禁 12/12；provider 启用后应观察 `agent_intent_decision` 指标并复盘。
 - RAG 15/15 全命中：当前向量检索 + 重排在显式事实型问题上表现良好，作为混合检索改造的对照基线。
 

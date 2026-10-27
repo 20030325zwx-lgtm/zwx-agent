@@ -2,7 +2,7 @@
   "name": "knowledge-intent-eval-v1",
   "createdAt": "2026-10-26",
   "maintainer": "zhuwenxuan",
-  "description": "意图分流 + RAG 检索评测集 v1。意图用例验证 IntentRouter 的 choice/score 判断；知识库只由用户开关控制。RAG 用例独立验证知识库检索能否命中预期证据文档。",
+  "description": "意图分流 + RAG 检索评测集 v1。意图用例验证 IntentRouter 的 choice/score 判断（2026-10-27 起意图只分工作任务/闲聊问答，联网查询分类已删）；知识库与联网均由用户开关与编排提示词控制。RAG 用例独立验证知识库检索能否命中预期证据文档。",
   "corpus": {
     "test 范围": "人文地理语料 31 篇（data/knowledge/super-human-geography，幂等键 n8n-eval-corpus-*，自动发布）",
     "super 范围": "南京先维信息技术有限公司-员工手册（2024版）.pdf、G60沪昆高速镇胜线交通事故_前后门架梳理.xlsx"
@@ -13,21 +13,20 @@
     "新增用例时同步更新 notes 说明判定依据；模糊用例必须在 notes 里写清归类理由"
   ],
   "intentTaxonomy": {
-    "联网查询": "需要实时信息、新闻、行情、外部网站数据",
-    "工作任务": "读取或分析资料、操作项目、生成或处理文件、写代码、多步骤操作",
-    "闲聊问答": "打招呼、常识问答、闲聊，无需执行任务"
+    "工作任务": "读取或分析资料、查找公司制度流程或文档内容、操作项目、生成或处理文件、写代码、多步骤操作",
+    "闲聊问答": "打招呼、常识问答、闲聊，无需执行任务或查阅资料；是否需要联网不由意图判断，由用户开关与任务提示词决定"
   },
   "cases": [
     { "id": "intent-001", "type": "intent", "question": "你好呀，在吗", "expectedIntent": "闲聊问答", "notes": "纯打招呼" },
     { "id": "intent-002", "type": "intent", "question": "讲个笑话放松一下", "expectedIntent": "闲聊问答", "notes": "闲聊" },
-    { "id": "intent-003", "type": "intent", "question": "今天天气怎么样", "expectedIntent": "联网查询", "notes": "实时信息，需要联网" },
-    { "id": "intent-004", "type": "intent", "question": "现在黄金价格是多少", "expectedIntent": "联网查询", "notes": "实时行情" },
+    { "id": "intent-003", "type": "intent", "question": "今天天气怎么样", "expectedIntent": "闲聊问答", "notes": "单轮常识提问；联网与否由用户开关与提示词决定，意图不再判断联网需求" },
+    { "id": "intent-004", "type": "intent", "question": "现在黄金价格是多少", "expectedIntent": "闲聊问答", "notes": "单轮常识提问；同 intent-003，是否联网不由意图判断" },
     { "id": "intent-005", "type": "intent", "question": "帮我根据员工手册查一下试用期有多久", "expectedIntent": "工作任务", "notes": "读取并分析用户指定资料；是否检索知识库由用户开关决定" },
     { "id": "intent-006", "type": "intent", "question": "查一下先维信息的员工年假有几天", "expectedIntent": "工作任务", "notes": "需要查找并分析内部制度" },
-    { "id": "intent-007", "type": "intent", "question": "公司的报销流程是怎么规定的", "expectedIntent": "工作任务", "notes": "需要查找并分析内部制度" },
+    { "id": "intent-007", "type": "intent", "question": "公司的报销流程是怎么规定的", "expectedIntent": "工作任务", "notes": "查内部制度需查阅资料，不得判为闲聊短路（否则模型只能编造）；是否检索知识库由用户开关决定" },
     { "id": "intent-008", "type": "intent", "question": "帮我写一份项目周报，保存成 word 文档", "expectedIntent": "工作任务", "notes": "生成文件" },
     { "id": "intent-009", "type": "intent", "question": "把这份事故数据整理成 PDF 报告", "expectedIntent": "工作任务", "notes": "文档处理" },
-    { "id": "intent-010", "type": "intent", "question": "看看竞品最近发了什么新产品", "expectedIntent": "联网查询", "notes": "外部动态信息" },
+    { "id": "intent-010", "type": "intent", "question": "看看竞品最近发了什么新产品", "expectedIntent": "工作任务", "notes": "外部动态调研属多步骤执行；开关开启后由编排提示词决定是否联网" },
     { "id": "intent-011", "type": "intent", "question": "黑龙江省的省会是哪座城市", "expectedIntent": "闲聊问答", "notes": "单轮常识问答；意图识别不再判断知识库需求" },
     { "id": "intent-012", "type": "intent", "question": "根据G60沪昆高速的资料，分析镇胜线交通事故的原因", "expectedIntent": "工作任务", "notes": "读取资料并分析；是否检索知识库由用户开关决定" },
 

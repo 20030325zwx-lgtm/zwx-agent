@@ -48,7 +48,7 @@ class QwenIntentRouterTest {
         assertThat(json.path("messages")).hasSize(2);
         assertThat(json.path("messages").path(0).path("content").asText())
                 .contains("意图识别器", "工作任务")
-                .doesNotContain("知识库问答", "needs_knowledge");
+                .doesNotContain("知识库问答", "联网查询", "needs_knowledge");
         assertThat(json.path("messages").path(1).path("content").asText()).isEqualTo("帮我把事故数据整理成表格");
     }
 

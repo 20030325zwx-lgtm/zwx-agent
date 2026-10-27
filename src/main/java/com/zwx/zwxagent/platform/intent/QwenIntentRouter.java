@@ -80,8 +80,9 @@ public class QwenIntentRouter implements IntentRouter {
     Map<String, Object> buildRequest(String message) {
         String systemPrompt = """
                 你是意图识别器。对用户消息做判断后，只输出一个 JSON 对象，禁止输出任何其他文字或代码块标记。字段：
-                intent：取值只能是 工作任务、联网查询、闲聊问答 之一；
-                工作任务包括读取或分析资料、操作项目、生成或处理文件、写代码以及其他需要执行的任务；
+                intent：取值只能是 工作任务、闲聊问答 之一；
+                工作任务包括读取或分析资料、查找公司制度流程或文档内容、操作项目、生成或处理文件、写代码以及其他需要执行或查阅资料的任务；
+                闲聊问答仅限常识问答与寒暄，不涉及查阅资料；是否需要联网搜索不由意图判断，由用户开关与任务提示词决定；
                 confidence：0 到 1 的数字，你对意图判断的把握；
                 complexity：0 到 2 的数字（0=单轮可答，1=需要多步骤，2=需要研究分析）。
                 """;

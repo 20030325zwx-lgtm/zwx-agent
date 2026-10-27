@@ -17,7 +17,7 @@ class JevIntentRouterTest {
               "model": "jev-latest",
               "answers": {
                 "intent": {"type": "choice", "choice": "工作任务", "confidence": 0.92,
-                           "probabilities": {"工作任务": 0.92, "联网查询": 0.03, "闲聊问答": 0.05}},
+                           "probabilities": {"工作任务": 0.92, "闲聊问答": 0.08}},
                 "complexity": {"type": "score", "score": 0.4, "confidence": 0.66,
                                "legend": {"0": "单轮可答", "1": "需要多步骤", "2": "需要研究分析"},
                                "probabilities": {"0": 0.6, "1": 0.0, "2": 0.4}}
@@ -43,9 +43,10 @@ class JevIntentRouterTest {
         assertThat(json.path("model").asText()).isEqualTo("jev-latest");
         assertThat(json.path("state").asText()).isEqualTo("帮我把事故数据整理成表格");
         assertThat(json.path("questions").path("intent").path("type").asText()).isEqualTo("choice");
-        assertThat(json.path("questions").path("intent").path("criteria")).hasSize(3);
+        assertThat(json.path("questions").path("intent").path("criteria")).hasSize(2);
         assertThat(json.path("questions").path("intent").path("criteria").has("工作任务")).isTrue();
         assertThat(json.path("questions").path("intent").path("criteria").has("知识库问答")).isFalse();
+        assertThat(json.path("questions").path("intent").path("criteria").has("联网查询")).isFalse();
         assertThat(json.path("questions").path("complexity").path("criteria")).hasSize(3);
         assertThat(json.path("questions").has("needs_knowledge")).isFalse();
     }
@@ -68,7 +69,7 @@ class JevIntentRouterTest {
 
     @Test
     void recommendationFollowsDecisionTable() {
-        assertThat(new IntentDecision("联网查询", 0.8, 1.2, 0.6, 10).recommend())
+        assertThat(new IntentDecision("工作任务", 0.8, 1.2, 0.6, 10).recommend())
                 .isEqualTo(IntentDecision.Recommendation.FALLBACK);
         assertThat(new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 10).recommend())
                 .isEqualTo(IntentDecision.Recommendation.SHORT_CIRCUIT_CANDIDATE);
@@ -80,18 +81,18 @@ class JevIntentRouterTest {
 
     @Test
     void applyToPreservesBothUserSwitches() {
-        IntentDecision web = new IntentDecision("联网查询", 0.8, 1.2, 0.6, 10);
-        assertThat(web.applyTo(false, false).knowledgeSearch()).isFalse();
-        assertThat(web.applyTo(true, false).knowledgeSearch()).isTrue();
-        assertThat(web.applyTo(true, false).webSearch()).isFalse();
-        assertThat(web.applyTo(false, true).webSearch()).isTrue();
-        assertThat(web.applyTo(false, false).action()).contains("维持用户开关");
+        IntentDecision work = new IntentDecision("工作任务", 0.8, 1.2, 0.6, 10);
+        assertThat(work.applyTo(false, false).knowledgeSearch()).isFalse();
+        assertThat(work.applyTo(true, false).knowledgeSearch()).isTrue();
+        assertThat(work.applyTo(true, false).webSearch()).isFalse();
+        assertThat(work.applyTo(false, true).webSearch()).isTrue();
+        assertThat(work.applyTo(false, false).action()).contains("维持用户开关");
 
         IntentDecision chat = new IntentDecision("闲聊问答", 0.9, 0.1, 0.8, 10);
         assertThat(chat.applyTo(false, false).knowledgeSearch()).isFalse();
         assertThat(chat.applyTo(false, false).action()).contains("闲聊短路候选");
 
-        IntentDecision work = new IntentDecision("工作任务", 0.55, 1.5, 0.4, 10);
+        IntentDecision planning = new IntentDecision("工作任务", 0.55, 1.5, 0.4, 10);
         assertThat(work.applyTo(true, false).knowledgeSearch()).isTrue();
         assertThat(work.applyTo(false, false).knowledgeSearch()).isFalse();
         assertThat(work.applyTo(false, false).action()).contains("维持用户开关");

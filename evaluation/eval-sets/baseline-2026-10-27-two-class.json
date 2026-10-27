@@ -1,0 +1,105 @@
+{
+  "name": "ci-intent-gate",
+  "model": "qwen-plus",
+  "minPass": 11,
+  "cases": [
+    {
+      "id": "intent-001",
+      "expected": "闲聊问答",
+      "actual": "闲聊问答",
+      "confidence": 1.0,
+      "match": true,
+      "latencySeconds": 1.09
+    },
+    {
+      "id": "intent-002",
+      "expected": "闲聊问答",
+      "actual": "闲聊问答",
+      "confidence": 0.98,
+      "match": true,
+      "latencySeconds": 1.05
+    },
+    {
+      "id": "intent-003",
+      "expected": "闲聊问答",
+      "actual": "闲聊问答",
+      "confidence": 0.95,
+      "match": true,
+      "latencySeconds": 0.93
+    },
+    {
+      "id": "intent-004",
+      "expected": "闲聊问答",
+      "actual": "闲聊问答",
+      "confidence": 0.95,
+      "match": true,
+      "latencySeconds": 0.99
+    },
+    {
+      "id": "intent-005",
+      "expected": "工作任务",
+      "actual": "工作任务",
+      "confidence": 0.98,
+      "match": true,
+      "latencySeconds": 1.04
+    },
+    {
+      "id": "intent-006",
+      "expected": "工作任务",
+      "actual": "工作任务",
+      "confidence": 0.95,
+      "match": true,
+      "latencySeconds": 0.96
+    },
+    {
+      "id": "intent-007",
+      "expected": "工作任务",
+      "actual": "工作任务",
+      "confidence": 0.98,
+      "match": true,
+      "latencySeconds": 0.99
+    },
+    {
+      "id": "intent-008",
+      "expected": "工作任务",
+      "actual": "工作任务",
+      "confidence": 0.98,
+      "match": true,
+      "latencySeconds": 0.99
+    },
+    {
+      "id": "intent-009",
+      "expected": "工作任务",
+      "actual": "工作任务",
+      "confidence": 0.98,
+      "match": true,
+      "latencySeconds": 1.07
+    },
+    {
+      "id": "intent-010",
+      "expected": "工作任务",
+      "actual": "工作任务",
+      "confidence": 0.95,
+      "match": true,
+      "latencySeconds": 0.95
+    },
+    {
+      "id": "intent-011",
+      "expected": "闲聊问答",
+      "actual": "闲聊问答",
+      "confidence": 1.0,
+      "match": true,
+      "latencySeconds": 1.12
+    },
+    {
+      "id": "intent-012",
+      "expected": "工作任务",
+      "actual": "工作任务",
+      "confidence": 0.95,
+      "match": true,
+      "latencySeconds": 1.17
+    }
+  ],
+  "passed": 12,
+  "total": 12
+}

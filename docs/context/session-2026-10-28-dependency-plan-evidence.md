@@ -1,5 +1,13 @@
 # 会话交接：依赖计划与证据验收（P0 三项）（2026-10-28）
 
+## 追加改动二（10-28 晚）：P0 收尾 + P1 评测闭环
+
+- **计划先对齐后执行**（EvoFlow Plan 模式核心）：planner 后新增条件边——多步计划路由到 `plan_gate` 空节点直接挂起（run 状态 INTERRUPTED、`verification_status='plan_pending'`、发 `plan-proposed` SSE 事件），工作台显示计划卡片（查看计划/开始执行）；授权走既有 resume 链路（checkpoint lastNode=planner → resume 到 workers，不会重过门）；单步任务不设门直接执行。恢复时 plan_pending 状态不再带入图状态。
+- **revise_steps 持久化**：V31 迁移加 `agent_run.revise_steps JSONB`，checkpoint 读写贯通，恢复后仍按质检点名只重跑相关步骤。
+- **时间线状态色**：执行中蓝、暂停黄、失败红。
+- **任务级端到端评测**：`run_task_eval.py` + `task-eval-v1.json`，覆盖闲聊直达/知识库单步/多步依赖三路径；自动代用户授权计划门；SSE 按 spec 解析（多行 data 合并）。实测：task-003 2.4s ✅、task-001 27s ✅（验收 pass）、task-002 117s ✅（计划门触发、s2 依赖 s1、产出 .md 文件、验收 unverified 为一轮返工后的设计行为）。凭据读 `frontend/.env.local`（不回显），结果 JSON 已 gitignore。
+- 遗留：Goal 后台模式、任务经验复用、计划修订对话（当前修订=直接发新消息重新规划）、暗色主题等 P1/P2 项未做。
+
 ## 追加改动：时间线折叠与回答复制
 
 - ChatRoom：时间线在执行中默认展开、结束后折叠为「状态 + N 步」一行摘要（点击展开/收起，与 ZCode 行为一致），历史消息同样默认折叠；AI 回答新增悬停显示的「复制」按钮（触屏常显）。

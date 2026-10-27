@@ -29,6 +29,7 @@ public class ToolFactory {
     private final int dbQueryMaxRows;
     private final int dbQueryTimeoutSeconds;
     private final boolean dbQueryExternalEnabled;
+    private final int projectTaskTimeoutSeconds;
 
     public ToolFactory(ToolSandbox sandbox,
                        com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService,
@@ -46,7 +47,8 @@ public class ToolFactory {
                        @Value("${app.tools.db-query-denied-tables:}") String dbQueryDeniedTables,
                        @Value("${app.tools.db-query-max-rows:20}") int dbQueryMaxRows,
                        @Value("${app.tools.db-query-timeout-seconds:5}") int dbQueryTimeoutSeconds,
-                       @Value("${app.tools.db-query-external-enabled:false}") boolean dbQueryExternalEnabled) {
+                       @Value("${app.tools.db-query-external-enabled:false}") boolean dbQueryExternalEnabled,
+                       @Value("${app.project-workspace.task-timeout-seconds:900}") int projectTaskTimeoutSeconds) {
         this.sandbox = sandbox;
         this.workspaceService = workspaceService;
         this.projectWorkspaceService = projectWorkspaceService;
@@ -65,6 +67,7 @@ public class ToolFactory {
         this.dbQueryMaxRows = dbQueryMaxRows;
         this.dbQueryTimeoutSeconds = dbQueryTimeoutSeconds;
         this.dbQueryExternalEnabled = dbQueryExternalEnabled;
+        this.projectTaskTimeoutSeconds = Math.max(10, projectTaskTimeoutSeconds);
     }
 
     /** 工作区签名（design/plans/09 批次 A）：工具 workDir 来自统一工作区目录模型。 */
@@ -118,6 +121,8 @@ public class ToolFactory {
             if (runId != null && !runId.isBlank()) {
                 tools.add(new ProjectCodeWriteTool(project.projectId(), project.name(), project.root(), runId,
                         projectExecutionLockService));
+                tools.add(new ProjectTaskTool(project.projectId(), project.root(), runId,
+                        projectExecutionLockService, projectTaskTimeoutSeconds));
             }
         }
         if (terminalEnabled) {

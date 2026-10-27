@@ -26,7 +26,7 @@ class ToolFactoryWebSearchTest {
         return new ToolFactory(sandbox, workspace, mock(com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService.class),
                 mock(com.zwx.zwxagent.platform.workspace.ProjectExecutionLockService.class),
                 mock(UrlAccessPolicy.class), "", "searchapi",
-                false, 1024 * 1024, "", mock(DataSource.class), false, "", "", 20, 5, false);
+                false, 1024 * 1024, "", mock(DataSource.class), false, "", "", 20, 5, false, 900);
     }
 
     private Set<String> names(ToolCallback[] tools) {

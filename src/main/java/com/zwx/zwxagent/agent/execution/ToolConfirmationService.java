@@ -36,7 +36,7 @@ public class ToolConfirmationService {
 
     @org.springframework.beans.factory.annotation.Autowired
     public ToolConfirmationService(@Value("${app.tools.confirmation.enabled:true}") boolean enabled,
-                                   @Value("${app.tools.confirmation.required-tools:applyProjectPatch,executeTerminalCommand,executeDatabaseQuery,queryExternalDatabase,downloadResource,mcp:*}") String requiredTools,
+                                   @Value("${app.tools.confirmation.required-tools:applyProjectPatch,runProjectTask,executeTerminalCommand,executeDatabaseQuery,queryExternalDatabase,downloadResource,mcp:*}") String requiredTools,
                                    JdbcTemplate jdbcTemplate) {
         this(enabled, requiredTools, jdbcTemplate, null);
     }

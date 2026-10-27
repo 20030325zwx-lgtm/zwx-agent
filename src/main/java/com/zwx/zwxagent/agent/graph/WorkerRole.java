@@ -14,7 +14,7 @@ public enum WorkerRole {
             SetOf("executeDatabaseQuery", "queryExternalDatabase", "executeTerminalCommand")),
     CODER("coder", "代码工程师", "代码工程师：浏览、搜索和分析当前项目源码与 Git 变更",
             SetOf("listProjectTree", "searchProjectCode", "readProjectFile", "getProjectGitStatus", "getProjectDiff",
-                    "applyProjectPatch")),
+                    "applyProjectPatch", "listProjectTasks", "runProjectTask")),
     GENERAL("general", "通用助理", "通用助理：可以使用全部可用工具（含 MCP）",
             null);
 
@@ -75,6 +75,8 @@ public enum WorkerRole {
             case "getProjectGitStatus" -> "查看 Git 状态";
             case "getProjectDiff" -> "查看代码差异";
             case "applyProjectPatch" -> "修改源码";
+            case "listProjectTasks" -> "识别项目任务";
+            case "runProjectTask" -> "执行项目检查";
             case "" -> "处理任务";
             default -> "执行 " + toolName;
         };

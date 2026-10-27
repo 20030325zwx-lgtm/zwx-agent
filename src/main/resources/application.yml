@@ -82,6 +82,7 @@ app:
     jwt-ttl-hours: ${JWT_TTL_HOURS:72}
     admin-username: ${APP_SECURITY_ADMIN_USERNAME:admin}
     admin-password: ${APP_SECURITY_ADMIN_PASSWORD:}
+    registration-enabled: ${APP_SECURITY_REGISTRATION_ENABLED:false}
   temp-dir: ${APP_TEMP_DIR:${user.dir}/temp}
   workspace:
     # 统一工作区根（design/plans/09 批次 A）；空 = {temp-dir}/workspaces

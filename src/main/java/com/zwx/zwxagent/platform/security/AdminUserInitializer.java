@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class AdminUserInitializer implements ApplicationRunner {
 
+    private static final String DEFAULT_ADMIN_PASSWORD = "admin123";
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final String adminUsername;
@@ -26,14 +28,14 @@ public class AdminUserInitializer implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         if (userRepository.existsByUsername(adminUsername)) return;
-        if (adminPassword == null || adminPassword.isBlank()) {
-            if (userRepository.count() > 0) return;
-            userRepository.insert("default", adminUsername, passwordEncoder.encode("admin123"), Role.ADMIN);
+        String effectivePassword = adminPassword == null || adminPassword.isBlank()
+                ? DEFAULT_ADMIN_PASSWORD
+                : adminPassword;
+        userRepository.insert("default", adminUsername, passwordEncoder.encode(effectivePassword), Role.ADMIN);
+        if (DEFAULT_ADMIN_PASSWORD.equals(effectivePassword)) {
             org.slf4j.LoggerFactory.getLogger(AdminUserInitializer.class).warn(
                     "Bootstrapped admin user '{}' with default password 'admin123'. Set APP_SECURITY_ADMIN_PASSWORD to override before any real deployment.",
                     adminUsername);
-            return;
         }
-        userRepository.insert("default", adminUsername, passwordEncoder.encode(adminPassword), Role.ADMIN);
     }
 }

@@ -11,16 +11,14 @@
       </label>
       <label>
         <span>密码</span>
-        <input v-model="password" type="password" autocomplete="current-password" placeholder="至少 6 位" required />
+        <input v-model="password" type="password" autocomplete="current-password" placeholder="请输入密码" required />
       </label>
 
       <p v-if="error" class="login-error">{{ error }}</p>
 
-      <button class="login-submit" type="submit" :disabled="loading">{{ loading ? '请稍候...' : mode === 'login' ? '登录' : '注册并登录' }}</button>
+      <button class="login-submit" type="submit" :disabled="loading">{{ loading ? '请稍候...' : '登录' }}</button>
 
-      <button class="login-switch" type="button" @click="toggleMode">
-        {{ mode === 'login' ? '没有账号？注册新账号' : '已有账号？返回登录' }}
-      </button>
+      <button class="login-switch" type="button" disabled>注册账号（已关闭）</button>
     </form>
   </div>
 </template>
@@ -28,27 +26,22 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { login, register } from '../api/auth'
+import { login } from '../api/auth'
 
 const router = useRouter()
-const mode = ref('login')
-const username = ref('')
-const password = ref('')
+const defaultAdminUsername = import.meta.env.VITE_DEFAULT_ADMIN_USERNAME || 'admin'
+const defaultAdminPassword = import.meta.env.VITE_DEFAULT_ADMIN_PASSWORD || 'admin123'
+const username = ref(defaultAdminUsername)
+const password = ref(defaultAdminPassword)
 const error = ref('')
 const loading = ref(false)
-
-const toggleMode = () => {
-  mode.value = mode.value === 'login' ? 'register' : 'login'
-  error.value = ''
-}
 
 const submit = async () => {
   if (loading.value) return
   loading.value = true
   error.value = ''
   try {
-    if (mode.value === 'login') await login(username.value, password.value)
-    else await register(username.value, password.value)
+    await login(username.value, password.value)
     const redirect = router.currentRoute.value.query.redirect
     await router.replace(typeof redirect === 'string' && redirect.startsWith('/') ? redirect : '/')
   } catch (requestError) {
@@ -178,4 +171,11 @@ const submit = async () => {
 }
 
 .login-switch:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.login-switch:disabled {
+  color: var(--sk-label-3);
+  cursor: not-allowed;
+  opacity: 0.65;
+  text-decoration: none;
+}
 </style>

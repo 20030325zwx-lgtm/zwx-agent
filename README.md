@@ -87,7 +87,7 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-访问 `http://127.0.0.1:3000/`。首次启动且用户表为空时，会自动创建管理员 `admin`，默认密码 `admin123`。生产环境请通过 `APP_SECURITY_ADMIN_PASSWORD` 覆盖，并设置稳定的 `JWT_SECRET`。
+访问 `http://127.0.0.1:3000/`。启动时若管理员账号不存在，会自动创建 `admin`，默认密码 `admin123`。公开注册默认关闭；如确需开放，可设置 `APP_SECURITY_REGISTRATION_ENABLED=true`。生产环境请通过 `APP_SECURITY_ADMIN_PASSWORD` 覆盖默认密码，并设置稳定的 `JWT_SECRET`。
 
 ## Docker 部署
 

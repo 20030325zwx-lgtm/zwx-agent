@@ -16,8 +16,11 @@ spring.ai.dashscope.api-key=YOUR_DASHSCOPE_API_KEY
 # —— JWT 签名密钥（必填）：至少 32 位随机字符串，更换后已登录会话失效 ——
 app.security.jwt-secret=CHANGE_ME_TO_A_LONG_RANDOM_SECRET_AT_LEAST_32_CHARS
 
-# —— 管理员初始密码（建议必填）：仅在用户表为空时创建 admin 时使用 ——
+# —— 管理员初始密码（建议必填）：admin 不存在时自动创建 ——
 # app.security.admin-password=CHANGE_ME_TO_A_STRONG_ADMIN_PASSWORD
+
+# —— 公开注册默认关闭；确需允许访客自助注册时才打开 ——
+# app.security.registration-enabled=false
 
 # —— 配置密钥加密口令（建议单独设置；不填回退 JWT secret）——
 # app.config.encryption-key=CHANGE_ME_TO_A_LONG_RANDOM_CONFIG_KEY

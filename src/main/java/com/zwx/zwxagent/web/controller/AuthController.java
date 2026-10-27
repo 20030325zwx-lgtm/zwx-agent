@@ -6,6 +6,7 @@ import com.zwx.zwxagent.platform.security.JwtService;
 import com.zwx.zwxagent.platform.security.Role;
 import com.zwx.zwxagent.platform.security.UserRepository;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.validation.annotation.Validated;
@@ -31,11 +32,14 @@ public class AuthController {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final boolean registrationEnabled;
 
-    public AuthController(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+    public AuthController(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService,
+                          @Value("${app.security.registration-enabled:false}") boolean registrationEnabled) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.registrationEnabled = registrationEnabled;
     }
 
     public record AuthRequest(@NotBlank String username, @NotBlank String password) {
@@ -46,6 +50,9 @@ public class AuthController {
 
     @PostMapping("/register")
     public AuthResponse register(@RequestBody AuthRequest request) {
+        if (!registrationEnabled) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Registration is disabled");
+        }
         String username = request.username() == null ? "" : request.username().trim();
         if (!USERNAME_PATTERN.matcher(username).matches()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username must be 3-64 characters of letters, digits, _, . or -");

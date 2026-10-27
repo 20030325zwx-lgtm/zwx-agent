@@ -191,44 +191,44 @@ watch(() => props.projects.length, (current, previous) => {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid #e3e4e7;
-  background: #f7f7f8;
-  color: #292a2d;
+  border-right: 1px solid #d9e4f3;
+  background: linear-gradient(180deg, #f7faff 0%, #f0f5fc 100%);
+  color: #26364f;
 }
 .sidebar-header { display: flex; height: 62px; flex: 0 0 62px; align-items: center; justify-content: space-between; padding: 0 18px; }
 .brand { display: flex; min-width: 0; align-items: center; gap: 10px; }
-.brand strong { overflow: hidden; color: #242528; font-size: 16px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.brand-mark { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: 7px; background: #e9e9eb; color: #36373a; font-size: 10px; font-weight: 750; }
+.brand strong { overflow: hidden; color: #22324a; font-size: 16px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.brand-mark { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: 7px; background: #e4edfb; color: #3768c5; font-size: 10px; font-weight: 750; }
 .brand-mark.travel { font-size: 14px; }
-.icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #74767b; }
-.icon-button:hover { background: #e8e8ea; color: #252629; }
+.icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #73829a; }
+.icon-button:hover { background: #e5edf9; color: #2f527f; }
 .close-button { display: none; }
-.new-task-button { display: flex; height: 42px; flex: 0 0 42px; align-items: center; gap: 12px; margin: 2px 10px 10px; border: 0; border-radius: 7px; padding: 0 12px; background: transparent; color: #303136; font-size: 14px; font-weight: 600; text-align: left; }
-.new-task-button:hover { background: #eaeaeb; }
-.sidebar-divider { height: 1px; flex: 0 0 1px; background: #e2e2e4; }
+.new-task-button { display: flex; height: 42px; flex: 0 0 42px; align-items: center; gap: 12px; margin: 2px 10px 10px; border: 0; border-radius: 7px; padding: 0 12px; background: transparent; color: #2a3b55; font-size: 14px; font-weight: 600; text-align: left; }
+.new-task-button:hover { background: #e6eef9; }
+.sidebar-divider { height: 1px; flex: 0 0 1px; background: #dce6f3; }
 .list-toolbar { display: flex; height: 52px; flex: 0 0 52px; align-items: center; justify-content: space-between; padding: 0 12px 0 18px; }
-.list-toolbar h2 { margin: 0; color: #77797e; font-size: 13px; font-weight: 700; }
+.list-toolbar h2 { margin: 0; color: #74839a; font-size: 13px; font-weight: 700; }
 .toolbar-actions { display: flex; gap: 2px; }
-.search-row { display: flex; height: 34px; flex: 0 0 34px; align-items: center; gap: 7px; margin: -3px 12px 9px; border: 1px solid #d7d8dc; border-radius: 7px; padding: 0 7px 0 9px; background: #fff; color: #8b8d91; }
-.search-row:focus-within { border-color: #aeb0b5; box-shadow: 0 0 0 2px rgba(0, 0, 0, .04); }
+.search-row { display: flex; height: 34px; flex: 0 0 34px; align-items: center; gap: 7px; margin: -3px 12px 9px; border: 1px solid #cfdbec; border-radius: 7px; padding: 0 7px 0 9px; background: rgba(255, 255, 255, .82); color: #8190a6; }
+.search-row:focus-within { border-color: #9eb6d7; box-shadow: 0 0 0 2px rgba(67, 116, 184, .08); }
 .search-row input { min-width: 0; flex: 1; border: 0; outline: none; background: transparent; color: #2d2e32; font-size: 12px; }
 .clear-search { width: 24px; height: 24px; }
-.conversation-list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 20px; scrollbar-width: thin; scrollbar-color: #c8c9cc transparent; }
+.conversation-list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 20px; scrollbar-width: thin; scrollbar-color: #c2cfe1 transparent; }
 .workspace-group { margin-bottom: 7px; }
-.workspace-row { display: flex; width: 100%; height: 36px; min-width: 0; align-items: center; gap: 9px; border: 0; border-radius: 7px; padding: 0 9px; background: transparent; color: #6f7176; text-align: left; }
-.workspace-row:hover { background: #ececee; color: #333438; }
-.workspace-row.selected { color: #3e3f43; }
+.workspace-row { display: flex; width: 100%; height: 36px; min-width: 0; align-items: center; gap: 9px; border: 0; border-radius: 7px; padding: 0 9px; background: transparent; color: #66758b; text-align: left; }
+.workspace-row:hover { background: #e7eef8; color: #304967; }
+.workspace-row.selected { color: #36577f; }
 .workspace-name { overflow: hidden; flex: 1; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.task-count { color: #a1a2a6; font-size: 11px; font-variant-numeric: tabular-nums; }
+.task-count { color: #91a0b4; font-size: 11px; font-variant-numeric: tabular-nums; }
 .workspace-tasks { padding-left: 15px; }
 .conversation-row { position: relative; display: flex; align-items: center; }
-.conversation-item { display: grid; width: 100%; height: 36px; min-width: 0; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 0; border-radius: 7px; padding: 0 28px 0 9px; background: transparent; color: #55575c; text-align: left; }
-.conversation-item:hover { background: #ececee; color: #2f3034; }
-.conversation-item.active { background: #e2e2e4; color: #222326; font-weight: 600; }
+.conversation-item { display: grid; width: 100%; height: 36px; min-width: 0; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 0; border-radius: 7px; padding: 0 28px 0 9px; background: transparent; color: #56657a; text-align: left; }
+.conversation-item:hover { background: #e8eff9; color: #2d4563; }
+.conversation-item.active { background: #dfe9f7; color: #233c5c; font-weight: 600; }
 .active-dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; }
 .conversation-item.active .active-dot { background: #ff5964; }
 .conversation-title { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-item time { color: #96989d; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.conversation-item time { color: #8e9db1; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .delete-button { position: absolute; right: 3px; width: 25px; height: 25px; opacity: 0; }
 .conversation-row:hover .delete-button, .conversation-item.active + .delete-button { opacity: 1; }
 .delete-button:hover { background: #f7dfe1; color: #c82c3a; }

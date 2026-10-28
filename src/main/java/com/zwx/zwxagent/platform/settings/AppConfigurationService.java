@@ -197,6 +197,13 @@ public class AppConfigurationService {
                 systemRow.enabled() ? "SYSTEM" : "ENVIRONMENT");
     }
 
+    /**
+     * 供模型目录等服务复用同一套地址校验：白名单主机直通，其余走可解析公网 URL 校验。
+     */
+    public String validateAndNormalizeBaseUrl(String baseUrl) {
+        return normalizeBaseUrl(baseUrl);
+    }
+
     private Descriptor descriptor(String key) {
         Descriptor descriptor = descriptors.get(key);
         if (descriptor == null) throw new IllegalArgumentException("未知的模型配置项：" + key);

@@ -24,7 +24,6 @@ import com.zwx.zwxagent.knowledge.storage.AgentImageStorageService;
 import com.zwx.zwxagent.platform.intent.IntentDecision;
 import com.zwx.zwxagent.platform.intent.IntentRouter;
 import com.zwx.zwxagent.platform.security.CurrentActor;
-import com.zwx.zwxagent.platform.settings.AppConfigurationService;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
 import com.zwx.zwxagent.platform.workspace.WorkspaceService;
 import jakarta.annotation.Resource;
@@ -99,7 +98,7 @@ public class ManusAgentController {
     private com.zwx.zwxagent.platform.workspace.ProjectWorkspaceService projectWorkspaceService;
 
     @Resource
-    private AppConfigurationService appConfigurationService;
+    private com.zwx.zwxagent.platform.settings.ModelCatalogService modelCatalogService;
 
     @Resource
     private DynamicChatModelFactory dynamicChatModelFactory;
@@ -349,6 +348,9 @@ public class ManusAgentController {
             conversationLease.close();
             throw exception;
         }
+        modelCatalogService.attachToRun(runId,
+                modelCatalogService.resolve(actor.userId(),
+                        com.zwx.zwxagent.platform.settings.ModelCatalogService.PURPOSE_CHAT));
         try {
             availableTools = Stream.concat(
                             Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
@@ -569,7 +571,9 @@ public class ManusAgentController {
     }
 
     private ChatModel chatModelFor(String userId) {
-        return dynamicChatModelFactory.model(appConfigurationService.resolve(userId, AppConfigurationService.CHAT));
+        return dynamicChatModelFactory.model(
+                modelCatalogService.resolve(userId, com.zwx.zwxagent.platform.settings.ModelCatalogService.PURPOSE_CHAT)
+                        .config());
     }
 
     /**

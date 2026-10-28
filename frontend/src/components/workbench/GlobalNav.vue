@@ -25,7 +25,7 @@
         <component :is="themeIcon" :size="18" :stroke-width="1.9" />
         <span class="wb-nav-tip">{{ themeTitle }}</span>
       </button>
-      <router-link to="/model-settings" class="wb-nav-item" title="设置">
+      <router-link to="/model-catalog" class="wb-nav-item" title="设置">
         <Settings :size="19" :stroke-width="1.9" />
         <span class="wb-nav-tip">设置</span>
       </router-link>

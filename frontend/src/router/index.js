@@ -20,6 +20,13 @@ const routes = [
     }
   },
   {
+    // 模型目录设置：工作台内的完整页面，不挂在旧顶部导航布局下
+    path: '/model-catalog',
+    name: 'ModelCatalog',
+    component: () => import('../views/ModelCatalogSettings.vue'),
+    meta: { title: '模型设置 - Aster', description: '管理模型供应商、模型与用途绑定。' }
+  },
+  {
     path: '/',
     component: WorkspaceLayout,
     children: [

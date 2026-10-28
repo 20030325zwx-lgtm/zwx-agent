@@ -231,6 +231,19 @@ export const saveSystemModelSettings = (key, payload) => request.put(`/settings/
 export const resetSystemModelSettings = key => request.delete(`/settings/system/models/${encodeURIComponent(key)}`).then(response => response.data)
 export const testModelSettings = (key, scope = 'USER') => request.post(`/settings/models/${encodeURIComponent(key)}/test`, null, { params: { scope } }).then(response => response.data)
 
+// 模型供应商目录（Provider/Model/Binding），见 docs/design/2026-10-28-desktop-phase-a-runtime-model-contract.md
+export const listModelCatalog = () => request.get('/settings/catalog').then(response => response.data)
+export const createModelProvider = payload => request.post('/settings/providers', payload).then(response => response.data)
+export const updateModelProvider = (providerId, payload) => request.put(`/settings/providers/${providerId}`, payload).then(response => response.data)
+export const deleteModelProvider = providerId => request.delete(`/settings/providers/${providerId}`).then(response => response.data)
+export const addProviderModel = (providerId, payload) => request.post(`/settings/providers/${providerId}/models`, payload).then(response => response.data)
+export const updateProviderModel = (providerId, modelRowId, payload) => request.put(`/settings/providers/${providerId}/models/${modelRowId}`, payload).then(response => response.data)
+export const deleteProviderModel = (providerId, modelRowId) => request.delete(`/settings/providers/${providerId}/models/${modelRowId}`).then(response => response.data)
+export const testModelProvider = (providerId, draft) => request.post(`/settings/providers/${providerId}/test`, draft || {}).then(response => response.data)
+export const setModelBinding = (purpose, payload) => request.put(`/settings/bindings/${encodeURIComponent(purpose)}`, payload).then(response => response.data)
+export const clearModelBinding = (purpose, scope = 'USER') => request.delete(`/settings/bindings/${encodeURIComponent(purpose)}`, { params: { scope } }).then(response => response.data)
+
+
 export default {
   chatWithManus,
   resumeManusRun,

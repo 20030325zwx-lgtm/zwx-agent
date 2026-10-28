@@ -103,6 +103,9 @@
         </template>
 
         <template v-else>
+          <button v-if="isDesktop" type="button" class="primary-button native-picker" @click="pickNativeDirectory">
+            {{ workspaceCreating ? '授权中…' : '选择本机目录…' }}
+          </button>
           <div class="path-bar">
             <button class="icon-button" type="button" title="上一级" aria-label="上一级" :disabled="directoryView?.parentPath == null || directoryLoading" @click="browse(directoryView.parentPath)"><ArrowUp :size="16" /></button>
             <span :title="directoryView?.displayPath">{{ directoryView?.displayPath || '正在读取...' }}</span>
@@ -132,6 +135,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { ArrowUp, ChevronRight, Folder, FolderOpen, FolderPlus, Search, SquarePen, Trash2, X } from 'lucide-vue-next'
+import { chooseDesktopDirectory, isDesktopLocal } from '../api/auth'
 
 const props = defineProps({
   conversations: { type: Array, default: () => [] },
@@ -150,6 +154,13 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['create', 'create-workspace', 'browse-workspaces', 'choose-workspace', 'select-project', 'select', 'delete', 'close'])
+// 桌面端：系统目录选择器取得用户授权后直接绑定
+const isDesktop = isDesktopLocal()
+const pickNativeDirectory = async () => {
+  if (props.workspaceCreating) return
+  const path = await chooseDesktopDirectory()
+  if (path) emit('choose-workspace', path)
+}
 const workspaceFormOpen = ref(false)
 const workspaceName = ref('')
 const directoryName = ref('')
@@ -241,6 +252,11 @@ watch(() => props.workspaceCreating, creating => {
 </script>
 
 <style scoped>
+.native-picker {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
 .conversation-sidebar {
   width: 304px;
   box-sizing: border-box;

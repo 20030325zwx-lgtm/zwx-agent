@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, safeStorage } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const crypto = require('crypto')
 const http = require('http')
@@ -58,6 +58,7 @@ const logStream = name => {
   return fs.createWriteStream(path.join(logDir(), name), { flags: 'a' })
 }
 const randomToken = () => crypto.randomBytes(32).toString('hex')
+const readGrants = config => Array.isArray(config.grantedDirectories) ? config.grantedDirectories : []
 
 const contentType = filename => ({
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -172,6 +173,23 @@ const waitForBackend = async port => {
   return false
 }
 
+// 把用户授权的目录清单同步给本机后端（回环令牌认证）；后端以此校验所有目录绑定
+const pushDirectoryGrants = async () => {
+  const port = runtimeState.backendPort
+  const token = runtimeState.loopbackToken
+  if (!port || !token) return
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/ai/desktop/grants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Aster-Local-Token': token },
+      body: JSON.stringify({ paths: readGrants(readConfig()) })
+    })
+    console.log('[aster-desktop] 目录授权同步:', response.status, '目录数', readGrants(readConfig()).length)
+  } catch (error) {
+    console.error('[aster-desktop] 目录授权同步失败:', error.message)
+  }
+}
+
 const startLocalBackend = async () => {
   const config = readConfig()
   if (!isLocalMode(config)) {
@@ -248,6 +266,7 @@ const startLocalBackend = async () => {
     const ready = await waitForBackend(port)
     if (!ready && !runtimeState.error) runtimeState.error = '本机服务在 90 秒内未就绪，请查看日志。'
     runtimeState.phase = ready ? 'ready' : 'failed'
+    if (ready) await pushDirectoryGrants()
   } catch (error) {
     console.error('[aster-desktop] 本机服务启动失败:', error.message || error)
     runtimeState.phase = 'failed'
@@ -259,6 +278,28 @@ ipcMain.on('desktop:get-api-base-url', event => { event.returnValue = apiBaseUrl
 ipcMain.on('desktop:get-settings', event => { event.returnValue = settingsView(readConfig()) })
 ipcMain.on('desktop:get-local-token', event => { event.returnValue = runtimeState.loopbackToken || '' })
 ipcMain.on('desktop:get-runtime-state', event => { event.returnValue = { ...runtimeState, apiBaseUrl: apiBaseUrl() } })
+ipcMain.handle('desktop:choose-directory', async () => {
+  const window = BrowserWindow.getAllWindows()[0]
+  const result = await dialog.showOpenDialog(window, {
+    title: '选择要授权给 Aster 的目录',
+    properties: ['openDirectory']
+  })
+  if (result.canceled || !result.filePaths.length) return null
+  const path = result.filePaths[0]
+  const config = readConfig()
+  const grants = readGrants(config)
+  if (!grants.includes(path)) writeConfig({ ...config, grantedDirectories: [...grants, path] })
+  await pushDirectoryGrants()
+  return path
+})
+ipcMain.on('desktop:get-directory-grants', event => { event.returnValue = readGrants(readConfig()) })
+ipcMain.handle('desktop:revoke-directory-grant', async (_, path) => {
+  const config = readConfig()
+  const grants = readGrants(config).filter(grant => grant !== path)
+  writeConfig({ ...config, grantedDirectories: grants })
+  await pushDirectoryGrants()
+  return true
+})
 ipcMain.handle('desktop:save-settings', (_, payload) => {
   if (!payload || !['local', 'remote'].includes(payload.backendMode)) throw new Error('无效的运行模式。')
   if (!isValidApiBaseUrl(payload.apiBaseUrl || '')) throw new Error('服务地址必须是以 /api 结尾的 HTTP(S) 地址。')

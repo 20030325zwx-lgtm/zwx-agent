@@ -27,13 +27,16 @@ public class ProjectWorkspaceService {
     private final JdbcTemplate jdbcTemplate;
     private final Path configuredRoot;
     private final SelectionMode selectionMode;
+    private final com.zwx.zwxagent.platform.desktop.DesktopDirectoryGrantService desktopDirectoryGrants;
 
     public ProjectWorkspaceService(JdbcTemplate jdbcTemplate,
                                    @Value("${app.project-workspace.root:${user.dir}/projects}") String root,
-                                   @Value("${app.project-workspace.selection-mode:local}") String selectionMode) {
+                                   @Value("${app.project-workspace.selection-mode:local}") String selectionMode,
+                                   com.zwx.zwxagent.platform.desktop.DesktopDirectoryGrantService desktopDirectoryGrants) {
         this.jdbcTemplate = jdbcTemplate;
         this.configuredRoot = Path.of(root).toAbsolutePath().normalize();
         this.selectionMode = SelectionMode.parse(selectionMode);
+        this.desktopDirectoryGrants = desktopDirectoryGrants;
     }
 
     public List<ProjectWorkspace> list(String tenantId, String userId) {
@@ -77,6 +80,7 @@ public class ProjectWorkspaceService {
 
     @Transactional
     public ProjectWorkspace select(String tenantId, String userId, String path, String name) {
+        if (desktopDirectoryGrants.active()) desktopDirectoryGrants.requireGranted(path);
         ResolvedSelection selection = resolveSelection(path);
         String displayName = name == null || name.isBlank()
                 ? selection.realPath().getFileName().toString()
@@ -102,6 +106,9 @@ public class ProjectWorkspaceService {
     }
 
     public WorkspaceDirectoryView browse(String path) {
+        if (desktopDirectoryGrants.active() && path != null && !path.isBlank()) {
+            desktopDirectoryGrants.requireGranted(path);
+        }
         try {
             Path current = resolveBrowsePath(path);
             List<WorkspaceDirectoryView.DirectoryEntry> directories;
@@ -177,6 +184,10 @@ public class ProjectWorkspaceService {
     }
 
     private Path resolveBrowsePath(String value) throws IOException {
+        // 桌面模式：授权目录允许任意绝对路径，ROOT 相对路径解析不适用
+        if (desktopDirectoryGrants.active() && value != null && Path.of(value).isAbsolute()) {
+            return requireRealDirectory(Path.of(value));
+        }
         if (selectionMode == SelectionMode.ROOT) {
             Path root = realRoot();
             String relative = value == null ? "" : value.trim();
@@ -201,6 +212,10 @@ public class ProjectWorkspaceService {
         try {
             Path real = resolveBrowsePath(path);
             if (!isSelectable(real)) throw new IllegalArgumentException("请选择一个文件夹");
+            // 桌面模式以用户授权清单为边界（授权目录可以是本机任意位置），不受 ROOT 模式限制
+            if (desktopDirectoryGrants.active()) {
+                return new ResolvedSelection(PathScope.LOCAL, real.toString(), real);
+            }
             if (selectionMode == SelectionMode.ROOT) {
                 Path root = realRoot();
                 String relative = root.relativize(real).toString().replace('\\', '/');

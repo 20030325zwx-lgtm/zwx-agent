@@ -18,7 +18,8 @@ class ProjectWorkspaceServiceTest {
     Path tempDir;
 
     private ProjectWorkspaceService service() {
-        return new ProjectWorkspaceService(mock(JdbcTemplate.class), tempDir.toString(), "root");
+        return new ProjectWorkspaceService(mock(JdbcTemplate.class), tempDir.toString(), "root",
+                new com.zwx.zwxagent.platform.desktop.DesktopDirectoryGrantService(""));
     }
 
     @Test
@@ -47,7 +48,8 @@ class ProjectWorkspaceServiceTest {
     void localModeAcceptsExistingAbsoluteDirectory() throws Exception {
         Path project = Files.createDirectory(tempDir.resolve("local-project"));
         ProjectWorkspaceService service = new ProjectWorkspaceService(
-                mock(JdbcTemplate.class), tempDir.resolve("unused").toString(), "local");
+                mock(JdbcTemplate.class), tempDir.resolve("unused").toString(), "local",
+                new com.zwx.zwxagent.platform.desktop.DesktopDirectoryGrantService(""));
 
         WorkspaceDirectoryView view = service.browse(project.toString());
         assertEquals("local", view.mode());

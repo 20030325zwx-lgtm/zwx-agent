@@ -12,6 +12,18 @@ export const getLocalToken = () => (typeof window !== 'undefined' ? window.zwxDe
 export const isDesktopLocal = () => !!getLocalToken()
 export const localTokenHeader = () => (getLocalToken() ? { 'X-Aster-Local-Token': getLocalToken() } : {})
 
+// 桌面本机目录授权：经主进程系统选择器取得用户授权
+export const chooseDesktopDirectory = () =>
+  typeof window !== 'undefined' && window.zwxDesktop?.chooseDirectory
+    ? window.zwxDesktop.chooseDirectory()
+    : Promise.resolve(null)
+export const getDesktopDirectoryGrants = () =>
+  typeof window !== 'undefined' && window.zwxDesktop?.directoryGrants ? window.zwxDesktop.directoryGrants() : []
+export const revokeDesktopDirectoryGrant = path =>
+  typeof window !== 'undefined' && window.zwxDesktop?.revokeDirectoryGrant
+    ? window.zwxDesktop.revokeDirectoryGrant(path)
+    : Promise.resolve(false)
+
 export const getToken = () => {
   if (isDesktopLocal()) return localStorage.getItem(TOKEN_KEY) || 'desktop-local'
   return localStorage.getItem(TOKEN_KEY) || ''

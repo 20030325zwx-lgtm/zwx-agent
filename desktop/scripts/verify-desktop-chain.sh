@@ -65,6 +65,32 @@ echo "    错令牌: $WRONG_TOKEN（期望 401）"
 WHOAMI=$(curl -s -m 5 "http://127.0.0.1:$BACKEND_PORT/api/settings/catalog" -H "X-Aster-Local-Token: $LOCAL_TOKEN")
 echo "    目录响应: $(echo "$WHOAMI" | head -c 120)"
 if [ "$WITH_TOKEN" = "200" ] && [ "$WITHOUT_TOKEN" = "401" ] && [ "$WRONG_TOKEN" = "401" ]; then
+  echo "    回环令牌验证通过"
+else
+  echo "==> 回环令牌验证失败"
+  exit 1
+fi
+
+echo "==> 6. 本机目录授权链路"
+GRANT_DIR="$USER_DATA/grant-root/myproject"
+mkdir -p "$GRANT_DIR"
+OTHER_DIR="$USER_DATA/other-project"
+mkdir -p "$OTHER_DIR"
+GRANT_JSON=$(printf '{"paths":["%s/grant-root"]}' "$USER_DATA")
+SET_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:$BACKEND_PORT/api/ai/desktop/grants" \
+  -H "X-Aster-Local-Token: $LOCAL_TOKEN" -H "Content-Type: application/json" -d "$GRANT_JSON")
+GRANTED_BODY=$(curl -s -X POST "http://127.0.0.1:$BACKEND_PORT/api/ai/projects/select" \
+  -H "X-Aster-Local-Token: $LOCAL_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"path\":\"$GRANT_DIR\"}")
+GRANTED_SELECT=$(echo "$GRANTED_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id','') and 200 or 400)" 2>/dev/null || echo 400)
+GRANTED_ERR=$(echo "$GRANTED_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('error',''))" 2>/dev/null)
+DENIED_SELECT=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:$BACKEND_PORT/api/ai/projects/select" \
+  -H "X-Aster-Local-Token: $LOCAL_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"path\":\"$OTHER_DIR\"}")
+echo "    同步授权: $SET_CODE（期望 200）"
+echo "    授权目录绑定: $GRANTED_SELECT（期望 200）${GRANTED_ERR:+ 失败原因: $GRANTED_ERR}"
+echo "    未授权目录绑定: $DENIED_SELECT（期望 400）"
+if [ "$SET_CODE" = "200" ] && [ "$GRANTED_SELECT" = "200" ] && [ "$DENIED_SELECT" = "400" ]; then
   echo "==> 验证通过"
 else
   echo "==> 验证失败"

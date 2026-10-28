@@ -50,46 +50,75 @@ const routes = [
         }
       },
       {
-        path: 'model-catalog',
-        name: 'ModelCatalog',
-        component: () => import('../views/ModelCatalogSettings.vue'),
-        meta: { title: '模型设置 - Aster', description: '管理模型供应商、模型与用途绑定。' }
+        // 设置中心：统一分类外壳，内部页面逐步迁移为工作台样式
+        path: 'settings',
+        component: () => import('../components/workbench/SettingsLayout.vue'),
+        children: [
+          {
+            path: '',
+            redirect: '/settings/model'
+          },
+          {
+            path: 'model',
+            name: 'SettingsModel',
+            component: () => import('../views/ModelCatalogSettings.vue'),
+            meta: { title: '模型设置 - Aster', description: '管理模型供应商、模型与用途绑定。' }
+          },
+          {
+            path: 'skill',
+            name: 'SettingsSkill',
+            component: () => import('../views/SkillSettings.vue'),
+            meta: { title: 'Skill 配置 - Aster', description: '配置各个智能体可使用的内置 Skill。' }
+          },
+          {
+            path: 'mcp',
+            name: 'SettingsMcp',
+            component: () => import('../views/McpSettings.vue'),
+            meta: { title: 'MCP 管理 - Aster', description: '管理超级智能体可用的远程 MCP SSE 服务。' }
+          },
+          {
+            path: 'memory',
+            name: 'SettingsMemory',
+            component: () => import('../views/MemorySettings.vue'),
+            meta: {
+              title: '记忆管理 - Aster',
+              description: '查看、修正与删除智能体跨会话记住的关于你的事实。'
+            }
+          },
+          {
+            path: 'permission',
+            name: 'SettingsPermission',
+            component: () => import('../views/PermissionSettings.vue'),
+            meta: {
+              title: '权限模式 - Aster',
+              description: '配置默认权限模式与工具 allow/deny 规则。'
+            }
+          }
+        ]
       },
       {
         path: 'model-settings',
-        name: 'ModelSettings',
-        component: () => import('../views/ModelSettings.vue'),
-        meta: { title: '模型设置 - Aster', description: '配置个人或系统默认的对话与视觉模型。' }
+        redirect: '/settings/model'
+      },
+      {
+        path: 'model-catalog',
+        redirect: '/settings/model'
       },
       {
         path: 'skill-settings',
-        name: 'SkillSettings',
-        component: () => import('../views/SkillSettings.vue'),
-        meta: { title: 'Skill 配置 - Aster', description: '配置各个智能体可使用的内置 Skill。' }
+        redirect: '/settings/skill'
       },
       {
         path: 'mcp-settings',
-        name: 'McpSettings',
-        component: () => import('../views/McpSettings.vue'),
-        meta: { title: 'MCP 管理 - Aster', description: '管理超级智能体可用的远程 MCP SSE 服务。' }
+        redirect: '/settings/mcp'
       },
       {
         path: 'memory-settings',
-        name: 'MemorySettings',
-        component: () => import('../views/MemorySettings.vue'),
-        meta: {
-          title: '记忆管理 - Aster',
-          description: '查看、修正与删除智能体跨会话记住的关于你的事实。'
-        }
+        redirect: '/settings/memory'
       },
       {
         path: 'permission-settings',
-        name: 'PermissionSettings',
-        component: () => import('../views/PermissionSettings.vue'),
-        meta: {
-          title: '权限模式 - Aster',
-          description: '配置默认权限模式与工具 allow/deny 规则。'
-        }
+        redirect: '/settings/permission'
       }
     ]
   }

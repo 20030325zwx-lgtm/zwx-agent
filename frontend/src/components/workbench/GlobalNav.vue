@@ -36,7 +36,7 @@
         <component :is="themeIcon" :size="18" :stroke-width="1.9" />
         <span class="wb-nav-label">{{ themeShort }}</span>
       </button>
-      <router-link to="/model-catalog" class="wb-nav-item" title="设置" aria-label="设置">
+      <router-link to="/settings/model" class="wb-nav-item" title="设置" aria-label="设置">
         <Settings :size="19" :stroke-width="1.9" />
         <span class="wb-nav-label">设置</span>
       </router-link>

@@ -54,3 +54,9 @@
 - 开发服务保持 launchctl 常规：后端 8123 + 前端 3000，本轮未重启；**开发后端仍是旧 JAR**（无 V4 迁移），下次重启时 Flyway 会自动应用 V4 并迁移旧模型配置，属预期行为。
 - `desktop/pgserver/`、`desktop/server/`、`desktop/runtime/`、`desktop/app/`、`desktop/release/` 均为构建产物，已 gitignore。
 - 重跑桌面验证：`sh desktop/scripts/prepare-pgserver.sh && sh desktop/scripts/verify-desktop-chain.sh`。
+
+> 再追补（提交 b608265）：按用户反馈把工作台首页从"问候+对话框"改为**服务概览仪表盘**
+> （统计卡：工作区/会话/进行中/已完成/待处理；任务动态分组时间线；工作区列表；服务状态）。
+> 后端新增 `/ai/manus/runs/overview`（含会话标题与任务输入，修复运行卡深链缺 conversationId）。
+> 任务发起收归任务页；删除 WorkbenchComposer 与 SuperAgent 草稿消费死代码。
+> 开发后端已重启并应用 V4 迁移（旧 chat/vision 配置已自动转入供应商目录）。

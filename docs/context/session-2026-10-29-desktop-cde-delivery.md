@@ -63,3 +63,6 @@
 > 再追补（提交 7a2ab0d）：**工作流垂直试点完成并真实跑通**——原生引擎（V5 workflow_run）
 > + 首个工作流「商品海报生成」（MCP 搜图/Commons 回退/LLM 译英 → Java2D 海报 → OSS 产物），
 > 前端新增「工作流」导航页；详见 docs/design/2026-10-29-workflow-pilot-product-poster.md。
+> 再追补（提交 f21430a）：**桌面本机目录授权完成**——系统目录选择器 → 主进程持久化授权清单
+> → 回环令牌推送后端 → select/browse 以清单为边界；授权链路脚本验证 + 打包应用实测通过。
+> 详见 docs/design/2026-10-29-desktop-file-authorization.md。

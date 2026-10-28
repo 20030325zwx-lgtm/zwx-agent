@@ -1,6 +1,5 @@
 <template>
-  <WorkbenchShell>
-    <div class="catalog-page">
+  <div class="catalog-page">
       <header class="page-head">
         <div>
           <h1>模型设置</h1>
@@ -159,7 +158,6 @@
         </section>
       </div>
     </div>
-  </WorkbenchShell>
 </template>
 
 <script setup>
@@ -175,7 +173,6 @@ const APopconfirm = Popconfirm
 const ASelect = Select
 const ASwitch = Switch
 import { AlertCircle, CheckCircle2, Plus, Server, Trash2 } from 'lucide-vue-next'
-import WorkbenchShell from '../components/workbench/WorkbenchShell.vue'
 import {
   addProviderModel,
   clearModelBinding,

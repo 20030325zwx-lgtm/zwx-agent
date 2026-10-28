@@ -2,10 +2,10 @@
    颜色值只允许出现在 design/tokens.js；组件样式一律 scoped + var(--wb-*)。 */
 
 ::selection {
-  background: var(--wb-brand-soft, rgba(108, 92, 247, 0.1));
+  background: var(--wb-brand-soft, rgba(46, 107, 230, 0.1));
 }
 
 :focus-visible {
-  outline: 2px solid var(--wb-brand, #6C5CF7);
+  outline: 2px solid var(--wb-brand, #2E6BE6);
   outline-offset: 2px;
 }

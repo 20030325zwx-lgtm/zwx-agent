@@ -2,11 +2,11 @@
 // antd 与 CSS 变量都从这里取值，组件样式一律使用 var(--wb-*)，禁止硬编码色值。
 
 export const PALETTE = {
-  brand: '#6C5CF7',
-  brandHover: '#5A49EE',
-  brandActive: '#4F3ED6',
-  brandSoft: 'rgba(108, 92, 247, 0.1)',
-  brandGradient: 'linear-gradient(135deg, #6C5CF7 0%, #9D5CF7 55%, #C86DD7 100%)',
+  brand: '#2E6BE6',
+  brandHover: '#2458C8',
+  brandActive: '#1E48AC',
+  brandSoft: 'rgba(46, 107, 230, 0.10)',
+  brandGradient: 'linear-gradient(135deg, #2E6BE6 0%, #1FA2D6 60%, #22C3BE 100%)',
   success: '#1F9D4D',
   warning: '#B45309',
   danger: '#DC2F4C',
@@ -22,7 +22,7 @@ export const THEMES = {
   light: {
     css: {
       '--wb-bg': '#F5F6FA',
-      '--wb-bg-accent': 'radial-gradient(1200px 500px at 85% -10%, rgba(108,92,247,0.08), transparent 60%)',
+      '--wb-bg-accent': 'radial-gradient(1200px 500px at 85% -10%, rgba(46,107,230,0.07), transparent 60%)',
       '--wb-surface': '#FFFFFF',
       '--wb-surface-2': '#FAFAFE',
       '--wb-raise': '#FFFFFF',
@@ -73,7 +73,7 @@ export const THEMES = {
   dark: {
     css: {
       '--wb-bg': '#0F111A',
-      '--wb-bg-accent': 'radial-gradient(1200px 500px at 85% -10%, rgba(140,120,255,0.1), transparent 60%)',
+      '--wb-bg-accent': 'radial-gradient(1200px 500px at 85% -10%, rgba(92,141,246,0.1), transparent 60%)',
       '--wb-surface': '#161927',
       '--wb-surface-2': '#1B1F30',
       '--wb-raise': '#1E2234',
@@ -84,10 +84,10 @@ export const THEMES = {
       '--wb-text': '#E9EBF5',
       '--wb-text-2': '#A9AEC4',
       '--wb-muted': '#71778E',
-      '--wb-brand': '#8B7BFF',
-      '--wb-brand-hover': '#9D8FFF',
-      '--wb-brand-active': '#7A68F2',
-      '--wb-brand-soft': 'rgba(139, 123, 255, 0.16)',
+      '--wb-brand': '#5C8DF6',
+      '--wb-brand-hover': '#7BA2FF',
+      '--wb-brand-active': '#4A76E8',
+      '--wb-brand-soft': 'rgba(92, 141, 246, 0.16)',
       '--wb-brand-contrast': '#FFFFFF',
       '--wb-success': '#3DBE6C',
       '--wb-warning': '#E5A23C',
@@ -104,7 +104,7 @@ export const THEMES = {
     },
     antd: {
       token: {
-        colorPrimary: '#8B7BFF',
+        colorPrimary: '#5C8DF6',
         colorInfo: '#5AA7FF',
         colorSuccess: '#3DBE6C',
         colorWarning: '#E5A23C',

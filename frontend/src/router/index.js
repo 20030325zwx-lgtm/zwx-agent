@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getToken } from '../api/auth'
-import WorkspaceLayout from '../components/WorkspaceLayout.vue'
+import WorkbenchShell from '../components/workbench/WorkbenchShell.vue'
 
+// 全部板块共用 WorkbenchShell 常驻外壳：左侧导航固定，内容区按路由切换
 const routes = [
   {
     path: '/login',
@@ -10,25 +11,8 @@ const routes = [
     meta: { title: '登录 - Aster', public: true }
   },
   {
-    // 工作台：网页与桌面的默认入口，替代原宣传式首页
-    path: '/workbench',
-    name: 'Workbench',
-    component: () => import('../views/Workbench.vue'),
-    meta: {
-      title: '工作台 - Aster',
-      description: 'Aster AI 工作台：从这里开始任务、继续工作。'
-    }
-  },
-  {
-    // 模型目录设置：工作台内的完整页面，不挂在旧顶部导航布局下
-    path: '/model-catalog',
-    name: 'ModelCatalog',
-    component: () => import('../views/ModelCatalogSettings.vue'),
-    meta: { title: '模型设置 - Aster', description: '管理模型供应商、模型与用途绑定。' }
-  },
-  {
     path: '/',
-    component: WorkspaceLayout,
+    component: WorkbenchShell,
     children: [
       {
         path: '',
@@ -37,6 +21,39 @@ const routes = [
       {
         path: 'home',
         redirect: '/workbench'
+      },
+      {
+        path: 'workbench',
+        name: 'Workbench',
+        component: () => import('../views/Workbench.vue'),
+        meta: {
+          title: '工作台 - Aster',
+          description: 'Aster AI 工作台：从这里开始任务、继续工作。'
+        }
+      },
+      {
+        path: 'super-agent',
+        name: 'SuperAgent',
+        component: () => import('../views/SuperAgent.vue'),
+        meta: {
+          title: '超级智能体 - Aster',
+          description: '超级智能体是 Aster 的通用任务协作助手。'
+        }
+      },
+      {
+        path: 'knowledge-admin',
+        name: 'KnowledgeAdmin',
+        component: () => import('../views/KnowledgeAdmin.vue'),
+        meta: {
+          title: '知识库管理 - Aster',
+          description: '查看各智能体的私有知识文档、版本状态与实际向量切片。'
+        }
+      },
+      {
+        path: 'model-catalog',
+        name: 'ModelCatalog',
+        component: () => import('../views/ModelCatalogSettings.vue'),
+        meta: { title: '模型设置 - Aster', description: '管理模型供应商、模型与用途绑定。' }
       },
       {
         path: 'model-settings',
@@ -57,15 +74,6 @@ const routes = [
         meta: { title: 'MCP 管理 - Aster', description: '管理超级智能体可用的远程 MCP SSE 服务。' }
       },
       {
-        path: 'knowledge-admin',
-        name: 'KnowledgeAdmin',
-        component: () => import('../views/KnowledgeAdmin.vue'),
-        meta: {
-          title: '知识库管理 - Aster',
-          description: '查看各智能体的私有知识文档、版本状态与实际向量切片。'
-        }
-      },
-      {
         path: 'memory-settings',
         name: 'MemorySettings',
         component: () => import('../views/MemorySettings.vue'),
@@ -84,16 +92,7 @@ const routes = [
         }
       }
     ]
-  },
-  {
-    path: '/super-agent',
-    name: 'SuperAgent',
-    component: () => import('../views/SuperAgent.vue'),
-    meta: {
-      title: '超级智能体 - Aster',
-      description: '超级智能体是 Aster 的通用任务协作助手。'
-    }
-  },
+  }
 ]
 
 const router = createRouter({

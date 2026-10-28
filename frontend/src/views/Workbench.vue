@@ -1,7 +1,6 @@
 <template>
-  <WorkbenchShell>
-    <div class="wb-home">
-      <div class="wb-home-inner">
+  <div class="wb-home">
+    <div class="wb-home-inner">
         <header class="home-head">
           <div>
             <h1 class="home-greeting">{{ greeting }}，{{ userName }}</h1>
@@ -83,7 +82,6 @@
         </div>
       </div>
     </div>
-  </WorkbenchShell>
 </template>
 
 <script setup>
@@ -91,7 +89,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { Activity, ChevronRight, MessagesSquare } from 'lucide-vue-next'
-import WorkbenchShell from '../components/workbench/WorkbenchShell.vue'
 import WorkbenchComposer from '../components/workbench/WorkbenchComposer.vue'
 import { getCurrentUser } from '../api/auth'
 import {

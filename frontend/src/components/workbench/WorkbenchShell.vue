@@ -2,7 +2,7 @@
   <div class="wb-shell">
     <GlobalNav />
     <main class="wb-content">
-      <slot />
+      <router-view />
     </main>
   </div>
 </template>

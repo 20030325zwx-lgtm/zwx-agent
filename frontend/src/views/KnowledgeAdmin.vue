@@ -566,7 +566,7 @@ onBeforeUnmount(() => { if (refreshTimer) window.clearInterval(refreshTimer) })
 </script>
 
 <style scoped>
-.knowledge-admin { height: calc(100vh - 72px); min-height: 520px; display: flex; flex-direction: column; gap: 16px; padding: 22px 26px 24px; overflow: hidden; color: var(--sk-label); background: var(--sk-bg); }
+.knowledge-admin { height: 100%; min-height: 520px; display: flex; flex-direction: column; gap: 16px; padding: 22px 26px 24px; overflow: hidden; color: var(--sk-label); background: var(--sk-bg); }
 .page-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 20px; }
 .page-header h1 { margin: 5px 0 2px; font-size: 26px; line-height: 1.2; font-weight: 760; }
 .page-header p { margin: 0; color: var(--sk-label-2); font-size: 12px; }

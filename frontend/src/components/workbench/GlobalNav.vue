@@ -1,6 +1,15 @@
 <template>
-  <nav class="wb-nav" aria-label="全局导航">
-    <div class="wb-nav-logo" title="Aster 工作台">✦</div>
+  <nav class="wb-nav" :class="{ collapsed }" aria-label="全局导航">
+    <div class="wb-nav-brand">
+      <div class="wb-nav-logo">✦</div>
+      <span class="wb-nav-wordmark">Aster</span>
+    </div>
+
+    <button type="button" class="wb-collapse" :title="collapsed ? '展开导航' : '收起导航'" @click="toggle">
+      <PanelLeftClose v-if="!collapsed" :size="17" :stroke-width="1.8" />
+      <PanelLeftOpen v-else :size="17" :stroke-width="1.8" />
+      <span class="wb-nav-label">收起导航</span>
+    </button>
 
     <div class="wb-nav-items">
       <router-link
@@ -9,9 +18,11 @@
         :to="item.to"
         class="wb-nav-item"
         :class="{ active: isActive(item) }"
+        :title="item.label"
+        :aria-label="item.label"
       >
         <component :is="item.icon" :size="19" :stroke-width="1.9" />
-        <span class="wb-nav-tip">{{ item.label }}</span>
+        <span class="wb-nav-label">{{ item.label }}</span>
       </router-link>
     </div>
 
@@ -23,27 +34,38 @@
         @click="cycleTheme"
       >
         <component :is="themeIcon" :size="18" :stroke-width="1.9" />
-        <span class="wb-nav-tip">{{ themeTitle }}</span>
+        <span class="wb-nav-label">{{ themeShort }}</span>
       </button>
-      <router-link to="/model-catalog" class="wb-nav-item" title="设置">
+      <router-link to="/model-catalog" class="wb-nav-item" title="设置" aria-label="设置">
         <Settings :size="19" :stroke-width="1.9" />
-        <span class="wb-nav-tip">设置</span>
+        <span class="wb-nav-label">设置</span>
       </router-link>
       <div class="wb-nav-user" :title="userName">
-        {{ userInitial }}
+        <span class="wb-nav-user-badge">{{ userInitial }}</span>
+        <span class="wb-nav-label">{{ userName }}</span>
       </div>
     </div>
   </nav>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog } from 'lucide-vue-next'
+import {
+  Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
+  PanelLeftClose, PanelLeftOpen
+} from 'lucide-vue-next'
 import { resolvedTheme, themeMode, setThemeMode } from '../../design/apply-tokens'
 import { getCurrentUser } from '../../api/auth'
 
 const route = useRoute()
+
+const COLLAPSE_KEY = 'aster.nav.collapsed'
+const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === 'true')
+watch(collapsed, value => {
+  try { localStorage.setItem(COLLAPSE_KEY, String(value)) } catch (error) { /* ignore */ }
+})
+function toggle() { collapsed.value = !collapsed.value }
 
 // 只挂已上线能力，不做空占位入口
 const items = [
@@ -60,6 +82,7 @@ const themeIcon = computed(() => {
   if (themeMode.value === 'system') return MonitorCog
   return resolvedTheme.value === 'dark' ? Moon : Sun
 })
+const themeShort = computed(() => ({ light: '浅色', dark: '深色', system: '主题' }[themeMode.value]))
 const themeTitle = computed(() => {
   const label = { light: '浅色', dark: '深色', system: '跟随系统' }[themeMode.value]
   return `主题：${label}（点击切换）`
@@ -80,13 +103,27 @@ function cycleTheme() {
   z-index: 30;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  width: 60px;
-  flex: 0 0 60px;
-  padding: 14px 0 12px;
-  gap: 10px;
+  width: 208px;
+  flex: 0 0 208px;
+  padding: 14px 10px 12px;
+  gap: 8px;
   background: var(--wb-rail);
   border-right: 1px solid var(--wb-border);
+  transition: width 0.18s ease, flex-basis 0.18s ease;
+  overflow: hidden;
+}
+
+.wb-nav.collapsed {
+  width: 64px;
+  flex-basis: 64px;
+}
+
+.wb-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 4px 10px;
+  white-space: nowrap;
 }
 
 .wb-nav-logo {
@@ -94,7 +131,7 @@ function cycleTheme() {
   place-items: center;
   width: 36px;
   height: 36px;
-  margin-bottom: 8px;
+  flex: 0 0 36px;
   border-radius: 11px;
   background: var(--wb-brand-soft);
   color: var(--wb-brand);
@@ -102,33 +139,73 @@ function cycleTheme() {
   user-select: none;
 }
 
+.wb-nav-wordmark {
+  color: var(--wb-text);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.wb-collapse {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 2px 6px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--wb-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.wb-collapse:hover {
+  background: var(--wb-fill);
+  color: var(--wb-text);
+}
+
+.wb-nav.collapsed .wb-collapse {
+  justify-content: center;
+  padding: 7px 0;
+}
+
 .wb-nav-items {
   display: flex;
   flex: 1;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding-top: 6px;
+  gap: 4px;
+  padding-top: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .wb-nav-bottom {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .wb-nav-item {
   position: relative;
-  display: grid;
-  place-items: center;
-  width: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   height: 38px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 11px;
+  border-radius: 10px;
   background: transparent;
   color: var(--wb-muted);
+  font-size: 13px;
+  white-space: nowrap;
   transition: color 0.15s, background 0.15s;
+}
+
+.wb-nav.collapsed .wb-nav-item {
+  justify-content: center;
+  padding: 0;
 }
 
 .wb-nav-item:hover {
@@ -139,12 +216,13 @@ function cycleTheme() {
 .wb-nav-item.active {
   background: var(--wb-brand-soft);
   color: var(--wb-brand);
+  font-weight: 550;
 }
 
 .wb-nav-item.active::before {
   content: '';
   position: absolute;
-  left: -9px;
+  left: -10px;
   top: 9px;
   bottom: 9px;
   width: 3px;
@@ -152,39 +230,57 @@ function cycleTheme() {
   background: var(--wb-brand);
 }
 
-.wb-nav-tip {
-  position: absolute;
-  left: calc(100% + 10px);
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 5px 9px;
-  border-radius: 8px;
-  background: var(--wb-raise);
-  border: 1px solid var(--wb-border);
-  box-shadow: var(--wb-shadow-md);
-  color: var(--wb-text);
-  font-size: 12px;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
+.wb-nav.collapsed .wb-nav-item.active::before {
+  left: -8px;
+}
+
+.wb-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 1;
   transition: opacity 0.12s;
 }
 
-.wb-nav-item:hover .wb-nav-tip,
-.wb-nav-item:focus-visible .wb-nav-tip {
-  opacity: 1;
+.wb-nav.collapsed .wb-nav-label {
+  display: none;
 }
 
 .wb-nav-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  margin-top: 4px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: var(--wb-fill);
+  white-space: nowrap;
+}
+
+.wb-nav.collapsed .wb-nav-user {
+  justify-content: center;
+  padding: 0;
+}
+
+.wb-nav-user-badge {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--wb-brand), #c86dd7);
-  color: var(--wb-brand-contrast);
-  font-size: 13px;
+  background: var(--wb-brand-gradient, linear-gradient(135deg, #2e6be6, #22c3be));
+  color: #fff;
+  font-size: 12px;
   font-weight: 600;
-  user-select: none;
+}
+
+.wb-nav.collapsed .wb-nav-user .wb-nav-label {
+  display: none;
+}
+
+/* 折叠态悬浮提示：折叠时隐藏文字，悬停显示原生 title 兜底 */
+.wb-nav.collapsed .wb-nav-item:hover {
+  background: var(--wb-fill);
 }
 </style>

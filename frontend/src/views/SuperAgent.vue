@@ -124,7 +124,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import { BookOpen, Database, Download, Globe2, PanelRightOpen, RotateCw, Workflow } from 'lucide-vue-next'
@@ -991,16 +991,6 @@ onMounted(async () => {
       companionCaption.value = ''
       companionIdleTimer = null
     }, 4200)
-  }
-  // 工作台首页带入的任务草稿：填入输入框，等用户确认发送，不自动发起调用
-  const DRAFT_KEY = 'aster.workbench.draft'
-  let pendingDraft = ''
-  try { pendingDraft = sessionStorage.getItem(DRAFT_KEY) || '' } catch (error) { /* ignore */ }
-  if (pendingDraft) {
-    try { sessionStorage.removeItem(DRAFT_KEY) } catch (error) { /* ignore */ }
-    await nextTick()
-    composerRef.value?.fill(pendingDraft)
-    composerRef.value?.focus()
   }
 })
 onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStream() })

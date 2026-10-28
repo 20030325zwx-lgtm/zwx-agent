@@ -210,6 +210,8 @@ export const listManusRuns = conversationId =>
   request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs`).then(response => response.data)
 export const listRecentManusRuns = (limit = 8) =>
   request.get('/ai/manus/runs/recent', { params: { limit } }).then(response => response.data)
+export const listManusRunOverviews = (limit = 30) =>
+  request.get('/ai/manus/runs/overview', { params: { limit } }).then(response => response.data)
 export const getManusRun = (conversationId, runId) =>
   request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`).then(response => response.data)
 export const listWorkspaceFiles = (agentKey, conversationId, limit = 200) =>

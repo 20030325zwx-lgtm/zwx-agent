@@ -190,6 +190,29 @@ public class AgentRunService {
                 """, runMapper(), tenantId, userId, Math.max(1, limit));
     }
 
+    /** 工作台概览条目：带会话标题与任务输入，供跨会话任务动态与状态统计展示。 */
+    public record RunOverview(String id, String conversationId, String status, String input,
+                              String conversationTitle, java.time.Instant createdAt, java.time.Instant updatedAt) {
+    }
+
+    public List<RunOverview> findRecentRunOverviews(String tenantId, String userId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT r.id, r.conversation_id, r.status, r.input, r.created_at, r.updated_at,
+                       COALESCE(c.title, '') AS conversation_title
+                FROM agent_run r
+                LEFT JOIN agent_conversation c ON c.id = r.conversation_id
+                WHERE r.tenant_id = ? AND r.user_id = ? AND r.agent_key = 'super'
+                  AND r.input IS NOT NULL AND r.input <> ''
+                ORDER BY r.updated_at DESC
+                LIMIT ?
+                """,
+                (rs, rowNum) -> new RunOverview(
+                        rs.getString("id"), rs.getString("conversation_id"), rs.getString("status"),
+                        rs.getString("input"), rs.getString("conversation_title"),
+                        rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()),
+                tenantId, userId, Math.max(1, limit));
+    }
+
     public Optional<AgentRun> findLatestResumable(String tenantId, String userId, String conversationId) {
         return jdbcTemplate.query("""
                 SELECT * FROM agent_run

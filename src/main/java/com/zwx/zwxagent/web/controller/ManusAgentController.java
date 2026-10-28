@@ -393,6 +393,14 @@ public class ManusAgentController {
                 .stream().map(AgentRunSummary::from).toList();
     }
 
+    /** 工作台概览：跨会话任务动态（含会话标题与任务输入），供统计与时间线展示。 */
+    @GetMapping("/manus/runs/overview")
+    public List<AgentRunService.RunOverview> listManusRunOverviews(CurrentActor actor,
+                                                                   @RequestParam(defaultValue = "30") int limit) {
+        return agentRunService.findRecentRunOverviews(actor.tenantId(), actor.userId(),
+                Math.min(Math.max(limit, 1), 50));
+    }
+
     @GetMapping("/manus/conversations/{conversationId}/runs")
     public List<AgentRunSummary> listManusRuns(CurrentActor actor, @PathVariable String conversationId,
                                                @RequestParam(defaultValue = "30") int limit) {

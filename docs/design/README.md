@@ -1,5 +1,9 @@
 # 设计文档
 
+- [AI 工作台设计归档入口（接手必读）](./2026-10-28-ai-workbench-archive.md)
+- [阶段 A：桌面运行时验证结论与模型调用契约](./2026-10-28-desktop-phase-a-runtime-model-contract.md)
+- [AI 工作台：GitHub 设计借鉴与方案修订](./2026-10-28-ai-workbench-references.md)
+- [网页与桌面工作区改造计划（待确认）](./2026-10-28-web-desktop-workspace-plan.md)
 - [当前智能体架构](./agent-architecture.md)
 - [超级智能体跨重启续跑](./2026-10-20-super-agent-run-resume.md)
 - [SSE 断线重连与事件回放](./2026-10-20-sse-reconnect-replay.md)

@@ -1,0 +1,146 @@
+<div id="aster-plan" aria-label="Aster 工作区布局草图">
+  <div class="ap-toolbar"><span>Aster · 布局草图</span><span>macOS / 网页共用结构</span></div>
+  <div class="ap-window">
+    <aside class="ap-sidebar">
+      <div class="ap-brand"><span class="ap-logo">A</span><strong>Aster</strong><span class="ap-local">本机</span></div>
+      <nav class="ap-work-nav" aria-label="工作区导航">
+        <button type="button" class="ap-button ap-new cursor-interaction" data-action="new"><i data-lucide="square-pen" aria-hidden="true"></i>新建任务</button>
+        <label class="ap-search"><i data-lucide="search" aria-hidden="true"></i><input aria-label="搜索会话" placeholder="搜索会话" id="ap-search"></label>
+        <div class="ap-caption">项目</div>
+        <div class="ap-project"><i data-lucide="folder" aria-hidden="true"></i>Aster</div>
+        <button type="button" class="ap-history cursor-interaction" data-action="task">网页与桌面改造计划</button>
+        <div class="ap-caption">最近会话</div>
+        <button type="button" class="ap-history cursor-interaction" data-action="new">新会话</button>
+        <p class="ap-no-match" hidden>没有匹配的会话</p>
+      </nav>
+      <nav class="ap-settings-nav" aria-label="设置分类" hidden>
+        <button class="ap-button cursor-interaction" type="button" data-action="back"><i data-lucide="arrow-left" aria-hidden="true"></i>返回工作区</button>
+        <div class="ap-caption">基础设置</div>
+        <span class="ap-nav-label">常规</span><span class="ap-nav-label">外观</span><span class="ap-nav-label ap-selected">模型</span>
+        <div class="ap-caption">能力与数据</div>
+        <span class="ap-nav-label">Skill 与 MCP</span><span class="ap-nav-label">知识库与记忆</span><span class="ap-nav-label">权限</span><span class="ap-nav-label">本地数据与诊断</span>
+      </nav>
+      <div class="ap-bottom"><button class="ap-button cursor-interaction" data-action="settings" type="button"><i data-lucide="settings" aria-hidden="true"></i>设置</button><span class="ap-caption">本机工作区 · 免登录</span></div>
+    </aside>
+    <main class="ap-main">
+      <section id="ap-workspace" aria-label="任务工作区">
+        <header class="ap-header"><span id="ap-title">新建任务</span><button class="ap-button cursor-interaction" type="button" data-action="inspector" aria-expanded="false"><i data-lucide="panel-right" aria-hidden="true"></i>任务详情</button></header>
+        <div class="ap-work-grid">
+          <div class="ap-chat">
+            <div id="ap-empty"><span class="ap-eyebrow">ASTER WORKSPACE</span><h2>今天想完成什么？</h2><p>从一个问题、一份文件，或一个项目开始。</p></div>
+            <div id="ap-conversation" hidden><div class="ap-user-message">帮我规划网页与桌面端的改造，先定计划再开工。</div><div class="ap-answer"><span class="ap-eyebrow">Aster</span><p>先统一任务工作区与模型设置，再接通桌面本机运行。</p><p>网页直接进入对话；桌面安装后，在设置中添加自己的模型即可开始。</p><div class="ap-draft">计划草稿 · 等待确认</div></div></div>
+            <div class="ap-compose">
+              <textarea id="ap-prompt" aria-label="任务输入草稿" placeholder="描述目标、约束或需要交付的结果…" rows="3"></textarea>
+              <div class="ap-compose-actions"><div class="ap-compose-left"><span><i data-lucide="paperclip" aria-hidden="true"></i>附件</span><span>项目：未选择</span><span>权限：编辑</span></div><button class="ap-button ap-choose cursor-interaction" type="button" data-action="settings">配置模型 <i data-lucide="chevron-down" aria-hidden="true"></i></button></div>
+            </div>
+            <div class="ap-prompts"><button type="button" class="ap-prompt-button cursor-interaction" data-prompt="帮我梳理项目结构，并列出值得优先改进的地方。">梳理项目</button><button type="button" class="ap-prompt-button cursor-interaction" data-prompt="阅读我提供的材料，整理要点和待确认问题。">整理材料</button><button type="button" class="ap-prompt-button cursor-interaction" data-prompt="根据目标制定分阶段计划，先等我确认后再执行。">制定计划</button></div>
+          </div>
+          <aside id="ap-inspector" aria-label="任务详情" hidden><h3>任务详情</h3><p class="ap-muted">计划 · 文件 · 引用</p><hr><p>计划草稿</p><ol><li>桌面运行环境验证</li><li>统一两端工作区</li><li>模型供应商管理</li><li>本机使用与打包</li></ol><span class="ap-muted">未开始执行</span></aside>
+        </div>
+      </section>
+      <section id="ap-settings" aria-label="模型设置草图" hidden>
+        <header class="ap-header"><span>设置 / 模型</span><span class="ap-muted">本机配置</span></header>
+        <div class="ap-settings-content"><h2>模型设置</h2><p class="ap-muted">添加供应商和模型，在任务中选择使用。</p>
+          <div class="ap-provider-panel">
+            <aside class="ap-provider-list"><div class="ap-caption">供应商</div><button class="ap-provider cursor-interaction" data-provider="compatible" aria-pressed="true" type="button">自定义供应商<span>未配置</span></button><button class="ap-provider cursor-interaction" data-provider="dashscope" aria-pressed="false" type="button">DashScope<span>未配置</span></button><span class="ap-muted ap-add">＋ 添加供应商</span></aside>
+            <div class="ap-provider-editor"><h3 id="ap-provider-title">自定义供应商</h3><label>API 格式<select id="ap-protocol" aria-label="API 格式"><option>Chat Completions</option></select></label><label>Base URL<input placeholder="填写模型服务地址" disabled></label><label>API Key<input placeholder="在正式应用中填写密钥" type="password" disabled></label><div class="ap-model-heading"><strong>模型列表</strong><span class="ap-muted">＋ 添加模型</span></div><div class="ap-model-empty">添加模型 ID，测试后设为默认对话模型。</div><div class="ap-provider-actions"><button type="button" class="ap-button cursor-interaction" id="ap-test">测试连接</button><button type="button" class="ap-button ap-primary" disabled>保存并设为默认</button></div><p id="ap-test-status" class="ap-muted" aria-live="polite">布局预览，不保存配置、不调用模型。</p></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+<style>
+#aster-plan { --ap-bg:light-dark(#ffffff,#171819); --ap-side:light-dark(#f3f4f6,#232426); --ap-text:light-dark(#24272d,#ebebed); --ap-muted:light-dark(#69717d,#a5a8b0); --ap-line:light-dark(#e1e4e9,#383b40); --ap-active:light-dark(#e5e9f0,#353941); --ap-blue:light-dark(#275ccb,#9db9ff); --ap-side-width:220px; color:var(--ap-text); font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+#aster-plan * {box-sizing:border-box} #aster-plan [hidden] {display:none!important}
+#aster-plan .ap-toolbar {display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--ap-muted);padding:8px 100px 12px 0;font-size:12px}
+#aster-plan .ap-window {display:grid;grid-template-columns:var(--ap-side-width) minmax(0,1fr);min-height:610px;background:var(--ap-bg);border:1px solid var(--ap-line);border-radius:12px;overflow:hidden}
+#aster-plan .ap-sidebar {display:flex;flex-direction:column;padding:22px 12px 14px;background:var(--ap-side);border-right:1px solid var(--ap-line)}
+#aster-plan .ap-brand {display:flex;align-items:center;gap:9px;margin:0 8px 28px} #aster-plan .ap-logo {background:var(--ap-blue);color:var(--ap-bg);border-radius:8px;width:28px;height:28px;text-align:center;font-weight:600}
+#aster-plan .ap-local {margin-left:auto;color:var(--ap-muted);font-size:12px}
+#aster-plan button,#aster-plan input,#aster-plan select,#aster-plan textarea {font:inherit;color:inherit}
+#aster-plan button:disabled {opacity:.55} #aster-plan button:focus-visible {outline:2px solid var(--ap-blue);outline-offset:2px}
+#aster-plan .ap-button {display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:1px solid var(--ap-line);border-radius:7px;padding:7px 10px}
+#aster-plan .ap-new {width:100%;background:var(--ap-bg);justify-content:flex-start} #aster-plan .ap-button:hover:not(:disabled) {background:var(--ap-active)}
+#aster-plan .ap-search {display:flex;align-items:center;gap:7px;padding:12px 8px;color:var(--ap-muted)} #aster-plan .ap-search input {width:100%;min-width:0;background:transparent;border:0;font-size:12px}
+#aster-plan .ap-caption {display:block;font-size:12px;color:var(--ap-muted);padding:15px 8px 8px}
+#aster-plan .ap-project {display:flex;gap:9px;align-items:center;padding:6px 8px}
+#aster-plan .ap-history {display:block;background:transparent;border:0;border-radius:6px;width:100%;text-align:left;padding:8px 10px;font-size:12px;overflow-wrap:anywhere} #aster-plan .ap-history:hover {background:var(--ap-active)}
+#aster-plan .ap-bottom {margin-top:auto;padding-top:25px} #aster-plan .ap-bottom .ap-button {border:0}
+#aster-plan .ap-main {min-width:0} #aster-plan .ap-header {display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:16px 22px;border-bottom:1px solid var(--ap-line);min-height:68px}
+#aster-plan .ap-header .ap-button {border:0;font-size:12px} #aster-plan .ap-work-grid {display:grid;grid-template-columns:minmax(0,1fr)}
+#aster-plan .ap-work-grid.ap-with-inspector {grid-template-columns:minmax(0,1fr) 210px}
+#aster-plan .ap-chat {display:flex;flex-direction:column;min-width:0;padding:24px;min-height:540px}
+#aster-plan #ap-empty {text-align:center;margin:auto 0 52px;padding-top:46px} #aster-plan h2 {font-size:25px;line-height:1.4;font-weight:600;margin:8px 0 12px} #aster-plan h3 {font-size:16px;font-weight:600;margin:0 0 18px}
+#aster-plan p {margin:10px 0} #aster-plan #ap-empty p,#aster-plan .ap-muted {color:var(--ap-muted);font-size:12px}
+#aster-plan .ap-eyebrow {font-size:11px;letter-spacing:.1em;color:var(--ap-muted)}
+#aster-plan .ap-compose {border:1px solid var(--ap-line);border-radius:14px;padding:13px;background:var(--ap-side)} #aster-plan textarea {width:100%;resize:vertical;background:transparent;border:0;min-height:68px;font-size:14px;outline-offset:4px}
+#aster-plan .ap-compose-actions {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px} #aster-plan .ap-compose-left {display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--ap-muted)} #aster-plan .ap-compose-left span {display:inline-flex;align-items:center;gap:4px} #aster-plan .ap-choose {font-size:12px;border:0}
+#aster-plan .ap-prompts {display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:14px} #aster-plan .ap-prompt-button {font-size:12px;border:1px solid var(--ap-line);border-radius:8px;background:transparent;padding:5px 10px}
+#aster-plan #ap-conversation {flex:1} #aster-plan .ap-user-message {background:var(--ap-side);padding:12px 16px;border-radius:12px;margin:10px 0 34px 24px} #aster-plan .ap-answer {padding-bottom:28px} #aster-plan .ap-draft {padding:8px 0;color:var(--ap-blue);font-size:12px}
+#aster-plan #ap-inspector {border-left:1px solid var(--ap-line);padding:24px 16px;background:var(--ap-side)} #aster-plan #ap-inspector ol {padding-left:20px;font-size:12px} #aster-plan #ap-inspector li {margin:14px 0} #aster-plan hr {border:0;border-top:1px solid var(--ap-line);margin:22px 0}
+#aster-plan .ap-nav-label {display:block;padding:7px 10px;font-size:13px;border-radius:7px} #aster-plan .ap-selected {background:var(--ap-active)}
+#aster-plan .ap-settings-content {padding:26px} #aster-plan .ap-settings-content h2 {font-size:23px}
+#aster-plan .ap-provider-panel {display:grid;grid-template-columns:150px minmax(0,1fr);border:1px solid var(--ap-line);border-radius:12px;margin-top:24px;min-height:410px;overflow:hidden}
+#aster-plan .ap-provider-list {padding:12px 8px;background:var(--ap-side);border-right:1px solid var(--ap-line)} #aster-plan .ap-provider-list .ap-caption {padding-top:4px}
+#aster-plan .ap-provider {width:100%;text-align:left;background:transparent;border:0;border-radius:7px;padding:10px;font-size:12px} #aster-plan .ap-provider[aria-pressed=true] {background:var(--ap-active)} #aster-plan .ap-provider span {display:block;color:var(--ap-muted);font-size:11px} #aster-plan .ap-add {display:block;padding:16px 10px}
+#aster-plan .ap-provider-editor {padding:22px;min-width:0} #aster-plan .ap-provider-editor label {display:block;font-size:12px;margin-bottom:14px;color:var(--ap-muted)} #aster-plan .ap-provider-editor input,#aster-plan .ap-provider-editor select {display:block;background:var(--ap-bg);border:1px solid var(--ap-line);border-radius:7px;padding:8px;margin-top:5px;width:100%;min-width:0;color:var(--ap-text);font-size:12px}
+#aster-plan .ap-model-heading {display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:12px} #aster-plan .ap-model-empty {font-size:12px;color:var(--ap-muted);padding:14px 0 22px} #aster-plan .ap-provider-actions {display:flex;gap:8px;flex-wrap:wrap;font-size:12px} #aster-plan .ap-primary {background:var(--ap-text);color:var(--ap-bg)} #aster-plan #ap-test-status {margin-top:16px}
+@media(max-width:850px){#aster-plan .ap-work-grid.ap-with-inspector {grid-template-columns:minmax(0,1fr)} #aster-plan #ap-inspector {border-left:0;border-top:1px solid var(--ap-line)} #aster-plan .ap-provider-panel {grid-template-columns:minmax(0,1fr)} #aster-plan .ap-provider-list {border-right:0;border-bottom:1px solid var(--ap-line);display:flex;gap:5px;flex-wrap:wrap} #aster-plan .ap-provider-list .ap-caption,#aster-plan .ap-add {display:none} #aster-plan .ap-provider {width:auto;flex:1}}
+@media(max-width:570px){#aster-plan .ap-window {grid-template-columns:minmax(0,1fr)} #aster-plan .ap-sidebar {border-right:0;border-bottom:1px solid var(--ap-line);padding:12px} #aster-plan .ap-brand {margin:0 4px 10px} #aster-plan .ap-work-nav .ap-caption,#aster-plan .ap-project,#aster-plan .ap-history,#aster-plan .ap-search {display:none} #aster-plan .ap-bottom {padding-top:4px;display:flex;align-items:center;justify-content:space-between} #aster-plan .ap-bottom .ap-caption {padding:4px} #aster-plan .ap-settings-nav {display:flex;flex-wrap:wrap;gap:4px} #aster-plan .ap-settings-nav .ap-caption {width:100%} #aster-plan .ap-chat {padding:18px;min-height:470px} #aster-plan .ap-settings-content {padding:18px} #aster-plan .ap-header {padding:12px 16px} #aster-plan .ap-toolbar {padding-right:0} #aster-plan .ap-compose-left {gap:8px} #aster-plan .ap-provider-editor {padding:16px}}
+@media(pointer:coarse){#aster-plan button {min-height:44px} #aster-plan input,#aster-plan textarea,#aster-plan select {font-size:16px!important}}
+</style>
+<script>
+(() => {
+  const root = document.getElementById('aster-plan');
+  const query = selector => root.querySelector(selector);
+  const workspace = query('#ap-workspace');
+  const settings = query('#ap-settings');
+  const state = { sidebarWidth:220, details:false };
+  function showSettings(open) {
+    workspace.hidden = open;
+    settings.hidden = !open;
+    query('.ap-work-nav').hidden = open;
+    query('.ap-settings-nav').hidden = !open;
+  }
+  function showTask(active) {
+    showSettings(false);
+    query('#ap-empty').hidden = active;
+    query('#ap-conversation').hidden = !active;
+    query('#ap-title').textContent = active ? 'Aster / 网页与桌面改造计划' : '新建任务';
+  }
+  function renderDetails() {
+    root.style.setProperty('--ap-side-width', state.sidebarWidth + 'px');
+    query('#ap-inspector').hidden = !state.details;
+    query('.ap-work-grid').classList.toggle('ap-with-inspector', state.details);
+    query('[data-action="inspector"]').setAttribute('aria-expanded', String(state.details));
+  }
+  root.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => {
+    const action = button.dataset.action;
+    if(action === 'settings') showSettings(true);
+    if(action === 'back') showSettings(false);
+    if(action === 'new') showTask(false);
+    if(action === 'task') showTask(true);
+    if(action === 'inspector') {state.details = !state.details;renderDetails();}
+  }));
+  root.querySelectorAll('[data-prompt]').forEach(button => button.addEventListener('click', () => {query('#ap-prompt').value = button.dataset.prompt;query('#ap-prompt').focus();}));
+  root.querySelectorAll('[data-provider]').forEach(button => button.addEventListener('click', () => {
+    root.querySelectorAll('[data-provider]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    const dashscope = button.dataset.provider === 'dashscope';
+    query('#ap-provider-title').textContent = dashscope ? 'DashScope' : '自定义供应商';
+    query('#ap-protocol').options[0].textContent = dashscope ? 'DashScope' : 'Chat Completions';
+  }));
+  query('#ap-test').addEventListener('click', () => {query('#ap-test-status').textContent = '正式应用将测试当前填写的地址与模型；草图不发起网络请求。';});
+  query('#ap-search').addEventListener('input', event => {
+    let count = 0;
+    root.querySelectorAll('.ap-history').forEach(button => {button.hidden = !button.textContent.includes(event.target.value.trim());if(!button.hidden) count++;});
+    query('.ap-no-match').hidden = count > 0;
+  });
+  renderDetails();
+  if(globalThis.Tweak) {
+    const tweak = new Tweak({container:root,onChange:renderDetails});
+    tweak.addSlider(state,'sidebarWidth',{label:'侧栏宽度',min:190,max:270,step:10,unit:'px'});
+    tweak.addToggle(state,'details',{label:'展开任务详情'});
+  }
+})();
+</script>

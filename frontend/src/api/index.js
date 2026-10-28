@@ -238,6 +238,10 @@ export const testModelSettings = (key, scope = 'USER') => request.post(`/setting
 
 // 模型供应商目录（Provider/Model/Binding），见 docs/design/2026-10-28-desktop-phase-a-runtime-model-contract.md
 export const listModelCatalog = () => request.get('/settings/catalog').then(response => response.data)
+// 工作流试点：定义 + 运行
+export const listWorkflows = (limit = 20) => request.get('/ai/workflows', { params: { limit } }).then(response => response.data)
+export const startWorkflow = (workflowKey, keyword) => request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/runs`, { keyword }).then(response => response.data)
+export const getWorkflowRun = runId => request.get(`/ai/workflows/runs/${encodeURIComponent(runId)}`).then(response => response.data)
 export const createModelProvider = payload => request.post('/settings/providers', payload).then(response => response.data)
 export const updateModelProvider = (providerId, payload) => request.put(`/settings/providers/${providerId}`, payload).then(response => response.data)
 export const deleteModelProvider = providerId => request.delete(`/settings/providers/${providerId}`).then(response => response.data)

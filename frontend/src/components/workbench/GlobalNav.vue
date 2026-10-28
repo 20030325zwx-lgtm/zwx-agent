@@ -53,7 +53,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
-  PanelLeftClose, PanelLeftOpen
+  PanelLeftClose, PanelLeftOpen, Workflow
 } from 'lucide-vue-next'
 import { resolvedTheme, themeMode, setThemeMode } from '../../design/apply-tokens'
 import { getCurrentUser } from '../../api/auth'
@@ -71,6 +71,7 @@ function toggle() { collapsed.value = !collapsed.value }
 const items = [
   { to: '/workbench', label: '工作台', icon: Compass, match: ['/workbench'] },
   { to: '/super-agent', label: '任务', icon: MessagesSquare, match: ['/super-agent'] },
+  { to: '/workflows', label: '工作流', icon: Workflow, match: ['/workflows'] },
   { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] }
 ]
 

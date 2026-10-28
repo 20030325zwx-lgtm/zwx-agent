@@ -41,6 +41,15 @@ const routes = [
         }
       },
       {
+        path: 'workflows',
+        name: 'Workflows',
+        component: () => import('../views/Workflows.vue'),
+        meta: {
+          title: '工作流 - Aster',
+          description: '把多步任务固化为可复用、可观测的自动化流程。'
+        }
+      },
+      {
         path: 'knowledge-admin',
         name: 'KnowledgeAdmin',
         component: () => import('../views/KnowledgeAdmin.vue'),

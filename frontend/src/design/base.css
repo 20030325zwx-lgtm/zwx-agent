@@ -1,0 +1,11 @@
+/* Aster 工作台补充的全局规则：只放 App.vue 遗留全局样式之外的新增项。
+   颜色值只允许出现在 design/tokens.js；组件样式一律 scoped + var(--wb-*)。 */
+
+::selection {
+  background: var(--wb-brand-soft, rgba(108, 92, 247, 0.1));
+}
+
+:focus-visible {
+  outline: 2px solid var(--wb-brand, #6C5CF7);
+  outline-offset: 2px;
+}

@@ -10,17 +10,26 @@ const routes = [
     meta: { title: '登录 - Aster', public: true }
   },
   {
+    // 工作台：网页与桌面的默认入口，替代原宣传式首页
+    path: '/workbench',
+    name: 'Workbench',
+    component: () => import('../views/Workbench.vue'),
+    meta: {
+      title: '工作台 - Aster',
+      description: 'Aster AI 工作台：从这里开始任务、继续工作。'
+    }
+  },
+  {
     path: '/',
     component: WorkspaceLayout,
     children: [
       {
         path: '',
-        name: 'Home',
-        component: () => import('../views/Home.vue'),
-        meta: {
-          title: 'Aster - 智能体目录',
-          description: 'Aster 提供情感分析大师和超级智能体服务。'
-        }
+        redirect: '/workbench'
+      },
+      {
+        path: 'home',
+        redirect: '/workbench'
       },
       {
         path: 'model-settings',

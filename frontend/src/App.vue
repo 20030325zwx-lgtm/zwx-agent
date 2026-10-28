@@ -1,6 +1,24 @@
 <template>
-  <router-view />
+  <ConfigProvider :locale="zhCN" :theme="antdTheme">
+    <router-view />
+  </ConfigProvider>
 </template>
+
+<script setup>
+import { computed } from 'vue'
+import { ConfigProvider, theme as antdThemeApi } from 'ant-design-vue'
+import zhCN from 'ant-design-vue/es/locale/zh_CN'
+import { resolvedTheme } from './design/apply-tokens'
+import { THEMES } from './design/tokens'
+
+const antdTheme = computed(() => {
+  const resolved = resolvedTheme.value
+  return {
+    ...THEMES[resolved].antd,
+    algorithm: resolved === 'dark' ? antdThemeApi.darkAlgorithm : antdThemeApi.defaultAlgorithm
+  }
+})
+</script>
 
 <style>
 * {

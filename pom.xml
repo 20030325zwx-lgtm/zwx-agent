@@ -88,6 +88,14 @@
             <groupId>com.alibaba</groupId>
             <artifactId>dashscope-sdk-java</artifactId>
             <version>2.19.1</version>
+            <exclusions>
+                <!-- dashscope 传递引入 slf4j-simple，与 logback 双提供者并存时
+                     异常日志渲染会触发 NoClassDefFoundError 并杀死 Tomcat 工作线程 -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-simple</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>com.aliyun.oss</groupId>

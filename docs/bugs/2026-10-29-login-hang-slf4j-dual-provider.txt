@@ -1,0 +1,30 @@
+日期：2026-10-29
+
+问题现象
+- 本地环境用错误密码调用 /api/auth/login 时请求无限悬挂（无响应、无超时日志），
+  Tomcat 工作线程被杀死；多次失败尝试累积后所有登录请求都悬挂。
+- 后端日志出现 NoClassDefFoundError: ch/qos/logback/classic/spi/ThrowableProxy，
+  以及启动警告 "Multiple SLF4J providers"（logback 与 slf4j-simple 并存）。
+
+影响范围
+- 所有走异常日志渲染的错误路径（错误密码 401、参数校验失败等）都可能杀死工作线程；
+  正常成功路径不受影响。
+
+原因
+- com.alibaba:dashscope-sdk-java:2.19.1 传递引入 org.slf4j:slf4j-simple:2.0.17，
+  与 Spring Boot 的 logback-classic 构成双 SLF4J 提供者；异常渲染路径触发
+  NoClassDefFoundError，未捕获错误导致工作线程死亡、连接悬挂。
+
+解决方式
+- pom.xml 对 dashscope-sdk-java 增加 exclusion（org.slf4j:slf4j-simple），
+  重建后 fat jar 内仅剩 logback-classic 一个提供者。
+
+验证结果
+- 启动警告消失（grep providers/simple = 0）。
+- 错误密码 104ms 返回 401（此前为无限悬挂）；正确密码 200。
+- 本地后端重启后功能正常。
+
+后续注意事项
+- 新增依赖时注意不要再次带入第二个 SLF4J 提供者（simple/nop 均不行）；
+  构建后可用 `unzip -l target/*.jar | grep slf4j` 快速自查。
+- 若历史运行中的后端出现"错误路径悬挂"，先重启后端恢复线程池，再检查类路径。

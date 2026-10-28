@@ -1,0 +1,26 @@
+日期：2026-10-28
+主题：删除/重命名 Flyway 迁移后，增量构建残留旧迁移导致启动失败
+
+问题现象：
+整合迁移基线后执行 `mvn test`（未 clean），Spring 上下文启动报
+`FlywayException: Found more than one migration with version 1`，
+指向 target/classes/db/migration 下同时存在 V1__baseline.sql 与已删除的 V1__create_application_tables.sql。
+
+影响范围：
+本地开发、CI 中任何“删除或改名迁移文件后直接 mvn test/package”的场景；应用可正常在干净 checkout 构建，
+只在增量构建目录上复现。
+
+原因：
+Maven resources 插件在增量构建时只复制变化的资源，不删除 target 中已不存在的旧资源文件，导致旧迁移仍在
+classpath 内与新迁移冲突。
+
+解决方式：
+迁移文件增删改后使用 `mvn clean test` / `mvn clean package`；本次验证即改用 clean 构建。
+后续如有 CI 缓存，需在缓存键中包含 db/migration 目录的哈希，或在构建前清理 target/classes/db/migration。
+
+验证结果：
+`mvn clean test` 344 通过、0 失败、1 跳过；打包重启后 health ok，Flyway 仅应用 V1/V2/V3。
+
+后续注意事项：
+1. 只要改动了 src/main/resources/db/migration，就不要再依赖增量构建验证。
+2. 检查启动日志中的 Flyway 迁移列表，确认没有重复版本号。

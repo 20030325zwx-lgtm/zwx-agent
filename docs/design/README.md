@@ -2,6 +2,7 @@
 
 - [AI 工作台设计归档入口（接手必读）](./2026-10-28-ai-workbench-archive.md)
 - [阶段 A：桌面运行时验证结论与模型调用契约](./2026-10-28-desktop-phase-a-runtime-model-contract.md)
+- [阶段 C/D/E 交付：模型目录、桌面独立运行与打包](./2026-10-29-desktop-phase-c-d-delivery.md)
 - [AI 工作台：GitHub 设计借鉴与方案修订](./2026-10-28-ai-workbench-references.md)
 - [网页与桌面工作区改造计划（待确认）](./2026-10-28-web-desktop-workspace-plan.md)
 - [当前智能体架构](./agent-architecture.md)

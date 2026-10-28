@@ -60,3 +60,6 @@
 > 后端新增 `/ai/manus/runs/overview`（含会话标题与任务输入，修复运行卡深链缺 conversationId）。
 > 任务发起收归任务页；删除 WorkbenchComposer 与 SuperAgent 草稿消费死代码。
 > 开发后端已重启并应用 V4 迁移（旧 chat/vision 配置已自动转入供应商目录）。
+> 再追补（提交 7a2ab0d）：**工作流垂直试点完成并真实跑通**——原生引擎（V5 workflow_run）
+> + 首个工作流「商品海报生成」（MCP 搜图/Commons 回退/LLM 译英 → Java2D 海报 → OSS 产物），
+> 前端新增「工作流」导航页；详见 docs/design/2026-10-29-workflow-pilot-product-poster.md。

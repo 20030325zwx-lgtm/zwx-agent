@@ -5,6 +5,7 @@
 - [阶段 C/D/E 交付：模型目录、桌面独立运行与打包](./2026-10-29-desktop-phase-c-d-delivery.md)
 - [工作流垂直试点：原生引擎与商品海报生成](./2026-10-29-workflow-pilot-product-poster.md)
 - [桌面本机目录授权：系统选择器与受控读取](./2026-10-29-desktop-file-authorization.md)
+- [产品下一阶段规划](./2026-10-29-product-next-phase-plan.md)
 - [AI 工作台：GitHub 设计借鉴与方案修订](./2026-10-28-ai-workbench-references.md)
 - [网页与桌面工作区改造计划（待确认）](./2026-10-28-web-desktop-workspace-plan.md)
 - [当前智能体架构](./agent-architecture.md)

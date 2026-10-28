@@ -66,3 +66,9 @@
 > 再追补（提交 f21430a）：**桌面本机目录授权完成**——系统目录选择器 → 主进程持久化授权清单
 > → 回环令牌推送后端 → select/browse 以清单为边界；授权链路脚本验证 + 打包应用实测通过。
 > 详见 docs/design/2026-10-29-desktop-file-authorization.md。
+> 再追补（提交 db70891 之后）：**模型目录已按本地环境配置**——DashScope 官方供应商
+> （Key 取自 application-local.yml 加密入库）+ qwen-plus/qwen3-vl-plus 模型 +
+> chat/vision 用户绑定，连通性测试通过（484ms）。顺带修复错误密码登录悬挂
+> （dashscope 传递引入 slf4j-simple 致双 SLF4J 提供者，已排除，见 docs/bugs/
+> 2026-10-29-login-hang-slf4j-dual-provider.txt）。本地管理员密码为默认 admin123。
+> 产品下一阶段规划见 docs/design/2026-10-29-product-next-phase-plan.md。

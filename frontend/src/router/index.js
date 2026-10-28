@@ -57,6 +57,15 @@ const routes = [
           title: '记忆管理 - Aster',
           description: '查看、修正与删除智能体跨会话记住的关于你的事实。'
         }
+      },
+      {
+        path: 'permission-settings',
+        name: 'PermissionSettings',
+        component: () => import('../views/PermissionSettings.vue'),
+        meta: {
+          title: '权限模式 - Aster',
+          description: '配置默认权限模式与工具 allow/deny 规则。'
+        }
       }
     ]
   },

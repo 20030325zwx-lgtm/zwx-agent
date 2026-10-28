@@ -127,6 +127,13 @@ app:
       tool-guard-enabled: true
       # 未登记工具默认拒绝；MCP 工具需完成策略评审后按名称加入此逗号分隔列表
       allowed-unregistered-tools: ${APP_ALLOWED_UNREGISTERED_TOOLS:}
+    observability:
+      # 模型调用轨迹：每次 LLM 调用落一条结构摘要（角色/字符数/预览），供评测回放与成本归因
+      model-io-enabled: ${APP_MODEL_IO_ENABLED:true}
+      # 是否记录完整请求/响应载荷（单条按 model-io-max-payload-chars 截断）；评测排障时开启
+      model-io-full: ${APP_MODEL_IO_FULL:false}
+      model-io-preview-chars: 500
+      model-io-max-payload-chars: 65536
     memory:
       # 工作记忆压缩（批次 C L1）：messageList 超 context-budget 字符时压缩最旧块，保留最近 recent-keep 条
       compression-enabled: true

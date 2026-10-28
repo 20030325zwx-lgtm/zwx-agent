@@ -20,12 +20,11 @@ class ToolGuardHookTest {
 
     private ToolConfirmationService confirmationService() {
         // 空实现 JdbcTemplate：确认台账的读写全部落空，仅内存态参与断言
-        return new ToolConfirmationService(true, "executeTerminalCommand,executeDatabaseQuery,downloadResource,mcp:*",
-                mock(JdbcTemplate.class));
+        return new ToolConfirmationService(true, mock(JdbcTemplate.class));
     }
 
     private ToolGuardHook hook(boolean enabled) {
-        return new ToolGuardHook(enabled, "", "", new UrlAccessPolicy(), confirmationService(), new com.zwx.zwxagent.agent.observability.AgentMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
+        return new ToolGuardHook(enabled, "", "", new UrlAccessPolicy(), confirmationService(), null, new com.zwx.zwxagent.agent.observability.AgentMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
     }
 
     private AgentRunContext context() {
@@ -78,7 +77,7 @@ class ToolGuardHookTest {
     void legitimateCallsPass() {
         UrlAccessPolicy urlPolicy = mock(UrlAccessPolicy.class);
         when(urlPolicy.validateHttpUrl(anyString())).thenAnswer(invocation -> URI.create(invocation.getArgument(0)));
-        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy, confirmationService(), null);
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy, confirmationService(), null, null);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "readFile", "{\"fileName\": \"notes/report.txt\"}"),
                 new PlannedToolCall("id-2", "function", "executeTerminalCommand", "{\"command\": \"grep -rn TODO .\"}"),
@@ -91,7 +90,7 @@ class ToolGuardHookTest {
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "someFutureTool", "{\"path\": \"/etc/passwd\"}"));
         assertThrows(HookAbortException.class, () -> hook(true).beforeToolCalls(context(), calls));
-        ToolGuardHook registered = new ToolGuardHook(true, "", "someFutureTool", new UrlAccessPolicy(), confirmationService(), null);
+        ToolGuardHook registered = new ToolGuardHook(true, "", "someFutureTool", new UrlAccessPolicy(), confirmationService(), null, null);
         assertDoesNotThrow(() -> registered.beforeToolCalls(context(), calls));
     }
 
@@ -151,7 +150,12 @@ class ToolGuardHookTest {
         AgentRunContext runContext = AgentRunContext.builder().tenantId("default").agentKey("super")
                 .conversationId("conv-1").runId("run-42").build();
         service.registerRun("run-42");
-        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), service, null);
+        com.zwx.zwxagent.capability.tools.PermissionService permissions =
+                new com.zwx.zwxagent.capability.tools.PermissionService(mock(JdbcTemplate.class),
+                        "executeTerminalCommand,mcp:*");
+        permissions.registerRun("run-42", com.zwx.zwxagent.capability.tools.PermissionMode.EDIT,
+                "default", "user-1");
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), service, permissions, null);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"ls\"}"));
         ToolConfirmationRequiredException exception = assertThrows(ToolConfirmationRequiredException.class,
@@ -173,7 +177,7 @@ class ToolGuardHookTest {
         service.registerRun("run-43");
         service.markPending("run-43", "executeTerminalCommand", "keys=[command], chars=4");
         service.decide("run-43", "executeTerminalCommand", ToolConfirmationService.DECISION_APPROVED);
-        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy, service, null);
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", urlPolicy, service, null, null);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"ls\"}"));
         assertDoesNotThrow(() -> hook.beforeToolCalls(runContext, calls));
@@ -189,13 +193,49 @@ class ToolGuardHookTest {
     }
 
     @Test
+    void planModeDeniesWriteToolsBeforeConfirmation() {
+        ToolConfirmationService service = confirmationService();
+        AgentRunContext runContext = AgentRunContext.builder().tenantId("default").agentKey("super")
+                .conversationId("conv-1").runId("run-45").build();
+        service.registerRun("run-45");
+        com.zwx.zwxagent.capability.tools.PermissionService permissions =
+                new com.zwx.zwxagent.capability.tools.PermissionService(mock(JdbcTemplate.class),
+                        "executeTerminalCommand,mcp:*");
+        permissions.registerRun("run-45", com.zwx.zwxagent.capability.tools.PermissionMode.PLAN,
+                "default", "user-1");
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), service, permissions, null);
+        List<PlannedToolCall> calls = List.of(
+                new PlannedToolCall("id-1", "function", "writeFile",
+                        "{\"fileName\": \"report.md\", \"content\": \"x\"}"));
+        HookAbortException exception = assertThrows(HookAbortException.class,
+                () -> hook.beforeToolCalls(runContext, calls));
+        assertTrue(exception.getMessage().contains("权限模式"), exception.getMessage());
+    }
+
+    @Test
+    void yoloModeSkipsConfirmationForRegisteredRun() {
+        ToolConfirmationService service = confirmationService();
+        AgentRunContext runContext = AgentRunContext.builder().tenantId("default").agentKey("super")
+                .conversationId("conv-1").runId("run-46").build();
+        service.registerRun("run-46");
+        com.zwx.zwxagent.capability.tools.PermissionService permissions =
+                new com.zwx.zwxagent.capability.tools.PermissionService(mock(JdbcTemplate.class),
+                        "executeTerminalCommand,mcp:*");
+        permissions.registerRun("run-46", com.zwx.zwxagent.capability.tools.PermissionMode.YOLO,
+                "default", "user-1");
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), service, permissions, null);
+        List<PlannedToolCall> calls = List.of(
+                new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"ls\"}"));
+        assertDoesNotThrow(() -> hook.beforeToolCalls(runContext, calls));
+    }
+
+    @Test
     void confirmationDisabledSkipsGate() {
-        ToolConfirmationService disabled = new ToolConfirmationService(false,
-                "executeTerminalCommand", mock(JdbcTemplate.class));
+        ToolConfirmationService disabled = new ToolConfirmationService(false, mock(JdbcTemplate.class));
         AgentRunContext runContext = AgentRunContext.builder().tenantId("default").agentKey("super")
                 .conversationId("conv-1").runId("run-44").build();
         disabled.registerRun("run-44");
-        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), disabled, null);
+        ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), disabled, null, null);
         List<PlannedToolCall> calls = List.of(
                 new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"ls\"}"));
         assertDoesNotThrow(() -> hook.beforeToolCalls(runContext, calls));

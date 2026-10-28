@@ -73,6 +73,32 @@ public class AuthController {
         return authenticate(request.username(), request.password());
     }
 
+    /**
+     * 管理员开户：为无人值守场景（评测/后台任务）预置隔离账号。
+     * 公共注册仍受 registration-enabled 控制；本接口必须携带管理员 JWT。
+     */
+    @PostMapping("/users")
+    public UserView createUser(CurrentActor actor, @RequestBody AuthRequest request) {
+        actor.requireAdmin();
+        String username = request.username() == null ? "" : request.username().trim();
+        if (!USERNAME_PATTERN.matcher(username).matches()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Username must be 3-64 characters of letters, digits, _, . or -");
+        }
+        if (request.password() == null || request.password().length() < 6 || request.password().length() > 128) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be 6-128 characters");
+        }
+        if (userRepository.existsByUsername(username)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists");
+        }
+        AppUser user = userRepository.insert(actor.tenantId(), username,
+                passwordEncoder.encode(request.password()), Role.USER);
+        return new UserView(user.id(), user.username(), user.tenantId(), user.role().name());
+    }
+
+    public record UserView(String id, String username, String tenantId, String role) {
+    }
+
     @PostMapping("/token")
     public AuthResponse token(jakarta.servlet.http.HttpServletRequest request) {
         String authorization = request.getHeader("Authorization");

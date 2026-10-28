@@ -36,9 +36,14 @@ public class AggregatorNode implements NodeAction {
     private final AtomicReference<String> tokenUsageRunId = new AtomicReference<>("");
 
     public AggregatorNode(ChatModel chatModel, TokenUsageService tokenUsage) {
+        this(chatModel, tokenUsage, null);
+    }
+
+    public AggregatorNode(ChatModel chatModel, TokenUsageService tokenUsage,
+                 com.zwx.zwxagent.agent.observability.ModelIoService modelIo) {
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(new MyLoggerAdvisor(),
-                        new TokenUsageAdvisor("aggregator", tokenUsage, tokenUsageRunId::get))
+                        new TokenUsageAdvisor("aggregator", tokenUsage, tokenUsageRunId::get, modelIo))
                 .build();
     }
 

@@ -37,6 +37,13 @@
           :aria-pressed="knowledgeSearch" @click="knowledgeSearch = !knowledgeSearch">
           <BookOpenCheck :size="17" />
         </button>
+        <label v-if="permissionModes.length" class="mode-select" :class="`mode-${permissionMode.toLowerCase()}`"
+          :data-tooltip="modeHint">
+          <ShieldCheck :size="15" />
+          <select v-model="permissionMode" aria-label="权限模式" @change="rememberMode">
+            <option v-for="mode in permissionModes" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+          </select>
+        </label>
         <span class="composer-hint">{{ connectionStatus === 'connecting' ? '任务执行中，可随时停止' : 'Enter 发送 · Shift+Enter 换行' }}</span>
         <button v-if="connectionStatus === 'connecting'" class="stop-button" type="button" title="停止生成" aria-label="停止生成" @click="emit('stop-generation')">
           <Square :size="14" fill="currentColor" />
@@ -50,8 +57,10 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
-import { ArrowUp, BookOpenCheck, Globe2, Paperclip, Square } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { ArrowUp, BookOpenCheck, Globe2, Paperclip, ShieldCheck, Square } from 'lucide-vue-next'
+
+const MODE_STORAGE_KEY = 'zwx-permission-mode'
 
 const props = defineProps({
   connectionStatus: { type: String, default: 'disconnected' },
@@ -59,6 +68,8 @@ const props = defineProps({
   attachmentAccept: { type: String, default: 'image/jpeg,image/png,image/gif,image/webp' },
   webSearchAvailable: { type: Boolean, default: false },
   knowledgeSearchAvailable: { type: Boolean, default: false },
+  permissionModes: { type: Array, default: () => [] },
+  defaultPermissionMode: { type: String, default: 'EDIT' },
   placeholder: { type: String, default: '描述目标、约束或需要交付的结果…' },
   disabled: { type: Boolean, default: false }
 })
@@ -70,6 +81,26 @@ const inputMessage = ref('')
 const selectedImages = ref([])
 const webSearch = ref(false)
 const knowledgeSearch = ref(false)
+const permissionMode = ref(
+  localStorage.getItem(MODE_STORAGE_KEY)
+  || props.defaultPermissionMode
+  || 'EDIT'
+)
+
+const modeHint = computed(() => {
+  const mode = props.permissionModes.find(item => item.value === permissionMode.value)
+  return mode ? `${mode.label}：${mode.hint}` : '权限模式'
+})
+
+const rememberMode = () => localStorage.setItem(MODE_STORAGE_KEY, permissionMode.value)
+
+// 用户尚未手动选择过模式时，跟随服务端默认值（设置页修改后生效）。
+watch(() => props.defaultPermissionMode, value => {
+  if (value && !localStorage.getItem(MODE_STORAGE_KEY)
+    && props.permissionModes.some(mode => mode.value === value)) {
+    permissionMode.value = value
+  }
+})
 
 const canSend = computed(() => !props.disabled
   && (inputMessage.value.trim().length > 0 || selectedImages.value.length > 0))
@@ -79,6 +110,7 @@ const send = () => {
   const payload = { message: inputMessage.value.trim(), files: selectedImages.value.map(item => item.file) }
   if (props.webSearchAvailable) payload.webSearch = webSearch.value
   if (props.knowledgeSearchAvailable) payload.knowledgeSearch = knowledgeSearch.value
+  if (props.permissionModes.length) payload.permissionMode = permissionMode.value
   emit('send-message', payload)
   inputMessage.value = ''
   clearSelectedImages()
@@ -180,6 +212,61 @@ defineExpose({ fill, submit, focus })
 
 .tool-button:hover { background: var(--sk-fill); color: var(--sk-label); }
 .tool-button.active { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+
+.mode-select {
+  position: relative;
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9px;
+  padding: 0 7px;
+  color: var(--sk-label-2);
+  cursor: pointer;
+}
+
+.mode-select:hover { background: var(--sk-fill); color: var(--sk-label); }
+.mode-select.mode-plan { color: #2563eb; }
+.mode-select.mode-yolo { color: #b45309; }
+.mode-select.mode-guarded { color: #7c3aed; }
+
+.mode-select select {
+  appearance: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.mode-select::after {
+  position: absolute;
+  z-index: 10;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: rgba(23, 33, 58, 0.94);
+  color: #fff;
+  content: attr(data-tooltip);
+  font-size: 10.5px;
+  font-weight: 550;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(3px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+}
+
+.mode-select:hover::after, .mode-select:focus-within::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
 
 .tool-button::after {
   position: absolute;

@@ -52,6 +52,7 @@
                   ⏸ 任务已暂停：等待确认
                   <strong>{{ activeRun.pendingConfirmations.map(item => item.tool).join('、') }}</strong>
                 </span>
+                <span class="confirmation-mode">{{ activeRun.permissionMode || defaultPermissionMode }} 模式</span>
                 <button type="button" class="confirmation-action" @click="confirmationDialogOpen = true">查看并确认</button>
               </div>
               <div class="canvas-conversation">
@@ -84,6 +85,7 @@
           <footer class="workspace-composer-shell">
             <TaskComposer ref="composerRef" :connection-status="connectionStatus" attachments-enabled
               attachment-accept="image/jpeg,image/png,image/gif,image/webp" knowledge-search-available web-search-available
+              :permission-modes="permissionModes" :default-permission-mode="defaultPermissionMode"
               :placeholder="activeRun ? '继续补充要求，或描述下一步…' : '描述目标、约束或需要交付的结果…'"
               @send-message="sendMessage" @stop-generation="stopGeneration" />
           </footer>
@@ -134,7 +136,16 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import HomeButton from '../components/HomeButton.vue'
 import RunInspector from '../components/workspace/RunInspector.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
-import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, listManusConversations, listManusRuns, listManusWebSources, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
+import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, listManusConversations, listManusRuns, listManusWebSources, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
+
+const permissionModes = [
+  { value: 'PLAN', label: '只读规划', hint: '仅允许只读工具，写操作直接拒绝' },
+  { value: 'BUILD', label: '严格', hint: '文件写入与执行操作都需要确认' },
+  { value: 'EDIT', label: '编辑', hint: '文件产出免确认，执行类工具需确认' },
+  { value: 'GUARDED', label: '守护', hint: '常规操作免确认，高危操作需确认' },
+  { value: 'YOLO', label: '全自动', hint: '全部放行，仅建议在隔离环境使用' }
+]
+const defaultPermissionMode = ref('EDIT')
 
 useHead({ title: '超级智能体 - Aster', meta: [{ name: 'description', content: 'Aster 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -581,6 +592,7 @@ const sendMessage = async payload => {
   const knowledgeSearch = typeof payload === 'string' ? false : payload.knowledgeSearch === true
   const webSearch = typeof payload === 'string' ? false : payload.webSearch === true
   const files = typeof payload === 'string' ? [] : payload.files || []
+  const permissionMode = typeof payload === 'string' ? null : payload.permissionMode || null
   const imageObjectKeys = []
   if (files.length) {
     setCompanion('working', files.length > 1 ? `正在上传 ${files.length} 张图片` : '正在上传图片')
@@ -604,13 +616,14 @@ const sendMessage = async payload => {
   activeAnswerIndex.value = answerIndex
   activeRun.value = normalizeRun({ status: 'RUNNING', canCancel: true, input: message, createdAt: new Date().toISOString() }, answerIndex)
   activeRun.value.webSearch = webSearch
+  activeRun.value.permissionMode = permissionMode || defaultPermissionMode.value
   workspaceFiles.value = []
   const requestId = crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`
   connectionStatus.value = 'connecting'
   reconnectAttempts = 0
   const thinkingSteps = [knowledgeSearch ? '检索知识库' : '', webSearch ? '联网搜索' : ''].filter(Boolean).join('与')
   setCompanion('thinking', thinkingSteps ? `正在${thinkingSteps}并规划任务` : '正在规划任务')
-  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, webSearch, requestId, imageObjectKeys)
+  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, webSearch, requestId, imageObjectKeys, permissionMode)
   attachManusStream(eventSource, answerIndex)
 }
 const attachManusStream = (stream, answerIndex) => {
@@ -957,6 +970,10 @@ const exportRun = async () => {
 }
 onMounted(async () => {
   await Promise.all([refreshProjects(), refreshConversations()])
+  // 权限模式默认值：读取用户设置；失败时保持 EDIT，不阻塞工作台。
+  getPermissionSettings()
+    .then(settings => { if (settings?.mode) defaultPermissionMode.value = settings.mode })
+    .catch(error => console.error('Unable to load permission settings:', error))
   // run 深链：/super-agent?conversationId=…&runId=…（首页任务流/分享入口）
   const queryRunId = typeof route.query.runId === 'string' ? route.query.runId : ''
   const queryConversationId = typeof route.query.conversationId === 'string' ? route.query.conversationId : ''
@@ -1191,6 +1208,15 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   color: #7a5a10;
 }
 .confirmation-text strong { font-weight: 700; }
+.confirmation-mode {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #8a6a1c;
+  font-size: 10.5px;
+  font-weight: 600;
+}
 .confirmation-action {
   flex-shrink: 0;
   border: 1px solid #e2b93b;

@@ -46,9 +46,14 @@ public class PlannerNode implements NodeAction {
     private final AtomicReference<String> tokenUsageRunId = new AtomicReference<>("");
 
     public PlannerNode(ChatModel chatModel, TokenUsageService tokenUsage) {
+        this(chatModel, tokenUsage, null);
+    }
+
+    public PlannerNode(ChatModel chatModel, TokenUsageService tokenUsage,
+                 com.zwx.zwxagent.agent.observability.ModelIoService modelIo) {
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(new MyLoggerAdvisor(),
-                        new TokenUsageAdvisor("planner", tokenUsage, tokenUsageRunId::get))
+                        new TokenUsageAdvisor("planner", tokenUsage, tokenUsageRunId::get, modelIo))
                 .build();
     }
 

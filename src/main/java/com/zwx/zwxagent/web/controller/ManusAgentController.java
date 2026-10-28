@@ -144,6 +144,12 @@ public class ManusAgentController {
     private ToolConfirmationService toolConfirmationService;
 
     @Resource
+    private com.zwx.zwxagent.capability.tools.PermissionService permissionService;
+
+    @Resource
+    private com.zwx.zwxagent.agent.execution.RunTrajectoryService runTrajectoryService;
+
+    @Resource
     private com.zwx.zwxagent.agent.observability.AgentMetrics agentMetrics;
 
     @Resource
@@ -212,10 +218,16 @@ public class ManusAgentController {
                                       @RequestParam(defaultValue = "false") boolean knowledgeSearch,
                                       @RequestParam(defaultValue = "true") boolean webSearch,
                                       @RequestParam(required = false) List<String> imageObjectKey,
-                                      @RequestParam(required = false) String clientRequestId) {
+                                      @RequestParam(required = false) String clientRequestId,
+                                      @RequestParam(required = false) String permissionMode) {
         agentConversationService.ensureConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
         // 每用户配额：并发 run / 小时频率 / 24h token 预算，超限 429（在会话锁之前，快速拒绝）
         runQuotaService.checkRunAllowed(actor.userId());
+        // 权限模式：请求参数覆盖用户默认；非法值在进入执行前拒绝，避免半途失败。
+        com.zwx.zwxagent.capability.tools.PermissionMode effectivePermissionMode =
+                permissionMode == null || permissionMode.isBlank()
+                        ? permissionService.defaultMode(actor.tenantId(), actor.userId())
+                        : com.zwx.zwxagent.capability.tools.PermissionMode.require(permissionMode);
         var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
         if (conversationLease == null) throw new com.zwx.zwxagent.chat.conversation.ConversationBusyException();
         long userMessageId;
@@ -329,7 +341,8 @@ public class ManusAgentController {
         String runId;
         try {
             runId = agentRunService.start(conversationId, actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
-                    userMessageId, agentMessage, historyContext, knowledgeContext, ragTraceJson);
+                    userMessageId, agentMessage, historyContext, knowledgeContext, ragTraceJson,
+                    effectivePermissionMode.name());
         } catch (RuntimeException exception) {
             agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
             activeMcpTools.close();
@@ -355,8 +368,8 @@ public class ManusAgentController {
             conversationLease.close();
         };
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
-                conversationId, actor.tenantId(), runChatModel, agentMessage, historyContext, availableTools, knowledgeContext,
-                knowledge.trace() == null ? null : ragTraceJson, prefaceActivity, runId, null, null, cleanup,
+                conversationId, actor.tenantId(), actor.userId(), runChatModel, agentMessage, historyContext, availableTools, knowledgeContext,
+                knowledge.trace() == null ? null : ragTraceJson, prefaceActivity, runId, effectivePermissionMode.name(), null, null, cleanup,
                 result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result));
         ManusGraphOrchestrator.ManusRunHandle handle;
         try {
@@ -391,6 +404,16 @@ public class ManusAgentController {
     public AgentRunView getManusRun(CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
         return agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
                 .map(AgentRunView::from)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+    }
+
+    /** 轨迹导出：检查点 + 工具账本 + 模型调用 + 执行事件，用于评测留证与回放。 */
+    @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/trajectory")
+    public java.util.Map<String, Object> getManusRunTrajectory(CurrentActor actor,
+                                                               @PathVariable String conversationId,
+                                                               @PathVariable String runId) {
+        return runTrajectoryService.trajectory(actor.tenantId(), actor.userId(), conversationId, runId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
     }
@@ -525,10 +548,12 @@ public class ManusAgentController {
         };
         com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest runRequest =
                 new com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest(
-                        conversationId, actor.tenantId(), runChatModel, run.input(),
+                        conversationId, actor.tenantId(), actor.userId(), runChatModel, run.input(),
                         run.historyContext() == null ? "" : run.historyContext(),
                         availableTools, run.knowledgeContext() == null ? "" : run.knowledgeContext(),
-                        run.ragTraceJson(), null, runId, resumeCheckpoint, resumeFrom, cleanup,
+                        run.ragTraceJson(), null, runId,
+                        com.zwx.zwxagent.capability.tools.PermissionMode.parse(run.permissionMode()).name(),
+                        resumeCheckpoint, resumeFrom, cleanup,
                         result -> completeManusRun(actor, conversationId, run.userMessageId(), runId,
                                 ragTraceJson, run.assistantMessageId(), result));
         com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunHandle handle;

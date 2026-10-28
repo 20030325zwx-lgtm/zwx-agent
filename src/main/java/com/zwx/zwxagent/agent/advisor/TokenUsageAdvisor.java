@@ -31,11 +31,18 @@ public class TokenUsageAdvisor implements CallAdvisor, StreamAdvisor {
     private final String phase;
     private final TokenUsageService tokenUsage;
     private final Supplier<String> runIdSupplier;
+    private final com.zwx.zwxagent.agent.observability.ModelIoService modelIo;
 
     public TokenUsageAdvisor(String phase, TokenUsageService tokenUsage, Supplier<String> runIdSupplier) {
+        this(phase, tokenUsage, runIdSupplier, null);
+    }
+
+    public TokenUsageAdvisor(String phase, TokenUsageService tokenUsage, Supplier<String> runIdSupplier,
+                             com.zwx.zwxagent.agent.observability.ModelIoService modelIo) {
         this.phase = phase;
         this.tokenUsage = tokenUsage;
         this.runIdSupplier = runIdSupplier;
+        this.modelIo = modelIo;
     }
 
     @Override
@@ -50,15 +57,33 @@ public class TokenUsageAdvisor implements CallAdvisor, StreamAdvisor {
 
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
+        long startNanos = System.nanoTime();
         ChatClientResponse response = chain.nextCall(request);
+        long latencyMs = (System.nanoTime() - startNanos) / 1_000_000;
         observe(request, response);
+        recordIo(request, response, latencyMs);
         return response;
     }
 
     @Override
     public Flux<ChatClientResponse> adviseStream(ChatClientRequest request, StreamAdvisorChain chain) {
+        long startNanos = System.nanoTime();
         Flux<ChatClientResponse> responses = chain.nextStream(request);
-        return new ChatClientMessageAggregator().aggregateChatClientResponse(responses, aggregated -> observe(request, aggregated));
+        return new ChatClientMessageAggregator().aggregateChatClientResponse(responses, aggregated -> {
+            observe(request, aggregated);
+            recordIo(request, aggregated, (System.nanoTime() - startNanos) / 1_000_000);
+        });
+    }
+
+    private void recordIo(ChatClientRequest request, ChatClientResponse response, long latencyMs) {
+        if (modelIo == null || !modelIo.isEnabled() || response == null) return;
+        try {
+            String model = request.prompt().getOptions() == null ? null : request.prompt().getOptions().getModel();
+            modelIo.record(runIdSupplier.get(), phase, model,
+                    request.prompt().getInstructions(), response.chatResponse(), latencyMs);
+        } catch (Exception exception) {
+            // 轨迹记录失败不影响生成
+        }
     }
 
     private void observe(ChatClientRequest request, ChatClientResponse response) {

@@ -54,17 +54,17 @@ public class AgentRunService {
 
     public String start(String conversationId, String tenantId, String userId, String agentKey,
                         long userMessageId, String input, String historyContext,
-                        String knowledgeContext, String ragTraceJson) {
+                        String knowledgeContext, String ragTraceJson, String permissionMode) {
         String id = UUID.randomUUID().toString();
         String ownerInstance = instanceRegistry == null ? null : instanceRegistry.currentInstanceId();
         int inserted = jdbcTemplate.update("""
                 INSERT INTO agent_run (id, conversation_id, tenant_id, user_id, agent_key, user_message_id,
-                                       status, input, history_context, knowledge_context, rag_trace_json,
+                                       status, permission_mode, input, history_context, knowledge_context, rag_trace_json,
                                        owner_instance)
-                SELECT ?, c.id, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?, ?
+                SELECT ?, c.id, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?, ?, ?
                 FROM agent_conversation c
                 WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ?
-                """, id, tenantId, userId, agentKey, userMessageId, input, historyContext,
+                """, id, tenantId, userId, agentKey, userMessageId, permissionMode, input, historyContext,
                 knowledgeContext, ragTraceJson, ownerInstance, conversationId, tenantId, userId, agentKey);
         if (inserted == 0) throw new IllegalArgumentException("Agent conversation was not found");
         return id;
@@ -247,6 +247,7 @@ public class AgentRunService {
                 rs.getLong("user_message_id"),
                 assistantId,
                 rs.getString("status"),
+                rs.getString("permission_mode"),
                 rs.getString("input"),
                 rs.getString("history_context"),
                 rs.getString("knowledge_context"),

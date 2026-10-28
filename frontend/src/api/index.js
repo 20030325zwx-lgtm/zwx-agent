@@ -163,7 +163,7 @@ export const saveSkillConfiguration = (agentKey, enabledSkillIds) => request.pos
 export const judgeRagCandidate = (messageId, agentKey, candidateId, judgment) => request.post(`/ai/rag-evaluations/${messageId}/judgments`, { agentKey, candidateId, judgment })
 
 // AI超级智能体聊天
-export const chatWithManus = (conversationId, message, knowledgeSearch = false, webSearch = true, clientRequestId = null, imageObjectKey = null) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, webSearch, clientRequestId, imageObjectKey })
+export const chatWithManus = (conversationId, message, knowledgeSearch = false, webSearch = true, clientRequestId = null, imageObjectKey = null, permissionMode = null) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, webSearch, clientRequestId, imageObjectKey, permissionMode })
 export const uploadManusImage = async (conversationId, file) => {
   const formData = new FormData()
   formData.append('conversationId', conversationId)
@@ -173,6 +173,12 @@ export const uploadManusImage = async (conversationId, file) => {
 export const getManusImageUrl = (conversationId, objectKey) =>
   fetchAuthBlobUrl(`/ai/manus/images?conversationId=${encodeURIComponent(conversationId)}&objectKey=${encodeURIComponent(objectKey)}`)
 export const resumeManusRun = (conversationId, runId, webSearch = true) => connectSSE(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/resume`, { webSearch })
+
+// 权限设置：默认模式与工具 allow/deny 规则
+export const getPermissionSettings = () => request.get('/ai/settings/permission').then(response => response.data)
+export const savePermissionMode = mode => request.put('/ai/settings/permission', { mode }).then(response => response.data)
+export const addPermissionRule = (toolPattern, effect) => request.post('/ai/settings/permission/rules', { toolPattern, effect }).then(response => response.data)
+export const deletePermissionRule = id => request.delete(`/ai/settings/permission/rules/${id}`).then(response => response.data)
 export const reconnectManusRun = (conversationId, runId, lastEventId = null) => connectSSE(
   `/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/reconnect`,
   { lastEventId })

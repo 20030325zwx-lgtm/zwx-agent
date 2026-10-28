@@ -81,6 +81,8 @@ public class ManusGraphOrchestrator {
     private final AgentToolCallLedgerService toolCallLedger;
     private final com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage;
     private final com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService;
+    private final com.zwx.zwxagent.capability.tools.PermissionService permissionService;
+    private final com.zwx.zwxagent.agent.observability.ModelIoService modelIo;
     private final com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
@@ -92,7 +94,7 @@ public class ManusGraphOrchestrator {
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor) {
-        this(dashscopeChatModel, workerExecutor, null, null, null, null, null);
+        this(dashscopeChatModel, workerExecutor, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -103,6 +105,8 @@ public class ManusGraphOrchestrator {
                                   AgentToolCallLedgerService toolCallLedger,
                                   com.zwx.zwxagent.agent.observability.TokenUsageService tokenUsage,
                                   com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService,
+                                  com.zwx.zwxagent.capability.tools.PermissionService permissionService,
+                                  com.zwx.zwxagent.agent.observability.ModelIoService modelIo,
                                   com.zwx.zwxagent.agent.observability.AgentMetrics metrics) {
         this.chatModel = dashscopeChatModel;
         this.workerExecutor = workerExecutor;
@@ -110,6 +114,8 @@ public class ManusGraphOrchestrator {
         this.toolCallLedger = toolCallLedger;
         this.tokenUsage = tokenUsage;
         this.toolConfirmationService = toolConfirmationService;
+        this.permissionService = permissionService;
+        this.modelIo = modelIo;
         this.metrics = metrics;
     }
 
@@ -127,13 +133,14 @@ public class ManusGraphOrchestrator {
     }
 
     private GraphInstance buildGraph(ChatModel graphChatModel) throws Exception {
-        WorkersNode workersNode = new WorkersNode(graphChatModel, workerExecutor, tokenUsage, toolConfirmationService);
+        WorkersNode workersNode = new WorkersNode(graphChatModel, workerExecutor, tokenUsage,
+                toolConfirmationService, modelIo);
         StateGraph graph = new StateGraph(this::newState);
         graph.addNode(NODE_RESUME_ROUTER, AsyncNodeAction.node_async(state -> Map.of()));
-        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel, tokenUsage)));
+        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel, tokenUsage, modelIo)));
         graph.addNode(NODE_WORKERS, AsyncNodeAction.node_async(workersNode));
-        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel, tokenUsage)));
-        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel, tokenUsage)));
+        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel, tokenUsage, modelIo)));
+        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel, tokenUsage, modelIo)));
         graph.addNode(NODE_PLAN_GATE, AsyncNodeAction.node_async(state -> Map.of()));
         graph.addEdge(StateGraph.START, NODE_RESUME_ROUTER);
         graph.addConditionalEdges(NODE_RESUME_ROUTER, AsyncEdgeAction.edge_async(this::routeResume),
@@ -175,7 +182,8 @@ public class ManusGraphOrchestrator {
                 Map.entry(GraphState.RUN_CONTEXT, new ReplaceStrategy()),
                 Map.entry(GraphState.RESUME_FROM, new ReplaceStrategy()),
                 Map.entry(GraphState.RUN_ID, new ReplaceStrategy()),
-                Map.entry(GraphState.PENDING_CONFIRMATION, new ReplaceStrategy())));
+                Map.entry(GraphState.PENDING_CONFIRMATION, new ReplaceStrategy()),
+                Map.entry(GraphState.PERMISSION_MODE, new ReplaceStrategy())));
         return state;
     }
 
@@ -221,6 +229,11 @@ public class ManusGraphOrchestrator {
         List<PlanStep> plan = state.value(GraphState.PLAN)
                 .map(value -> (List<PlanStep>) value)
                 .orElse(List.of());
+        // YOLO 是无人值守/评测模式：计划直接执行，不停在确认门等待人工授权。
+        if (com.zwx.zwxagent.capability.tools.PermissionMode.parse(
+                state.value(GraphState.PERMISSION_MODE, "EDIT")) == com.zwx.zwxagent.capability.tools.PermissionMode.YOLO) {
+            return NODE_WORKERS;
+        }
         return planGateTarget(plan.size());
     }
 
@@ -246,6 +259,7 @@ public class ManusGraphOrchestrator {
 
     public record ManusRunRequest(String conversationId,
                                   String tenantId,
+                                  String userId,
                                   ChatModel chatModel,
                                   String message,
                                   String historyContext,
@@ -254,6 +268,7 @@ public class ManusGraphOrchestrator {
                                   String ragTraceJson,
                                   String prefaceActivity,
                                   String runId,
+                                  String permissionMode,
                                   GraphCheckpoint resumeCheckpoint,
                                   String resumeFrom,
                                   Runnable cleanup,
@@ -373,6 +388,11 @@ public class ManusGraphOrchestrator {
         if (toolConfirmationService != null && !effectiveRunId.isBlank()) {
             toolConfirmationService.registerRun(effectiveRunId);
         }
+        if (permissionService != null && !effectiveRunId.isBlank()) {
+            permissionService.registerRun(effectiveRunId,
+                    com.zwx.zwxagent.capability.tools.PermissionMode.parse(request.permissionMode()),
+                    request.tenantId(), request.userId());
+        }
         try {
             if (request.ragTraceJson() != null && !request.ragTraceJson().isBlank()) {
                 stream.send("rag-trace", request.ragTraceJson());
@@ -429,7 +449,9 @@ public class ManusGraphOrchestrator {
                     GraphState.INPUT, request.message(),
                     GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext(),
                     GraphState.RUN_CONTEXT, context,
-                    GraphState.RUN_ID, request.runId() == null ? "" : request.runId());
+                    GraphState.RUN_ID, request.runId() == null ? "" : request.runId(),
+                    GraphState.PERMISSION_MODE,
+                    com.zwx.zwxagent.capability.tools.PermissionMode.parse(request.permissionMode()).name());
             int sentActivities = 0;
             int sentEvents = request.resumeCheckpoint() == null ? 0 : request.resumeCheckpoint().events().size();
             boolean planGated = false;
@@ -512,6 +534,8 @@ public class ManusGraphOrchestrator {
             stream.complete();
         } finally {
             if (toolConfirmationService != null) toolConfirmationService.releaseRun(effectiveRunId);
+            if (permissionService != null) permissionService.releaseRun(effectiveRunId);
+            if (modelIo != null) modelIo.releaseRun(effectiveRunId);
         }
     }
 
@@ -573,6 +597,8 @@ public class ManusGraphOrchestrator {
         saved.put(GraphState.RUN_CONTEXT, context);
         saved.put(GraphState.RESUME_FROM, request.resumeFrom());
         saved.put(GraphState.RUN_ID, request.runId() == null ? "" : request.runId());
+        saved.put(GraphState.PERMISSION_MODE,
+                com.zwx.zwxagent.capability.tools.PermissionMode.parse(request.permissionMode()).name());
         return saved;
     }
 

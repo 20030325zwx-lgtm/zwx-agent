@@ -29,6 +29,7 @@ public class ToolGuardHook implements AgentHook {
     private final Set<String> allowedUnregisteredTools;
     private final UrlAccessPolicy urlAccessPolicy;
     private final ToolConfirmationService confirmationService;
+    private final com.zwx.zwxagent.capability.tools.PermissionService permissionService;
     private final com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -37,6 +38,7 @@ public class ToolGuardHook implements AgentHook {
                          @Value("${app.agent.hook.allowed-unregistered-tools:}") String allowedUnregisteredTools,
                          UrlAccessPolicy urlAccessPolicy,
                          ToolConfirmationService confirmationService,
+                         com.zwx.zwxagent.capability.tools.PermissionService permissionService,
                          com.zwx.zwxagent.agent.observability.AgentMetrics metrics) {
         this.enabled = enabled;
         this.terminalAllowlist = terminalAllowlist == null || terminalAllowlist.isBlank()
@@ -45,6 +47,7 @@ public class ToolGuardHook implements AgentHook {
         this.allowedUnregisteredTools = parseNames(allowedUnregisteredTools);
         this.urlAccessPolicy = urlAccessPolicy;
         this.confirmationService = confirmationService;
+        this.permissionService = permissionService;
         this.metrics = metrics;
     }
 
@@ -76,23 +79,34 @@ public class ToolGuardHook implements AgentHook {
         }
     }
 
-    /** 副作用工具确认门禁：已拒绝→受控终止；待确认→登记请求并挂起等待用户决定。 */
+    /** 副作用工具确认门禁：权限模式判定 ALLOW / ASK / DENY；已拒绝→受控终止；待确认→登记请求并挂起等待用户决定。 */
     private void confirmationGate(AgentRunContext context, PlannedToolCall call) {
         if (confirmationService == null || !confirmationService.isEnabled()) return;
         String runId = context.runId();
         if (runId == null || !confirmationService.isRunRegistered(runId)) return;
         String toolName = call.name();
+        // 用户显式决定优先于模式矩阵：已批准直接放行，已拒绝直接拦截。
         if (confirmationService.isApproved(runId, toolName)) return;
         if (confirmationService.isDenied(runId, toolName)) {
             if (metrics != null) metrics.toolDenied(toolName, "user-denied");
             throw new HookAbortException("用户已拒绝在本轮任务中执行工具 " + toolName + "，请改用其他方式完成子任务，或直接说明受限");
         }
-        if (!confirmationService.requiresConfirmation(toolName)) return;
-        confirmationService.markPending(runId, toolName, argumentSummary(call.arguments()));
-        log.info("[tool-guard] 工具调用等待用户确认 runId={} tool={} argsSummary={}",
-                runId, toolName, argumentSummary(call.arguments()));
-        throw new ToolConfirmationRequiredException(
-                "工具 " + toolName + " 属于有副作用的操作，需要用户确认后才能执行；任务已暂停等待确认");
+        if (permissionService == null || !permissionService.isRegistered(runId)) return;
+        com.zwx.zwxagent.capability.tools.PermissionService.Decision decision =
+                permissionService.decide(runId, toolName);
+        if (decision == com.zwx.zwxagent.capability.tools.PermissionService.Decision.DENY) {
+            log.warn("[tool-guard] 权限模式拒绝工具调用 runId={} tool={}", runId, toolName);
+            if (metrics != null) metrics.toolDenied(toolName, "permission-mode");
+            throw new HookAbortException("当前权限模式不允许执行工具 " + toolName
+                    + "；请切换到更高权限模式，或改用只读方式完成子任务并说明限制");
+        }
+        if (decision == com.zwx.zwxagent.capability.tools.PermissionService.Decision.ASK) {
+            confirmationService.markPending(runId, toolName, argumentSummary(call.arguments()));
+            log.info("[tool-guard] 工具调用等待用户确认 runId={} tool={} argsSummary={}",
+                    runId, toolName, argumentSummary(call.arguments()));
+            throw new ToolConfirmationRequiredException(
+                    "工具 " + toolName + " 在当前权限模式下需要用户确认后才能执行；任务已暂停等待确认");
+        }
     }
 
     /** @return null=放行；非 null=拒绝原因 */

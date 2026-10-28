@@ -51,9 +51,14 @@ public class VerifierNode implements NodeAction {
     private final AtomicReference<String> tokenUsageRunId = new AtomicReference<>("");
 
     public VerifierNode(ChatModel chatModel, TokenUsageService tokenUsage) {
+        this(chatModel, tokenUsage, null);
+    }
+
+    public VerifierNode(ChatModel chatModel, TokenUsageService tokenUsage,
+                 com.zwx.zwxagent.agent.observability.ModelIoService modelIo) {
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(new MyLoggerAdvisor(),
-                        new TokenUsageAdvisor("verifier", tokenUsage, tokenUsageRunId::get))
+                        new TokenUsageAdvisor("verifier", tokenUsage, tokenUsageRunId::get, modelIo))
                 .build();
     }
 

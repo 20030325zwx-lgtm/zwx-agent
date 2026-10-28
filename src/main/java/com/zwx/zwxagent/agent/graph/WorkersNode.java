@@ -45,6 +45,7 @@ public class WorkersNode implements NodeAction {
     private final TokenUsageService tokenUsage;
     /** 有副作用工具的人工确认服务；为 null（旧测试路径）时不启用确认门禁。 */
     private final ToolConfirmationService confirmationService;
+    private final com.zwx.zwxagent.agent.observability.ModelIoService modelIo;
 
     /** 当前运行中尚未结束的子 agent，供客户端断开时联动停止。 */
     private final Map<String, List<ToolCallAgent>> activeWorkers = new ConcurrentHashMap<>();
@@ -78,15 +79,22 @@ public class WorkersNode implements NodeAction {
     }
 
     public WorkersNode(ChatModel chatModel, Executor workerExecutor, TokenUsageService tokenUsage) {
-        this(chatModel, workerExecutor, tokenUsage, null);
+        this(chatModel, workerExecutor, tokenUsage, null, null);
     }
 
     public WorkersNode(ChatModel chatModel, Executor workerExecutor, TokenUsageService tokenUsage,
                        ToolConfirmationService confirmationService) {
+        this(chatModel, workerExecutor, tokenUsage, confirmationService, null);
+    }
+
+    public WorkersNode(ChatModel chatModel, Executor workerExecutor, TokenUsageService tokenUsage,
+                       ToolConfirmationService confirmationService,
+                       com.zwx.zwxagent.agent.observability.ModelIoService modelIo) {
         this.chatModel = chatModel;
         this.workerExecutor = workerExecutor;
         this.tokenUsage = tokenUsage;
         this.confirmationService = confirmationService;
+        this.modelIo = modelIo;
     }
 
     @Override
@@ -180,7 +188,7 @@ public class WorkersNode implements NodeAction {
                 ChatClient workerClient = ChatClient.builder(chatModel)
                         .defaultAdvisors(new MyLoggerAdvisor(),
                                 new TokenUsageAdvisor("worker·" + step.role().displayName() + "#" + stepNumber,
-                                        tokenUsage, () -> runId))
+                                        tokenUsage, () -> runId, modelIo))
                         .build();
                 String upstream = upstreamPrompt(plan, results,
                         step.dependsOn().stream().map(dep -> indexOfId(plan, dep)).toList());

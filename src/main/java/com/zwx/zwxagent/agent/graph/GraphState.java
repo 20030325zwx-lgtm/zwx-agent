@@ -35,6 +35,8 @@ final class GraphState {
     static final String RUN_ID = "run_id";
     /** 有副作用工具等待用户确认：待确认工具名列表；非空时质检与交付节点直接早退（replace） */
     static final String PENDING_CONFIRMATION = "pending_confirmation";
+    /** 本次 run 的权限模式（PLAN/BUILD/EDIT/GUARDED/YOLO）；YOLO 跳过计划确认门（replace） */
+    static final String PERMISSION_MODE = "permission_mode";
 
     private GraphState() {
     }

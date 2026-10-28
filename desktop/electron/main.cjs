@@ -30,9 +30,11 @@ const encryptSecret = value => ({ encrypted: safeStorage.encryptString(value).to
 const decryptSecret = record => { try { return record?.encrypted ? safeStorage.decryptString(Buffer.from(record.encrypted, 'base64')) : '' } catch { return '' } }
 const readSecret = (config, key) => decryptSecret(config.secrets?.[key])
 const backendPort = config => Number(config.backendPort) || 0
+// 全新安装无 desktop-config.json：桌面产品默认本机独立运行
+const isLocalMode = config => (config.backendMode ?? 'local') === 'local'
 const apiBaseUrl = () => {
   const config = readConfig()
-  return config.backendMode === 'local' ? `http://127.0.0.1:${runtimeState.backendPort || backendPort(config) || 8123}/api` : config.apiBaseUrl || defaultApiBaseUrl
+  return isLocalMode(config) ? `http://127.0.0.1:${runtimeState.backendPort || backendPort(config) || 8123}/api` : config.apiBaseUrl || defaultApiBaseUrl
 }
 const isValidApiBaseUrl = value => {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && url.pathname.replace(/\/$/, '') === '/api' } catch { return false }
@@ -40,7 +42,7 @@ const isValidApiBaseUrl = value => {
 const isValidJdbcUrl = value => !value || /^jdbc:postgresql:\/\/[^\s]+/i.test(value)
 const resourcePath = (...segments) => app.isPackaged ? path.join(process.resourcesPath, ...segments) : path.join(__dirname, '..', ...segments)
 const settingsView = config => ({
-  backendMode: config.backendMode === 'local' ? 'local' : 'remote',
+  backendMode: isLocalMode(config) ? 'local' : 'remote',
   apiBaseUrl: config.apiBaseUrl || defaultApiBaseUrl,
   backendPort: backendPort(config),
   postgresUrl: config.postgresUrl || '',
@@ -131,18 +133,20 @@ const ensureHostedDatabase = config => {
   }
   const port = Number(config.hostedPostgresPort) || 0
   const effectivePort = port || 54329
+  // unix socket 目录必须先于服务器启动存在
+  fs.mkdirSync(path.join(app.getPath('userData'), 'tmp'), { recursive: true })
+  fs.mkdirSync(logDir(), { recursive: true })
   const started = spawnSync(bin('pg_ctl'), ['-D', dataDir, '-l', path.join(logDir(), 'postgres.log'),
-    '-o', `-p ${effectivePort} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${path.join(app.getPath('userData'), 'tmp')}`,
+    '-o', `-p ${effectivePort} -c listen_addresses=127.0.0.1`,
     '-w', '-t', '30', 'start'], { env, encoding: 'utf8' })
   if (started.status !== 0) {
     // 已在运行（例如上次未正常退出）：先停再起
     spawnSync(bin('pg_ctl'), ['-D', dataDir, '-m', 'fast', 'stop'], { env, encoding: 'utf8' })
     const retry = spawnSync(bin('pg_ctl'), ['-D', dataDir, '-l', path.join(logDir(), 'postgres.log'),
-      '-o', `-p ${effectivePort} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${path.join(app.getPath('userData'), 'tmp')}`,
+      '-o', `-p ${effectivePort} -c listen_addresses=127.0.0.1`,
       '-w', '-t', '30', 'start'], { env, encoding: 'utf8' })
     if (retry.status !== 0) throw new Error(`数据库启动失败：${(retry.stderr || retry.stdout || '').slice(-400)}`)
   }
-  fs.mkdirSync(path.join(app.getPath('userData'), 'tmp'), { recursive: true })
   postgresProcess = { dataDir, env }
   return { port: effectivePort, dataDir, env }
 }
@@ -170,7 +174,7 @@ const waitForBackend = async port => {
 
 const startLocalBackend = async () => {
   const config = readConfig()
-  if (config.backendMode !== 'local') {
+  if (!isLocalMode(config)) {
     runtimeState = { phase: 'remote', backendPort: null, loopbackToken: '', error: '' }
     return
   }
@@ -184,6 +188,7 @@ const startLocalBackend = async () => {
   try {
     const requestedPort = backendPort(config)
     const port = requestedPort || await getFreePort()
+    const managementPort = await getFreePort()
     let database = null
     if (!config.postgresUrl) {
       database = ensureHostedDatabase(config)
@@ -199,6 +204,7 @@ const startLocalBackend = async () => {
     const env = {
       ...process.env,
       SERVER_PORT: String(port),
+      MANAGEMENT_SERVER_PORT: String(managementPort),
       SPRING_PROFILES_ACTIVE: 'desktop',
       APP_TEMP_DIR: tempDir,
       APP_DESKTOP_LOOPBACK_TOKEN: loopbackToken,
@@ -243,6 +249,7 @@ const startLocalBackend = async () => {
     if (!ready && !runtimeState.error) runtimeState.error = '本机服务在 90 秒内未就绪，请查看日志。'
     runtimeState.phase = ready ? 'ready' : 'failed'
   } catch (error) {
+    console.error('[aster-desktop] 本机服务启动失败:', error.message || error)
     runtimeState.phase = 'failed'
     runtimeState.error = String(error.message || error)
   }

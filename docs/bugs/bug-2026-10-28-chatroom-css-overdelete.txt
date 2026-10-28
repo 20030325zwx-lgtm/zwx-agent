@@ -1,0 +1,10 @@
+日期：2026-10-28
+问题现象：超级智能体会话中「引用资料」卡片、生成文件列表（message-files）、参考资料（reference-card）的样式全部丢失，渲染为无样式的灰色文本块；引用资料标题也被截断。
+影响范围：仅前端 ChatRoom 组件的以下样式区块：.message-files、.message-references、.reference-card、.citation-preview/.citation-card/.citation-modal 等引用相关样式及其移动端 media query。功能（点击预览、切片接口）不受影响，纯样式回归。
+原因：结构整理提交 8f8538d 中，用 Python 按区间删除已迁移的时间线样式——起点为「/* ── 智能体时间线 */」注释，终点取 .trace-entry 选择器。但该时间线样式块实际位于 activity-trace 旧样式的位置（.message-files 之前），区间删除把中间的文件/引用样式一并删掉了（共约 4.5KB CSS）。
+解决方式：从上一个正确提交（06c9142）的 ChatRoom.vue 中原样提取 .message-files 至 .trace-entry 之间的全部样式块，插入回当前文件的 .trace-entry 之前；随后做两级校验：① 选择器级 diff（旧版 vs 新版+AgentTrace.vue），确认除已迁移的时间线选择器外无其他缺失；② 花括号配平检查（168/168）与 npm run build。
+验证结果：构建通过；恢复内容与历史版本逐字一致。刷新页面（Vite HMR 自动生效）后引用资料卡片恢复卡片样式。
+后续注意事项：
+1. 对样式/代码做区间删除时，终点标记必须紧邻起点块，或先列出区间内全部顶层块清单再删，禁止依赖"下一个已知选择器"作边界。
+2. 本次能快速定位是因为上一提交版本仍在 Git 中：删除类重构前先留可对照的提交点，出问题可逐字恢复。
+3. 可考虑把 CSS 拆分到组件级（scoped per component）以缩小此类事故的爆炸半径；ChatRoom 后续仍偏大，拆分时按块提交并每块跑构建。

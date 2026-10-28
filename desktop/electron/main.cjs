@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, safeStorage } = require('electron')
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
+const crypto = require('crypto')
 const http = require('http')
+const net = require('net')
 const path = require('path')
 const fs = require('fs')
 
@@ -9,9 +11,14 @@ const defaultOssEndpoint = 'https://oss-cn-hangzhou.aliyuncs.com'
 const defaultOssBucket = 'zwx-agent'
 const staticRoot = path.join(__dirname, '..', 'app')
 const secretKeys = ['dashscopeApiKey', 'searchApiKey', 'postgresPassword', 'ossAccessKeyId', 'ossAccessKeySecret']
+const HOSTED_DB_NAME = 'aster'
+const HOSTED_DB_USER = 'aster'
+const BACKEND_READY_TIMEOUT_MS = 90_000
 let staticServer
 let staticPort
 let backendProcess
+let postgresProcess
+let runtimeState = { phase: 'starting', backendPort: null, loopbackToken: '', error: '' }
 
 const configPath = () => path.join(app.getPath('userData'), 'desktop-config.json')
 const readConfig = () => { try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')) } catch { return {} } }
@@ -22,10 +29,10 @@ const writeConfig = config => {
 const encryptSecret = value => ({ encrypted: safeStorage.encryptString(value).toString('base64') })
 const decryptSecret = record => { try { return record?.encrypted ? safeStorage.decryptString(Buffer.from(record.encrypted, 'base64')) : '' } catch { return '' } }
 const readSecret = (config, key) => decryptSecret(config.secrets?.[key])
-const backendPort = config => Number(config.backendPort) || 8123
+const backendPort = config => Number(config.backendPort) || 0
 const apiBaseUrl = () => {
   const config = readConfig()
-  return config.backendMode === 'local' ? `http://127.0.0.1:${backendPort(config)}/api` : config.apiBaseUrl || defaultApiBaseUrl
+  return config.backendMode === 'local' ? `http://127.0.0.1:${runtimeState.backendPort || backendPort(config) || 8123}/api` : config.apiBaseUrl || defaultApiBaseUrl
 }
 const isValidApiBaseUrl = value => {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && url.pathname.replace(/\/$/, '') === '/api' } catch { return false }
@@ -43,6 +50,12 @@ const settingsView = config => ({
   tikaBaseUrl: config.tikaBaseUrl || '',
   secrets: Object.fromEntries(secretKeys.map(key => [key, readSecret(config, key) ? '*******' : '']))
 })
+const logDir = () => path.join(app.getPath('userData'), 'logs')
+const logStream = name => {
+  fs.mkdirSync(logDir(), { recursive: true })
+  return fs.createWriteStream(path.join(logDir(), name), { flags: 'a' })
+}
+const randomToken = () => crypto.randomBytes(32).toString('hex')
 
 const contentType = filename => ({
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -65,40 +78,180 @@ const startStaticServer = () => new Promise((resolve, reject) => {
   staticServer.listen(0, '127.0.0.1', () => resolve(staticServer.address().port))
 })
 
-const startLocalBackend = () => {
+// 启动失败/服务不可用时展示诊断页：原因 + 日志位置 + 重试
+const errorPageHtml = message => `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body style="font-family:-apple-system,sans-serif;background:#0f111a;color:#e9ebf5;display:grid;place-items:center;height:100vh;margin:0"><div style="max-width:560px;text-align:center"><h1 style="font-size:20px">Aster 本机服务未能就绪</h1><p style="color:#a9aec4;line-height:1.7">${message}</p><p style="color:#71778e;font-size:13px">日志位置：${logDir()}</p><button onclick="location.reload()" style="padding:8px 20px;border-radius:10px;border:0;background:#6c5cf7;color:#fff;font-size:14px;cursor:pointer">重试</button></div></body></html>`
+
+const fetchHealth = port => new Promise(resolve => {
+  const request = http.get({ host: '127.0.0.1', port, path: '/api/health', timeout: 2000 }, response => {
+    response.resume()
+    resolve(response.statusCode === 200)
+  })
+  request.on('error', () => resolve(false))
+  request.on('timeout', () => { request.destroy(); resolve(false) })
+})
+
+const getFreePort = () => new Promise((resolve, reject) => {
+  const server = net.createServer()
+  server.once('error', reject)
+  server.listen(0, '127.0.0.1', () => {
+    const { port } = server.address()
+    server.close(() => resolve(port))
+  })
+})
+
+// ---------------------------------------------------------------- 托管 PostgreSQL
+
+const bundledPostgresRoot = () => {
+  const root = resourcePath('pgserver')
+  return fs.existsSync(path.join(root, 'bin', 'postgres')) ? root : null
+}
+
+const ensureHostedDatabase = config => {
+  const pgRoot = bundledPostgresRoot()
+  if (!pgRoot) return null // 未捆绑或用户自备数据库
+  if (config.postgresUrl) return null // 用户显式指定外部数据库
+  const dataDir = path.join(app.getPath('userData'), 'pgdata')
+  const bin = name => path.join(pgRoot, 'bin', name)
+  const env = { ...process.env, LC_ALL: 'C', DYLD_LIBRARY_PATH: path.join(pgRoot, 'lib') }
+  fs.mkdirSync(dataDir, { recursive: true })
+  const versionFile = path.join(dataDir, 'PG_VERSION')
+  if (!fs.existsSync(versionFile)) {
+    const init = spawnSync(bin('initdb'), ['-D', dataDir, '-U', HOSTED_DB_USER, '-A', 'trust', '-E', 'UTF8'],
+      { env, encoding: 'utf8' })
+    if (init.status !== 0) throw new Error(`数据库初始化失败：${(init.stderr || init.stdout || '').slice(-400)}`)
+    // 服务器启动前用 single-user 模式建库（精简包没有 createdb/psql；运行中无法使用 --single）
+    const createDb = spawnSync(bin('postgres'), ['--single', '-D', dataDir, '-E', 'postgres'],
+      { env, encoding: 'utf8', input: `CREATE DATABASE ${HOSTED_DB_NAME} OWNER ${HOSTED_DB_USER};\n` })
+    if (createDb.status !== 0) {
+      const combined = `${createDb.stdout || ''}${createDb.stderr || ''}`
+      if (!/already exists/.test(combined)) {
+        throw new Error(`数据库创建失败：${combined.slice(-400)}`)
+      }
+    }
+  }
+  const port = Number(config.hostedPostgresPort) || 0
+  const effectivePort = port || 54329
+  const started = spawnSync(bin('pg_ctl'), ['-D', dataDir, '-l', path.join(logDir(), 'postgres.log'),
+    '-o', `-p ${effectivePort} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${path.join(app.getPath('userData'), 'tmp')}`,
+    '-w', '-t', '30', 'start'], { env, encoding: 'utf8' })
+  if (started.status !== 0) {
+    // 已在运行（例如上次未正常退出）：先停再起
+    spawnSync(bin('pg_ctl'), ['-D', dataDir, '-m', 'fast', 'stop'], { env, encoding: 'utf8' })
+    const retry = spawnSync(bin('pg_ctl'), ['-D', dataDir, '-l', path.join(logDir(), 'postgres.log'),
+      '-o', `-p ${effectivePort} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${path.join(app.getPath('userData'), 'tmp')}`,
+      '-w', '-t', '30', 'start'], { env, encoding: 'utf8' })
+    if (retry.status !== 0) throw new Error(`数据库启动失败：${(retry.stderr || retry.stdout || '').slice(-400)}`)
+  }
+  fs.mkdirSync(path.join(app.getPath('userData'), 'tmp'), { recursive: true })
+  postgresProcess = { dataDir, env }
+  return { port: effectivePort, dataDir, env }
+}
+
+const stopHostedDatabase = () => {
+  if (!postgresProcess) return
+  try {
+    spawnSync(path.join(bundledPostgresRoot() || '', 'bin', 'pg_ctl'),
+      ['-D', postgresProcess.dataDir, '-m', 'fast', 'stop'], { encoding: 'utf8' })
+  } catch { /* 退出时尽力而为 */ }
+  postgresProcess = null
+}
+
+// ---------------------------------------------------------------- 本机后端
+
+const waitForBackend = async port => {
+  const deadline = Date.now() + BACKEND_READY_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (await fetchHealth(port)) return true
+    if (!backendProcess || backendProcess.exitCode !== null) return false
+    await new Promise(resolve => setTimeout(resolve, 700))
+  }
+  return false
+}
+
+const startLocalBackend = async () => {
   const config = readConfig()
-  if (config.backendMode !== 'local') return
+  if (config.backendMode !== 'local') {
+    runtimeState = { phase: 'remote', backendPort: null, loopbackToken: '', error: '' }
+    return
+  }
+  runtimeState = { phase: 'starting', backendPort: null, loopbackToken: '', error: '' }
   const jar = resourcePath('server', 'aster-agent.jar')
   const bundledJava = resourcePath('runtime', 'bin', 'java')
-  if (!fs.existsSync(jar)) return
-  const dashscopeApiKey = readSecret(config, 'dashscopeApiKey')
-  const searchApiKey = readSecret(config, 'searchApiKey')
-  const postgresPassword = readSecret(config, 'postgresPassword')
-  const ossAccessKeyId = readSecret(config, 'ossAccessKeyId')
-  const ossAccessKeySecret = readSecret(config, 'ossAccessKeySecret')
-  const env = {
-    ...process.env,
-    SERVER_PORT: String(backendPort(config)),
-    SPRING_PROFILES_ACTIVE: 'prod', SPRING_SQL_INIT_MODE: 'always',
-    SPRING_DATASOURCE_URL: config.postgresUrl || '', SPRING_DATASOURCE_USERNAME: config.postgresUsername || '',
-    APP_TIKA_BASE_URL: config.tikaBaseUrl || '', APP_TEMP_DIR: path.join(app.getPath('userData'), 'temp')
+  if (!fs.existsSync(jar)) {
+    runtimeState.error = '内置服务缺失（server/aster-agent.jar），安装包可能不完整。'
+    return
   }
-  // Leave unset values to Spring's local defaults instead of overriding them with empty strings.
-  if (config.ossEndpoint) env.ALIYUN_OSS_ENDPOINT = config.ossEndpoint
-  if (config.ossBucket) env.ALIYUN_OSS_BUCKET = config.ossBucket
-  // Empty credentials must not override Spring defaults and block application startup.
-  if (postgresPassword) env.SPRING_DATASOURCE_PASSWORD = postgresPassword
-  if (dashscopeApiKey) env.SPRING_AI_DASHSCOPE_API_KEY = dashscopeApiKey
-  if (searchApiKey) env.SEARCH_API_API_KEY = searchApiKey
-  if (ossAccessKeyId) env.ALIYUN_OSS_ACCESS_KEY_ID = ossAccessKeyId
-  if (ossAccessKeySecret) env.ALIYUN_OSS_ACCESS_KEY_SECRET = ossAccessKeySecret
-  fs.mkdirSync(env.APP_TEMP_DIR, { recursive: true })
-  backendProcess = spawn(fs.existsSync(bundledJava) ? bundledJava : 'java', ['-jar', jar], { env, stdio: 'ignore' })
-  backendProcess.once('exit', () => { backendProcess = undefined })
+  try {
+    const requestedPort = backendPort(config)
+    const port = requestedPort || await getFreePort()
+    let database = null
+    if (!config.postgresUrl) {
+      database = ensureHostedDatabase(config)
+      if (database) {
+        runtimeState.hostedPostgresPort = database.port
+        writeConfig({ ...config, hostedPostgresPort: database.port })
+      }
+    }
+    const loopbackToken = randomToken()
+    const adminPassword = readSecret(config, 'adminPassword') || randomToken().slice(0, 32)
+    const tempDir = path.join(app.getPath('userData'), 'temp')
+    fs.mkdirSync(tempDir, { recursive: true })
+    const env = {
+      ...process.env,
+      SERVER_PORT: String(port),
+      SPRING_PROFILES_ACTIVE: 'desktop',
+      APP_TEMP_DIR: tempDir,
+      APP_DESKTOP_LOOPBACK_TOKEN: loopbackToken,
+      APP_SECURITY_ADMIN_PASSWORD: adminPassword,
+      APP_SECURITY_ADMIN_USERNAME: 'admin',
+      SPRING_DATASOURCE_URL: database
+        ? `jdbc:postgresql://127.0.0.1:${database.port}/${HOSTED_DB_NAME}`
+        : (config.postgresUrl || ''),
+      SPRING_DATASOURCE_USERNAME: database ? HOSTED_DB_USER : (config.postgresUsername || '')
+    }
+    if (!database && adminPassword) env.SPRING_DATASOURCE_PASSWORD = readSecret(config, 'postgresPassword') || ''
+    if (config.tikaBaseUrl) env.APP_TIKA_BASE_URL = config.tikaBaseUrl
+    const dashscopeApiKey = readSecret(config, 'dashscopeApiKey')
+    const searchApiKey = readSecret(config, 'searchApiKey')
+    const ossAccessKeyId = readSecret(config, 'ossAccessKeyId')
+    const ossAccessKeySecret = readSecret(config, 'ossAccessKeySecret')
+    // 供应商密钥已支持在应用内「模型设置」配置；此处环境变量仅作首次引导的兜底
+    if (dashscopeApiKey) env.SPRING_AI_DASHSCOPE_API_KEY = dashscopeApiKey
+    if (searchApiKey) env.SEARCH_API_API_KEY = searchApiKey
+    if (ossAccessKeyId) env.ALIYUN_OSS_ACCESS_KEY_ID = ossAccessKeyId
+    if (ossAccessKeySecret) env.ALIYUN_OSS_ACCESS_KEY_SECRET = ossAccessKeySecret
+    if (database) {
+      // trust 认证下仍传占位密码，避免 Spring 因空密码告警
+      env.SPRING_DATASOURCE_PASSWORD = 'hosted'
+      writeConfig({ ...readConfig(), secrets: { ...(readConfig().secrets || {}), adminPassword: encryptSecret(adminPassword) } })
+    }
+    runtimeState.loopbackToken = loopbackToken
+    runtimeState.backendPort = port
+    const out = logStream('backend.log')
+    const err = logStream('backend.err.log')
+    backendProcess = spawn(fs.existsSync(bundledJava) ? bundledJava : 'java', ['-jar', jar],
+      { env, stdio: ['ignore', 'pipe', 'pipe'] })
+    backendProcess.stdout.pipe(out)
+    backendProcess.stderr.pipe(err)
+    backendProcess.once('exit', (code) => {
+      backendProcess = undefined
+      if (runtimeState.phase === 'starting') {
+        runtimeState.error = `本机服务进程退出（代码 ${code}），请查看日志。`
+      }
+    })
+    const ready = await waitForBackend(port)
+    if (!ready && !runtimeState.error) runtimeState.error = '本机服务在 90 秒内未就绪，请查看日志。'
+    runtimeState.phase = ready ? 'ready' : 'failed'
+  } catch (error) {
+    runtimeState.phase = 'failed'
+    runtimeState.error = String(error.message || error)
+  }
 }
 
 ipcMain.on('desktop:get-api-base-url', event => { event.returnValue = apiBaseUrl() })
 ipcMain.on('desktop:get-settings', event => { event.returnValue = settingsView(readConfig()) })
+ipcMain.on('desktop:get-local-token', event => { event.returnValue = runtimeState.loopbackToken || '' })
+ipcMain.on('desktop:get-runtime-state', event => { event.returnValue = { ...runtimeState, apiBaseUrl: apiBaseUrl() } })
 ipcMain.handle('desktop:save-settings', (_, payload) => {
   if (!payload || !['local', 'remote'].includes(payload.backendMode)) throw new Error('无效的运行模式。')
   if (!isValidApiBaseUrl(payload.apiBaseUrl || '')) throw new Error('服务地址必须是以 /api 结尾的 HTTP(S) 地址。')
@@ -118,15 +271,31 @@ ipcMain.handle('desktop:save-settings', (_, payload) => {
   app.exit(0)
 })
 
-const createWindow = port => {
+const createWindow = async port => {
+  if (runtimeState.phase === 'failed') {
+    const window = new BrowserWindow({
+      width: 720, height: 480, title: 'Aster',
+      webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true }
+    })
+    window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorPageHtml(runtimeState.error))}`)
+    return
+  }
   const window = new BrowserWindow({
-    width: 1440, height: 920, minWidth: 1080, minHeight: 700, title: 'Aster', backgroundColor: '#ffffff',
+    width: 1440, height: 920, minWidth: 1080, minHeight: 700, title: 'Aster', backgroundColor: '#0f111a',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   })
   window.loadURL(`http://127.0.0.1:${port}`)
 }
 
-app.whenReady().then(async () => { startLocalBackend(); staticPort = await startStaticServer(); createWindow(staticPort) })
+app.whenReady().then(async () => {
+  await startLocalBackend()
+  staticPort = await startStaticServer()
+  await createWindow(staticPort)
+})
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(staticPort) })
-app.on('before-quit', () => { staticServer?.close(); backendProcess?.kill() })
+app.on('before-quit', () => {
+  staticServer?.close()
+  backendProcess?.kill()
+  stopHostedDatabase()
+})

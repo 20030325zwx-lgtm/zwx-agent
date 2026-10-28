@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { API_BASE_URL, getToken, clearSession } from './auth'
+import { API_BASE_URL, clearSession, getToken, localTokenHeader } from './auth'
 
 // 创建axios实例
 const request = axios.create({
@@ -10,6 +10,8 @@ const request = axios.create({
 request.interceptors.request.use(config => {
   const token = getToken()
   if (token) config.headers.Authorization = `Bearer ${token}`
+  const localHeaders = localTokenHeader()
+  if (localHeaders['X-Aster-Local-Token']) config.headers['X-Aster-Local-Token'] = localHeaders['X-Aster-Local-Token']
   return config
 })
 
@@ -94,8 +96,9 @@ export const connectSSE = (url, params, onMessage, onError) => {
   ;(async () => {
     try {
       const token = getToken()
+      const sseHeaders = { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...localTokenHeader() }
       const response = await fetch(`${API_BASE_URL}${url}?${queryString}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: sseHeaders,
         signal: controller.signal
       })
       if (!response.ok || !response.body) {

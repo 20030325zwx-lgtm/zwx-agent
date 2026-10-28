@@ -1,0 +1,31 @@
+# 桌面自包含运行 profile：由 Electron 主进程注入数据库等环境变量，本文件只放策略性配置。
+# 密钥一律不写入此文件；桌面密钥由主进程 safeStorage 保护并按需注入。
+#
+# 设计文档：docs/design/2026-10-28-desktop-phase-a-runtime-model-contract.md
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+knife4j:
+  enable: false
+  production: true
+
+app:
+  project-workspace:
+    selection-mode: root
+  config:
+    # 桌面允许用户显式配置回环/内网模型地址（如本机 Ollama/LM Studio）
+    allow-local-model-endpoints: true
+  document-parser:
+    # 首版桌面不依赖外部解析服务：PDF 走内置 iText，其余按纯文本处理
+    docling:
+      enabled: false
+
+logging:
+  level:
+    org.springframework.ai: INFO
+    org.springframework.security: WARN
+    com.zwx.zwxagent: INFO

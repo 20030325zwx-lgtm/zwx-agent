@@ -8,8 +8,9 @@
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "prepare:backend": "sh scripts/prepare-backend.sh",
     "prepare:runtime": "sh scripts/prepare-runtime.sh",
+    "prepare:pgserver": "sh scripts/prepare-pgserver.sh",
     "prepare:icon": "sh scripts/generate-icon.sh",
-    "dist:mac": "npm run build:web && npm run prepare:assets && npm run prepare:backend && npm run prepare:runtime && npm run prepare:icon && electron-builder --mac dmg zip --arm64",
+    "dist:mac": "npm run build:web && npm run prepare:assets && npm run prepare:backend && npm run prepare:runtime && npm run prepare:pgserver && npm run prepare:icon && electron-builder --mac dmg zip --arm64",
     "start": "npm run prepare:assets && electron ."
   },
   "devDependencies": {
@@ -30,7 +31,8 @@
     ],
     "extraResources": [
       { "from": "server", "to": "server" },
-      { "from": "runtime", "to": "runtime" }
+      { "from": "runtime", "to": "runtime" },
+      { "from": "pgserver", "to": "pgserver" }
     ],
     "mac": {
       "target": ["dmg", "zip"],

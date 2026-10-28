@@ -4,6 +4,6 @@ set -eu
 DESKTOP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$DESKTOP_DIR/.." && pwd)
 
-(cd "$ROOT_DIR" && sh ./mvnw -q -DskipTests clean package)
+(cd "$ROOT_DIR" && mvn -q -DskipTests clean package)
 mkdir -p "$DESKTOP_DIR/server"
 cp "$ROOT_DIR/target/aster-agent-0.0.1-SNAPSHOT.jar" "$DESKTOP_DIR/server/aster-agent.jar"

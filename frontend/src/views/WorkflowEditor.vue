@@ -21,7 +21,7 @@
         </div>
 
         <div class="canvas-toolbar">
-          <div class="canvas-hint">点击节点右侧的 + 新增下游节点 · 拖拽连接桩连线 · 点击节点编辑参数</div>
+          <div class="canvas-hint">从节点右侧端口拖到空白处新增节点 · 拖动连线端点可改接其他节点 · 点击节点编辑参数</div>
           <div class="toolbar-right">
             <button type="button" class="ghost-btn" @click="autoLayout">自动布局</button>
             <button type="button" class="ghost-btn" :disabled="savingVersion" @click="saveVersion()">
@@ -47,33 +47,35 @@
             :nodes-draggable="true"
             :nodes-connectable="true"
             :elements-selectable="true"
+            :edges-updatable="true"
+            :delete-key-code="null"
             :min-zoom="0.4"
             :max-zoom="1.6"
             :default-viewport="{ x: 20, y: 20, zoom: 0.95 }"
             fit-view-on-init
             @connect="onConnect"
+            @connect-start="onConnectStart"
+            @connect-end="onConnectEnd"
+            @edge-update="onEdgeUpdate"
             @node-click="onNodeClick"
-            @nodes-change="onNodesChange"
-            @edges-change="onEdgesChange"
+            @nodes-change="markDirtyOnChange"
+            @edges-change="markDirtyOnChange"
           >
-            <Background pattern-color="#c7ccdb" :gap="20" />
+            <Background pattern-color="#c7ccdb" :gap="18" :size="1.4" />
             <Controls />
             <template #node-default="nodeProps">
-              <div class="wf-node" :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass, { 'is-start': nodeProps.data.nodeType === 'start' }]">
-                <Handle v-if="nodeProps.data.nodeType !== 'start'" type="target" :position="Position.Left" class="wf-handle" />
-                <span class="node-type-dot" :style="{ background: nodeColor(nodeProps.data.nodeType) }" />
+              <div
+                class="wf-node"
+                :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass, { 'is-start': nodeProps.data.nodeType === 'start' }]"
+                :style="{ '--node-color': nodeColor(nodeProps.data.nodeType) }"
+              >
+                <Handle v-if="nodeProps.data.nodeType !== 'start'" type="target" :position="Position.Left" class="wf-handle target" />
                 <div class="node-main">
-                  <span class="node-name">{{ nodeProps.data.label }}</span>
                   <span class="node-type">{{ nodeTypeLabel(nodeProps.data.nodeType) }}</span>
+                  <span class="node-name">{{ nodeProps.data.label }}</span>
                 </div>
                 <span v-if="nodeProps.data.statusText" class="node-status">{{ nodeProps.data.statusText }}</span>
-                <Handle type="source" :position="Position.Right" class="wf-handle" />
-                <button
-                  type="button"
-                  class="node-add"
-                  title="在此节点后新增节点"
-                  @click.stop="openAddMenu($event, nodeProps.id)"
-                ><Plus :size="13" :stroke-width="2.4" /></button>
+                <Handle type="source" :position="Position.Right" class="wf-handle source" />
               </div>
             </template>
           </VueFlow>
@@ -85,13 +87,13 @@
           :style="{ left: addMenu.x + 'px', top: addMenu.y + 'px' }"
           @click.stop
         >
-          <p class="add-menu-title">新增节点（自动从「{{ addMenuSourceName }}」连线）</p>
+          <p class="add-menu-title">{{ addMenuSourceName ? `从「${addMenuSourceName}」拖出 · 选择节点类型` : '选择节点类型' }}</p>
           <button
             v-for="nodeType in nodeTypes"
             :key="nodeType.type"
             type="button"
             class="add-menu-item"
-            @click="addNode(nodeType.type, addMenu.sourceId)"
+            @click="addNode(nodeType.type, addMenu.sourceId, { x: addMenu.flowX, y: addMenu.flowY })"
           >
             <span class="palette-dot" :style="{ background: nodeType.color }" />
             <span class="add-menu-label">{{ nodeType.label }}</span>
@@ -196,7 +198,6 @@ import { message } from 'ant-design-vue'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { Handle, MarkerType, Position, VueFlow } from '@vue-flow/core'
-import { Plus } from 'lucide-vue-next'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import {
@@ -247,25 +248,18 @@ const savingVersion = ref(false)
 const flowNodes = ref([])
 const flowEdges = ref([])
 const selectedNode = ref(null)
+const connectDrag = reactive({ sourceId: '', justConnected: false })
 const expandedOutput = ref('')
-const addMenu = reactive({ open: false, x: 0, y: 0, sourceId: '' })
+const addMenu = reactive({ open: false, x: 0, y: 0, sourceId: '', flowX: 0, flowY: 0 })
 const addMenuSourceName = computed(() => {
   const node = flowNodes.value.find(item => item.id === addMenu.sourceId)
   return node?.data?.label || ''
 })
 
-function openAddMenu(event, sourceId) {
-  const rect = event.currentTarget.getBoundingClientRect()
-  const menuWidth = 330
-  const x = Math.min(rect.right + 10, window.innerWidth - menuWidth - 16)
-  const y = Math.min(rect.top - 8, window.innerHeight - 420)
-  addMenu.open = !(addMenu.open && addMenu.sourceId === sourceId)
-  addMenu.sourceId = sourceId
-  addMenu.x = Math.max(12, x)
-  addMenu.y = Math.max(12, y)
-}
+
 let pollTimer = null
 let graphDirty = false
+let suppressMenuCloseUntil = 0
 let nodeCounter = 0
 
 const nodeTypes = NODE_TYPES
@@ -352,6 +346,14 @@ function layeredPositions(graph) {
   })
 }
 
+const EDGE_DEFAULTS = {
+  type: 'smoothstep',
+  animated: false,
+  updatable: true,
+  style: { stroke: '#94A3B8', strokeWidth: 1.8 },
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#94A3B8', width: 17, height: 17 }
+}
+
 function applyGraph(versionView) {
   const graph = versionView?.graph || { nodes: [], edges: [] }
   if (!graph.nodes.some(node => node.type === 'start')) {
@@ -375,9 +377,7 @@ function applyGraph(versionView) {
     id: `e-${edge.from}-${edge.to}-${index}`,
     source: edge.from,
     target: edge.to,
-    type: 'default',
-    animated: false,
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
+    ...EDGE_DEFAULTS
   }))
   selectedNode.value = null
   graphDirty = false
@@ -395,13 +395,14 @@ async function loadDefinition() {
   }
 }
 
-function addNode(type, sourceId) {
-  const source = flowNodes.value.find(node => node.id === sourceId) || null
-  const baseX = source ? source.position.x + 260 : 120
-  const baseY = source ? source.position.y : 120
-  // 避开已有节点位置
-  let x = baseX
-  let y = baseY
+function addNode(type, sourceId, position) {
+  const source = sourceId ? flowNodes.value.find(node => node.id === sourceId) : null
+  const origin = position || {
+    x: source ? source.position.x + 260 : 120,
+    y: source ? source.position.y : 120
+  }
+  let x = origin.x
+  let y = origin.y
   let guard = 0
   while (flowNodes.value.some(node => Math.abs(node.position.x - x) < 40 && Math.abs(node.position.y - y) < 40) && guard < 12) {
     y += 110
@@ -424,58 +425,48 @@ function addNode(type, sourceId) {
       }
     }
   ]
-  if (source) {
+  const connectSource = sourceId || flowNodes.value.find(node => node.data.nodeType === 'start')?.id || ''
+  if (connectSource) {
     flowEdges.value = [
       ...flowEdges.value,
       {
-        id: `e-${source.id}-${key}-${Date.now().toString(36)}`,
-        source: source.id,
+        id: `e-${connectSource}-${key}-${Date.now().toString(36)}`,
+        source: connectSource,
         target: key,
-        type: 'default',
-        animated: false,
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
+        ...EDGE_DEFAULTS
       }
     ]
-  } else {
-    // 无来源时尝试从开始节点连线
-    const startNode = flowNodes.value.find(node => node.data.nodeType === 'start')
-    if (startNode && startNode.id !== key) {
-      flowEdges.value = [
-        ...flowEdges.value,
-        {
-          id: `e-${startNode.id}-${key}-${Date.now().toString(36)}`,
-          source: startNode.id,
-          target: key,
-          type: 'default',
-          animated: false,
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
-        }
-      ]
-    }
   }
   addMenu.open = false
   graphDirty = true
 }
 
 function autoLayout() {
-  const graph = {
-    nodes: flowNodes.value.map(node => ({ key: node.id })),
-    edges: flowEdges.value.map(edge => ({ from: edge.source, to: edge.target }))
-  }
-  applyLayoutOnly(graph)
-  graphDirty = true
-}
-
-function applyLayoutOnly(graph) {
-  const positioned = layeredPositions({
-    nodes: graph.nodes.map(node => ({ key: node.key })),
-    edges: graph.edges
-  })
+  const edges = flowEdges.value.map(edge => ({ from: edge.source, to: edge.target }))
+  const positioned = layeredPositions({ nodes: flowNodes.value.map(node => ({ key: node.id })), edges })
   const positionByKey = new Map(positioned.map(item => [item.node.key, { x: item.x, y: item.y }]))
   flowNodes.value = flowNodes.value.map(node => ({
     ...node,
     position: positionByKey.get(node.id) || node.position
   }))
+  graphDirty = true
+}
+
+/** 屏幕坐标 → 画布坐标（基于 vue-flow pane 的 transform） */
+function clientToFlowPoint(clientX, clientY) {
+  const pane = document.querySelector('.canvas-wrap .vue-flow__viewport')
+  const wrap = document.querySelector('.canvas-wrap')
+  if (!pane || !wrap) return { x: 120, y: 120 }
+  const transform = window.getComputedStyle(pane).transform
+  const matrix = new DOMMatrixReadOnly(transform === 'none' ? '' : transform)
+  const wrapRect = wrap.getBoundingClientRect()
+  const localX = clientX - wrapRect.left
+  const localY = clientY - wrapRect.top
+  const scale = matrix.a || 1
+  return {
+    x: (localX - matrix.e) / scale,
+    y: (localY - matrix.f) / scale
+  }
 }
 
 function onConnect(connection) {
@@ -488,31 +479,51 @@ function onConnect(connection) {
       id: `e-${connection.source}-${connection.target}-${Date.now().toString(36)}`,
       source: connection.source,
       target: connection.target,
-      type: 'default',
-      animated: false,
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
+      ...EDGE_DEFAULTS
     }
   ]
+  connectDrag.justConnected = true
+  setTimeout(() => { connectDrag.justConnected = false }, 50)
   graphDirty = true
 }
 
-function onNodesChange(changes) {
-  const removed = changes?.filter(change => change.type === 'remove') || []
-  if (removed.length) {
-    const startIds = flowNodes.value.filter(node => node.data.nodeType === 'start').map(node => node.id)
-    if (removed.some(change => startIds.includes(change.id))) {
-      // 开始节点被键盘删除：立即恢复
-      message.warning('开始节点不能删除')
-      applyGraph(definition.value?.graph || { nodes: [], edges: [] })
-      return
-    }
-    graphDirty = true
-    selectedNode.value = null
-  }
+function onConnectStart(params) {
+  connectDrag.sourceId = params?.nodeId || ''
 }
-function onEdgesChange(changes) {
-  if (changes?.some(change => change.type === 'remove')) graphDirty = true
+
+/** 从端口拖拽到空白画布松手：就地弹类型菜单，选中后在该位置建节点并连线 */
+function onConnectEnd(event) {
+  const sourceId = connectDrag.sourceId
+  connectDrag.sourceId = ''
+  if (connectDrag.justConnected) return
+  const native = event?.event || event
+  const clientX = native?.clientX
+  const clientY = native?.clientY
+  if (typeof clientX !== 'number' || typeof clientY !== 'number') return
+  const flowPoint = clientToFlowPoint(clientX, clientY)
+  suppressMenuCloseUntil = Date.now() + 300
+  addMenu.open = true
+  addMenu.sourceId = sourceId
+  addMenu.flowX = flowPoint.x
+  addMenu.flowY = flowPoint.y
+  addMenu.x = Math.min(clientX + 12, window.innerWidth - 340)
+  addMenu.y = Math.min(clientY - 10, window.innerHeight - 430)
 }
+
+/** 拖拽已有连线的端点改接到其他节点（RuleGo 式重连） */
+function onEdgeUpdate({ edge, connection }) {
+  if (!edge || !connection?.source || !connection?.target) return
+  if (connection.source === connection.target) return
+  flowEdges.value = flowEdges.value.map(item => item.id === edge.id
+    ? { ...item, source: connection.source, target: connection.target }
+    : item)
+  graphDirty = true
+}
+
+function markDirtyOnChange(changes) {
+  if (changes?.length) graphDirty = true
+}
+
 
 function onNodeClick({ node }) {
   selectedNode.value = node
@@ -542,6 +553,15 @@ function removeSelectedNode() {
   flowEdges.value = flowEdges.value.filter(edge => edge.source !== id && edge.target !== id)
   selectedNode.value = null
   graphDirty = true
+}
+
+function handleDeleteKey(event) {
+  if (event.key !== 'Delete' && event.key !== 'Backspace') return
+  const target = event.target
+  if (target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+  if (!selectedNode.value) return
+  event.preventDefault()
+  removeSelectedNode()
 }
 
 async function saveVersion() {
@@ -649,10 +669,14 @@ async function start() {
   }
 }
 
-function closeAddMenu() { addMenu.open = false }
+function closeAddMenu() {
+  if (Date.now() < suppressMenuCloseUntil) return
+  addMenu.open = false
+}
 
 onMounted(async () => {
   document.addEventListener('click', closeAddMenu)
+  document.addEventListener('keydown', handleDeleteKey)
   document.addEventListener('keydown', event => { if (event.key === 'Escape') addMenu.open = false })
   await refresh()
   await loadDefinition()
@@ -660,6 +684,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (pollTimer) clearTimeout(pollTimer)
   document.removeEventListener('click', closeAddMenu)
+  document.removeEventListener('keydown', handleDeleteKey)
 })
 </script>
 
@@ -691,6 +716,12 @@ onBeforeUnmount(() => {
 .wf-run:disabled { background: var(--wb-fill); color: var(--wb-muted); }
 .canvas-wrap { height: 440px; margin-top: 12px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); overflow: hidden; background: var(--wb-surface-2); }
 .canvas-wrap :deep(.vue-flow) { background: var(--wb-surface-2); }
+.canvas-wrap :deep(.vue-flow__node) {
+  z-index: 6;
+}
+.canvas-wrap :deep(.vue-flow__edge) {
+  z-index: 1;
+}
 .canvas-wrap :deep(.vue-flow__node-default) {
   padding: 0;
   border: 0;
@@ -699,16 +730,23 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 .wf-handle {
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
   border: 2px solid var(--wb-surface);
   background: var(--wb-brand);
+  transition: transform 0.12s, box-shadow 0.12s;
 }
-.wf-node { display: flex; align-items: center; gap: 10px; min-width: 190px; padding: 10px 12px; border: 1px solid var(--wb-border); border-radius: 11px; background: var(--wb-surface); box-shadow: var(--wb-shadow-md); }
-.wf-node .node-main { display: flex; flex-direction: column; gap: 2px; }
-.node-type-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; }
-.node-name { color: var(--wb-text); font-size: 13px; font-weight: 550; }
-.node-type { color: var(--wb-muted); font-size: 11.5px; }
+.wf-handle:hover {
+  transform: scale(1.5);
+  box-shadow: 0 0 0 4px var(--wb-brand-soft);
+}
+.wf-node .wf-handle.source { background: var(--node-color, var(--wb-brand)); }
+.wf-node { display: flex; align-items: center; gap: 10px; min-width: 200px; padding: 9px 14px 9px 12px; border: 1px solid var(--wb-border); border-left: 3px solid var(--node-color, var(--wb-brand)); border-radius: 10px; background: var(--wb-surface); box-shadow: var(--wb-shadow-md); transition: box-shadow 0.15s, border-color 0.15s; }
+.wf-node:hover { box-shadow: var(--wb-shadow-lg); }
+.wf-node .node-main { display: flex; flex-direction: column; gap: 3px; }
+
+.node-name { color: var(--wb-text); font-size: 13px; font-weight: 600; }
+.node-type { color: var(--node-color, var(--wb-muted)); font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .node-status { margin-left: auto; padding: 1px 8px; border-radius: 999px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 11px; }
 .wf-node.is-start { border-color: var(--wb-brand); background: var(--wb-brand-soft); }
 .wf-node.is-start .node-name { color: var(--wb-brand); }
@@ -723,8 +761,6 @@ onBeforeUnmount(() => {
 .ghost-btn.mini { padding: 4px 10px; font-size: 11.5px; }
 .download-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 9px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12.5px; }
 .canvas-hint { color: var(--wb-muted); font-size: 12px; }
-.node-add { position: absolute; right: -12px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--wb-border); border-radius: 50%; background: var(--wb-surface); color: var(--wb-muted); box-shadow: var(--wb-shadow-sm); z-index: 5; transition: all 0.15s; }
-.node-add:hover { color: #fff; background: var(--wb-brand); border-color: var(--wb-brand); }
 .add-menu { position: fixed; z-index: 70; width: 320px; max-height: 420px; overflow-y: auto; padding: 8px; border: 1px solid var(--wb-border); border-radius: 12px; background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); }
 .add-menu-title { padding: 4px 8px 8px; color: var(--wb-muted); font-size: 11.5px; }
 .add-menu-item { display: flex; width: 100%; align-items: center; gap: 9px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--wb-text); font-size: 12.5px; text-align: left; }

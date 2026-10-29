@@ -48,7 +48,8 @@
               </div>
               <div v-if="activeRun?.awaitingPlan" class="plan-gate-banner" role="status">
                 <span class="plan-gate-text">
-                  📋 已生成 <strong>{{ activeRun.plan?.length || 0 }}</strong> 步执行计划，等待你确认后开始执行
+                  <ClipboardList :size="14" />
+                  <span>已生成 <strong>{{ activeRun.plan?.length || 0 }}</strong> 步执行计划，等待你确认后开始执行</span>
                 </span>
                 <span class="plan-gate-actions">
                   <button type="button" class="plan-gate-secondary" @click="inspectorOpen = true">查看计划</button>
@@ -58,8 +59,8 @@
               <div v-if="activeRun?.canDecideConfirmation && activeRun.pendingConfirmations?.length"
                 class="confirmation-banner" role="status">
                 <span class="confirmation-text">
-                  ⏸ 任务已暂停：等待确认
-                  <strong>{{ activeRun.pendingConfirmations.map(item => item.tool).join('、') }}</strong>
+                  <PauseCircle :size="14" />
+                  <span>任务已暂停：等待确认 <strong>{{ activeRun.pendingConfirmations.map(item => item.tool).join('、') }}</strong></span>
                 </span>
                 <span class="confirmation-mode">{{ activeRun.permissionMode || defaultPermissionMode }} 模式</span>
                 <button type="button" class="confirmation-action" @click="confirmationDialogOpen = true">查看并确认</button>
@@ -137,8 +138,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import {
-  BookOpen, Database, Download, Globe2, Menu, PanelLeftClose, PanelLeftOpen,
-  PanelRightOpen, Plug, RotateCw, Workflow
+  BookOpen, ClipboardList, Database, Download, Globe2, Menu, PanelLeftClose, PanelLeftOpen,
+  PanelRightOpen, PauseCircle, Plug, RotateCw, Workflow
 } from 'lucide-vue-next'
 import AgentCompanion from '../components/AgentCompanion.vue'
 import AsterAvatar from '../components/AsterAvatar.vue'
@@ -1251,6 +1252,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--wb-warning);
 }
+.confirmation-text { display: flex; align-items: center; gap: 7px; }
 .confirmation-text strong { font-weight: 700; }
 .confirmation-mode {
   flex-shrink: 0;
@@ -1288,6 +1290,7 @@ onBeforeUnmount(() => {
   color: var(--wb-brand);
 }
 
+.plan-gate-text { display: flex; align-items: center; gap: 7px; }
 .plan-gate-actions { display: flex; flex: 0 0 auto; gap: 7px; }
 
 .plan-gate-banner button { border-radius: 999px; padding: 5px 13px; font-size: 11.5px; font-weight: 600; cursor: pointer; }

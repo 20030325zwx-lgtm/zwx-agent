@@ -71,3 +71,10 @@
 - 重新打包：`prepare-backend`（mvn package，含 JWT 修复）→ `electron-builder`，产物 `desktop/release/Aster-0.1.2-arm64.dmg`（337MB）与 `Aster-0.1.2-arm64-mac.zip`。
 - 打包校验：`Aster.app/Contents/Resources/icon.icns` 与新源文件 SHA 一致；`app.asar` 中 CSS 指纹 `index-Bb4yJS5m.css` 与 `frontend/dist` 一致；`app.asar` 含固定端口 `47821`；`Contents/Resources/server/aster-agent.jar` 为 11:32 新构建。
 - 注意：已安装的旧版 App 不会自动更新，需要重新安装这份 DMG 才能看到新界面。
+
+## 追加调整（同日）：去卡通化与打包清理
+
+- `AgentCompanion` 重写为状态条：去掉机器人形象、眨眼/漂浮/音波动画，只保留「标记 + 状态 + 说明」，空闲态不显示。
+- `AiAvatarFallback` 去掉 `🤖` / `❤️` emoji；任务页计划/确认横幅的 `📋` / `⏸` 换成 lucide 图标。
+- `desktop/package.json` 新增 `clean:release`，`dist:mac` 开头先清空 `release/*.dmg|zip|blockmap|yml`；已手动清理历史 `ZWX Agent-*` 包与重复的 `Aster-...-mac 2.zip`（约 1GB）。
+- 重新打包：`desktop/release/Aster-0.1.2-arm64.dmg`（11:47）+ zip；校验 `app.asar` 含 `companion-status`、无 `companion-figure`。

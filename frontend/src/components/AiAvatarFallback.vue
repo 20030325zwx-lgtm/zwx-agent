@@ -1,12 +1,12 @@
 <template>
   <div class="ai-avatar-fallback" :class="type">
-    <AsterAvatar v-if="type === 'super' || type === 'default'" />
-    <span v-else-if="type === 'love'">❤️</span>
-    <span v-else>🤖</span>
+    <Heart v-if="type === 'love'" :size="16" :stroke-width="2" />
+    <AsterAvatar v-else />
   </div>
 </template>
 
 <script setup>
+import { Heart } from 'lucide-vue-next'
 import AsterAvatar from './AsterAvatar.vue'
 
 defineProps({
@@ -29,7 +29,8 @@ defineProps({
 }
 
 .love {
-  background: linear-gradient(145deg, #ff7a95, #ff2d55);
+  background: color-mix(in srgb, var(--wb-danger) 12%, transparent);
+  color: var(--wb-danger);
 }
 
 .default, .super {

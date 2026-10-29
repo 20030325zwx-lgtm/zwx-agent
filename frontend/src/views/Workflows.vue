@@ -4,31 +4,43 @@
       <header class="wf-head">
         <div>
           <h1>工作流</h1>
-          <p>把多步任务固化为可复用、可观测的自动化流程</p>
+          <p>节点画布：自定义节点与连线，保存新版本后按图执行</p>
         </div>
       </header>
 
       <div v-if="!definitions.length && !loading" class="wf-empty">暂无可用工作流</div>
 
       <section v-for="definition in definitions" :key="definition.key" class="wf-section">
-        <div class="wf-def">
-          <div class="wf-def-head">
-            <div>
-              <h2>{{ definition.name }}</h2>
-              <p>{{ definition.description }}</p>
-            </div>
-            <span class="wf-version">v{{ definition.version }}</span>
+        <div class="wf-def-head">
+          <div>
+            <h2>{{ definition.name }}</h2>
+            <p>{{ definition.description }}</p>
           </div>
-          <div class="wf-steps">
-            <span v-for="(step, index) in definition.steps" :key="step.key" class="wf-step">
-              <span class="step-index">{{ index + 1 }}</span> {{ step.name }}
-            </span>
+          <span class="wf-version">v{{ definition.version }} · {{ graphNodes.length }} 个节点</span>
+        </div>
+
+        <div class="canvas-toolbar">
+          <div class="palette">
+            <button
+              v-for="nodeType in nodeTypes"
+              :key="nodeType.type"
+              type="button"
+              class="palette-item"
+              :title="nodeType.hint"
+              @click="addNode(definition.key, nodeType.type)"
+            >
+              <span class="palette-dot" :style="{ background: nodeType.color }" />
+              {{ nodeType.label }}
+            </button>
           </div>
-          <div class="wf-start">
+          <div class="toolbar-right">
+            <button type="button" class="ghost-btn" :disabled="savingVersion" @click="saveVersion(definition.key)">
+              {{ savingVersion ? '保存中…' : '保存新版本' }}
+            </button>
             <input
               v-model.trim="keyword"
-              class="wf-input"
-              :placeholder="`输入商品关键词，例如：蓝牙耳机`"
+              class="wf-input compact"
+              placeholder="运行输入（关键词）"
               maxlength="64"
               @keydown.enter="start(definition.key)"
             />
@@ -36,6 +48,60 @@
               {{ starting ? '运行中…' : '运行工作流' }}
             </button>
           </div>
+        </div>
+
+        <div class="canvas-wrap">
+          <VueFlow
+            :nodes="flowNodes"
+            :edges="flowEdges"
+            :nodes-draggable="true"
+            :nodes-connectable="true"
+            :elements-selectable="true"
+            :min-zoom="0.4"
+            :max-zoom="1.6"
+            :default-viewport="{ x: 20, y: 20, zoom: 0.95 }"
+            fit-view-on-init
+            @connect="onConnect"
+            @node-click="onNodeClick"
+            @nodes-change="onNodesChange"
+            @edges-change="onEdgesChange"
+          >
+            <Background pattern-color="#c7ccdb" :gap="20" />
+            <Controls />
+            <template #node-default="nodeProps">
+              <div class="wf-node" :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass]">
+                <Handle type="target" :position="Position.Left" class="wf-handle" />
+                <span class="node-type-dot" :style="{ background: nodeColor(nodeProps.data.nodeType) }" />
+                <div class="node-main">
+                  <span class="node-name">{{ nodeProps.data.label }}</span>
+                  <span class="node-type">{{ nodeTypeLabel(nodeProps.data.nodeType) }}</span>
+                </div>
+                <span v-if="nodeProps.data.statusText" class="node-status">{{ nodeProps.data.statusText }}</span>
+                <Handle type="source" :position="Position.Right" class="wf-handle" />
+              </div>
+            </template>
+          </VueFlow>
+        </div>
+
+        <div v-if="selectedNode" class="node-inspector">
+          <div class="inspector-head">
+            <strong>节点设置：{{ selectedNode.data.label }}</strong>
+            <div class="inspector-actions">
+              <button type="button" class="ghost-btn danger" @click="removeSelectedNode">删除节点</button>
+            </div>
+          </div>
+          <label class="inspector-row">
+            <span>名称</span>
+            <input v-model.trim="selectedNode.data.label" class="wf-input compact" maxlength="24" />
+          </label>
+          <label v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row">
+            <span class="param-key">{{ key }}</span>
+            <input v-model="selectedNode.data.params[key]" class="wf-input compact" :placeholder="paramPlaceholder(key)" />
+          </label>
+          <p class="inspector-hint">
+            参数支持引用：<code v-text="'{{input.keyword}}'"></code> 引用运行输入，
+            <code v-text="'{{节点key.output}}'"></code> 引用上游输出。
+          </p>
         </div>
       </section>
 
@@ -58,7 +124,7 @@
             <span class="status-dot" :class="statusClass(run.status)" />
             <span class="run-main">
               <span class="run-title">{{ run.input?.keyword || run.workflowName }}</span>
-              <span class="run-meta">{{ run.workflowName }} · {{ formatTime(run.createdAt) }}</span>
+              <span class="run-meta">{{ run.workflowName }} · v{{ run.definitionVersion }} · {{ formatTime(run.createdAt) }}</span>
             </span>
             <span class="run-status" :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span>
           </button>
@@ -92,7 +158,33 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
-import { getWorkflowRun, listWorkflows, startWorkflow } from '../api'
+import { Background } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
+import { Handle, Position, VueFlow } from '@vue-flow/core'
+import '@vue-flow/core/dist/style.css'
+import '@vue-flow/core/dist/theme-default.css'
+import {
+  getWorkflowDefinition,
+  getWorkflowRun,
+  listWorkflows,
+  saveWorkflowVersion,
+  startWorkflow
+} from '../api'
+
+const NODE_TYPES = [
+  { type: 'search_image', label: '搜集商品图', color: '#2E6BE6', hint: '通过图片搜索获取参考图；参数 keyword' },
+  { type: 'image_understand', label: '图片理解', color: '#7C5CF0', hint: '理解图片内容；参数 image / question' },
+  { type: 'llm_text', label: '文本生成', color: '#0F9D8A', hint: '调用对话模型生成文本；参数 prompt' },
+  { type: 'web_search', label: '联网搜索', color: '#C77B1E', hint: '搜索网页信息；参数 query' },
+  { type: 'poster_render', label: '海报合成', color: '#C2455E', hint: '合成海报 PNG；参数 image / copy' }
+]
+const PARAM_DEFAULTS = {
+  search_image: { keyword: '{{input.keyword}}' },
+  image_understand: { image: '{{search_image.output}}', question: '描述这张图片的内容与卖点' },
+  llm_text: { prompt: '根据以下信息生成一段文案：{{input.keyword}}' },
+  web_search: { query: '{{input.keyword}}' },
+  poster_render: { image: '{{search_image.output}}', copy: '{{llm_text.output}}' }
+}
 
 const definitions = ref([])
 const runs = ref([])
@@ -101,10 +193,28 @@ const selectedId = ref(null)
 const keyword = ref('')
 const loading = ref(true)
 const starting = ref(false)
+const savingVersion = ref(false)
+const flowNodes = ref([])
+const flowEdges = ref([])
+const selectedNode = ref(null)
 let pollTimer = null
+let graphDirty = false
+let nodeCounter = 0
 
+const nodeTypes = NODE_TYPES
+
+const graphNodes = computed(() => flowNodes.value)
 const pollLabel = computed(() => (runs.value.some(run => run.status === 'RUNNING') ? '自动刷新中' : '刷新'))
 
+function nodeTypeLabel(type) {
+  return NODE_TYPES.find(item => item.type === type)?.label || type
+}
+function nodeColor(type) {
+  return NODE_TYPES.find(item => item.type === type)?.color || '#8A90A6'
+}
+function paramPlaceholder(key) {
+  return { keyword: '如：蓝牙耳机 或 {{input.keyword}}', image: '图片 URL 或 {{节点key.output}}', question: '问题描述', prompt: '提示词，可含引用', query: '搜索词', copy: '文案 JSON 或 {{节点key.output}}' }[key] || ''
+}
 function statusLabel(status) {
   return { RUNNING: '运行中', SUCCEEDED: '成功', FAILED: '失败' }[status] || status
 }
@@ -124,6 +234,175 @@ function formatTime(value) {
   if (minutes < 1) return '刚刚'
   if (minutes < 60) return `${minutes} 分钟前`
   return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+// ---------------------------------------------------------------- 画布数据
+
+function layeredPositions(graph) {
+  const indegree = new Map()
+  const outgoing = new Map()
+  graph.nodes.forEach(node => { indegree.set(node.key, 0); outgoing.set(node.key, []) })
+  graph.edges.forEach(edge => {
+    outgoing.get(edge.from)?.push(edge.to)
+    indegree.set(edge.to, (indegree.get(edge.to) || 0) + 1)
+  })
+  const level = new Map()
+  const queue = graph.nodes.filter(node => (indegree.get(node.key) || 0) === 0).map(node => node.key)
+  queue.forEach(key => level.set(key, 0))
+  const byKey = new Map(graph.nodes.map(node => [node.key, node]))
+  while (queue.length) {
+    const key = queue.shift()
+    for (const next of outgoing.get(key) || []) {
+      level.set(next, Math.max(level.get(next) || 0, (level.get(key) || 0) + 1))
+      queue.push(next)
+    }
+  }
+  const rows = new Map()
+  return graph.nodes.map(node => {
+    const l = level.get(node.key) || 0
+    const row = rows.get(l) || 0
+    rows.set(l, row + 1)
+    return { node, x: 40 + l * 260, y: 40 + row * 110 }
+  })
+}
+
+function applyGraph(versionView) {
+  const graph = versionView?.graph || { nodes: [], edges: [] }
+  const positioned = layeredPositions(graph)
+  flowNodes.value = positioned.map(({ node, x, y }) => ({
+    id: node.key,
+    position: { x, y },
+    type: 'default',
+    data: {
+      label: node.name,
+      nodeType: node.type,
+      params: { ...(node.params || {}) },
+      statusText: '',
+      statusClass: ''
+    }
+  }))
+  flowEdges.value = graph.edges.map((edge, index) => ({
+    id: `e-${edge.from}-${edge.to}-${index}`,
+    source: edge.from,
+    target: edge.to,
+    type: 'smoothstep',
+    animated: true
+  }))
+  selectedNode.value = null
+  graphDirty = false
+}
+
+async function loadDefinition(workflowKey) {
+  try {
+    applyGraph(await getWorkflowDefinition(workflowKey))
+  } catch (error) {
+    message.error(error?.response?.data?.error || '画布加载失败')
+  }
+}
+
+function addNode(workflowKey, type) {
+  nodeCounter += 1
+  const key = `${type}_${Date.now().toString(36)}${nodeCounter}`
+  flowNodes.value = [
+    ...flowNodes.value,
+    {
+      id: key,
+      position: { x: 60 + (flowNodes.value.length % 4) * 240, y: 60 + Math.floor(flowNodes.value.length / 4) * 120 },
+      type: 'default',
+      data: {
+        label: nodeTypeLabel(type),
+        nodeType: type,
+        params: { ...(PARAM_DEFAULTS[type] || {}) },
+        statusText: '',
+        statusClass: ''
+      }
+    }
+  ]
+  graphDirty = true
+  void workflowKey
+}
+
+function onConnect(connection) {
+  if (!connection?.source || !connection?.target || connection.source === connection.target) return
+  const exists = flowEdges.value.some(edge => edge.source === connection.source && edge.target === connection.target)
+  if (exists) return
+  flowEdges.value = [
+    ...flowEdges.value,
+    {
+      id: `e-${connection.source}-${connection.target}-${Date.now().toString(36)}`,
+      source: connection.source,
+      target: connection.target,
+      type: 'smoothstep',
+      animated: true
+    }
+  ]
+  graphDirty = true
+}
+
+function onNodesChange(changes) {
+  if (changes?.some(change => change.type === 'remove')) {
+    graphDirty = true
+    selectedNode.value = null
+  }
+}
+function onEdgesChange(changes) {
+  if (changes?.some(change => change.type === 'remove')) graphDirty = true
+}
+
+function onNodeClick({ node }) {
+  selectedNode.value = node
+}
+
+function removeSelectedNode() {
+  if (!selectedNode.value) return
+  const id = selectedNode.value.id
+  flowNodes.value = flowNodes.value.filter(node => node.id !== id)
+  flowEdges.value = flowEdges.value.filter(edge => edge.source !== id && edge.target !== id)
+  selectedNode.value = null
+  graphDirty = true
+}
+
+async function saveVersion(workflowKey) {
+  if (savingVersion.value) return
+  savingVersion.value = true
+  try {
+    const graph = {
+      nodes: flowNodes.value.map(node => ({
+        key: node.id,
+        type: node.data.nodeType,
+        name: node.data.label,
+        params: node.data.params
+      })),
+      edges: flowEdges.value.map(edge => ({ from: edge.source, to: edge.target }))
+    }
+    await saveWorkflowVersion(workflowKey, { graph })
+    graphDirty = false
+    message.success('已保存为新版本')
+    await refresh()
+    await loadDefinition(workflowKey)
+  } catch (error) {
+    message.error(error?.response?.data?.error || '保存版本失败')
+  } finally {
+    savingVersion.value = false
+  }
+}
+
+// ---------------------------------------------------------------- 运行
+
+function applyRunStatus(run) {
+  if (!run) return
+  const statusByKey = new Map((run.steps || []).map(step => [step.key, step]))
+  flowNodes.value = flowNodes.value.map(node => {
+    const step = statusByKey.get(node.id)
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        statusText: step ? stepStatusText(step.status) : '',
+        statusClass: step ? stepClass(step.status) : ''
+      }
+    }
+  })
 }
 
 async function refresh() {
@@ -155,6 +434,7 @@ function schedulePoll() {
 async function loadDetail(runId, { silent } = {}) {
   try {
     detail.value = await getWorkflowRun(runId)
+    applyRunStatus(detail.value)
   } catch (error) {
     if (!silent) message.error(error?.response?.data?.error || '运行详情加载失败')
   }
@@ -169,9 +449,14 @@ async function start(workflowKey) {
   if (!keyword.value || starting.value) return
   starting.value = true
   try {
+    if (graphDirty) {
+      message.warning('画布有未保存的修改，先保存为版本再运行')
+      return
+    }
     const run = await startWorkflow(workflowKey, keyword.value)
     selectedId.value = run.id
     detail.value = run
+    applyRunStatus(run)
     await refresh()
     message.success('工作流已开始运行')
   } catch (error) {
@@ -181,307 +466,96 @@ async function start(workflowKey) {
   }
 }
 
-onMounted(refresh)
+onMounted(async () => {
+  await refresh()
+  if (definitions.value.length) await loadDefinition(definitions.value[0].key)
+})
 onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
 </script>
 
 <style scoped>
-.wf-page {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.wf-inner {
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 28px 32px 56px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.wf-head h1 {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  color: var(--wb-text);
-}
-
-.wf-head p {
-  margin-top: 4px;
-  font-size: 13px;
-  color: var(--wb-text-2);
-}
-
-.wf-empty,
-.section-hint {
-  padding: 18px 4px;
-  color: var(--wb-muted);
-  font-size: 13px;
-}
-
-.wf-section {
-  padding: 18px 20px;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-lg);
-  background: var(--wb-surface);
-}
-
-.wf-def-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.wf-def-head h2 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--wb-text);
-}
-
-.wf-def-head p {
-  margin-top: 4px;
-  font-size: 12.5px;
-  color: var(--wb-text-2);
-}
-
-.wf-version {
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: var(--wb-fill);
-  color: var(--wb-text-2);
-  font-size: 12px;
-}
-
-.wf-steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.wf-step {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 12px;
-  border: 1px solid var(--wb-border);
-  border-radius: 999px;
-  color: var(--wb-text-2);
-  font-size: 12.5px;
-}
-
-.step-index {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--wb-brand-soft);
-  color: var(--wb-brand);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.wf-start {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.wf-input {
-  flex: 1;
-  padding: 9px 13px;
-  border: 1px solid var(--wb-border);
-  border-radius: 10px;
-  background: var(--wb-surface-2);
-  color: var(--wb-text);
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.wf-input:focus {
-  border-color: var(--wb-brand);
-  box-shadow: 0 0 0 3px var(--wb-brand-soft);
-}
-
-.wf-run {
-  padding: 9px 20px;
+.wf-page { flex: 1; overflow-y: auto; }
+.wf-inner { max-width: 1120px; margin: 0 auto; padding: 28px 32px 56px; display: flex; flex-direction: column; gap: 16px; }
+.wf-head h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: var(--wb-text); }
+.wf-head p { margin-top: 4px; font-size: 13px; color: var(--wb-text-2); }
+.wf-empty, .section-hint { padding: 18px 4px; color: var(--wb-muted); font-size: 13px; }
+.wf-section { padding: 18px 20px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg); background: var(--wb-surface); }
+.wf-def-head { display: flex; align-items: flex-start; justify-content: space-between; }
+.wf-def-head h2 { font-size: 16px; font-weight: 600; color: var(--wb-text); }
+.wf-def-head p { margin-top: 4px; font-size: 12.5px; color: var(--wb-text-2); }
+.wf-version { padding: 2px 10px; border-radius: 999px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 12px; white-space: nowrap; }
+.canvas-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+.palette { display: flex; gap: 6px; flex-wrap: wrap; }
+.palette-item { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--wb-border); border-radius: 999px; background: var(--wb-surface); color: var(--wb-text-2); font-size: 12px; transition: border-color 0.15s; }
+.palette-item:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
+.palette-dot { width: 8px; height: 8px; border-radius: 50%; }
+.toolbar-right { display: flex; align-items: center; gap: 8px; }
+.ghost-btn { padding: 7px 14px; border: 1px solid var(--wb-border); border-radius: 9px; background: transparent; color: var(--wb-text-2); font-size: 12.5px; }
+.ghost-btn:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
+.ghost-btn.danger:hover { border-color: var(--wb-danger); color: var(--wb-danger); }
+.wf-input { flex: 1; padding: 9px 13px; border: 1px solid var(--wb-border); border-radius: 10px; background: var(--wb-surface-2); color: var(--wb-text); font-size: 13px; outline: none; }
+.wf-input.compact { padding: 7px 11px; font-size: 12.5px; }
+.wf-input:focus { border-color: var(--wb-brand); box-shadow: 0 0 0 3px var(--wb-brand-soft); }
+.wf-run { padding: 9px 20px; border: 0; border-radius: 10px; background: var(--wb-brand); color: var(--wb-brand-contrast); font-size: 13px; font-weight: 500; }
+.wf-run:disabled { background: var(--wb-fill); color: var(--wb-muted); }
+.canvas-wrap { height: 440px; margin-top: 12px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); overflow: hidden; background: var(--wb-surface-2); }
+.canvas-wrap :deep(.vue-flow) { background: var(--wb-surface-2); }
+.canvas-wrap :deep(.vue-flow__node-default) {
+  padding: 0;
   border: 0;
-  border-radius: 10px;
+  background: transparent;
+  width: auto;
+  box-shadow: none;
+}
+.wf-handle {
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--wb-surface);
   background: var(--wb-brand);
-  color: var(--wb-brand-contrast);
-  font-size: 13px;
-  font-weight: 500;
-  transition: background 0.15s;
 }
-
-.wf-run:hover:not(:disabled) {
-  background: var(--wb-brand-hover);
-}
-
-.wf-run:disabled {
-  background: var(--wb-fill);
-  color: var(--wb-muted);
-}
-
-.section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.section-head h2 {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--wb-text);
-}
-
-.refresh {
-  border: 0;
-  background: transparent;
-  color: var(--wb-muted);
-  font-size: 12.5px;
-}
-
-.run-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.run-item {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 10px;
-  border: 0;
-  border-radius: var(--wb-radius);
-  background: transparent;
-  text-align: left;
-  transition: background 0.15s;
-}
-
-.run-item:hover,
-.run-item.selected {
-  background: var(--wb-fill);
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: 0 0 8px;
-  background: var(--wb-border-strong);
-}
-
-.status-dot.is-running {
-  background: var(--wb-info);
-  box-shadow: 0 0 0 3px rgba(37, 144, 255, 0.18);
-}
-
+.wf-node { display: flex; align-items: center; gap: 10px; min-width: 190px; padding: 10px 12px; border: 1px solid var(--wb-border); border-radius: 11px; background: var(--wb-surface); box-shadow: var(--wb-shadow-md); }
+.wf-node .node-main { display: flex; flex-direction: column; gap: 2px; }
+.node-type-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; }
+.node-name { color: var(--wb-text); font-size: 13px; font-weight: 550; }
+.node-type { color: var(--wb-muted); font-size: 11.5px; }
+.node-status { margin-left: auto; padding: 1px 8px; border-radius: 999px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 11px; }
+.wf-node.is-running { border-color: var(--wb-info); box-shadow: 0 0 0 2px rgba(37, 144, 255, 0.18); }
+.wf-node.is-done { border-color: var(--wb-success); }
+.wf-node.is-failed { border-color: var(--wb-danger); box-shadow: 0 0 0 2px rgba(220, 47, 76, 0.18); }
+.node-inspector { margin-top: 12px; padding: 14px 16px; border: 1px dashed var(--wb-border-strong); border-radius: var(--wb-radius); background: var(--wb-surface-2); display: flex; flex-direction: column; gap: 10px; }
+.inspector-head { display: flex; align-items: center; justify-content: space-between; color: var(--wb-text); font-size: 13px; }
+.inspector-row { display: flex; align-items: center; gap: 12px; }
+.inspector-row > span { flex: 0 0 120px; color: var(--wb-text-2); font-size: 12.5px; font-family: var(--wb-font-mono, monospace); }
+.inspector-hint { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
+.inspector-hint code { padding: 1px 6px; border-radius: 5px; background: var(--wb-fill); font-size: 11.5px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.section-head h2 { font-size: 15px; font-weight: 600; color: var(--wb-text); }
+.refresh { border: 0; background: transparent; color: var(--wb-muted); font-size: 12.5px; }
+.run-list { display: flex; flex-direction: column; gap: 2px; }
+.run-item { display: flex; align-items: center; gap: 11px; padding: 10px; border: 0; border-radius: var(--wb-radius); background: transparent; text-align: left; }
+.run-item:hover, .run-item.selected { background: var(--wb-fill); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; background: var(--wb-border-strong); }
+.status-dot.is-running { background: var(--wb-info); box-shadow: 0 0 0 3px rgba(37, 144, 255, 0.18); }
 .status-dot.is-done { background: var(--wb-success); }
 .status-dot.is-failed { background: var(--wb-danger); }
 .status-dot.is-skipped { background: var(--wb-muted); }
 .status-dot.is-pending { background: var(--wb-border-strong); }
-
-.run-main {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.run-title {
-  color: var(--wb-text);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.run-meta {
-  color: var(--wb-muted);
-  font-size: 12px;
-}
-
-.run-status {
-  flex: 0 0 auto;
-  color: var(--wb-muted);
-  font-size: 12px;
-}
-
+.run-main { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.run-title { color: var(--wb-text); font-size: 13px; font-weight: 500; }
+.run-meta { color: var(--wb-muted); font-size: 12px; }
+.run-status { flex: 0 0 auto; color: var(--wb-muted); font-size: 12px; }
 .run-status.is-running { color: var(--wb-info); }
 .run-status.is-done { color: var(--wb-success); }
 .run-status.is-failed { color: var(--wb-danger); }
-
-.run-status.big {
-  padding: 3px 12px;
-  border-radius: 999px;
-  background: var(--wb-fill);
-  font-weight: 550;
-}
-
-.detail-steps {
-  display: flex;
-  flex-direction: column;
-}
-
-.detail-step {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 10px 4px;
-}
-
-.detail-step + .detail-step {
-  border-top: 1px solid var(--wb-border);
-}
-
-.step-main {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.step-name {
-  color: var(--wb-text);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.step-message {
-  color: var(--wb-muted);
-  font-size: 12px;
-}
-
-.step-status {
-  color: var(--wb-muted);
-  font-size: 12px;
-}
-
-.detail-error {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: var(--wb-radius);
-  background: rgba(220, 47, 76, 0.08);
-  color: var(--wb-danger);
-  font-size: 12.5px;
-}
-
-.artifact {
-  margin-top: 14px;
-  text-align: center;
-}
-
-.artifact-image {
-  max-width: 380px;
-  width: 100%;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
-  box-shadow: var(--wb-shadow-md);
-}
+.run-status.big { padding: 3px 12px; border-radius: 999px; background: var(--wb-fill); font-weight: 550; }
+.detail-steps { display: flex; flex-direction: column; }
+.detail-step { display: flex; align-items: center; gap: 11px; padding: 10px 4px; }
+.detail-step + .detail-step { border-top: 1px solid var(--wb-border); }
+.step-main { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.step-name { color: var(--wb-text); font-size: 13px; font-weight: 500; }
+.step-message { color: var(--wb-muted); font-size: 12px; }
+.step-status { color: var(--wb-muted); font-size: 12px; }
+.detail-error { margin-top: 10px; padding: 10px 12px; border-radius: var(--wb-radius); background: rgba(220, 47, 76, 0.08); color: var(--wb-danger); font-size: 12.5px; }
+.artifact { margin-top: 14px; text-align: center; }
+.artifact-image { max-width: 380px; width: 100%; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-md); }
 </style>

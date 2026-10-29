@@ -1,11 +1,13 @@
 package com.zwx.zwxagent.platform.workflow;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwx.zwxagent.knowledge.image.ImageAnalysisService;
 import com.zwx.zwxagent.capability.mcp.McpServerConfigurationService;
 import com.zwx.zwxagent.capability.mcp.McpTools;
 import com.zwx.zwxagent.capability.tools.UrlAccessPolicy;
+import com.zwx.zwxagent.capability.tools.WebSearchTool;
 import com.zwx.zwxagent.knowledge.storage.OssClientProvider;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
 import com.zwx.zwxagent.platform.settings.ModelCatalogService;
@@ -22,27 +24,35 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * 原生工作流引擎试点：代码注册的工作流定义 + 持久化的运行（步骤状态与产物）。
- * 试点工作流 product-poster：搜集商品图（MCP 搜索）→ 商品理解（图片 MCP）→
- * 文案规划（LLM）→ 海报合成（Java2D）→ 产物登记（OSS）。
- * 定义/版本拆表与画布编辑器留待原生画布阶段。
+ * 原生工作流引擎：定义版本（DB 图结构：节点+连线）+ 按拓扑序执行。
+ * 节点类型：search_image / image_understand / llm_text / web_search / poster_render。
+ * 节点 params 支持 "{{input.字段}}" 与 "{{节点key.output}}" 引用，执行时替换。
+ * 画布编辑保存为新版本；运行绑定最新版本。
  */
 @Service
 @Slf4j
 public class WorkflowService {
+
+    public static final Set<String> NODE_TYPES =
+            Set.of("search_image", "image_understand", "llm_text", "web_search", "poster_render");
 
     public record StepDef(String key, String name, String description) {
     }
@@ -51,7 +61,20 @@ public class WorkflowService {
                                      List<StepDef> steps) {
     }
 
-    public record StepState(String key, String name, String status, String message,
+    public record GraphNodeDef(String key, String type, String name, Map<String, Object> params) {
+    }
+
+    public record GraphEdgeDef(String from, String to) {
+    }
+
+    public record WorkflowGraph(List<GraphNodeDef> nodes, List<GraphEdgeDef> edges) {
+    }
+
+    public record DefinitionVersionView(int version, String name, String description, WorkflowGraph graph,
+                                        Instant createdAt) {
+    }
+
+    public record StepState(String key, String name, String status, String message, String output,
                             Instant startedAt, Instant finishedAt) {
     }
 
@@ -67,12 +90,31 @@ public class WorkflowService {
     public record ArtifactView(String type, String name, String url) {
     }
 
+    public record SaveVersionRequest(String name, String description, WorkflowGraph graph) {
+    }
+
+    public record StartRequest(String keyword, Map<String, Object> input) {
+    }
+
+    private record DefVersionRow(int version, String name, String description, WorkflowGraph graph, Instant createdAt) {
+    }
+
     private record WorkflowRunRow(String id, String tenantId, String userId, String workflowKey, int definitionVersion,
                                   String status, String currentStep, JsonNode input, JsonNode steps,
                                   JsonNode artifacts, String error, Instant createdAt, Instant updatedAt) {
     }
 
+    private record RunContext(String id, String tenantId, String userId, String workflowKey,
+                              int definitionVersion, String name, String description, WorkflowGraph graph,
+                              Map<String, Object> input, List<StepState> steps, List<Artifact> artifacts) {
+    }
+
+    private record NodeResult(String output, String message) {
+    }
+
     private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+    private static final int MAX_OUTPUT_CHARS = 4000;
+    private static final Pattern REF_PATTERN = Pattern.compile("\\{\\{([a-zA-Z0-9_.]+)}}");
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules()
@@ -84,6 +126,8 @@ public class WorkflowService {
     private final UrlAccessPolicy urlAccessPolicy;
     private final OssClientProvider ossClientProvider;
     private final String ossBucket;
+    private final String searchProvider;
+    private final String searchApiKey;
     private final ExecutorService executor = Executors.newFixedThreadPool(2, task -> {
         Thread thread = new Thread(task, "workflow-runner");
         thread.setDaemon(true);
@@ -101,7 +145,9 @@ public class WorkflowService {
                            DynamicChatModelFactory chatModelFactory,
                            UrlAccessPolicy urlAccessPolicy,
                            OssClientProvider ossClientProvider,
-                           @Value("${app.oss.bucket}") String ossBucket) {
+                           @Value("${app.oss.bucket}") String ossBucket,
+                           @Value("${search-api.provider:baidu}") String searchProvider,
+                           @Value("${search-api.api-key:}") String searchApiKey) {
         this.jdbcTemplate = jdbcTemplate;
         this.mcpServerConfigurationService = mcpServerConfigurationService;
         this.imageAnalysisService = imageAnalysisService;
@@ -110,102 +156,220 @@ public class WorkflowService {
         this.urlAccessPolicy = urlAccessPolicy;
         this.ossClientProvider = ossClientProvider;
         this.ossBucket = ossBucket;
+        this.searchProvider = searchProvider;
+        this.searchApiKey = searchApiKey;
     }
 
-    // ---------------------------------------------------------------- 定义
+    // ---------------------------------------------------------------- 定义版本
 
-    public List<WorkflowDefinition> definitions() {
-        return List.of(new WorkflowDefinition(
-                "product-poster", "商品海报生成", "搜集商品图，理解商品卖点，自动生成一张宣传海报。",
-                1,
-                List.of(
-                        new StepDef("search_image", "搜集商品图", "通过图片搜索服务获取商品参考图"),
-                        new StepDef("understand_product", "商品理解", "识别商品名称、卖点与建议配色"),
-                        new StepDef("compose_copy", "文案规划", "生成海报标题、副标题与要点"),
-                        new StepDef("render_poster", "海报合成", "排版合成海报图片并登记产物")
-                )));
+    public List<WorkflowDefinition> definitions(String tenantId) {
+        List<WorkflowDefinition> result = new ArrayList<>();
+        jdbcTemplate.query("""
+                        SELECT DISTINCT ON (workflow_key) workflow_key, version, name, description, graph
+                        FROM workflow_definition_version WHERE tenant_id = ?
+                        ORDER BY workflow_key, version DESC
+                        """, rs -> {
+                    WorkflowGraph graph = parseGraph(rs.getString("graph"));
+                    List<StepDef> steps = graph.nodes().stream()
+                            .map(node -> new StepDef(node.key(), node.name(), node.type())).toList();
+                    result.add(new WorkflowDefinition(rs.getString("workflow_key"), rs.getString("name"),
+                            rs.getString("description"), rs.getInt("version"), steps));
+                }, tenantId);
+        return result;
     }
 
-    private WorkflowDefinition definition(String key) {
-        return definitions().stream().filter(item -> item.key().equals(key)).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("未知的工作流：" + key));
+    public DefVersionRow latestVersion(String tenantId, String workflowKey) {
+        List<DefVersionRow> rows = jdbcTemplate.query("""
+                        SELECT version, name, description, graph, created_at
+                        FROM workflow_definition_version
+                        WHERE tenant_id = ? AND workflow_key = ?
+                        ORDER BY version DESC LIMIT 1
+                        """,
+                (rs, rowNum) -> new DefVersionRow(rs.getInt("version"), rs.getString("name"),
+                        rs.getString("description"), parseGraph(rs.getString("graph")),
+                        rs.getTimestamp("created_at").toInstant()),
+                tenantId, workflowKey);
+        if (rows.isEmpty()) throw new IllegalArgumentException("未知的工作流：" + workflowKey);
+        return rows.getFirst();
+    }
+
+    @SuppressWarnings("unchecked")
+    private WorkflowGraph parseGraph(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json == null || json.isBlank() ? "{}" : json);
+            List<GraphNodeDef> nodes = new ArrayList<>();
+            node.path("nodes").forEach(n -> nodes.add(new GraphNodeDef(
+                    n.path("key").asText(), n.path("type").asText(), n.path("name").asText(),
+                    objectMapper.convertValue(n.path("params"), Map.class))));
+            List<GraphEdgeDef> edges = new ArrayList<>();
+            node.path("edges").forEach(e -> edges.add(new GraphEdgeDef(
+                    e.path("from").asText(), e.path("to").asText())));
+            return new WorkflowGraph(nodes, edges);
+        } catch (Exception exception) {
+            return new WorkflowGraph(List.of(), List.of());
+        }
+    }
+
+    public DefinitionVersionView latestVersionView(String tenantId, String workflowKey) {
+        DefVersionRow row = latestVersion(tenantId, workflowKey);
+        return new DefinitionVersionView(row.version(), row.name(), row.description(), row.graph(), row.createdAt());
+    }
+
+    public DefinitionVersionView saveVersion(String tenantId, String userId, String workflowKey,
+                                             SaveVersionRequest request) {
+        WorkflowGraph graph = request.graph();
+        validateGraph(graph);
+        int nextVersion;
+        String lastName;
+        String lastDescription;
+        try {
+            DefVersionRow latest = latestVersion(tenantId, workflowKey);
+            nextVersion = latest.version() + 1;
+            lastName = latest.name();
+            lastDescription = latest.description();
+        } catch (IllegalArgumentException exception) {
+            nextVersion = 1;
+            lastName = workflowKey;
+            lastDescription = "";
+        }
+        String name = request.name() == null || request.name().isBlank() ? lastName : request.name().trim();
+        String description = request.description() == null ? lastDescription : request.description().trim();
+        jdbcTemplate.update("""
+                        INSERT INTO workflow_definition_version (tenant_id, workflow_key, version, name, description, graph, created_by)
+                        VALUES (?, ?, ?, ?, ?, ?::jsonb, ?)
+                        """,
+                tenantId, workflowKey, nextVersion, name, description, toJson(graph), userId);
+        return new DefinitionVersionView(nextVersion, name, description, graph, Instant.now());
+    }
+
+    private void validateGraph(WorkflowGraph graph) {
+        if (graph == null || graph.nodes() == null || graph.nodes().isEmpty()) {
+            throw new IllegalArgumentException("画布至少需要一个节点");
+        }
+        Set<String> keys = new HashSet<>();
+        for (GraphNodeDef node : graph.nodes()) {
+            if (node.key() == null || node.key().isBlank()) throw new IllegalArgumentException("节点 key 不能为空");
+            if (!keys.add(node.key())) throw new IllegalArgumentException("节点 key 重复：" + node.key());
+            if (!NODE_TYPES.contains(node.type())) throw new IllegalArgumentException("未知节点类型：" + node.type());
+            if (node.name() == null || node.name().isBlank()) throw new IllegalArgumentException("节点名称不能为空");
+        }
+        if (graph.edges() != null) {
+            for (GraphEdgeDef edge : graph.edges()) {
+                if (!keys.contains(edge.from()) || !keys.contains(edge.to())) {
+                    throw new IllegalArgumentException("连线引用了不存在的节点");
+                }
+            }
+        }
+        topologicalOrder(graph); // 有环时抛错
+    }
+
+    private List<GraphNodeDef> topologicalOrder(WorkflowGraph graph) {
+        Map<String, GraphNodeDef> byKey = new LinkedHashMap<>();
+        graph.nodes().forEach(node -> byKey.put(node.key(), node));
+        Map<String, Integer> indegree = new HashMap<>();
+        Map<String, List<String>> outgoing = new HashMap<>();
+        graph.nodes().forEach(node -> indegree.putIfAbsent(node.key(), 0));
+        if (graph.edges() != null) {
+            for (GraphEdgeDef edge : graph.edges()) {
+                outgoing.computeIfAbsent(edge.from(), ignored -> new ArrayList<>()).add(edge.to());
+                indegree.merge(edge.to(), 1, Integer::sum);
+            }
+        }
+        List<GraphNodeDef> order = new ArrayList<>();
+        List<String> ready = graph.nodes().stream()
+                .filter(node -> indegree.get(node.key()) == 0)
+                .map(GraphNodeDef::key).sorted().toList();
+        while (!ready.isEmpty()) {
+            List<String> next = new ArrayList<>();
+            for (String key : ready) {
+                order.add(byKey.get(key));
+                for (String to : outgoing.getOrDefault(key, List.of())) {
+                    if (indegree.merge(to, -1, Integer::sum) == 0) next.add(to);
+                }
+            }
+            ready = next;
+        }
+        if (order.size() != graph.nodes().size()) throw new IllegalArgumentException("画布存在循环依赖");
+        return order;
     }
 
     // ---------------------------------------------------------------- 运行
 
-    public WorkflowRunView start(String tenantId, String userId, String workflowKey, String keyword) {
-        WorkflowDefinition definition = definition(workflowKey);
-        String trimmed = keyword == null ? "" : keyword.trim();
-        if (trimmed.isEmpty()) throw new IllegalArgumentException("请填写商品关键词");
-        if (trimmed.length() > 64) throw new IllegalArgumentException("关键词过长");
+    public WorkflowRunView start(String tenantId, String userId, String workflowKey, StartRequest request) {
+        DefVersionRow definition = latestVersion(tenantId, workflowKey);
+        Map<String, Object> input = new LinkedHashMap<>();
+        if (request != null && request.input() != null) input.putAll(request.input());
+        String keyword = request == null ? "" : (request.keyword() == null ? "" : request.keyword().trim());
+        if (!keyword.isEmpty()) input.put("keyword", keyword);
+        if (input.isEmpty()) throw new IllegalArgumentException("请填写运行输入");
+        if (definition.graph().nodes().isEmpty()) throw new IllegalArgumentException("该工作流没有可执行的节点");
+        topologicalOrder(definition.graph());
 
         String id = UUID.randomUUID().toString();
-        // 引擎执行期会就地更新步骤状态，必须是可变列表
-        List<StepState> steps = new ArrayList<>(definition.steps().stream()
-                .map(step -> new StepState(step.key(), step.name(), "PENDING", "", null, null))
+        List<StepState> steps = new ArrayList<>(definition.graph().nodes().stream()
+                .map(node -> new StepState(node.key(), node.name(), "PENDING", "", "", null, null))
                 .toList());
-        Map<String, Object> input = Map.of("keyword", trimmed);
         jdbcTemplate.update("""
                         INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, definition_version,
                                                   status, current_step, input, steps, artifacts)
                         VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?::jsonb, ?::jsonb, '[]'::jsonb)
                         """,
-                id, tenantId, userId, definition.key(), definition.version(),
-                definition.steps().getFirst().key(),
+                id, tenantId, userId, workflowKey, definition.version(),
+                definition.graph().nodes().getFirst().key(),
                 toJson(input), toJson(steps));
-        executor.submit(() -> execute(new RunContext(id, tenantId, userId, definition, trimmed, steps)));
+        RunContext context = new RunContext(id, tenantId, userId, workflowKey, definition.version(),
+                definition.name(), definition.description(), definition.graph(), input, steps, new ArrayList<>());
+        executor.submit(() -> execute(context));
         return view(id, tenantId, userId);
-    }
-
-    private record RunContext(String id, String tenantId, String userId, WorkflowDefinition definition,
-                              String keyword, List<StepState> steps) {
     }
 
     private void execute(RunContext context) {
         try {
-            StepState search = step(context, "search_image", "RUNNING");
-            persistSteps(context, search);
-            String imageUrl = searchProductImage(context.tenantId(), context.userId(), context.keyword());
-            search = finish(search, "SUCCEEDED", "已获取商品参考图");
-            persistSteps(context, search);
-
-            StepState understand = step(context, "understand_product", "RUNNING");
-            persistSteps(context, understand);
-            String analysis = imageAnalysisService.analyze(context.tenantId(), imageUrl,
-                    "这是什么商品？给出商品名称、品类、三个核心卖点、适合海报的配色建议（十六进制色值）。").summary();
-            String productProfile = analysis == null || analysis.isBlank()
-                    ? "商品：" + context.keyword() + "（图片理解服务不可用，按关键词直接生成）"
-                    : analysis;
-            understand = finish(understand, analysis == null || analysis.isBlank() ? "SKIPPED" : "SUCCEEDED",
-                    analysis == null || analysis.isBlank() ? "图片理解不可用，已降级" : "商品画像已生成");
-            persistSteps(context, understand);
-
-            StepState copy = step(context, "compose_copy", "RUNNING");
-            persistSteps(context, copy);
-            PosterComposer.PosterCopy posterCopy = composeCopy(context.userId(), context.keyword(), productProfile);
-            copy = finish(copy, "SUCCEEDED", "文案与配色已生成");
-            persistSteps(context, copy);
-
-            StepState render = step(context, "render_poster", "RUNNING");
-            persistSteps(context, render);
-            byte[] productImage = downloadImage(imageUrl);
-            byte[] poster = PosterComposer.compose(productImage, posterCopy);
-            Artifact artifact = storeArtifact(context, poster);
-            render = finish(render, "SUCCEEDED", "海报已生成");
-            persistSteps(context, render);
-
-            finishRun(context.id(), "SUCCEEDED", List.of(artifact), null);
+            Map<String, String> outputs = new LinkedHashMap<>();
+            for (GraphNodeDef node : topologicalOrder(context.graph())) {
+                StepState running = new StepState(node.key(), node.name(), "RUNNING", "", "", Instant.now(), null);
+                updateStep(context, running);
+                try {
+                    Map<String, Object> params = resolveParams(node.params(), context.input(), outputs);
+                    NodeResult result = executeNode(context, node.type(), params);
+                    outputs.put(node.key(), result.output());
+                    updateStep(context, new StepState(node.key(), node.name(), "SUCCEEDED",
+                            result.message() == null ? "" : result.message(),
+                            truncate(result.output(), MAX_OUTPUT_CHARS), running.startedAt(), Instant.now()));
+                } catch (Exception exception) {
+                    log.warn("工作流节点失败：runId={} node={}", context.id(), node.key(), exception);
+                    updateStep(context, new StepState(node.key(), node.name(), "FAILED",
+                            truncate(exception.getMessage(), 300), "", running.startedAt(), Instant.now()));
+                    throw exception;
+                }
+            }
+            finishRun(context.id(), "SUCCEEDED", context.artifacts(), null);
         } catch (Exception exception) {
             log.warn("工作流运行失败：runId={}", context.id(), exception);
-            markRemainingFailed(context);
-            persistSteps(context);
-            finishRun(context.id(), "FAILED", List.of(), truncate(exception.getMessage(), 400));
+            markPendingSkipped(context);
+            finishRun(context.id(), "FAILED", context.artifacts(), truncate(exception.getMessage(), 400));
         }
     }
 
-    // ---------------------------------------------------------------- 步骤实现
+    private NodeResult executeNode(RunContext context, String type, Map<String, Object> params) throws Exception {
+        return switch (type) {
+            case "search_image" -> searchProductImage(context.tenantId(), text(params.get("keyword")));
+            case "image_understand" -> understandImage(context.tenantId(), text(params.get("image")),
+                    text(params.get("question")));
+            case "llm_text" -> {
+                var selection = modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT);
+                ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
+                String answer = client.prompt().user(text(params.get("prompt"))).call().content();
+                yield new NodeResult(answer == null ? "" : answer, "文本已生成");
+            }
+            case "web_search" -> webSearch(text(params.get("query")));
+            case "poster_render" -> renderPoster(context, text(params.get("image")), text(params.get("copy")));
+            default -> throw new IllegalArgumentException("未知节点类型：" + type);
+        };
+    }
 
-    private String searchProductImage(String tenantId, String userId, String keyword) throws Exception {
+    private NodeResult searchProductImage(String tenantId, String keyword) throws Exception {
+        if (keyword == null || keyword.isBlank()) throw new IllegalArgumentException("搜索关键词为空");
         String mcpFailure = "MCP 搜索不可用";
         try (McpTools tools = mcpServerConfigurationService.toolsFor(tenantId)) {
             if (tools.callbacks().length > 0) {
@@ -214,9 +378,10 @@ public class WorkflowService {
                         .findFirst().orElse(null);
                 if (callback != null) {
                     String raw = callback.call(objectMapper.writeValueAsString(Map.of("query", keyword)));
-                    List<String> urls = extractUrls(raw);
-                    for (String candidate : urls) {
-                        if (isProbableImage(candidate)) return candidate;
+                    for (String candidate : extractUrls(raw)) {
+                        if (isProbableImage(candidate)) {
+                            return new NodeResult(candidate, "MCP 搜索已获取商品图");
+                        }
                     }
                     mcpFailure = "MCP 搜索无可用结果（如未配置搜索服务密钥）";
                 }
@@ -225,29 +390,123 @@ public class WorkflowService {
         // 回退：Wikimedia Commons 开放检索（无需密钥，内容以英文为主，中文关键词先译英）
         List<String> commons = searchCommons(keyword);
         if (commons.isEmpty()) {
-            String english = translateKeyword(userId, keyword);
+            String english = translateKeyword(keyword);
             if (!english.isEmpty()) commons = searchCommons(english);
         }
         for (String candidate : commons) {
-            if (isProbableImage(candidate)) return candidate;
+            if (isProbableImage(candidate)) return new NodeResult(candidate, "Commons 检索已获取商品图");
         }
         throw new IllegalStateException("图片搜索没有返回结果（" + mcpFailure + "，Commons 无结果），请更换关键词重试");
     }
 
-    private String translateKeyword(String userId, String keyword) {
-        try {
-            var selection = modelCatalogService.resolve(userId, ModelCatalogService.PURPOSE_CHAT);
-            ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
-            String answer = client.prompt()
-                    .user("把商品关键词翻译成英文，只输出英文词组本身，不要解释：" + keyword)
-                    .call().content();
-            String text = answer == null ? "" : answer.trim().replaceAll("[^A-Za-z ]", "").trim();
-            log.info("关键词翻译：{} -> {}", keyword, text);
-            return text.length() > 64 ? text.substring(0, 64) : text;
-        } catch (Exception exception) {
-            log.info("关键词翻译不可用：{}", exception.getMessage());
-            return "";
+    private NodeResult understandImage(String tenantId, String imageUrl, String question) {
+        String analysis = imageAnalysisService.analyze(tenantId, imageUrl, question).summary();
+        if (analysis == null || analysis.isBlank()) {
+            return new NodeResult("商品画像不可用，请基于关键词直接生成。", "图片理解不可用，已降级");
         }
+        return new NodeResult(analysis, "商品画像已生成");
+    }
+
+    private NodeResult webSearch(String query) throws Exception {
+        if (query == null || query.isBlank()) throw new IllegalArgumentException("搜索关键词为空");
+        WebSearchTool tool = new WebSearchTool(searchProvider, searchApiKey);
+        String result = tool.searchWeb(query);
+        if (result == null || result.isBlank()) throw new IllegalStateException("联网搜索没有返回结果");
+        return new NodeResult(result, "联网搜索完成");
+    }
+
+    private NodeResult renderPoster(RunContext context, String imageUrl, String copyJson) throws Exception {
+        if (imageUrl == null || imageUrl.isBlank()) throw new IllegalArgumentException("海报缺少商品图输入");
+        JsonNode node = parseLooseJson(copyJson);
+        PosterComposer.PosterCopy copy = new PosterComposer.PosterCopy(
+                textOrDefault(node.path("title").asText(), "精选好物"),
+                textOrDefault(node.path("subtitle").asText(), "用心选品 · 品质之选"),
+                listOfText(node.path("points"), List.of("品质保障", "匠心工艺", "即刻拥有")),
+                textOrDefault(node.path("palette").path("bgFrom").asText(), "#EAF1FF"),
+                textOrDefault(node.path("palette").path("bgTo").asText(), "#D6E6FF"),
+                textOrDefault(node.path("palette").path("accent").asText(), "#2E6BE6"),
+                textOrDefault(node.path("palette").path("text").asText(), "#16224A"));
+        byte[] productImage = downloadImage(imageUrl);
+        byte[] poster = PosterComposer.compose(productImage, copy);
+        Artifact artifact = storeArtifact(context, poster);
+        return new NodeResult(artifact.objectKey(), "海报已生成");
+    }
+
+    // ---------------------------------------------------------------- 参数引用与工具
+
+    /** 替换 params 中的 "{{input.字段}}" 与 "{{节点key.output}}" 引用；整体引用还原原值，嵌套结构递归处理。 */
+    private Map<String, Object> resolveParams(Map<String, Object> params, Map<String, Object> input,
+                                              Map<String, String> outputs) {
+        Map<String, Object> resolved = new LinkedHashMap<>();
+        if (params == null) return resolved;
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            resolved.put(entry.getKey(), resolveValue(entry.getValue(), input, outputs));
+        }
+        return resolved;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object resolveValue(Object value, Map<String, Object> input, Map<String, String> outputs) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                result.put(String.valueOf(entry.getKey()), resolveValue(entry.getValue(), input, outputs));
+            }
+            return result;
+        }
+        if (!(value instanceof String text)) return value;
+        Matcher matcher = REF_PATTERN.matcher(text);
+        if (matcher.matches()) {
+            return lookupRef(matcher.group(1), input, outputs);
+        }
+        return matcher.replaceAll(match -> String.valueOf(lookupRef(match.group(1), input, outputs)));
+    }
+
+    private String lookupRef(String ref, Map<String, Object> input, Map<String, String> outputs) {
+        if (ref.startsWith("input.")) {
+            Object value = input.get(ref.substring("input.".length()));
+            return value == null ? "" : String.valueOf(value);
+        }
+        int dot = ref.lastIndexOf('.');
+        if (dot > 0 && ref.substring(dot + 1).equals("output")) {
+            return outputs.getOrDefault(ref.substring(0, dot), "");
+        }
+        return "";
+    }
+
+    private List<String> extractUrls(String raw) {
+        List<String> urls = new ArrayList<>();
+        if (raw == null || raw.isBlank()) return urls;
+        String text = raw;
+        try {
+            JsonNode payload = objectMapper.readTree(raw);
+            for (int depth = 0; depth < 5; depth++) {
+                if (payload.isObject() && payload.has("text") && payload.get("text").isTextual()) {
+                    payload = objectMapper.readTree(payload.get("text").asText());
+                    continue;
+                }
+                if (payload.isTextual()) {
+                    payload = objectMapper.readTree(payload.asText());
+                    continue;
+                }
+                break;
+            }
+            text = payload.toString();
+        } catch (Exception ignored) {
+            text = raw;
+        }
+        for (String token : text.split("[\\s,\\[\\]\"]+")) {
+            if (token.startsWith("http://") || token.startsWith("https://")) urls.add(token);
+        }
+        return urls;
+    }
+
+    private boolean isProbableImage(String url) {
+        String path = url;
+        int queryIndex = url.indexOf('?');
+        if (queryIndex >= 0) path = url.substring(0, queryIndex);
+        String lower = path.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp");
     }
 
     /** Wikimedia Commons 开放图片检索：无密钥依赖，作为 MCP 搜索的回退来源。 */
@@ -278,80 +537,36 @@ public class WorkflowService {
         }
     }
 
-    private List<String> extractUrls(String raw) {
-        List<String> urls = new ArrayList<>();
-        if (raw == null || raw.isBlank()) return urls;
-        String text = raw;
+    private String translateKeyword(String keyword) {
         try {
-            JsonNode node = objectMapper.readTree(raw);
-            JsonNode payload = node;
-            for (int depth = 0; depth < 5; depth++) {
-                if (payload.isObject() && payload.has("text") && payload.get("text").isTextual()) {
-                    payload = objectMapper.readTree(payload.get("text").asText());
-                    continue;
-                }
-                if (payload.isTextual()) {
-                    payload = objectMapper.readTree(payload.asText());
-                    continue;
-                }
-                break;
-            }
-            text = payload.toString();
-        } catch (Exception ignored) {
-            text = raw;
+            var selection = modelCatalogService.resolve("", ModelCatalogService.PURPOSE_CHAT);
+            ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
+            String answer = client.prompt()
+                    .user("把商品关键词翻译成英文，只输出英文词组本身，不要解释：" + keyword)
+                    .call().content();
+            String text = answer == null ? "" : answer.trim().replaceAll("[^A-Za-z ]", "").trim();
+            log.info("关键词翻译：{} -> {}", keyword, text);
+            return text.length() > 64 ? text.substring(0, 64) : text;
+        } catch (Exception exception) {
+            log.info("关键词翻译不可用：{}", exception.getMessage());
+            return "";
         }
-        for (String token : text.split("[\\s,\\[\\]\"]+")) {
-            if (token.startsWith("http://") || token.startsWith("https://")) urls.add(token);
-        }
-        return urls;
     }
 
-    private boolean isProbableImage(String url) {
-        String path = url;
-        int queryIndex = url.indexOf('?');
-        if (queryIndex >= 0) path = url.substring(0, queryIndex);
-        String lower = path.toLowerCase();
-        return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp");
-    }
-
-    private PosterComposer.PosterCopy composeCopy(String userId, String keyword, String productProfile) {
-        var selection = modelCatalogService.resolve(userId, ModelCatalogService.PURPOSE_CHAT);
-        ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
-        String prompt = """
-                你是海报文案策划。根据商品信息生成一张宣传海报的文案，只输出 JSON，不要解释：
-                {"title":"主标题(不超过12字)","subtitle":"副标题(不超过20字)","points":["卖点1","卖点2","卖点3"],
-                 "palette":{"bgFrom":"#十六进制","bgTo":"#十六进制","accent":"#十六进制","text":"#十六进制"}}
-                商品关键词：%s
-                商品信息：%s
-                """.formatted(keyword, productProfile);
-        String answer = client.prompt().user(prompt).call().content();
-        JsonNode node = parseLooseJson(answer);
-        JsonNode palette = node.path("palette");
-        return new PosterComposer.PosterCopy(
-                textOrDefault(node.path("title").asText(""), keyword),
-                textOrDefault(node.path("subtitle").asText(""), "用心选品 · 品质之选"),
-                listOfText(node.path("points"), List.of("品质保障", "匠心工艺", "即刻拥有")),
-                textOrDefault(palette.path("bgFrom").asText(""), "#EAF1FF"),
-                textOrDefault(palette.path("bgTo").asText(""), "#D6E6FF"),
-                textOrDefault(palette.path("accent").asText(""), "#2E6BE6"),
-                textOrDefault(palette.path("text").asText(""), "#16224A"));
-    }
-
-    /** 检索来源为外部公开媒体 CDN：这类主机的直连解析在本机代理/VPN 环境常为保留段 IP，按可信来源放行 */
-    private static final java.util.Set<String> TRUSTED_IMAGE_HOSTS =
-            java.util.Set.of("wikimedia.org", "wikipedia.org", "pexels.com", "pixabay.com", "openverse.org");
+    /** 检索来源为外部公开媒体 CDN：本机代理/VPN 环境常解析为保留段 IP，按可信来源放行 */
+    private static final Set<String> TRUSTED_IMAGE_HOSTS =
+            Set.of("wikimedia.org", "wikipedia.org", "pexels.com", "pixabay.com", "openverse.org");
 
     private byte[] downloadImage(String url) throws Exception {
         URI target = URI.create(url);
-        String host = target.getHost() == null ? "" : target.getHost().toLowerCase(java.util.Locale.ROOT);
+        String host = target.getHost() == null ? "" : target.getHost().toLowerCase(Locale.ROOT);
         boolean trusted = "https".equalsIgnoreCase(target.getScheme())
                 && TRUSTED_IMAGE_HOSTS.stream().anyMatch(known -> host.equals(known) || host.endsWith("." + known));
         if (!trusted) {
             urlAccessPolicy.validateHttpUrl(url); // 非可信来源维持公网 SSRF 校验
         }
-        String validated = url;
-        HttpResponse<byte[]> response = httpClient.send(HttpRequest.newBuilder(URI.create(validated))
-                        .timeout(Duration.ofSeconds(20))
+        HttpResponse<byte[]> response = httpClient.send(HttpRequest.newBuilder(target)
+                        .timeout(Duration.ofSeconds(30))
                         .header("User-Agent", "Aster-Workflow/0.1")
                         .GET().build(),
                 HttpResponse.BodyHandlers.ofByteArray());
@@ -372,7 +587,11 @@ public class WorkflowService {
         metadata.setContentLength((long) poster.length);
         metadata.setContentType("image/png");
         ossClientProvider.getClient().putObject(ossBucket, objectKey, new ByteArrayInputStream(poster), metadata);
-        return new Artifact("poster", "海报.png", objectKey);
+        Artifact artifact = new Artifact("poster", "海报.png", objectKey);
+        context.artifacts().add(artifact);
+        jdbcTemplate.update("UPDATE workflow_run SET artifacts = ?::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                toJson(context.artifacts()), context.id());
+        return artifact;
     }
 
     public String presignArtifact(String tenantId, String userId, String runId, String objectKey) {
@@ -387,38 +606,31 @@ public class WorkflowService {
 
     // ---------------------------------------------------------------- 状态持久化
 
-    private StepState step(RunContext context, String key, String status) {
-        StepState current = context.steps().stream().filter(item -> item.key().equals(key)).findFirst().orElseThrow();
-        return new StepState(current.key(), current.name(), status, current.message(), Instant.now(), null);
-    }
-
-    private StepState finish(StepState state, String status, String message) {
-        return new StepState(state.key(), state.name(), status, message, state.startedAt(), Instant.now());
-    }
-
-    private void persistSteps(RunContext context, StepState... updates) {
+    private void updateStep(RunContext context, StepState state) {
         Map<String, StepState> byKey = new LinkedHashMap<>();
         context.steps().forEach(item -> byKey.put(item.key(), item));
-        for (StepState update : updates) byKey.put(update.key(), update);
+        byKey.put(state.key(), state);
         context.steps().clear();
         context.steps().addAll(byKey.values());
         jdbcTemplate.update("""
                         UPDATE workflow_run
-                        SET steps = ?::jsonb, current_step = COALESCE((
-                            SELECT key FROM jsonb_to_recordset(steps) AS s(key text, status text)
-                            WHERE status = 'RUNNING' LIMIT 1), current_step),
+                        SET steps = ?::jsonb, current_step = CASE WHEN ? = 'RUNNING' THEN ? ELSE current_step END,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                        """, toJson(context.steps()), context.id());
+                        """, toJson(context.steps()), state.status(), state.key(), context.id());
     }
 
-    private void markRemainingFailed(RunContext context) {
+    private void markPendingSkipped(RunContext context) {
         List<StepState> updated = context.steps().stream()
                 .map(item -> "PENDING".equals(item.status()) || "RUNNING".equals(item.status())
-                        ? finish(item, "FAILED", "前序步骤失败") : item)
+                        ? new StepState(item.key(), item.name(), "SKIPPED", "前序步骤失败", item.output(),
+                        item.startedAt(), Instant.now())
+                        : item)
                 .toList();
         context.steps().clear();
         context.steps().addAll(updated);
+        jdbcTemplate.update("UPDATE workflow_run SET steps = ?::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                toJson(context.steps()), context.id());
     }
 
     private void finishRun(String id, String status, List<Artifact> artifacts, String error) {
@@ -469,17 +681,24 @@ public class WorkflowService {
         List<StepState> steps = new ArrayList<>();
         row.steps().forEach(node -> steps.add(new StepState(
                 node.path("key").asText(), node.path("name").asText(), node.path("status").asText(),
-                node.path("message").asText(), instantOrNull(node, "startedAt"), instantOrNull(node, "finishedAt"))));
+                node.path("message").asText(), node.path("output").asText(""),
+                instantOrNull(node, "startedAt"), instantOrNull(node, "finishedAt"))));
         List<ArtifactView> artifacts = new ArrayList<>();
         row.artifacts().forEach(node -> {
             String objectKey = node.path("objectKey").asText();
-            String url = withArtifactUrl && !objectKey.isBlank() ? presignArtifact(row.tenantId(), row.userId(), row.id(), objectKey) : "";
+            String url = withArtifactUrl && !objectKey.isBlank()
+                    ? presignArtifact(row.tenantId(), row.userId(), row.id(), objectKey) : "";
             artifacts.add(new ArtifactView(node.path("type").asText(), node.path("name").asText(), url));
         });
-        Map<String, Object> input = objectMapper.convertValue(row.input(), new com.fasterxml.jackson.core.type.TypeReference<>() {
+        Map<String, Object> input = objectMapper.convertValue(row.input(), new TypeReference<>() {
         });
-        WorkflowDefinition definition = definition(row.workflowKey());
-        return new WorkflowRunView(row.id(), row.workflowKey(), definition.name(), row.definitionVersion(),
+        String name;
+        try {
+            name = latestVersion(row.tenantId(), row.workflowKey()).name();
+        } catch (Exception exception) {
+            name = row.workflowKey();
+        }
+        return new WorkflowRunView(row.id(), row.workflowKey(), name, row.definitionVersion(),
                 row.status(), row.currentStep(), input, steps, artifacts, row.error(),
                 row.createdAt(), row.updatedAt());
     }
@@ -543,6 +762,10 @@ public class WorkflowService {
         } catch (Exception exception) {
             return "[]";
         }
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private static String truncate(String value, int max) {

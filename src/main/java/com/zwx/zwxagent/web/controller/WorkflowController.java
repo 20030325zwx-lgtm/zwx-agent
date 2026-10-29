@@ -26,19 +26,29 @@ public class WorkflowController {
         this.workflowService = workflowService;
     }
 
-    public record StartWorkflowRequest(String keyword) {
-    }
+
 
     @GetMapping
     public Map<String, Object> overview(CurrentActor actor, @RequestParam(defaultValue = "20") int limit) {
-        return Map.of("definitions", workflowService.definitions(), "runs", workflowService.list(
+        return Map.of("definitions", workflowService.definitions(actor.tenantId()), "runs", workflowService.list(
                 actor.tenantId(), actor.userId(), limit));
     }
 
     @PostMapping("/{workflowKey}/runs")
     public WorkflowService.WorkflowRunView start(CurrentActor actor, @PathVariable String workflowKey,
-                                                 @RequestBody StartWorkflowRequest request) {
-        return workflowService.start(actor.tenantId(), actor.userId(), workflowKey, request.keyword());
+                                                 @RequestBody WorkflowService.StartRequest request) {
+        return workflowService.start(actor.tenantId(), actor.userId(), workflowKey, request);
+    }
+
+    @GetMapping("/{workflowKey}/definition")
+    public WorkflowService.DefinitionVersionView definition(CurrentActor actor, @PathVariable String workflowKey) {
+        return workflowService.latestVersionView(actor.tenantId(), workflowKey);
+    }
+
+    @PostMapping("/{workflowKey}/versions")
+    public WorkflowService.DefinitionVersionView saveVersion(CurrentActor actor, @PathVariable String workflowKey,
+                                                             @RequestBody WorkflowService.SaveVersionRequest request) {
+        return workflowService.saveVersion(actor.tenantId(), actor.userId(), workflowKey, request);
     }
 
     @GetMapping("/runs")

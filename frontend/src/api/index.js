@@ -242,6 +242,8 @@ export const listModelCatalog = () => request.get('/settings/catalog').then(resp
 export const listWorkflows = (limit = 20) => request.get('/ai/workflows', { params: { limit } }).then(response => response.data)
 export const startWorkflow = (workflowKey, keyword) => request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/runs`, { keyword }).then(response => response.data)
 export const getWorkflowRun = runId => request.get(`/ai/workflows/runs/${encodeURIComponent(runId)}`).then(response => response.data)
+export const getWorkflowDefinition = workflowKey => request.get(`/ai/workflows/${encodeURIComponent(workflowKey)}/definition`).then(response => response.data)
+export const saveWorkflowVersion = (workflowKey, payload) => request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/versions`, payload).then(response => response.data)
 export const createModelProvider = payload => request.post('/settings/providers', payload).then(response => response.data)
 export const updateModelProvider = (providerId, payload) => request.put(`/settings/providers/${providerId}`, payload).then(response => response.data)
 export const deleteModelProvider = providerId => request.delete(`/settings/providers/${providerId}`).then(response => response.data)

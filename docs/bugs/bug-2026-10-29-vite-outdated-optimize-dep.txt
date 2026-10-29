@@ -1,0 +1,32 @@
+日期：2026-10-29
+主题：Vite 依赖预构建缓存过期，工作流编辑页 504 导致点击无反应
+
+问题现象
+工作台和列表页点击工作流条目没有反应：地址仍停在 /workbench 或 /workflows，
+标签页标题已经变成「工作流编辑 - Aster」。直接访问 /workflows/{key} 则是整页空白。
+浏览器 Network 里 @vue-flow/core、@vue-flow/background、@vue-flow/controls
+三个预构建依赖返回 504 Outdated Optimize Dep。
+
+影响范围
+只影响本机 Vite dev server（http://127.0.0.1:3000）；生产构建与桌面端打包产物不受影响，
+因为 vite build 会重新打包依赖，不经过 dev 的预构建缓存。
+
+原因
+dev server 在安装 @vue-flow/* 之前就启动了，依赖预构建快照（v=9a2f26b3）与当前
+node_modules 不一致；Vite 没有自动重新预构建，导致三个 chunk 持续 504。
+路由懒加载 import() 失败后 vue-router 取消导航：URL 不变、标题已改、无控制台报错，
+表现就像"按钮点不动"。
+
+解决方式
+重启前端服务（launchctl kickstart com.zwx.yu-ai-agent.frontend），让 Vite 重新预构建依赖。
+必要时删除 frontend/node_modules/.vite 再启动。
+
+验证结果
+重启后 @vue-flow_core.js 返回 200；从工作台点击「商品海报生成」进入
+/workflows/product-poster，画布正常渲染（5 个节点、START 与连线），标题与 URL 正确。
+
+后续注意事项
+- 新增或升级前端依赖后，如果页面出现 504 Outdated Optimize Dep，先重启 dev server，
+  不要当成路由或组件 bug 排查。
+- 排查这类"点击无反应"时，先看 Network 里懒加载 chunk 是否 200，再看 vue-router 是否
+  因为 import 失败而取消了导航。

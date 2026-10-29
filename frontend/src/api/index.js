@@ -255,6 +255,14 @@ export const getProjectCodeDiff = (conversationId, runId = null) =>
   request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/code/diff`, {
     params: { runId: runId || undefined }
   }).then(response => response.data)
+export const revertProjectCodeHunk = (conversationId, path, hunkIndex, runId = null) =>
+  request.post(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/code/revert`, { path, hunkIndex }, {
+    params: { runId: runId || undefined }
+  }).then(response => response.data)
+export const deleteProjectCodeFile = (conversationId, path, runId = null) =>
+  request.post(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/code/delete-file`, { path }, {
+    params: { runId: runId || undefined }
+  }).then(response => response.data)
 
 // 工作流试点：定义 + 运行
 export const listWorkflows = (limit = 20) => request.get('/ai/workflows', { params: { limit } }).then(response => response.data)

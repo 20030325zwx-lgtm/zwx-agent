@@ -9,6 +9,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -36,6 +37,12 @@ public class ProjectCodeController {
     }
 
     public record WriteRequest(String content, Long expectedModifiedAt) {
+    }
+
+    public record RevertRequest(String path, Integer hunkIndex) {
+    }
+
+    public record DeleteFileRequest(String path) {
     }
 
     @GetMapping("/tree")
@@ -69,6 +76,25 @@ public class ProjectCodeController {
                                             @RequestParam(required = false) String runId) {
         requireConversation(actor, conversationId);
         return codeService.diff(actor.tenantId(), actor.userId(), conversationId, runId);
+    }
+
+    @PostMapping("/revert")
+    public ProjectCodeService.DiffView revert(CurrentActor actor, @PathVariable String conversationId,
+                                              @RequestParam(required = false) String runId,
+                                              @RequestBody RevertRequest request) {
+        requireConversation(actor, conversationId);
+        int hunkIndex = request.hunkIndex() == null ? -1 : request.hunkIndex();
+        return codeService.revertHunk(actor.tenantId(), actor.userId(), conversationId, runId,
+                request.path(), hunkIndex);
+    }
+
+    @PostMapping("/delete-file")
+    public ProjectCodeService.DiffView deleteFile(CurrentActor actor, @PathVariable String conversationId,
+                                                  @RequestParam(required = false) String runId,
+                                                  @RequestBody DeleteFileRequest request) {
+        requireConversation(actor, conversationId);
+        return codeService.deleteUntrackedFile(actor.tenantId(), actor.userId(), conversationId, runId,
+                request.path());
     }
 
     @ExceptionHandler(ProjectCodeService.ProjectFileConflictException.class)

@@ -24,7 +24,9 @@
 - `GET /tree?path=&runId=`：单层目录列表，目录优先排序；
 - `GET /file?path=&runId=`：UTF-8 文本内容 + 大小 + 修改时间；
 - `PUT /file?path=&runId=`：保存文本，body 为 `{content, expectedModifiedAt}`；
-- `GET /diff?runId=`：改动摘要（状态、增删行数）+ unified diff。
+- `GET /diff?runId=`：改动摘要（状态、增删行数）+ unified diff；
+- `POST /revert`：`{path, hunkIndex}`，撤销某个 hunk（`-1` 为整文件）；只接受当前 diff 中真实存在的 hunk；
+- `POST /delete-file`：删除未跟踪文件（新增文件的「撤销」）。
 
 ## 安全与边界
 
@@ -33,19 +35,22 @@
 - 文件上限 1MB，二进制（NUL 字节）拒绝在线查看；
 - 保存只允许覆盖已存在文件；`expectedModifiedAt` 不匹配返回 **409**，由界面提示刷新；
 - 目录列表跳过 `node_modules`、`target`、`dist`、`release`、`runtime` 等生成/运行时目录；
-- 桌面端仍受本机目录授权清单约束（绑定项目时已授权）。
+- 桌面端仍受本机目录授权清单约束（绑定项目时已授权）；
+- 运行仍在进行（`agent_run.status = RUNNING`）时禁止撤销/删除，避免与智能体并发改写同一 checkout。
 
 ## 界面
 
 - 会话绑定工作区后，顶部出现「代码」入口，打开右侧抽屉（宽度 min(1180px, 96vw)）。
 - 「文件」页：左侧惰性展开的目录树，右侧带行号与语法高亮的只读视图；点「编辑」切换为等宽文本域，保存后立刻刷新改动。
 - 「改动」页：左侧改动文件列表（状态 A/M/D/U、增删行数），右侧逐文件 unified diff，新增/删除行分色。
+- 逐块审阅：每个 hunk 头部提供「撤销此块」，文件头提供「撤销整个文件」；未跟踪文件提供「删除文件」。撤销后自动刷新 diff 与已打开文件。
+- 语义是**事后撤销**：智能体的 patch 先应用，评审时保留即视为接受，撤销只回退不想保留的部分。
 - 高亮使用 `highlight.js` core + 常用语言（Java/JS/TS/XML/JSON/CSS/SQL/Bash/Python/YAML/Markdown），未知类型按纯文本显示。
 - 运行中切换 `runId` 会自动重新加载树与 diff；切换会话时抽屉关闭。
 
 ## 已知限制
 
-- 没有 hunk 级「接受/拒绝」：diff 是只读审阅，修改要么在编辑器里直接改，要么交给智能体重新 patch。
+- 审阅不是「应用前审批」：patch 已经写入 checkout，只能事后逐块撤销；没有暂存待批准的变更队列。
 - 未跟踪文件不显示 diff（只列在改动列表里），因为没有可对比的 base。
 - 没有 LSP、语义索引、终端面板；代码智能仍依赖 ripgrep。
 - worktree 改动合回主分支仍需智能体或人工执行 git 操作，界面不提供一键合并。

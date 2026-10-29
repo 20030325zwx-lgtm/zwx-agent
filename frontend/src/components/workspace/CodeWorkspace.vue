@@ -123,12 +123,34 @@
             </div>
             <div v-else class="diff-scroll">
               <div class="diff-file-head">
-                <strong>{{ activeDiffPath }}</strong>
-                <span>{{ diffFiles.find(file => file.path === activeDiffPath)?.additions }} 行新增 ·
-                  {{ diffFiles.find(file => file.path === activeDiffPath)?.deletions }} 行删除</span>
+                <div class="diff-file-copy">
+                  <strong>{{ activeDiffPath }}</strong>
+                  <span>{{ selectedDiffFile?.additions }} 行新增 · {{ selectedDiffFile?.deletions }} 行删除</span>
+                </div>
+                <span v-if="diffNotice" class="diff-notice">{{ diffNotice }}</span>
+                <div class="diff-actions">
+                  <button v-if="selectedDiffFile?.status === 'untracked'" type="button" class="bar-button danger"
+                    :disabled="revertBusy" @click="deleteUntracked">
+                    <Trash2 :size="13" /> 删除文件
+                  </button>
+                  <button v-else type="button" class="bar-button" :disabled="revertBusy" @click="revertWholeFile">
+                    <Undo2 :size="13" /> 撤销整个文件
+                  </button>
+                </div>
               </div>
-              <pre class="diff-view"><code><span v-for="(line, index) in activeDiffLines" :key="index"
+              <pre v-if="diffHeaderLines.length" class="diff-view diff-header"><code><span v-for="(line, index) in diffHeaderLines" :key="'h' + index"
                 :class="['diff-line', diffLineClass(line)]">{{ line || ' ' }}</span></code></pre>
+              <section v-for="hunk in diffHunks" :key="hunk.index" class="diff-hunk">
+                <header class="hunk-head">
+                  <span class="hunk-title">{{ hunk.header }}</span>
+                  <button type="button" class="hunk-revert" :disabled="revertBusy" @click="revertHunk(hunk.index)">
+                    <Undo2 :size="12" /> 撤销此块
+                  </button>
+                </header>
+                <pre class="diff-view"><code><span v-for="(line, lineIndex) in hunk.lines" :key="lineIndex"
+                  :class="['diff-line', diffLineClass(line)]">{{ line || ' ' }}</span></code></pre>
+              </section>
+              <p v-if="!diffHunks.length" class="diff-empty">该文件没有可逐块审阅的 hunk。</p>
             </div>
           </template>
         </main>
@@ -140,7 +162,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  ChevronRight, Code2, FileCode2, Folder, GitCompare, Loader2, Pencil, RotateCw, Save, X
+  ChevronRight, Code2, FileCode2, Folder, GitCompare, Loader2, Pencil, RotateCw, Save, Trash2, Undo2, X
 } from 'lucide-vue-next'
 import hljs from 'highlight.js/lib/core'
 import java from 'highlight.js/lib/languages/java'
@@ -155,7 +177,8 @@ import python from 'highlight.js/lib/languages/python'
 import yaml from 'highlight.js/lib/languages/yaml'
 import markdown from 'highlight.js/lib/languages/markdown'
 import {
-  getProjectCodeDiff, getProjectCodeFile, getProjectCodeTree, saveProjectCodeFile
+  deleteProjectCodeFile, getProjectCodeDiff, getProjectCodeFile, getProjectCodeTree,
+  revertProjectCodeHunk, saveProjectCodeFile
 } from '../../api'
 
 hljs.registerLanguage('java', java)
@@ -263,11 +286,92 @@ const activeDiffPatch = computed(() => {
   if (!match) return ''
   return `diff --git ${match}`
 })
-const activeDiffLines = computed(() => {
+const parsedDiff = computed(() => {
   const lines = activeDiffPatch.value.split('\n')
-  if (lines.length <= 4000) return lines
-  return [...lines.slice(0, 4000), '…（改动过大，已截断显示）']
+  const firstHunk = lines.findIndex(line => line.startsWith('@@'))
+  if (firstHunk < 0) return { header: lines, hunks: [] }
+  const header = lines.slice(0, firstHunk)
+  const hunks = []
+  let current = null
+  for (let index = firstHunk; index < lines.length; index++) {
+    const line = lines[index]
+    if (line.startsWith('@@')) {
+      current = { header: line, lines: [] }
+      hunks.push(current)
+    } else if (current) {
+      current.lines.push(line)
+    }
+  }
+  return { header, hunks: hunks.map((hunk, index) => ({ ...hunk, index })) }
 })
+const diffHeaderLines = computed(() => parsedDiff.value.header)
+const diffHunks = computed(() => {
+  const hunks = parsedDiff.value.hunks
+  if (!hunks.length) return hunks
+  let remaining = 4000
+  return hunks.map(hunk => {
+    const lines = remaining > 0 ? hunk.lines.slice(0, remaining) : []
+    remaining -= lines.length
+    return { ...hunk, lines }
+  })
+})
+const revertBusy = ref(false)
+const diffNotice = ref('')
+const refreshAfterRevert = async () => {
+  await loadDiff()
+  if (activePath.value && activePath.value === activeDiffPath.value) await openFile(activePath.value)
+}
+const revertHunk = async index => {
+  if (revertBusy.value || !activeDiffPath.value) return
+  if (!window.confirm(`撤销 ${activeDiffPath.value} 的这一块改动？`)) return
+  revertBusy.value = true
+  diffNotice.value = ''
+  try {
+    await revertProjectCodeHunk(props.conversationId, activeDiffPath.value, index, props.runId)
+    diffNotice.value = '已撤销该改动块'
+    await refreshAfterRevert()
+  } catch (error) {
+    diffError.value = error.response?.data?.error || error.message || '撤销失败'
+  } finally {
+    revertBusy.value = false
+  }
+}
+const revertWholeFile = async () => {
+  if (revertBusy.value || !activeDiffPath.value) return
+  if (!window.confirm(`撤销 ${activeDiffPath.value} 的全部改动？`)) return
+  revertBusy.value = true
+  diffNotice.value = ''
+  try {
+    await revertProjectCodeHunk(props.conversationId, activeDiffPath.value, -1, props.runId)
+    diffNotice.value = '已撤销整个文件的改动'
+    await refreshAfterRevert()
+  } catch (error) {
+    diffError.value = error.response?.data?.error || error.message || '撤销失败'
+  } finally {
+    revertBusy.value = false
+  }
+}
+const deleteUntracked = async () => {
+  if (revertBusy.value || !activeDiffPath.value) return
+  if (!window.confirm(`删除未跟踪文件 ${activeDiffPath.value}？此操作不可恢复。`)) return
+  revertBusy.value = true
+  diffNotice.value = ''
+  const deletedPath = activeDiffPath.value
+  try {
+    await deleteProjectCodeFile(props.conversationId, deletedPath, props.runId)
+    diffNotice.value = '已删除未跟踪文件'
+    if (activePath.value === deletedPath) {
+      activePath.value = ''
+      fileContent.value = ''
+      fileMeta.value = null
+    }
+    await loadDiff()
+  } catch (error) {
+    diffError.value = error.response?.data?.error || error.message || '删除失败'
+  } finally {
+    revertBusy.value = false
+  }
+}
 const diffLineClass = line => {
   if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@') || line.startsWith('diff --git') || line.startsWith('index ')) return 'meta'
   if (line.startsWith('+')) return 'add'
@@ -410,6 +514,8 @@ const resetState = () => {
   diffFiles.value = []
   diffPatch.value = ''
   activeDiffPath.value = ''
+  diffNotice.value = ''
+  revertBusy.value = false
   treeError.value = ''
 }
 
@@ -701,15 +807,52 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 .diff-scroll { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: auto; }
 .diff-file-head {
   display: flex;
-  align-items: baseline;
+  min-height: 40px;
+  align-items: center;
   gap: 10px;
-  padding: 8px 14px;
+  padding: 6px 12px 6px 14px;
   border-bottom: 1px solid var(--wb-border);
   background: var(--wb-surface-2);
   color: var(--wb-text);
   font-size: 11.5px;
 }
-.diff-file-head span { color: var(--wb-muted); font-size: 10.5px; }
+.diff-file-copy { display: flex; min-width: 0; align-items: baseline; gap: 9px; }
+.diff-file-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-file-copy span { color: var(--wb-muted); font-size: 10.5px; white-space: nowrap; }
+.diff-notice { margin-left: auto; color: var(--wb-success); font-size: 10.5px; }
+.diff-actions { display: flex; gap: 6px; margin-left: auto; }
+.diff-notice + .diff-actions { margin-left: 0; }
+.bar-button.danger { border-color: color-mix(in srgb, var(--wb-danger) 45%, transparent); color: var(--wb-danger); }
+.bar-button.danger:hover { border-color: var(--wb-danger); background: color-mix(in srgb, var(--wb-danger) 8%, transparent); }
+.diff-header { border-bottom: 1px solid var(--wb-border); padding-bottom: 0; }
+.diff-hunk { border-bottom: 1px solid var(--wb-border); }
+.hunk-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px 4px 14px;
+  background: color-mix(in srgb, var(--wb-brand) 6%, var(--wb-surface-2));
+}
+.hunk-title { overflow: hidden; flex: 1; color: var(--wb-muted); font: 11px/1.5 ui-monospace, "SF Mono", Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.hunk-revert {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  padding: 2px 7px;
+  background: var(--wb-surface);
+  color: var(--wb-text-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.12s ease;
+}
+.diff-hunk:hover .hunk-revert, .hunk-revert:focus-visible { opacity: 1; }
+.hunk-revert:hover { border-color: var(--wb-danger); color: var(--wb-danger); }
+.hunk-revert:disabled { opacity: 0.4; cursor: default; }
+.diff-empty { margin: 16px; color: var(--wb-muted); font-size: 11.5px; }
 .diff-view {
   margin: 0;
   padding: 8px 0 24px;

@@ -26,6 +26,10 @@
           </div>
         </div>
         <div class="header-end">
+          <button v-if="activeConversation?.projectId" class="header-mcp" type="button" title="打开项目代码" @click="codeOpen = true">
+            <Code2 :size="14" />
+            <span>代码</span>
+          </button>
           <button class="header-mcp" type="button" title="MCP 管理" @click="router.push('/mcp-settings')">
             <Plug :size="14" />
             <span>MCP</span>
@@ -113,6 +117,8 @@
       </div>
       <AgentCompanion v-if="!activeRun || inspectorOpen" :state="companionState" :caption="companionCaption" />
     </main>
+    <CodeWorkspace :open="codeOpen" :conversation-id="chatId" :run-id="activeRun?.id || ''"
+      :project-name="activeProjectName" @close="codeOpen = false" />
     <ConfirmDialog
       :open="!!pendingDelete"
       title="删除会话"
@@ -139,7 +145,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import {
-  BookOpen, ClipboardList, Database, Download, Globe2, Menu, PanelLeftClose, PanelLeftOpen,
+  BookOpen, ClipboardList, Code2, Database, Download, Globe2, Menu, PanelLeftClose, PanelLeftOpen,
   PanelRightOpen, PauseCircle, Plug, RotateCw, Workflow
 } from 'lucide-vue-next'
 import AgentCompanion from '../components/AgentCompanion.vue'
@@ -147,6 +153,7 @@ import AsterAvatar from '../components/AsterAvatar.vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import CodeWorkspace from '../components/workspace/CodeWorkspace.vue'
 import RunInspector from '../components/workspace/RunInspector.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
 import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, listManusConversations, listManusRuns, listManusWebSources, listModelCatalog, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
@@ -217,6 +224,7 @@ const connectionStatus = ref('disconnected')
 const historyLoading = ref(false)
 const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
+const codeOpen = ref(false)
 const SIDEBAR_KEY = 'aster.super.sidebar.collapsed'
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_KEY) === 'true')
 watch(sidebarCollapsed, value => {
@@ -267,6 +275,7 @@ const activeWorkspaceName = computed(() => {
   const project = projects.value.find(item => item.id === activeConversation.value?.projectId)
   return project?.name || '未绑定工作区'
 })
+const activeProjectName = computed(() => activeWorkspaceName.value === '未绑定工作区' ? '' : activeWorkspaceName.value)
 
 const clearCompanionIdle = () => {
   if (companionIdleTimer) { clearTimeout(companionIdleTimer); companionIdleTimer = null }
@@ -568,7 +577,10 @@ const scheduleRunPolling = () => {
   }
 }
 watch(() => `${activeRun.value?.id || ''}|${activeRun.value?.status || ''}`, scheduleRunPolling)
-watch(chatId, syncChatModel)
+watch(chatId, () => {
+  syncChatModel()
+  codeOpen.value = false
+})
 
 const createConversation = async () => {
   if (connectionStatus.value === 'connecting') return

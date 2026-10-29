@@ -38,6 +38,13 @@ public class RunWorkspaceService {
         return Optional.of(create(project.get(), runId));
     }
 
+    /** 只读取已存在的 run checkout，不创建；用于代码面板查看本次运行的改动。 */
+    public Optional<RunWorkspaceContext> find(String tenantId, String userId, String conversationId, String runId) {
+        if (runId == null || runId.isBlank()) return Optional.empty();
+        return projectWorkspaceService.resolveForConversation(tenantId, userId, conversationId)
+                .flatMap(project -> readExisting(runId, project));
+    }
+
     public void finish(String runId, String status) {
         if (runId == null || runId.isBlank()) return;
         String normalized = switch (status == null ? "FAILED" : status) {

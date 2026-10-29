@@ -99,3 +99,12 @@
 - 重新打包并覆盖安装 `/Applications/Aster.app`（DMG 13:45，337MB，旧包已按 clean:release 清理）。
 - 实机验证：无需登录落在 `/super-agent`，输入框同时出现「编辑」和「Qwen Plus」两个胶囊；后端对非法 `modelRowId` 返回 400，合法 id 正常起流。
 - 桌面模型目录补充 `qwen-max`，与网页端一致。
+
+## 追加功能（同日）：项目代码工作区
+
+- 新增 `ProjectCodeService` + `ProjectCodeController`：`/ai/manus/conversations/{id}/code/{tree,file,diff}`，支持读目录、读文件、保存（`expectedModifiedAt` 冲突返回 409）、查看 diff。
+- 目标目录：有 run checkout 时用该 checkout（Git 项目为 worktree，能看智能体本次改动），否则用绑定项目根目录。
+- 新增 `CodeWorkspace.vue` 右侧抽屉：惰性文件树、highlight.js 高亮、行号、编辑保存、改动列表与逐文件 unified diff；会话绑定工作区后顶部出现「代码」入口。
+- 防护：ProjectPathGuard、敏感文件拦截、1MB/二进制限制、生成目录跳过、只允许覆盖已有文件。
+- 验证：网页端绑定仓库后实测树/查看/编辑保存/diff；保存后文件内容与 diff 均更新；并发写返回 409；测试项目、会话与临时文件已清理。
+- 详见 `docs/design/2026-10-28-project-code-workspace.md`。

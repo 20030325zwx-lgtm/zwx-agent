@@ -238,6 +238,24 @@ export const testModelSettings = (key, scope = 'USER') => request.post(`/setting
 
 // 模型供应商目录（Provider/Model/Binding），见 docs/design/2026-10-28-desktop-phase-a-runtime-model-contract.md
 export const listModelCatalog = () => request.get('/settings/catalog').then(response => response.data)
+// 会话级代码工作区：文件树 / 文件内容 / 保存 / 改动 diff
+export const getProjectCodeTree = (conversationId, path = '', runId = null) =>
+  request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/code/tree`, {
+    params: { path: path || undefined, runId: runId || undefined }
+  }).then(response => response.data)
+export const getProjectCodeFile = (conversationId, path, runId = null) =>
+  request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/code/file`, {
+    params: { path, runId: runId || undefined }
+  }).then(response => response.data)
+export const saveProjectCodeFile = (conversationId, path, content, expectedModifiedAt = null, runId = null) =>
+  request.put(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/code/file`, { content, expectedModifiedAt }, {
+    params: { path, runId: runId || undefined }
+  }).then(response => response.data)
+export const getProjectCodeDiff = (conversationId, runId = null) =>
+  request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/code/diff`, {
+    params: { runId: runId || undefined }
+  }).then(response => response.data)
+
 // 工作流试点：定义 + 运行
 export const listWorkflows = (limit = 20) => request.get('/ai/workflows', { params: { limit } }).then(response => response.data)
 export const createWorkflow = payload => request.post('/ai/workflows', payload).then(response => response.data)

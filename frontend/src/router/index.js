@@ -46,7 +46,16 @@ const routes = [
         component: () => import('../views/Workflows.vue'),
         meta: {
           title: '工作流 - Aster',
-          description: '把多步任务固化为可复用、可观测的自动化流程。'
+          description: '已制定的工作流列表：新建或编辑工作流。'
+        }
+      },
+      {
+        path: 'workflows/:workflowKey',
+        name: 'WorkflowEditor',
+        component: () => import('../views/WorkflowEditor.vue'),
+        meta: {
+          title: '工作流编辑 - Aster',
+          description: '节点画布：自定义节点与连线，保存新版本后按图执行。'
         }
       },
       {

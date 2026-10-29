@@ -61,7 +61,11 @@ public class WorkflowService {
                                      List<StepDef> steps) {
     }
 
-    public record GraphNodeDef(String key, String type, String name, Map<String, Object> params) {
+    public record GraphNodeDef(String key, String type, String name, Map<String, Object> params,
+                               Double x, Double y) {
+        public GraphNodeDef(String key, String type, String name, Map<String, Object> params) {
+            this(key, type, name, params, null, null);
+        }
     }
 
     public record GraphEdgeDef(String from, String to) {
@@ -200,7 +204,9 @@ public class WorkflowService {
             List<GraphNodeDef> nodes = new ArrayList<>();
             node.path("nodes").forEach(n -> nodes.add(new GraphNodeDef(
                     n.path("key").asText(), n.path("type").asText(), n.path("name").asText(),
-                    objectMapper.convertValue(n.path("params"), Map.class))));
+                    objectMapper.convertValue(n.path("params"), Map.class),
+                    n.hasNonNull("x") ? n.path("x").asDouble() : null,
+                    n.hasNonNull("y") ? n.path("y").asDouble() : null)));
             List<GraphEdgeDef> edges = new ArrayList<>();
             node.path("edges").forEach(e -> edges.add(new GraphEdgeDef(
                     e.path("from").asText(), e.path("to").asText())));
@@ -208,6 +214,36 @@ public class WorkflowService {
         } catch (Exception exception) {
             return new WorkflowGraph(List.of(), List.of());
         }
+    }
+
+    public record CreateWorkflowRequest(String key, String name, String description, WorkflowGraph graph) {
+    }
+
+    /** 新建工作流：写入 v1 定义；未提供图时给一个单节点起始模板。 */
+    public DefinitionVersionView createWorkflow(String tenantId, String userId, CreateWorkflowRequest request) {
+        String key = request.key() == null ? "" : request.key().trim().toLowerCase(Locale.ROOT);
+        if (!key.matches("[a-z0-9][a-z0-9-]{1,48}")) {
+            throw new IllegalArgumentException("工作流标识只能使用小写字母、数字与连字符（2-49 位）");
+        }
+        String name = request.name() == null ? "" : request.name().trim();
+        if (name.isEmpty() || name.length() > 64) throw new IllegalArgumentException("请填写工作流名称（不超过 64 字）");
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM workflow_definition_version WHERE tenant_id = ? AND workflow_key = ?",
+                Integer.class, tenantId, key);
+        if (existing != null && existing > 0) throw new IllegalArgumentException("工作流标识已存在：" + key);
+        WorkflowGraph graph = request.graph();
+        if (graph == null || graph.nodes() == null || graph.nodes().isEmpty()) {
+            graph = new WorkflowGraph(List.of(new GraphNodeDef("llm_text_start", "llm_text", "生成内容",
+                    Map.of("prompt", "根据输入生成内容：{{input.keyword}}"))), List.of());
+        }
+        validateGraph(graph);
+        String description = request.description() == null ? "" : request.description().trim();
+        jdbcTemplate.update("""
+                        INSERT INTO workflow_definition_version (tenant_id, workflow_key, version, name, description, graph, created_by)
+                        VALUES (?, ?, 1, ?, ?, ?::jsonb, ?)
+                        """,
+                tenantId, key, name, description, toJson(graph), userId);
+        return new DefinitionVersionView(1, name, description, graph, Instant.now());
     }
 
     public DefinitionVersionView latestVersionView(String tenantId, String workflowKey) {

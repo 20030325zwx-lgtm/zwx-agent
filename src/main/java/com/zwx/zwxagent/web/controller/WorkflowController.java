@@ -40,6 +40,12 @@ public class WorkflowController {
         return workflowService.start(actor.tenantId(), actor.userId(), workflowKey, request);
     }
 
+    @PostMapping
+    public WorkflowService.DefinitionVersionView create(CurrentActor actor,
+                                                        @RequestBody WorkflowService.CreateWorkflowRequest request) {
+        return workflowService.createWorkflow(actor.tenantId(), actor.userId(), request);
+    }
+
     @GetMapping("/{workflowKey}/definition")
     public WorkflowService.DefinitionVersionView definition(CurrentActor actor, @PathVariable String workflowKey) {
         return workflowService.latestVersionView(actor.tenantId(), workflowKey);

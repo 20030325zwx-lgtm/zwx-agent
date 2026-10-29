@@ -1,6 +1,8 @@
 # 设计文档
 
 - [AI 工作台设计归档入口（接手必读）](./2026-10-28-ai-workbench-archive.md)
+- [品牌标记与应用图标](./2026-10-28-brand-mark.md)
+- [对话输入框：权限等级与模型选择](./2026-10-28-composer-permissions-models.md)
 - [阶段 A：桌面运行时验证结论与模型调用契约](./2026-10-28-desktop-phase-a-runtime-model-contract.md)
 - [阶段 C/D/E 交付：模型目录、桌面独立运行与打包](./2026-10-29-desktop-phase-c-d-delivery.md)
 - [工作流垂直试点：原生引擎与商品海报生成](./2026-10-29-workflow-pilot-product-poster.md)

@@ -214,7 +214,8 @@ const capabilityOptions = [
 ]
 const PURPOSES = [
   { key: 'chat', label: '对话模型' },
-  { key: 'vision', label: '视觉模型' }
+  { key: 'vision', label: '视觉模型' },
+  { key: 'image_generation', label: '图片生成' }
 ]
 
 const purposeRows = computed(() => PURPOSES.map(({ key, label }) => ({

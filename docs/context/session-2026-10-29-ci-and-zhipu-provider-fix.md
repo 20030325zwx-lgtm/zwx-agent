@@ -61,6 +61,16 @@
 - 修复：改用 useVueFlow().screenToFlowCoordinate。
 - 验证：屏幕 (420,520) 松手新增节点，节点 rect 正是 (420,520)，开始节点不动。
 
+## 追加：图片生成用途绑定与通义万相模型（同日）
+
+- 模型目录新增 purpose `image_generation`（对话/视觉之外），前端用途绑定多一行「图片生成」。
+- 解析规则：图片生成专用绑定优先（用户 > 系统）；未绑定时回退对话绑定 + 节点 model 参数（旧行为）。
+- 用现有 DashScope Key 实测：wanx2.1-t2i-plus、wanx2.1-t2i-turbo 均能出图。
+- 已在 DashScope 官方供应商下新增两个模型条目，并把「图片生成」绑定到 wanx2.1-t2i-plus。
+- 端到端验证：临时工作流（start → image_generate，节点 model 故意写成无效值）
+  运行成功并产出图片，证明绑定优先生效；临时工作流已删除。
+- 注意：绑定生效后，现有工作流里 image_generate 的 model 参数会被绑定模型覆盖。
+
 ## 遗留事项
 
 - CI 仍未真正覆盖向量库读写链路；要覆盖需添加仓库 secret DASHSCOPE_API_KEY

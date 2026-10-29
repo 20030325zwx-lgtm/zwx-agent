@@ -27,7 +27,8 @@ public class ModelCatalogService {
 
     public static final String PURPOSE_CHAT = "chat";
     public static final String PURPOSE_VISION = "vision";
-    private static final Set<String> PURPOSES = Set.of(PURPOSE_CHAT, PURPOSE_VISION, "embedding");
+    public static final String PURPOSE_IMAGE = "image_generation";
+    private static final Set<String> PURPOSES = Set.of(PURPOSE_CHAT, PURPOSE_VISION, PURPOSE_IMAGE, "embedding");
     private static final Set<String> CAPABILITIES = Set.of("tools", "vision", "embedding");
     private static final long CACHE_TTL_MILLIS = Duration.ofSeconds(30).toMillis();
 
@@ -359,6 +360,18 @@ public class ModelCatalogService {
         String source = provider.ownerId().isEmpty() ? "SYSTEM" : "USER";
         return new ResolvedSelection(new ResolvedModelConfig(PURPOSE_CHAT, provider.protocol(), baseUrl,
                 model.modelId(), decrypt(provider), source), revision());
+    }
+
+    /**
+     * 图片生成用途：只认专用绑定（用户优先、系统其次）。
+     * 未绑定时返回 empty，由调用方回退到对话绑定 + 节点自带模型参数，保持旧行为。
+     */
+    public Optional<ResolvedSelection> resolveImage(String userId) {
+        Optional<ResolvedModelConfig> user = bindingConfig(
+                findBinding(ConfigurationScope.USER, owner(userId), PURPOSE_IMAGE), PURPOSE_IMAGE, "USER");
+        Optional<ResolvedModelConfig> system = user.isPresent() ? Optional.empty()
+                : bindingConfig(findBinding(ConfigurationScope.SYSTEM, "", PURPOSE_IMAGE), PURPOSE_IMAGE, "SYSTEM");
+        return user.or(() -> system).map(config -> new ResolvedSelection(config, revision()));
     }
 
     private ResolvedModelConfig computeResolve(String userId, String purpose) {

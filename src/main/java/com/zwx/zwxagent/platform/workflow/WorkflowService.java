@@ -563,15 +563,19 @@ public class WorkflowService {
     /** 文生图：DashScope 异步任务（创建 → 轮询 → 下载），产物登记为图片。 */
     private NodeResult imageGenerate(RunContext context, String prompt, String size, String model) throws Exception {
         if (prompt == null || prompt.isBlank()) throw new IllegalArgumentException("生图提示词为空");
-        var selection = modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT);
-        var config = selection.config();
+        var imageBinding = modelCatalogService.resolveImage(context.userId());
+        var config = imageBinding.map(ModelCatalogService.ResolvedSelection::config)
+                .orElseGet(() -> modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT).config());
         if (!"dashscope".equalsIgnoreCase(config.provider()) || !config.hasApiKey()) {
             throw new IllegalStateException("图片生成需要 DashScope 供应商（请在模型设置中绑定带 Key 的 DashScope）");
         }
+        // 绑定了「图片生成」用途时以绑定模型为准，否则沿用节点上的 model 参数（旧行为）
+        String effectiveModel = imageBinding.isPresent() && config.modelName() != null && !config.modelName().isBlank()
+                ? config.modelName() : model;
         String baseUrl = config.baseUrl() == null || config.baseUrl().isBlank()
                 ? "https://dashscope.aliyuncs.com" : config.baseUrl().replaceAll("/+$", "");
         String createBody = toJson(Map.of(
-                "model", model,
+                "model", effectiveModel,
                 "input", Map.of("prompt", prompt),
                 "parameters", Map.of("size", size, "n", 1)));
         HttpRequest create = HttpRequest.newBuilder(URI.create(baseUrl + "/api/v1/services/aigc/text2image/image-synthesis"))

@@ -108,3 +108,9 @@
 - 防护：ProjectPathGuard、敏感文件拦截、1MB/二进制限制、生成目录跳过、只允许覆盖已有文件。
 - 验证：网页端绑定仓库后实测树/查看/编辑保存/diff；保存后文件内容与 diff 均更新；并发写返回 409；测试项目、会话与临时文件已清理。
 - 详见 `docs/design/2026-10-28-project-code-workspace.md`。
+
+### 桌面端同步（代码工作区）
+
+- 重新打包并覆盖安装 `/Applications/Aster.app`；`app.asar` 已包含 `CodeWorkspace`。
+- 实机验证：无登录落在 `/workbench`；桌面后端 `code/tree`、`code/diff` 对未绑定会话返回 400「当前会话未绑定工作区」，说明路由已生效。
+- 桌面端需要先通过「添加工作区 → 选择本机目录」授权并绑定项目，代码入口才会出现。

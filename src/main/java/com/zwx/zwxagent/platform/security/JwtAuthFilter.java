@@ -54,7 +54,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 jwtService.parse(header.substring(7))
                         .filter(actor -> sessionUserExists(actor.userId()))
                         .ifPresent(this::install);
-            } else if (!loopbackToken.isBlank() && matches(request)) {
+            }
+            // 桌面端会同时带 Bearer 占位 token（desktop-local）与回环令牌：
+            // JWT 解析失败时仍需按回环身份放行，否则本地模式会误判为未登录。
+            if (SecurityContextHolder.getContext().getAuthentication() == null
+                    && !loopbackToken.isBlank() && matches(request)) {
                 localActor().ifPresent(this::install);
             }
         }

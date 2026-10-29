@@ -1,0 +1,32 @@
+日期：2026-10-28
+主题：桌面本地模式回环令牌被 Bearer 占位值挡住，应用落到登录页
+
+问题现象
+桌面 App 打开后直接停在 /login，所有接口返回 401；后端日志显示服务已就绪，
+本机回环令牌也存在（preload 注入正常）。
+
+影响范围
+所有桌面本地模式用户：无法免登录，等于桌面端不可用。
+
+原因
+前端桌面模式的 getToken() 返回占位值 'desktop-local'，axios 拦截器把它放进
+Authorization: Bearer，同时还会带 X-Aster-Local-Token。
+JwtAuthFilter 里回环分支写成了 else-if：只要请求带 Authorization 就不再检查回环令牌；
+而 'desktop-local' 不是合法 JWT，解析失败后没有任何身份 → 401。
+
+解决方式
+回环令牌分支改为独立的 if：JWT 解析失败且请求来自回环地址、回环令牌匹配时，
+仍然按本机 admin 身份放行；有效 JWT 仍然优先，不改变远程登录语义。
+
+验证结果
+- 临时 desktop profile 后端（真实 PG）：
+  无头 401 / 仅回环 200 / Bearer+回环 200（修复前 401）/ 仅 Bearer 401。
+- 重新打包并在实机用 CDP 检查：落在 /workbench，无登录页；
+  7 个 /api 请求全部 200，失败 0；导航、任务侧栏、品牌标记正常。
+- 新包已覆盖安装到 /Applications/Aster.app。
+
+后续注意事项
+- Authorization 里的 'desktop-local' 是占位值，不是 JWT；后续改鉴权逻辑时
+  不要假设 Authorization 与回环令牌互斥。
+- 早期 verify-desktop-chain.sh 只测了“仅回环令牌”，没有覆盖“两者同时存在”，
+  建议后续把该组合加入脚本。

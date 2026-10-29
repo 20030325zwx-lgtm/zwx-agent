@@ -78,3 +78,10 @@
 - `AiAvatarFallback` 去掉 `🤖` / `❤️` emoji；任务页计划/确认横幅的 `📋` / `⏸` 换成 lucide 图标。
 - `desktop/package.json` 新增 `clean:release`，`dist:mac` 开头先清空 `release/*.dmg|zip|blockmap|yml`；已手动清理历史 `ZWX Agent-*` 包与重复的 `Aster-...-mac 2.zip`（约 1GB）。
 - 重新打包：`desktop/release/Aster-0.1.2-arm64.dmg`（11:47）+ zip；校验 `app.asar` 含 `companion-status`、无 `companion-figure`。
+
+## 追加调整（同日）：桌面回环鉴权修复
+
+- 根因：桌面模式前端同时发送 `Authorization: Bearer desktop-local` 与 `X-Aster-Local-Token`，`JwtAuthFilter` 用 `else if`，JWT 失败后不再尝试回环令牌 → 401 → 落到登录页。
+- 修复：回环分支改为独立 `if`（JWT 失败后仍按回环身份放行），有效 JWT 仍优先。
+- 验证：临时后端四种头部组合 401/200/200/401；重打包后实机 CDP 确认 `/workbench`、7 个 API 全部 200、无登录页；新包已覆盖 `/Applications/Aster.app`。
+- 详见 `docs/bugs/bug-2026-10-28-desktop-loopback-auth-blocked-by-bearer.txt`。

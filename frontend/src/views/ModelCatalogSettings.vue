@@ -66,7 +66,7 @@
                   <span>API Key {{ selected?.hasApiKey ? `（已保存 ${selected.apiKeyHint || ''}）` : '' }}</span>
                   <AInputPassword
                     v-model:value="form.apiKey"
-                    placeholder="留空保持不变"
+                    :placeholder="apiKeyPlaceholder"
                     autocomplete="new-password"
                   />
                   <ACheckbox
@@ -198,6 +198,10 @@ const newModel = reactive({ modelId: '', displayName: '', capabilities: [] })
 
 const selected = computed(() => catalog.providers.find(provider => provider.id === selectedId.value) || null)
 const enabledModels = computed(() => (selected.value?.models || []).filter(model => model.enabled))
+// 输入框保存后会被清空，脱敏 Key 只体现在标签里容易被误读成“没填”，所以占位符也要带上已存状态
+const apiKeyPlaceholder = computed(() => selected.value?.hasApiKey
+  ? `已保存 ${selected.value.apiKeyHint || ''}，留空则保持不变`
+  : '尚未保存 API Key，请在此粘贴')
 
 const protocolOptions = [
   { value: 'openai-compatible', label: 'OpenAI 兼容接口' },
@@ -306,10 +310,12 @@ async function saveProvider() {
       selectProvider(provider.id)
       message.success('供应商已创建')
     } else {
-      await updateModelProvider(selectedId.value, payload)
+      const updated = await updateModelProvider(selectedId.value, payload)
       await refresh()
       selectProvider(selectedId.value)
-      message.success('已保存')
+      message.success(updated.hasApiKey
+        ? `已保存（API Key ${updated.apiKeyHint || ''}）`
+        : '已保存（未设置 API Key）')
     }
   } catch (error) {
     message.error(extractError(error, '保存失败'))

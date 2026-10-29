@@ -21,20 +21,9 @@
         </div>
 
         <div class="canvas-toolbar">
-          <div class="palette">
-            <button
-              v-for="nodeType in nodeTypes"
-              :key="nodeType.type"
-              type="button"
-              class="palette-item"
-              :title="nodeType.hint"
-              @click="addNode(nodeType.type)"
-            >
-              <span class="palette-dot" :style="{ background: nodeType.color }" />
-              {{ nodeType.label }}
-            </button>
-          </div>
+          <div class="canvas-hint">点击节点右侧的 + 新增下游节点 · 拖拽连接桩连线 · 点击节点编辑参数</div>
           <div class="toolbar-right">
+            <button type="button" class="ghost-btn" @click="autoLayout">自动布局</button>
             <button type="button" class="ghost-btn" :disabled="savingVersion" @click="saveVersion()">
               {{ savingVersion ? '保存中…' : '保存新版本' }}
             </button>
@@ -79,9 +68,35 @@
                 </div>
                 <span v-if="nodeProps.data.statusText" class="node-status">{{ nodeProps.data.statusText }}</span>
                 <Handle type="source" :position="Position.Right" class="wf-handle" />
+                <button
+                  type="button"
+                  class="node-add"
+                  title="在此节点后新增节点"
+                  @click.stop="openAddMenu($event, nodeProps.id)"
+                ><Plus :size="13" :stroke-width="2.4" /></button>
               </div>
             </template>
           </VueFlow>
+        </div>
+
+        <div
+          v-if="addMenu.open"
+          class="add-menu"
+          :style="{ left: addMenu.x + 'px', top: addMenu.y + 'px' }"
+          @click.stop
+        >
+          <p class="add-menu-title">新增节点（自动从「{{ addMenuSourceName }}」连线）</p>
+          <button
+            v-for="nodeType in nodeTypes"
+            :key="nodeType.type"
+            type="button"
+            class="add-menu-item"
+            @click="addNode(nodeType.type, addMenu.sourceId)"
+          >
+            <span class="palette-dot" :style="{ background: nodeType.color }" />
+            <span class="add-menu-label">{{ nodeType.label }}</span>
+            <span class="add-menu-hint">{{ nodeType.hint }}</span>
+          </button>
         </div>
 
         <div v-if="selectedNode" class="node-inspector">
@@ -175,12 +190,13 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { Handle, MarkerType, Position, VueFlow } from '@vue-flow/core'
+import { Plus } from 'lucide-vue-next'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import {
@@ -232,6 +248,22 @@ const flowNodes = ref([])
 const flowEdges = ref([])
 const selectedNode = ref(null)
 const expandedOutput = ref('')
+const addMenu = reactive({ open: false, x: 0, y: 0, sourceId: '' })
+const addMenuSourceName = computed(() => {
+  const node = flowNodes.value.find(item => item.id === addMenu.sourceId)
+  return node?.data?.label || ''
+})
+
+function openAddMenu(event, sourceId) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  const menuWidth = 330
+  const x = Math.min(rect.right + 10, window.innerWidth - menuWidth - 16)
+  const y = Math.min(rect.top - 8, window.innerHeight - 420)
+  addMenu.open = !(addMenu.open && addMenu.sourceId === sourceId)
+  addMenu.sourceId = sourceId
+  addMenu.x = Math.max(12, x)
+  addMenu.y = Math.max(12, y)
+}
 let pollTimer = null
 let graphDirty = false
 let nodeCounter = 0
@@ -363,14 +395,25 @@ async function loadDefinition() {
   }
 }
 
-function addNode(type) {
+function addNode(type, sourceId) {
+  const source = flowNodes.value.find(node => node.id === sourceId) || null
+  const baseX = source ? source.position.x + 260 : 120
+  const baseY = source ? source.position.y : 120
+  // 避开已有节点位置
+  let x = baseX
+  let y = baseY
+  let guard = 0
+  while (flowNodes.value.some(node => Math.abs(node.position.x - x) < 40 && Math.abs(node.position.y - y) < 40) && guard < 12) {
+    y += 110
+    guard += 1
+  }
   nodeCounter += 1
   const key = `${type}_${Date.now().toString(36)}${nodeCounter}`
   flowNodes.value = [
     ...flowNodes.value,
     {
       id: key,
-      position: { x: 60 + (flowNodes.value.length % 4) * 240, y: 60 + Math.floor(flowNodes.value.length / 4) * 120 },
+      position: { x, y },
       type: 'default',
       data: {
         label: nodeTypeLabel(type),
@@ -381,21 +424,58 @@ function addNode(type) {
       }
     }
   ]
-  const startNode = flowNodes.value.find(node => node.data.nodeType === 'start')
-  if (startNode) {
+  if (source) {
     flowEdges.value = [
       ...flowEdges.value,
       {
-        id: `e-${startNode.id}-${key}-${Date.now().toString(36)}`,
-        source: startNode.id,
+        id: `e-${source.id}-${key}-${Date.now().toString(36)}`,
+        source: source.id,
         target: key,
         type: 'default',
         animated: false,
         markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
       }
     ]
+  } else {
+    // 无来源时尝试从开始节点连线
+    const startNode = flowNodes.value.find(node => node.data.nodeType === 'start')
+    if (startNode && startNode.id !== key) {
+      flowEdges.value = [
+        ...flowEdges.value,
+        {
+          id: `e-${startNode.id}-${key}-${Date.now().toString(36)}`,
+          source: startNode.id,
+          target: key,
+          type: 'default',
+          animated: false,
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
+        }
+      ]
+    }
   }
+  addMenu.open = false
   graphDirty = true
+}
+
+function autoLayout() {
+  const graph = {
+    nodes: flowNodes.value.map(node => ({ key: node.id })),
+    edges: flowEdges.value.map(edge => ({ from: edge.source, to: edge.target }))
+  }
+  applyLayoutOnly(graph)
+  graphDirty = true
+}
+
+function applyLayoutOnly(graph) {
+  const positioned = layeredPositions({
+    nodes: graph.nodes.map(node => ({ key: node.key })),
+    edges: graph.edges
+  })
+  const positionByKey = new Map(positioned.map(item => [item.node.key, { x: item.x, y: item.y }]))
+  flowNodes.value = flowNodes.value.map(node => ({
+    ...node,
+    position: positionByKey.get(node.id) || node.position
+  }))
 }
 
 function onConnect(connection) {
@@ -569,11 +649,18 @@ async function start() {
   }
 }
 
+function closeAddMenu() { addMenu.open = false }
+
 onMounted(async () => {
+  document.addEventListener('click', closeAddMenu)
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') addMenu.open = false })
   await refresh()
   await loadDefinition()
 })
-onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
+onBeforeUnmount(() => {
+  if (pollTimer) clearTimeout(pollTimer)
+  document.removeEventListener('click', closeAddMenu)
+})
 </script>
 
 <style scoped>
@@ -635,6 +722,15 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
 .output-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
 .ghost-btn.mini { padding: 4px 10px; font-size: 11.5px; }
 .download-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 9px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12.5px; }
+.canvas-hint { color: var(--wb-muted); font-size: 12px; }
+.node-add { position: absolute; right: -12px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--wb-border); border-radius: 50%; background: var(--wb-surface); color: var(--wb-muted); box-shadow: var(--wb-shadow-sm); z-index: 5; transition: all 0.15s; }
+.node-add:hover { color: #fff; background: var(--wb-brand); border-color: var(--wb-brand); }
+.add-menu { position: fixed; z-index: 70; width: 320px; max-height: 420px; overflow-y: auto; padding: 8px; border: 1px solid var(--wb-border); border-radius: 12px; background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); }
+.add-menu-title { padding: 4px 8px 8px; color: var(--wb-muted); font-size: 11.5px; }
+.add-menu-item { display: flex; width: 100%; align-items: center; gap: 9px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--wb-text); font-size: 12.5px; text-align: left; }
+.add-menu-item:hover { background: var(--wb-fill); }
+.add-menu-label { flex: 0 0 auto; }
+.add-menu-hint { flex: 1; min-width: 0; overflow: hidden; color: var(--wb-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .wf-node.is-running { border-color: var(--wb-info); box-shadow: 0 0 0 2px rgba(37, 144, 255, 0.18); }
 .wf-node.is-done { border-color: var(--wb-success); }
 .wf-node.is-failed { border-color: var(--wb-danger); box-shadow: 0 0 0 2px rgba(220, 47, 76, 0.18); }

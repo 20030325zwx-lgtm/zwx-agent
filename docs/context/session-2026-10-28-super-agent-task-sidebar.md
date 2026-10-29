@@ -93,3 +93,9 @@
 - 后端 `/ai/manus/chat` 新增 `modelRowId`，`ModelCatalogService.resolveModelRow` 校验归属与启用状态，闲聊直达与图编排共用；运行通过 `attachToRun` 冻结模型。
 - 验证：浏览器实测权限/模型菜单；切到 Qwen Max 发送任务，`agent_run.model_name=qwen-max`，说明覆盖生效。
 - 桌面目录补充 `qwen-max`，与网页端可选模型对齐。详见 `docs/design/2026-10-28-composer-permissions-models.md`。
+
+### 桌面端同步
+
+- 重新打包并覆盖安装 `/Applications/Aster.app`（DMG 13:45，337MB，旧包已按 clean:release 清理）。
+- 实机验证：无需登录落在 `/super-agent`，输入框同时出现「编辑」和「Qwen Plus」两个胶囊；后端对非法 `modelRowId` 返回 400，合法 id 正常起流。
+- 桌面模型目录补充 `qwen-max`，与网页端一致。

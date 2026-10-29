@@ -27,6 +27,8 @@ import java.util.Optional;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     static final String LOCAL_TOKEN_HEADER = "X-Aster-Local-Token";
+    private static final long SESSION_USER_CACHE_TTL_MILLIS = 60_000;
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> verifiedUsers = new java.util.concurrent.ConcurrentHashMap<>();
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
@@ -49,7 +51,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (SecurityContextHolder.getContext().getAuthentication() == null) {
             String header = request.getHeader("Authorization");
             if (header != null && header.startsWith("Bearer ")) {
-                jwtService.parse(header.substring(7)).ifPresent(this::install);
+                jwtService.parse(header.substring(7))
+                        .filter(actor -> sessionUserExists(actor.userId()))
+                        .ifPresent(this::install);
             } else if (!loopbackToken.isBlank() && matches(request)) {
                 localActor().ifPresent(this::install);
             }
@@ -72,6 +76,21 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         } catch (Exception exception) {
             return false;
         }
+    }
+
+    /**
+     * 历史 JWT 可能指向已删除/重建的用户：这类 token 视为未登录（401），
+     * 避免按不存在的用户 id 查出空数据造成"配置消失"的错觉。命中缓存 60 秒。
+     */
+    private boolean sessionUserExists(String userId) {
+        if (userId == null || userId.isBlank()) return false;
+        Long expiresAt = verifiedUsers.get(userId);
+        long now = System.currentTimeMillis();
+        if (expiresAt != null && expiresAt > now) return true;
+        boolean exists = userRepository.findById(userId).isPresent();
+        if (exists) verifiedUsers.put(userId, now + SESSION_USER_CACHE_TTL_MILLIS);
+        else verifiedUsers.remove(userId);
+        return exists;
     }
 
     private Optional<CurrentActor> localActor() {

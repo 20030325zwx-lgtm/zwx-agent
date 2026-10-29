@@ -26,6 +26,20 @@ public class UserRepository {
         return count == null ? 0 : count;
     }
 
+    public Optional<AppUser> findById(String id) {
+        List<AppUser> users = jdbcTemplate.query("""
+                SELECT id, tenant_id, username, password_hash, role, status
+                FROM app_user WHERE id = ?
+                """, (rs, rowNum) -> new AppUser(
+                rs.getString("id"),
+                rs.getString("tenant_id"),
+                rs.getString("username"),
+                rs.getString("password_hash"),
+                Role.from(rs.getString("role")),
+                rs.getString("status")), id);
+        return users.stream().findFirst();
+    }
+
     public Optional<AppUser> findByUsername(String username) {
         List<AppUser> users = jdbcTemplate.query("""
                 SELECT id, tenant_id, username, password_hash, role, status

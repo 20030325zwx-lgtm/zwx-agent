@@ -13,9 +13,9 @@
       </button>
     </header>
 
-    <button class="new-task-button" type="button" @click="$emit('create')">
-      <SquarePen :size="16" stroke-width="1.9" />
-      <span>新建任务</span>
+    <button class="add-workspace" type="button" @click="openWorkspaceForm">
+      <FolderPlus :size="14" stroke-width="1.9" />
+      <span>添加工作区</span>
     </button>
 
     <div class="search-box" :class="{ active: searchFocused }">
@@ -69,11 +69,6 @@
           <p>描述一个目标，星枢会拆解计划并交付结果。</p>
           <button type="button" class="empty-cta" @click="$emit('create')">新建第一个任务</button>
         </div>
-
-        <button class="add-workspace" type="button" @click="openWorkspaceForm">
-          <FolderPlus :size="14" stroke-width="1.9" />
-          <span>添加工作区</span>
-        </button>
       </template>
     </nav>
   </aside>
@@ -350,34 +345,13 @@ watch(() => props.workspaceCreating, creating => {
 .icon-button:disabled { opacity: 0.35; cursor: default; }
 .close-button { display: none; }
 
-.new-task-button {
-  display: flex;
-  height: 36px;
-  flex: 0 0 36px;
-  align-items: center;
-  gap: 9px;
-  margin: 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--wb-radius-sm);
-  padding: 0 10px;
-  background: var(--wb-brand-soft);
-  color: var(--wb-brand);
-  font-size: 12.5px;
-  font-weight: 650;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.new-task-button:hover { border-color: var(--wb-brand); }
-.new-task-button:active { transform: translateY(0.5px); }
-
 .search-box {
   display: flex;
   height: 32px;
   flex: 0 0 32px;
   align-items: center;
   gap: 7px;
-  margin: 10px 10px 4px;
+  margin: 4px 10px 4px;
   border: 1px solid transparent;
   border-radius: var(--wb-radius-sm);
   padding: 0 8px;
@@ -447,7 +421,7 @@ watch(() => props.workspaceCreating, creating => {
   background: transparent;
   color: var(--wb-muted);
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity 0.12s ease;
 }
 .group-head:hover .group-action, .group-action:focus-visible { opacity: 1; }
@@ -533,7 +507,7 @@ watch(() => props.workspaceCreating, creating => {
   height: 32px;
   align-items: center;
   gap: 7px;
-  margin-top: 6px;
+  margin: 0 10px 2px;
   border: 1px dashed var(--wb-border-strong);
   border-radius: var(--wb-radius-sm);
   padding: 0 10px;

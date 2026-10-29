@@ -1,0 +1,36 @@
+日期：2026-10-29
+主题：后端运行期间替换 jar，工作流导出步骤随机报 java.io.EOFException
+
+问题现象
+「每周调研汇总」工作流执行到最后一个节点「导出简报」失败，运行记录里显示
+java.io.EOFException，前面 5 个节点都成功；重跑一次仍在同一步失败。
+后端日志：
+  java.io.UncheckedIOException: java.io.EOFException
+    at org.springframework.boot.loader.zip.ZipContent.loadZipCentralDirectoryFileHeaderRecord
+    at org.springframework.boot.loader.net.protocol.jar.JarUrlClassLoader.loadClass
+    at WorkflowService.storeArtifact(WorkflowService.java:823)
+
+影响范围
+本机 8123 后端进程。jar 被替换后，任何第一次被加载的类都可能失败，
+不限于工作流导出；错误信息只有 EOFException，很容易被误判成网络或模型调用问题。
+桌面端和生产构建不受影响。
+
+原因
+为打包桌面端执行了 mvn clean package（desktop/scripts/prepare-backend.sh），
+target/aster-agent-0.0.1-SNAPSHOT.jar 在 8123 进程运行期间被整体替换。
+Spring Boot 的可执行 jar 用嵌套类加载器按文件偏移懒加载 class，
+旧进程记录的偏移在新文件里失效，读到文件末尾就抛 EOFException。
+导出步骤是当前进程里第一次加载导出相关类的地方，所以固定在这一步炸。
+
+解决方式
+重启后端，让 JVM 重新打开当前 jar：
+launchctl kickstart -k "gui/$(id -u)/com.zwx.yu-ai-agent.backend"。
+
+验证结果
+重启后重跑同一工作流：6 个节点全部 SUCCEEDED，产物「调研简报.md」正常导出。
+
+后续注意事项
+- 只要对 target 下的 jar 做过 package / clean package（包括打桌面端的
+  prepare:backend），而 8123 后端还在运行，就必须重启后端。
+- 遇到类似 EOFException / ZipException / NoClassDefFoundError 的偶发失败，
+  先确认运行中的进程与磁盘上的 jar 是否一致，再查业务代码。

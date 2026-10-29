@@ -246,6 +246,18 @@ public class WorkflowService {
         return new DefinitionVersionView(1, name, description, graph, Instant.now());
     }
 
+    /** 删除工作流：连带删除其定义版本与全部运行记录（前端需二次确认）。 */
+    public void deleteWorkflow(String tenantId, String workflowKey) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM workflow_definition_version WHERE tenant_id = ? AND workflow_key = ?",
+                Integer.class, tenantId, workflowKey);
+        if (count == null || count == 0) throw new IllegalArgumentException("工作流不存在：" + workflowKey);
+        jdbcTemplate.update("DELETE FROM workflow_run WHERE tenant_id = ? AND workflow_key = ?",
+                tenantId, workflowKey);
+        jdbcTemplate.update("DELETE FROM workflow_definition_version WHERE tenant_id = ? AND workflow_key = ?",
+                tenantId, workflowKey);
+    }
+
     public DefinitionVersionView latestVersionView(String tenantId, String workflowKey) {
         DefVersionRow row = latestVersion(tenantId, workflowKey);
         return new DefinitionVersionView(row.version(), row.name(), row.description(), row.graph(), row.createdAt());

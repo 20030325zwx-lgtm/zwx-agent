@@ -147,6 +147,16 @@ function cycleTheme() {
   letter-spacing: -0.01em;
 }
 
+.wb-nav.collapsed .wb-nav-brand {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.wb-nav.collapsed .wb-nav-wordmark {
+  display: none;
+}
+
 .wb-collapse {
   display: flex;
   align-items: center;

@@ -2,6 +2,7 @@ package com.zwx.zwxagent.web.controller;
 
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import com.zwx.zwxagent.platform.workflow.WorkflowService;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -44,6 +45,12 @@ public class WorkflowController {
     public WorkflowService.DefinitionVersionView create(CurrentActor actor,
                                                         @RequestBody WorkflowService.CreateWorkflowRequest request) {
         return workflowService.createWorkflow(actor.tenantId(), actor.userId(), request);
+    }
+
+    @DeleteMapping("/{workflowKey}")
+    public Map<String, Object> delete(CurrentActor actor, @PathVariable String workflowKey) {
+        workflowService.deleteWorkflow(actor.tenantId(), workflowKey);
+        return Map.of("deleted", true);
     }
 
     @GetMapping("/{workflowKey}/definition")

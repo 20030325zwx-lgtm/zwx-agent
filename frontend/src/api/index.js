@@ -241,6 +241,7 @@ export const listModelCatalog = () => request.get('/settings/catalog').then(resp
 // 工作流试点：定义 + 运行
 export const listWorkflows = (limit = 20) => request.get('/ai/workflows', { params: { limit } }).then(response => response.data)
 export const createWorkflow = payload => request.post('/ai/workflows', payload).then(response => response.data)
+export const deleteWorkflow = workflowKey => request.delete(`/ai/workflows/${encodeURIComponent(workflowKey)}`).then(response => response.data)
 export const startWorkflow = (workflowKey, keyword) => request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/runs`, { keyword }).then(response => response.data)
 export const getWorkflowRun = runId => request.get(`/ai/workflows/runs/${encodeURIComponent(runId)}`).then(response => response.data)
 export const getWorkflowDefinition = workflowKey => request.get(`/ai/workflows/${encodeURIComponent(workflowKey)}/definition`).then(response => response.data)

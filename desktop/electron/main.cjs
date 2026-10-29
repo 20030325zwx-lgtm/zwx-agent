@@ -64,25 +64,38 @@ const contentType = filename => ({
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2'
 }[path.extname(filename)] || 'application/octet-stream')
-const startStaticServer = () => new Promise((resolve, reject) => {
-  staticServer = http.createServer((request, response) => {
-    let requestPath
-    try { requestPath = decodeURIComponent((request.url || '/').split('?')[0]) } catch { requestPath = '/' }
-    const requestedFile = path.resolve(staticRoot, `.${requestPath}`)
-    const inside = requestedFile === staticRoot || requestedFile.startsWith(`${staticRoot}${path.sep}`)
-    const file = inside && fs.existsSync(requestedFile) && fs.statSync(requestedFile).isFile() ? requestedFile : path.join(staticRoot, 'index.html')
-    fs.readFile(file, (error, data) => {
-      if (error) { response.writeHead(500); response.end('Unable to load desktop resources'); return }
-      response.writeHead(200, { 'Content-Type': contentType(file), 'Cache-Control': 'no-store' })
-      response.end(data)
-    })
+const staticHandler = (request, response) => {
+  let requestPath
+  try { requestPath = decodeURIComponent((request.url || '/').split('?')[0]) } catch { requestPath = '/' }
+  const requestedFile = path.resolve(staticRoot, `.${requestPath}`)
+  const inside = requestedFile === staticRoot || requestedFile.startsWith(`${staticRoot}${path.sep}`)
+  const file = inside && fs.existsSync(requestedFile) && fs.statSync(requestedFile).isFile() ? requestedFile : path.join(staticRoot, 'index.html')
+  fs.readFile(file, (error, data) => {
+    if (error) { response.writeHead(500); response.end('Unable to load desktop resources'); return }
+    response.writeHead(200, { 'Content-Type': contentType(file), 'Cache-Control': 'no-store' })
+    response.end(data)
   })
-  staticServer.once('error', reject)
-  staticServer.listen(0, '127.0.0.1', () => resolve(staticServer.address().port))
+}
+// 固定端口让 localStorage（主题、导航/任务栏折叠状态）在多次启动之间保持；
+// 端口被占用时退回随机端口，避免第二个实例启动失败。
+const PREFERRED_STATIC_PORT = 47821
+const listenStatic = port => new Promise((resolve, reject) => {
+  const server = http.createServer(staticHandler)
+  server.once('error', reject)
+  server.listen(port, '127.0.0.1', () => resolve(server))
 })
+const startStaticServer = async () => {
+  try {
+    staticServer = await listenStatic(PREFERRED_STATIC_PORT)
+  } catch (error) {
+    if (error.code !== 'EADDRINUSE') throw error
+    staticServer = await listenStatic(0)
+  }
+  return staticServer.address().port
+}
 
 // 启动失败/服务不可用时展示诊断页：原因 + 日志位置 + 重试
-const errorPageHtml = message => `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body style="font-family:-apple-system,sans-serif;background:#0f111a;color:#e9ebf5;display:grid;place-items:center;height:100vh;margin:0"><div style="max-width:560px;text-align:center"><h1 style="font-size:20px">Aster 本机服务未能就绪</h1><p style="color:#a9aec4;line-height:1.7">${message}</p><p style="color:#71778e;font-size:13px">日志位置：${logDir()}</p><button onclick="location.reload()" style="padding:8px 20px;border-radius:10px;border:0;background:#6c5cf7;color:#fff;font-size:14px;cursor:pointer">重试</button></div></body></html>`
+const errorPageHtml = message => `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body style="font-family:-apple-system,sans-serif;background:#0f111a;color:#e9ebf5;display:grid;place-items:center;height:100vh;margin:0"><div style="max-width:560px;text-align:center"><h1 style="font-size:20px">Aster 本机服务未能就绪</h1><p style="color:#a9aec4;line-height:1.7">${message}</p><p style="color:#71778e;font-size:13px">日志位置：${logDir()}</p><button onclick="location.reload()" style="padding:8px 20px;border-radius:10px;border:0;background:#2E6BE6;color:#fff;font-size:14px;cursor:pointer">重试</button></div></body></html>`
 
 const fetchHealth = port => new Promise(resolve => {
   const request = http.get({ host: '127.0.0.1', port, path: '/api/health', timeout: 2000 }, response => {

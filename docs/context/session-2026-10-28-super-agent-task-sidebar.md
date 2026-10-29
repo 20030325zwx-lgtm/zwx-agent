@@ -57,3 +57,10 @@
 - 补齐 favicon：原 `index.html` 指向不存在的 `favicon.ico`，现改为 `favicon.svg` + `apple-touch-icon.png`，并补 `theme-color`。
 - 桌面 `desktop/assets/icon.svg` 重绘为 1024 墨色圆角方块 + 白星，`generate-icon.sh` 重新生成 `icon.icns`（被 gitignore，打包时再生成）。
 - 验证：构建通过；浅色/深色任务页截图正常；16px favicon 可辨认。临时预览页已删除。
+
+## 追加调整（同日）：桌面端与网页端一致性
+
+- 桌面端静态资源服务改用固定端口 47821（占用时回退随机端口），解决 localStorage 按 origin 隔离导致的主题/侧栏状态每次启动重置；详见 `docs/bugs/bug-2026-10-28-desktop-static-port-localstorage.txt`。
+- 用当前前端重新执行 `build:web` + `prepare:assets`，`desktop/app` 已与网页端同源产物；差异仅 `base: './'`（相对路径），CSS/JS 内容一致。
+- 通过本地静态代理（桌面产物 + /api 转发 8123）在浏览器登录并对比：登录页、任务页、侧栏、图标、浅/深色表现与 3000 一致。
+- 顺带把桌面诊断页按钮的旧紫色换成品牌蓝。

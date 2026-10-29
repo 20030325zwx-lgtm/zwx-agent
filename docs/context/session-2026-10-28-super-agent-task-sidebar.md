@@ -126,3 +126,7 @@
 
 - 重新打包并覆盖安装 `/Applications/Aster.app`；桌面后端 `POST /code/revert` 对未绑定会话返回 400，路由生效。
 - DMG：`desktop/release/Aster-0.1.2-arm64.dmg`（14:09，338MB），旧包已清理。
+
+## 文档收尾
+
+- 根 README 增加「代码工作区」使用说明与安全边界；设计文档的后续项改为「应用前待审批队列」，与当前的事后撤销语义区分。

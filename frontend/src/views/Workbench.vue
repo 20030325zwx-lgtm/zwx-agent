@@ -32,44 +32,91 @@
           <span class="stat-value is-waiting">{{ stats.pending }}</span>
           <span class="stat-label">待处理</span>
         </div>
+        <router-link to="/workflows" class="stat-card">
+          <span class="stat-value">{{ stats.workflows }}</span>
+          <span class="stat-label">工作流</span>
+        </router-link>
+        <router-link to="/knowledge-admin" class="stat-card">
+          <span class="stat-value">{{ stats.documents }}</span>
+          <span class="stat-label">知识文档</span>
+        </router-link>
       </div>
 
       <div class="home-grid">
-        <section class="home-section">
-          <div class="section-head">
-            <h2>任务动态</h2>
-            <router-link to="/super-agent" class="section-more">
-              运行历史 <ChevronRight :size="14" />
-            </router-link>
-          </div>
-
-          <p v-if="loading" class="section-hint">加载中…</p>
-          <p v-else-if="!runs.length" class="section-empty">
-            <Activity :size="18" /> 暂无任务运行，去「任务」页发起第一个任务
-          </p>
-
-          <template v-else>
-            <template v-for="group in runGroups" :key="group.key">
-              <p v-if="group.items.length" class="group-title">
-                <span class="group-dot" :class="group.dotClass" /> {{ group.label }}
-                <span class="group-count">{{ group.items.length }}</span>
-              </p>
-              <router-link
-                v-for="run in group.items"
-                :key="run.id"
-                class="run-card"
-                :to="{ path: '/super-agent', query: { conversationId: run.conversationId, runId: run.id } }"
-              >
-                <span class="run-dot" :class="group.dotClass" />
-                <span class="run-main">
-                  <span class="run-title">{{ runTitle(run) }}</span>
-                  <span class="run-meta">{{ run.conversationTitle || '未命名会话' }} · {{ formatTime(run.updatedAt) }}</span>
-                </span>
-                <span v-if="group.key === 'pending'" class="run-flag">可恢复</span>
+        <div class="home-main">
+          <section class="home-section">
+            <div class="section-head">
+              <h2>任务动态</h2>
+              <router-link to="/super-agent" class="section-more">
+                运行历史 <ChevronRight :size="14" />
               </router-link>
+            </div>
+
+            <p v-if="loading" class="section-hint">加载中…</p>
+            <p v-else-if="!runs.length" class="section-empty">
+              <Activity :size="18" /> 暂无任务运行，去「任务」页发起第一个任务
+            </p>
+
+            <template v-else>
+              <template v-for="group in runGroups" :key="group.key">
+                <p v-if="group.items.length" class="group-title">
+                  <span class="group-dot" :class="group.dotClass" /> {{ group.label }}
+                  <span class="group-count">{{ group.items.length }}</span>
+                </p>
+                <router-link
+                  v-for="run in group.items"
+                  :key="run.id"
+                  class="run-card"
+                  :to="{ path: '/super-agent', query: { conversationId: run.conversationId, runId: run.id } }"
+                >
+                  <span class="run-dot" :class="group.dotClass" />
+                  <span class="run-main">
+                    <span class="run-title">{{ runTitle(run) }}</span>
+                    <span class="run-meta">{{ run.conversationTitle || '未命名会话' }} · {{ formatTime(run.updatedAt) }}</span>
+                  </span>
+                  <span v-if="group.key === 'pending'" class="run-flag">可恢复</span>
+                </router-link>
+              </template>
             </template>
-          </template>
-        </section>
+          </section>
+
+          <section class="home-section">
+            <div class="section-head">
+              <h2>工作流</h2>
+              <router-link to="/workflows" class="section-more">
+                全部工作流 <ChevronRight :size="14" />
+              </router-link>
+            </div>
+
+            <p v-if="loading" class="section-hint">加载中…</p>
+            <p v-else-if="!workflowCards.length" class="section-empty">
+              <Workflow :size="18" /> 还没有工作流<br />
+              <span class="empty-sub">在工作流页新建后即可一键运行</span>
+            </p>
+
+            <div v-else class="wf-list">
+              <router-link
+                v-for="workflow in workflowCards"
+                :key="workflow.key"
+                class="wf-item"
+                :to="`/workflows/${workflow.key}`"
+              >
+                <span class="wf-main">
+                  <span class="wf-name">{{ workflow.name }}</span>
+                  <span class="wf-desc">{{ workflow.description || '暂无描述' }}</span>
+                </span>
+                <span class="wf-meta">
+                  <span>v{{ workflow.version }} · {{ workflow.steps.length }} 节点</span>
+                  <span v-if="latestRunOf(workflow.key)" class="wf-run">
+                    <span class="wf-dot" :class="runDotClass(latestRunOf(workflow.key).status)" />
+                    {{ runStatusLabel(latestRunOf(workflow.key).status) }} · {{ formatTime(latestRunOf(workflow.key).createdAt) }}
+                  </span>
+                  <span v-else class="wf-run is-idle">未运行</span>
+                </span>
+              </router-link>
+            </div>
+          </section>
+        </div>
 
         <div class="home-side">
           <section class="home-section">
@@ -97,6 +144,53 @@
 
           <section class="home-section">
             <div class="section-head">
+              <h2>知识库</h2>
+              <router-link to="/knowledge-admin" class="section-more">
+                管理 <ChevronRight :size="14" />
+              </router-link>
+            </div>
+
+            <p v-if="loading" class="section-hint">加载中…</p>
+            <p v-else-if="!knowledgeStats.total" class="section-empty">
+              <Database :size="18" /> 知识库还没有资料<br />
+              <span class="empty-sub">上传文档并切片后可被检索引用</span>
+            </p>
+
+            <template v-else>
+              <div class="kb-stats">
+                <div class="kb-stat">
+                  <span class="kb-value">{{ knowledgeStats.active }}</span>
+                  <span class="kb-label">已发布</span>
+                </div>
+                <div class="kb-stat">
+                  <span class="kb-value is-waiting">{{ knowledgeStats.pending }}</span>
+                  <span class="kb-label">待审批</span>
+                </div>
+                <div class="kb-stat">
+                  <span class="kb-value is-running">{{ knowledgeStats.processing }}</span>
+                  <span class="kb-label">处理中</span>
+                </div>
+                <div class="kb-stat">
+                  <span class="kb-value is-fail">{{ knowledgeStats.failed }}</span>
+                  <span class="kb-label">失败</span>
+                </div>
+              </div>
+              <div class="kb-list">
+                <router-link
+                  v-for="document in recentDocuments"
+                  :key="document.id"
+                  class="kb-item"
+                  to="/knowledge-admin"
+                >
+                  <span class="kb-name">{{ document.filename }}</span>
+                  <span class="kb-meta">{{ knowledgeStatusLabel(document) }} · {{ formatTime(document.createdAt) }}</span>
+                </router-link>
+              </div>
+            </template>
+          </section>
+
+          <section class="home-section">
+            <div class="section-head">
               <h2>服务状态</h2>
             </div>
             <div class="service-row">
@@ -108,10 +202,6 @@
               <span class="service-label">模型供应商</span>
               <router-link to="/settings/model" class="service-action">管理 →</router-link>
             </div>
-            <div class="service-row">
-              <span class="service-label">知识库</span>
-              <router-link to="/knowledge-admin" class="service-action">管理 →</router-link>
-            </div>
           </section>
         </div>
       </div>
@@ -121,15 +211,29 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Activity, ChevronRight, FolderOpen, Plus } from 'lucide-vue-next'
+import { Activity, ChevronRight, Database, FolderOpen, Plus, Workflow } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
-import { listManusRunOverviews, listManusConversations, listModelSettings, listProjects } from '../api'
+import {
+  listAgentKnowledgeDocuments,
+  listManusRunOverviews,
+  listManusConversations,
+  listModelSettings,
+  listProjects,
+  listWorkflows
+} from '../api'
+import { KNOWLEDGE_AGENTS } from '../config/agents'
 
 const projects = ref([])
 const conversations = ref([])
 const runs = ref([])
+const workflows = ref([])
+const workflowRuns = ref([])
+const knowledgeDocs = ref([])
 const modelLabel = ref('')
 const loading = ref(true)
+
+// 知识库列表含历史版本，概览只统计未归档的文档
+const liveDocuments = computed(() => knowledgeDocs.value.filter(doc => doc.lifecycleStatus !== 'ARCHIVED'))
 
 const stats = computed(() => {
   const count = status => runs.value.filter(run => status.includes(run.status)).length
@@ -138,9 +242,28 @@ const stats = computed(() => {
     conversations: conversations.value.length,
     running: count(['RUNNING']),
     completed: count(['COMPLETED']),
-    pending: count(['INTERRUPTED', 'FAILED'])
+    pending: count(['INTERRUPTED', 'FAILED']),
+    workflows: workflows.value.length,
+    documents: liveDocuments.value.length
   }
 })
+
+const workflowCards = computed(() => workflows.value.slice(0, 4))
+
+const knowledgeStats = computed(() => {
+  const docs = liveDocuments.value
+  return {
+    total: docs.length,
+    active: docs.filter(doc => doc.lifecycleStatus === 'ACTIVE').length,
+    pending: docs.filter(doc => doc.lifecycleStatus === 'READY').length,
+    processing: docs.filter(doc => ['PENDING', 'INDEXING'].includes(doc.status)).length,
+    failed: docs.filter(doc => doc.status === 'FAILED' || doc.lifecycleStatus === 'REJECTED').length
+  }
+})
+
+const recentDocuments = computed(() => [...liveDocuments.value]
+  .sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0))
+  .slice(0, 3))
 
 const runGroups = computed(() => [
   { key: 'running', label: '进行中', dotClass: 'is-running', items: runs.value.filter(run => run.status === 'RUNNING') },
@@ -174,17 +297,44 @@ function formatDate(value) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '' : `${date.getMonth() + 1}月${date.getDate()}日`
 }
+function latestRunOf(workflowKey) {
+  return workflowRuns.value.find(run => run.workflowKey === workflowKey) || null
+}
+function runStatusLabel(status) {
+  return { RUNNING: '运行中', SUCCEEDED: '成功', FAILED: '失败', INTERRUPTED: '已中断' }[status] || status
+}
+function runDotClass(status) {
+  if (status === 'RUNNING') return 'is-running'
+  if (status === 'FAILED' || status === 'INTERRUPTED') return 'is-fail'
+  return 'is-done'
+}
+function knowledgeStatusLabel(document) {
+  if (!document) return ''
+  if (['PENDING', 'INDEXING'].includes(document.status)) return '处理中'
+  if (document.lifecycleStatus === 'READY') return '待审批'
+  if (document.lifecycleStatus === 'REJECTED') return '已驳回'
+  if (document.lifecycleStatus === 'ACTIVE') return '已发布'
+  if (document.status === 'FAILED' || document.lifecycleStatus === 'FAILED') return '失败'
+  return document.status === 'DONE' ? '已完成' : '待切片'
+}
 
 onMounted(async () => {
-  const [runResult, conversationResult, projectResult, modelResult] = await Promise.allSettled([
-    listManusRunOverviews(30),
-    listManusConversations(),
-    listProjects(),
-    listModelSettings()
-  ])
+  const [runResult, conversationResult, projectResult, modelResult, workflowResult, ...knowledgeResults] =
+    await Promise.allSettled([
+      listManusRunOverviews(30),
+      listManusConversations(),
+      listProjects(),
+      listModelSettings(),
+      listWorkflows(20),
+      ...KNOWLEDGE_AGENTS.map(agent => listAgentKnowledgeDocuments(agent.key))
+    ])
   runs.value = runResult.status === 'fulfilled' ? runResult.value || [] : []
   conversations.value = conversationResult.status === 'fulfilled' ? conversationResult.value || [] : []
   projects.value = projectResult.status === 'fulfilled' ? projectResult.value || [] : []
+  workflows.value = workflowResult.status === 'fulfilled' ? workflowResult.value?.definitions || [] : []
+  workflowRuns.value = workflowResult.status === 'fulfilled' ? workflowResult.value?.runs || [] : []
+  knowledgeDocs.value = knowledgeResults.flatMap(result =>
+    result.status === 'fulfilled' ? result.value || [] : [])
   if (modelResult.status === 'fulfilled') {
     const chat = (modelResult.value?.models || []).find(item => (item.key || '').toLowerCase() === 'chat')
     const effective = chat?.effective
@@ -252,7 +402,7 @@ onMounted(async () => {
 
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 12px;
 }
 
@@ -305,6 +455,7 @@ a.stat-card:hover {
   align-items: start;
 }
 
+.home-main,
 .home-side {
   display: flex;
   flex-direction: column;
@@ -488,6 +639,134 @@ a.stat-card:hover {
   color: var(--wb-muted);
   font-size: 12px;
   font-family: var(--wb-font-mono, monospace);
+}
+
+.wf-list,
+.kb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wf-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: var(--wb-radius);
+  transition: background 0.15s;
+}
+
+.wf-item:hover,
+.kb-item:hover {
+  background: var(--wb-fill);
+}
+
+.wf-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wf-name {
+  color: var(--wb-text);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.wf-desc {
+  color: var(--wb-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-meta {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  color: var(--wb-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.wf-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wf-run.is-idle {
+  opacity: 0.7;
+}
+
+.wf-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.wf-dot.is-running { background: var(--wb-info); }
+.wf-dot.is-done { background: var(--wb-success); }
+.wf-dot.is-fail { background: var(--wb-danger); }
+
+.kb-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.kb-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--wb-radius);
+  background: var(--wb-fill);
+}
+
+.kb-value {
+  color: var(--wb-text);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.kb-value.is-waiting { color: var(--wb-warning); }
+.kb-value.is-running { color: var(--wb-info); }
+.kb-value.is-fail { color: var(--wb-danger); }
+
+.kb-label {
+  color: var(--wb-muted);
+  font-size: 11.5px;
+}
+
+.kb-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border-radius: var(--wb-radius);
+  transition: background 0.15s;
+}
+
+.kb-name {
+  color: var(--wb-text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kb-meta {
+  color: var(--wb-muted);
+  font-size: 11.5px;
 }
 
 .service-row {

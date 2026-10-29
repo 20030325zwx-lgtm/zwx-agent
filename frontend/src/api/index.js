@@ -166,7 +166,7 @@ export const saveSkillConfiguration = (agentKey, enabledSkillIds) => request.pos
 export const judgeRagCandidate = (messageId, agentKey, candidateId, judgment) => request.post(`/ai/rag-evaluations/${messageId}/judgments`, { agentKey, candidateId, judgment })
 
 // AI超级智能体聊天
-export const chatWithManus = (conversationId, message, knowledgeSearch = false, webSearch = true, clientRequestId = null, imageObjectKey = null, permissionMode = null) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, webSearch, clientRequestId, imageObjectKey, permissionMode })
+export const chatWithManus = (conversationId, message, knowledgeSearch = false, webSearch = true, clientRequestId = null, imageObjectKey = null, permissionMode = null, modelRowId = null) => connectSSE('/ai/manus/chat', { conversationId, message, knowledgeSearch, webSearch, clientRequestId, imageObjectKey, permissionMode, modelRowId })
 export const uploadManusImage = async (conversationId, file) => {
   const formData = new FormData()
   formData.append('conversationId', conversationId)

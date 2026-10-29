@@ -218,6 +218,7 @@ public class ManusAgentController {
                                       @RequestParam(defaultValue = "true") boolean webSearch,
                                       @RequestParam(required = false) List<String> imageObjectKey,
                                       @RequestParam(required = false) String clientRequestId,
+                                      @RequestParam(required = false) Long modelRowId,
                                       @RequestParam(required = false) String permissionMode) {
         agentConversationService.ensureConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, SUPER_DEFAULT_TITLE, message);
         // 每用户配额：并发 run / 小时频率 / 24h token 预算，超限 429（在会话锁之前，快速拒绝）
@@ -227,6 +228,8 @@ public class ManusAgentController {
                 permissionMode == null || permissionMode.isBlank()
                         ? permissionService.defaultMode(actor.tenantId(), actor.userId())
                         : com.zwx.zwxagent.capability.tools.PermissionMode.require(permissionMode);
+        // 输入框里选择的模型只解析一次：闲聊直达与图编排共用同一份选择
+        var modelSelection = chatSelection(actor.userId(), modelRowId);
         var conversationLease = conversationLockManager.tryAcquire(actor.tenantId() + ":" + actor.userId() + ":super:" + conversationId);
         if (conversationLease == null) throw new com.zwx.zwxagent.chat.conversation.ConversationBusyException();
         long userMessageId;
@@ -279,7 +282,8 @@ public class ManusAgentController {
                 String summary = "闲聊直达：命中闲聊短路（置信 " + String.format("%.2f", decision.intentConfidence())
                         + "），本轮跳过知识库检索、联网搜索与多智能体编排";
                 return casualChat(actor, conversationId, message, userMessageId, conversationLease,
-                        toJson(java.util.Map.of("phase", "plan", "agent", "意图识别", "summary", summary)));
+                        toJson(java.util.Map.of("phase", "plan", "agent", "意图识别", "summary", summary)),
+                        modelSelection);
             }
         }
         AgentKnowledgeRagResult knowledge;
@@ -326,7 +330,7 @@ public class ManusAgentController {
                         return role + status + ": " + historyMessage.content();
                     })
                     .collect(java.util.stream.Collectors.joining("\n"));
-            runChatModel = chatModelFor(actor.userId());
+            runChatModel = dynamicChatModelFactory.model(modelSelection.config());
         } catch (RuntimeException exception) {
             agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
             if (mcpTools != null) mcpTools.close();
@@ -348,9 +352,7 @@ public class ManusAgentController {
             conversationLease.close();
             throw exception;
         }
-        modelCatalogService.attachToRun(runId,
-                modelCatalogService.resolve(actor.userId(),
-                        com.zwx.zwxagent.platform.settings.ModelCatalogService.PURPOSE_CHAT));
+        modelCatalogService.attachToRun(runId, modelSelection);
         try {
             availableTools = Stream.concat(
                             Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
@@ -579,9 +581,13 @@ public class ManusAgentController {
     }
 
     private ChatModel chatModelFor(String userId) {
-        return dynamicChatModelFactory.model(
-                modelCatalogService.resolve(userId, com.zwx.zwxagent.platform.settings.ModelCatalogService.PURPOSE_CHAT)
-                        .config());
+        return dynamicChatModelFactory.model(chatSelection(userId, null).config());
+    }
+
+    private com.zwx.zwxagent.platform.settings.ModelCatalogService.ResolvedSelection chatSelection(String userId, Long modelRowId) {
+        return modelRowId == null
+                ? modelCatalogService.resolve(userId, com.zwx.zwxagent.platform.settings.ModelCatalogService.PURPOSE_CHAT)
+                : modelCatalogService.resolveModelRow(userId, modelRowId);
     }
 
     /**
@@ -589,13 +595,14 @@ public class ManusAgentController {
      * 直接流式回答并按既有链路持久化消息（runId 为空，token 台账不含闲聊轮）。
      */
     private SseEmitter casualChat(CurrentActor actor, String conversationId, String message, long userMessageId,
-                                  AutoCloseable conversationLease, String prefaceActivity) {
+                                  AutoCloseable conversationLease, String prefaceActivity,
+                                  com.zwx.zwxagent.platform.settings.ModelCatalogService.ResolvedSelection modelSelection) {
         SseEmitter emitter = new SseEmitter(java.util.concurrent.TimeUnit.MINUTES.toMillis(2));
         agentExecutor.execute(() -> {
             try {
                 emitter.send(SseEmitter.event().name("activity").data(prefaceActivity));
                 StringBuilder answer = new StringBuilder();
-                ChatClient.builder(chatModelFor(actor.userId())).build()
+                ChatClient.builder(dynamicChatModelFactory.model(modelSelection.config())).build()
                         .prompt().user(message).stream().content()
                         .toStream()
                         .forEach(chunk -> {

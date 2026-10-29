@@ -96,8 +96,9 @@
             <TaskComposer ref="composerRef" :connection-status="connectionStatus" attachments-enabled
               attachment-accept="image/jpeg,image/png,image/gif,image/webp" knowledge-search-available web-search-available
               :permission-modes="permissionModes" :default-permission-mode="defaultPermissionMode"
+              :model-options="modelOptions" :model-row-id="chatModelRowId"
               :placeholder="activeRun ? '继续补充要求，或描述下一步…' : '描述目标、约束或需要交付的结果…'"
-              @send-message="sendMessage" @stop-generation="stopGeneration" />
+              @send-message="sendMessage" @stop-generation="stopGeneration" @model-change="selectChatModel" />
           </footer>
         </div>
 
@@ -148,7 +149,7 @@ import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import RunInspector from '../components/workspace/RunInspector.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
-import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, listManusConversations, listManusRuns, listManusWebSources, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
+import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, listManusConversations, listManusRuns, listManusWebSources, listModelCatalog, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
 
 const permissionModes = [
   { value: 'PLAN', label: '只读规划', hint: '仅允许只读工具，写操作直接拒绝' },
@@ -158,6 +159,47 @@ const permissionModes = [
   { value: 'YOLO', label: '全自动', hint: '全部放行，仅建议在隔离环境使用' }
 ]
 const defaultPermissionMode = ref('EDIT')
+const modelOptions = ref([])
+const defaultModelRowId = ref(null)
+const chatModelRowId = ref(null)
+const MODEL_STORAGE_PREFIX = 'aster.chat.model.'
+
+// 输入框模型选择：只列可调用工具（tools）的启用模型；默认跟随用户 chat 绑定的模型
+const loadModelOptions = async () => {
+  try {
+    const catalog = await listModelCatalog()
+    const options = []
+    for (const provider of catalog.providers || []) {
+      if (!provider.enabled) continue
+      for (const model of provider.models || []) {
+        if (!model.enabled) continue
+        if (!(model.capabilities || []).includes('tools')) continue
+        options.push({
+          id: model.id,
+          label: model.displayName || model.modelId,
+          description: provider.name
+        })
+      }
+    }
+    modelOptions.value = options
+    const bound = catalog.userBindings?.chat?.modelRowId
+    defaultModelRowId.value = options.some(option => option.id === bound) ? bound : (options[0]?.id ?? null)
+    syncChatModel()
+  } catch (error) {
+    console.error('Unable to load model catalog:', error)
+  }
+}
+const syncChatModel = () => {
+  const stored = chatId.value ? Number(localStorage.getItem(MODEL_STORAGE_PREFIX + chatId.value)) : null
+  chatModelRowId.value = Number.isFinite(stored) && modelOptions.value.some(option => option.id === stored)
+    ? stored
+    : defaultModelRowId.value
+}
+const selectChatModel = id => {
+  if (!id) return
+  chatModelRowId.value = id
+  try { if (chatId.value) localStorage.setItem(MODEL_STORAGE_PREFIX + chatId.value, String(id)) } catch (error) { console.error(error) }
+}
 
 useHead({ title: '超级智能体 - Aster', meta: [{ name: 'description', content: 'Aster 的自主智能体，可规划任务、调用工具并多步执行。' }] })
 const router = useRouter()
@@ -526,6 +568,7 @@ const scheduleRunPolling = () => {
   }
 }
 watch(() => `${activeRun.value?.id || ''}|${activeRun.value?.status || ''}`, scheduleRunPolling)
+watch(chatId, syncChatModel)
 
 const createConversation = async () => {
   if (connectionStatus.value === 'connecting') return
@@ -627,6 +670,7 @@ const sendMessage = async payload => {
   const webSearch = typeof payload === 'string' ? false : payload.webSearch === true
   const files = typeof payload === 'string' ? [] : payload.files || []
   const permissionMode = typeof payload === 'string' ? null : payload.permissionMode || null
+  const modelRowId = typeof payload === 'string' ? null : payload.modelRowId || null
   const imageObjectKeys = []
   if (files.length) {
     setCompanion('working', files.length > 1 ? `正在上传 ${files.length} 张图片` : '正在上传图片')
@@ -657,7 +701,7 @@ const sendMessage = async payload => {
   reconnectAttempts = 0
   const thinkingSteps = [knowledgeSearch ? '检索知识库' : '', webSearch ? '联网搜索' : ''].filter(Boolean).join('与')
   setCompanion('thinking', thinkingSteps ? `正在${thinkingSteps}并规划任务` : '正在规划任务')
-  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, webSearch, requestId, imageObjectKeys, permissionMode)
+  eventSource = chatWithManus(chatId.value, message, knowledgeSearch, webSearch, requestId, imageObjectKeys, permissionMode, modelRowId)
   attachManusStream(eventSource, answerIndex)
 }
 const attachManusStream = (stream, answerIndex) => {
@@ -1013,7 +1057,7 @@ const onGlobalShortcut = event => {
 onMounted(async () => {
   narrowMedia.addEventListener('change', onNarrowChange)
   window.addEventListener('keydown', onGlobalShortcut)
-  await Promise.all([refreshProjects(), refreshConversations()])
+  await Promise.all([refreshProjects(), refreshConversations(), loadModelOptions()])
   // 权限模式默认值：读取用户设置；失败时保持 EDIT，不阻塞工作台。
   getPermissionSettings()
     .then(settings => { if (settings?.mode) defaultPermissionMode.value = settings.mode })

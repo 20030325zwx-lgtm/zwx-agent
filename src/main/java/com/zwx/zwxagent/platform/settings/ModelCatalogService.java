@@ -339,6 +339,28 @@ public class ModelCatalogService {
         return resolved;
     }
 
+    /**
+     * 按模型条目直接解析：对话输入框里切换模型时使用。
+     * 只允许本人供应商或系统供应商，且供应商与模型都必须处于启用状态。
+     */
+    public ResolvedSelection resolveModelRow(String userId, long modelRowId) {
+        Long providerId = jdbcTemplate.query(
+                "SELECT provider_id FROM model_provider_model WHERE id = ?",
+                rs -> rs.next() ? rs.getLong(1) : null,
+                modelRowId);
+        if (providerId == null) throw new IllegalArgumentException("模型不存在或已被删除");
+        ProviderRow provider = requireAccessibleProvider(userId, providerId);
+        if (!provider.enabled()) throw new IllegalArgumentException("所选模型的供应商已停用");
+        ModelRow model = findModelRow(provider.id(), modelRowId)
+                .orElseThrow(() -> new IllegalArgumentException("模型不存在或已被删除"));
+        if (!model.enabled()) throw new IllegalArgumentException("所选模型已停用");
+        String baseUrl = "dashscope".equals(provider.protocol()) && isBlank(provider.baseUrl())
+                ? null : provider.baseUrl();
+        String source = provider.ownerId().isEmpty() ? "SYSTEM" : "USER";
+        return new ResolvedSelection(new ResolvedModelConfig(PURPOSE_CHAT, provider.protocol(), baseUrl,
+                model.modelId(), decrypt(provider), source), revision());
+    }
+
     private ResolvedModelConfig computeResolve(String userId, String purpose) {
         Optional<BindingRow> userBinding = findBinding(ConfigurationScope.USER, owner(userId), purpose);
         Optional<ResolvedModelConfig> user = bindingConfig(userBinding, purpose, "USER");

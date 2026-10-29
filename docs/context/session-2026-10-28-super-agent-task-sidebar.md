@@ -85,3 +85,11 @@
 - 修复：回环分支改为独立 `if`（JWT 失败后仍按回环身份放行），有效 JWT 仍优先。
 - 验证：临时后端四种头部组合 401/200/200/401；重打包后实机 CDP 确认 `/workbench`、7 个 API 全部 200、无登录页；新包已覆盖 `/Applications/Aster.app`。
 - 详见 `docs/bugs/bug-2026-10-28-desktop-loopback-auth-blocked-by-bearer.txt`。
+
+## 追加调整（同日）：输入框权限等级与模型选择
+
+- `TaskComposer` 的原生权限下拉换成富菜单（图标 + 标题 + 说明 + 勾选）；新增模型选择胶囊。
+- 模型列表来自 `/settings/catalog`，只列启用且具备 `tools` 能力的模型；默认跟随 chat 绑定，切换后按会话记忆（`aster.chat.model.<id>`）。
+- 后端 `/ai/manus/chat` 新增 `modelRowId`，`ModelCatalogService.resolveModelRow` 校验归属与启用状态，闲聊直达与图编排共用；运行通过 `attachToRun` 冻结模型。
+- 验证：浏览器实测权限/模型菜单；切到 Qwen Max 发送任务，`agent_run.model_name=qwen-max`，说明覆盖生效。
+- 桌面目录补充 `qwen-max`，与网页端可选模型对齐。详见 `docs/design/2026-10-28-composer-permissions-models.md`。

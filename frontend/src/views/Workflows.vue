@@ -109,7 +109,10 @@
           </div>
           <p v-if="runDialog.run.error" class="dialog-error">{{ runDialog.run.error }}</p>
           <div v-for="artifact in runDialog.run.artifacts" :key="artifact.name" class="run-artifact">
-            <img v-if="artifact.url" :src="artifact.url" alt="工作流产物" class="artifact-image" />
+            <img v-if="artifact.url && artifact.type !== 'file'" :src="artifact.url" alt="工作流产物" class="artifact-image" />
+            <a v-if="artifact.url" class="artifact-link" :href="artifact.url" :download="artifact.name" target="_blank" rel="noopener">
+              下载 {{ artifact.name }}
+            </a>
           </div>
         </div>
         <p v-else-if="!runDialog.running" class="dialog-hint">输入运行参数后开始执行；运行期间会实时刷新步骤状态。</p>
@@ -144,7 +147,10 @@
                 </div>
                 <p v-if="historyDialog.detail.error" class="dialog-error">{{ historyDialog.detail.error }}</p>
                 <div v-for="artifact in historyDialog.detail.artifacts" :key="artifact.name" class="run-artifact">
-                  <img v-if="artifact.url" :src="artifact.url" alt="工作流产物" class="artifact-image" />
+                  <img v-if="artifact.url && artifact.type !== 'file'" :src="artifact.url" alt="工作流产物" class="artifact-image" />
+                  <a v-if="artifact.url" class="artifact-link" :href="artifact.url" :download="artifact.name" target="_blank" rel="noopener">
+                    下载 {{ artifact.name }}
+                  </a>
                 </div>
               </template>
             </div>
@@ -437,8 +443,10 @@ onBeforeUnmount(() => {
 .mini-step { display: flex; align-items: center; gap: 9px; padding: 5px 2px; }
 .mini-name { color: var(--wb-text); font-size: 12.5px; }
 .mini-meta { color: var(--wb-muted); font-size: 12px; margin-left: auto; }
-.run-artifact { text-align: center; }
+.run-artifact { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 4px 0; }
 .artifact-image { max-width: 220px; width: 100%; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); }
+.artifact-link { color: var(--wb-brand); font-size: 12.5px; }
+.artifact-link:hover { text-decoration: underline; }
 .history-list { display: flex; flex-direction: column; gap: 4px; }
 .history-item { border: 1px solid var(--wb-border); border-radius: var(--wb-radius); background: var(--wb-surface-2); overflow: hidden; }
 .history-row { display: flex; width: 100%; align-items: center; gap: 10px; padding: 10px 12px; border: 0; background: transparent; text-align: left; }

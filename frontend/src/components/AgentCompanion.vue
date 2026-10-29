@@ -142,11 +142,11 @@ const bubbleVisible = computed(() => hovered.value || pinned.value || props.stat
   width: max-content;
   max-width: 216px;
   margin-bottom: 46px;
-  border: 1px solid var(--sk-separator);
+  border: 1px solid var(--wb-border);
   border-radius: 14px 14px 4px 14px;
   padding: 9px 12px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.16);
+  background: color-mix(in srgb, var(--wb-surface) 96%, transparent);
+  box-shadow: var(--wb-shadow-lg);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   pointer-events: none;
@@ -158,15 +158,15 @@ const bubbleVisible = computed(() => hovered.value || pinned.value || props.stat
   bottom: 10px;
   width: 9px;
   height: 9px;
-  border-right: 1px solid var(--sk-separator);
-  border-bottom: 1px solid var(--sk-separator);
+  border-right: 1px solid var(--wb-border);
+  border-bottom: 1px solid var(--wb-border);
   background: inherit;
   content: "";
   transform: rotate(-45deg);
 }
 
-.companion-bubble strong { display: block; color: var(--sk-label); font-size: 12.5px; font-weight: 700; }
-.companion-bubble span { display: block; margin-top: 3px; color: var(--sk-label-2); font-size: 11.5px; line-height: 1.5; }
+.companion-bubble strong { display: block; color: var(--wb-text); font-size: 12.5px; font-weight: 700; }
+.companion-bubble span { display: block; margin-top: 3px; color: var(--wb-text-2); font-size: 11.5px; line-height: 1.5; }
 
 .bubble-enter-active, .bubble-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
 .bubble-enter-from, .bubble-leave-to { opacity: 0; transform: translateY(4px) scale(0.96); }

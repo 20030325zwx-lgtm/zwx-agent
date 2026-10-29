@@ -1,26 +1,35 @@
 <template>
   <div class="super-layout">
-    <ConversationSidebar title="超级智能体" mark="✦" theme="travel"
-      :conversations="conversations" :projects="projects" :active-id="chatId"
-      :selected-project-id="selectedProjectId" :loading="historyLoading"
+    <ConversationSidebar v-if="!sidebarCollapsed || sidebarOpen"
+      :conversations="conversations" :projects="projects" :active-id="chatId" :loading="historyLoading"
       :workspace-creating="workspaceCreating" :workspace-error="workspaceError" :open="sidebarOpen"
       :directory-view="directoryView" :directory-loading="directoryLoading"
-      @create="createConversation" @create-workspace="createWorkspace" @browse-workspaces="browseWorkspaces"
-      @choose-workspace="chooseWorkspace" @select-project="selectProject"
-      @select="selectConversation" @delete="requestDelete" @close="sidebarOpen = false" />
+      @create="createConversation" @create-in="createConversationIn"
+      @create-workspace="createWorkspace" @browse-workspaces="browseWorkspaces"
+      @choose-workspace="chooseWorkspace" @select="selectConversation" @delete="requestDelete"
+      @close="sidebarOpen = false" @collapse="toggleSidebar" />
+    <div v-if="sidebarOpen" class="sidebar-scrim" @click="sidebarOpen = false"></div>
     <main class="super-main">
       <header class="super-header">
         <div class="header-start">
-          <button class="history-toggle" type="button" aria-label="打开历史会话" @click="sidebarOpen = true">☰</button>
-          <HomeButton />
-          <button class="back-button" type="button" @click="router.push('/mcp-settings')">MCP 管理</button>
-        </div>
-        <div class="title">
-          <span class="super-mark" aria-hidden="true"><AsterAvatar /></span>
-          <strong>超级智能体</strong>
-          <em class="kind-pill">Agent</em>
+          <button class="header-icon" type="button"
+            :title="isNarrow ? '打开任务列表' : sidebarCollapsed ? '展开任务栏（⌘B）' : '收起任务栏（⌘B）'"
+            :aria-label="isNarrow ? '打开任务列表' : '切换任务栏'"
+            @click="toggleSidebar">
+            <Menu v-if="isNarrow" :size="18" />
+            <PanelLeftOpen v-else-if="sidebarCollapsed" :size="18" />
+            <PanelLeftClose v-else :size="18" />
+          </button>
+          <div class="header-title">
+            <strong>{{ activeConversationTitle }}</strong>
+            <span class="header-sub">{{ activeWorkspaceName }}</span>
+          </div>
         </div>
         <div class="header-end">
+          <button class="header-mcp" type="button" title="MCP 管理" @click="router.push('/mcp-settings')">
+            <Plug :size="14" />
+            <span>MCP</span>
+          </button>
           <span class="status" :class="connectionStatus">{{ statusText }}</span>
         </div>
       </header>
@@ -127,13 +136,15 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
-import { BookOpen, Database, Download, Globe2, PanelRightOpen, RotateCw, Workflow } from 'lucide-vue-next'
+import {
+  BookOpen, Database, Download, Globe2, Menu, PanelLeftClose, PanelLeftOpen,
+  PanelRightOpen, Plug, RotateCw, Workflow
+} from 'lucide-vue-next'
 import AgentCompanion from '../components/AgentCompanion.vue'
 import AsterAvatar from '../components/AsterAvatar.vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import HomeButton from '../components/HomeButton.vue'
 import RunInspector from '../components/workspace/RunInspector.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
 import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, listManusConversations, listManusRuns, listManusWebSources, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
@@ -163,6 +174,18 @@ const connectionStatus = ref('disconnected')
 const historyLoading = ref(false)
 const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
+const SIDEBAR_KEY = 'aster.super.sidebar.collapsed'
+const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_KEY) === 'true')
+watch(sidebarCollapsed, value => {
+  try { localStorage.setItem(SIDEBAR_KEY, value ? 'true' : 'false') } catch (error) { console.error(error) }
+})
+const narrowMedia = window.matchMedia('(max-width: 720px)')
+const isNarrow = ref(narrowMedia.matches)
+const onNarrowChange = event => { isNarrow.value = event.matches }
+const toggleSidebar = () => {
+  if (isNarrow.value) sidebarOpen.value = !sidebarOpen.value
+  else sidebarCollapsed.value = !sidebarCollapsed.value
+}
 const pendingDelete = ref(null)
 const companionState = ref('idle')
 const companionCaption = ref('')
@@ -194,6 +217,13 @@ const taskTemplates = [
 const statusText = computed(() => connectionStatus.value === 'connecting'
   ? '正在执行'
   : connectionStatus.value === 'error' ? '连接异常' : '就绪')
+
+const activeConversation = computed(() => conversations.value.find(item => item.id === chatId.value) || null)
+const activeConversationTitle = computed(() => activeConversation.value?.title || '新任务')
+const activeWorkspaceName = computed(() => {
+  const project = projects.value.find(item => item.id === activeConversation.value?.projectId)
+  return project?.name || '未绑定工作区'
+})
 
 const clearCompanionIdle = () => {
   if (companionIdleTimer) { clearTimeout(companionIdleTimer); companionIdleTimer = null }
@@ -508,8 +538,11 @@ const createConversation = async () => {
   sidebarOpen.value = false
   setCompanion('idle')
 }
-const selectProject = projectId => {
+// 从工作区分组的新建按钮进入：先绑定工作区，再开新任务
+const createConversationIn = async projectId => {
+  if (connectionStatus.value === 'connecting') return
   selectedProjectId.value = projectId || null
+  await createConversation()
 }
 const createWorkspace = async payload => {
   if (workspaceCreating.value) return
@@ -968,7 +1001,17 @@ const exportRun = async () => {
     console.error('Unable to export run:', error)
   }
 }
+const onGlobalShortcut = event => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
+    event.preventDefault()
+    toggleSidebar()
+  } else if (event.key === 'Escape' && sidebarOpen.value) {
+    sidebarOpen.value = false
+  }
+}
 onMounted(async () => {
+  narrowMedia.addEventListener('change', onNarrowChange)
+  window.addEventListener('keydown', onGlobalShortcut)
   await Promise.all([refreshProjects(), refreshConversations()])
   // 权限模式默认值：读取用户设置；失败时保持 EDIT，不阻塞工作台。
   getPermissionSettings()
@@ -993,72 +1036,75 @@ onMounted(async () => {
     }, 4200)
   }
 })
-onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStream() })
+onBeforeUnmount(() => {
+  narrowMedia.removeEventListener('change', onNarrowChange)
+  window.removeEventListener('keydown', onGlobalShortcut)
+  stopRunPolling(); clearCompanionIdle(); cancelActiveStream()
+})
 </script>
 
 <style scoped>
-.super-layout { display: flex; height: 100%; overflow: hidden; background: linear-gradient(135deg, #e5efff, #f5f9ff 44%, #eaf3ff); }
+.super-layout { display: flex; height: 100%; overflow: hidden; background: var(--wb-bg); background-image: var(--wb-bg-accent); }
 .super-main { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+
+.sidebar-scrim { display: none; }
 
 .super-header {
   display: flex;
-  height: 66px;
-  flex: 0 0 66px;
+  height: 60px;
+  flex: 0 0 60px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--sk-separator);
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: var(--sk-blur);
-  -webkit-backdrop-filter: var(--sk-blur);
-}
-
-.header-start { display: flex; width: auto; min-width: 0; align-items: center; gap: 6px; }
-
-.history-toggle {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 0 18px 0 12px;
   background: transparent;
-  color: var(--sk-label-2);
-  font-size: 18px;
-  cursor: pointer;
 }
 
-.history-toggle:hover { background: var(--sk-fill); color: var(--sk-label); }
+.header-start { display: flex; min-width: 0; align-items: center; gap: 6px; }
 
-.back-button { border: 0; background: transparent; color: var(--zwx-primary); font-size: 13px; cursor: pointer; }
-.back-button:hover { opacity: 0.7; }
-
-.title { display: flex; align-items: center; gap: 9px; font-size: 15px; }
-
-.super-mark {
+.header-icon {
   display: grid;
   width: 30px;
   height: 30px;
+  flex: 0 0 30px;
   place-items: center;
-  overflow: hidden;
-  border-radius: 9px;
-  background: linear-gradient(160deg, #3f9bff, var(--zwx-primary) 70%);
-  color: #fff;
-  font-size: 15px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 3px 8px var(--zwx-primary-ring);
+  border: 0;
+  border-radius: var(--wb-radius-sm);
+  background: transparent;
+  color: var(--wb-muted);
+  cursor: pointer;
 }
 
-.title strong { font-weight: 700; letter-spacing: -0.01em; }
+.header-icon:hover { background: var(--wb-fill); color: var(--wb-text); }
 
-.kind-pill { border: 0; border-radius: 6px; padding: 3px 7px; background: var(--zwx-primary-soft); color: var(--zwx-primary); font-size: 10px; font-style: normal; font-weight: 700; }
+.header-title { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.header-title strong { overflow: hidden; max-width: 46vw; color: var(--wb-text); font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
+.header-sub { color: var(--wb-muted); font-size: 10.5px; }
 
-.header-end { display: flex; width: auto; justify-content: flex-end; }
+.header-end { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; }
 
-.status { display: flex; align-items: center; gap: 6px; color: #1f9d4d; font-size: 12px; font-weight: 550; }
+.header-mcp {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--wb-border);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: var(--wb-surface);
+  color: var(--wb-text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.header-mcp:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
+
+.status { display: flex; align-items: center; gap: 6px; color: var(--wb-success); font-size: 12px; font-weight: 550; }
 .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.status.connecting { color: var(--zwx-primary); }
+.status.connecting { color: var(--wb-brand); }
 .status.connecting::before { animation: status-blink 1.05s ease-in-out infinite; }
-.status.error { color: var(--sk-red); }
+.status.error { color: var(--wb-danger); }
 
 .workspace-main {
   display: grid;
@@ -1090,11 +1136,11 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   flex: 1;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--sk-separator);
-  border-radius: 16px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg);
   padding: 0;
-  background: linear-gradient(180deg, rgba(251, 253, 255, 0.96), rgba(255, 255, 255, 0.98));
-  box-shadow: 0 16px 40px rgba(45, 76, 132, 0.1);
+  background: var(--wb-surface);
+  box-shadow: var(--wb-shadow-md);
 }
 
 /* 主画布即会话：提问与回答都在对话流里，不再挂头部标题 */
@@ -1116,16 +1162,14 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   width: 30px;
   height: 30px;
   place-items: center;
-  border: 1px solid var(--sk-separator);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: var(--sk-blur);
-  -webkit-backdrop-filter: var(--sk-blur);
-  color: var(--sk-label-2);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-surface);
+  color: var(--wb-text-2);
   cursor: pointer;
 }
 
-.canvas-actions button:hover:not(:disabled) { border-color: var(--zwx-primary-ring); color: var(--zwx-primary); }
+.canvas-actions button:hover:not(:disabled) { border-color: var(--wb-brand); color: var(--wb-brand); }
 .canvas-actions button:disabled { opacity: 0.6; cursor: default; }
 .canvas-actions .spin { animation: canvas-spin 0.9s linear infinite; }
 @keyframes canvas-spin { to { transform: rotate(360deg); } }
@@ -1143,16 +1187,16 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
-  border: 1px solid var(--sk-separator);
-  border-radius: 12px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
   padding: 14px 0 12px;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--sk-label-2);
+  background: var(--wb-surface);
+  color: var(--wb-text-2);
   cursor: pointer;
   transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
 }
 
-.inspector-rail:hover { border-color: var(--zwx-primary-ring); background: rgba(255, 255, 255, 0.92); color: var(--zwx-primary); }
+.inspector-rail:hover { border-color: var(--wb-brand); background: var(--wb-surface-2); color: var(--wb-brand); }
 .inspector-rail span { writing-mode: vertical-rl; font-size: 10.5px; font-weight: 600; letter-spacing: 0.16em; }
 
 .workspace-empty {
@@ -1167,9 +1211,9 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
 }
 
 .empty-avatar { display: block; width: 72px; height: 72px; border-radius: 20px; box-shadow: 0 14px 30px rgba(37, 99, 235, 0.2); }
-.empty-kicker { margin-top: 16px; color: var(--sk-label-3); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
-.workspace-empty h1 { margin: 9px 0 8px; color: var(--sk-label); font-size: clamp(24px, 3vw, 34px); font-weight: 800; line-height: 1.25; letter-spacing: -0.03em; }
-.workspace-empty p { max-width: 600px; margin: 0; color: var(--sk-label-2); font-size: 13.5px; line-height: 1.7; }
+.empty-kicker { margin-top: 16px; color: var(--wb-muted); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.workspace-empty h1 { margin: 9px 0 8px; color: var(--wb-text); font-size: clamp(24px, 3vw, 34px); font-weight: 800; line-height: 1.25; letter-spacing: -0.03em; }
+.workspace-empty p { max-width: 600px; margin: 0; color: var(--wb-text-2); font-size: 13.5px; line-height: 1.7; }
 
 .template-grid { display: grid; width: min(100%, 720px); grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 28px; }
 
@@ -1179,20 +1223,20 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   flex-direction: column;
   align-items: flex-start;
   gap: 5px;
-  border: 1px solid var(--sk-separator);
-  border-radius: 13px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
   padding: 13px 13px 14px;
-  background: #fff;
-  color: var(--sk-label);
+  background: var(--wb-surface);
+  color: var(--wb-text);
   text-align: left;
   cursor: pointer;
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.template-card:hover { border-color: var(--zwx-primary-ring); box-shadow: 0 8px 22px rgba(37, 99, 235, 0.1); transform: translateY(-2px); }
-.template-icon { display: grid; width: 30px; height: 30px; place-items: center; margin-bottom: 3px; border-radius: 9px; background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+.template-card:hover { border-color: var(--wb-brand); box-shadow: var(--wb-shadow-md); transform: translateY(-2px); }
+.template-icon { display: grid; width: 30px; height: 30px; place-items: center; margin-bottom: 3px; border-radius: var(--wb-radius-sm); background: var(--wb-brand-soft); color: var(--wb-brand); }
 .template-card strong { font-size: 12.5px; font-weight: 700; }
-.template-card > span:last-child { color: var(--sk-label-2); font-size: 10.5px; line-height: 1.5; }
+.template-card > span:last-child { color: var(--wb-text-2); font-size: 10.5px; line-height: 1.5; }
 
 .confirmation-banner {
   display: flex;
@@ -1201,34 +1245,34 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   gap: 12px;
   margin: 12px 16px 0;
   padding: 10px 14px;
-  border: 1px solid #f5d48a;
-  border-radius: 12px;
-  background: #fff8e6;
+  border: 1px solid color-mix(in srgb, var(--wb-warning) 38%, transparent);
+  border-radius: var(--wb-radius);
+  background: color-mix(in srgb, var(--wb-warning) 12%, var(--wb-surface));
   font-size: 12px;
-  color: #7a5a10;
+  color: var(--wb-warning);
 }
 .confirmation-text strong { font-weight: 700; }
 .confirmation-mode {
   flex-shrink: 0;
   border-radius: 999px;
   padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.7);
-  color: #8a6a1c;
+  background: var(--wb-surface);
+  color: var(--wb-warning);
   font-size: 10.5px;
   font-weight: 600;
 }
 .confirmation-action {
   flex-shrink: 0;
-  border: 1px solid #e2b93b;
+  border: 1px solid color-mix(in srgb, var(--wb-warning) 55%, transparent);
   border-radius: 999px;
   padding: 5px 12px;
-  background: #fff;
-  color: #7a5a10;
+  background: var(--wb-surface);
+  color: var(--wb-warning);
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
 }
-.confirmation-action:hover { background: #fdf1cd; }
+.confirmation-action:hover { background: var(--wb-fill); }
 
 .plan-gate-banner {
   display: flex;
@@ -1237,20 +1281,20 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   gap: 12px;
   margin: 12px 16px 0;
   padding: 10px 14px;
-  border: 1px solid var(--zwx-primary-ring);
-  border-radius: 12px;
-  background: var(--zwx-primary-soft);
+  border: 1px solid var(--wb-brand);
+  border-radius: var(--wb-radius);
+  background: var(--wb-brand-soft);
   font-size: 12px;
-  color: var(--zwx-primary);
+  color: var(--wb-brand);
 }
 
 .plan-gate-actions { display: flex; flex: 0 0 auto; gap: 7px; }
 
 .plan-gate-banner button { border-radius: 999px; padding: 5px 13px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
-.plan-gate-primary { border: 0; background: var(--zwx-primary); color: #fff; }
+.plan-gate-primary { border: 0; background: var(--wb-brand); color: var(--wb-brand-contrast); }
 .plan-gate-primary:hover { filter: brightness(1.05); }
-.plan-gate-secondary { border: 1px solid var(--zwx-primary-ring); background: #fff; color: var(--zwx-primary); }
-.plan-gate-secondary:hover { background: rgba(255, 255, 255, 0.8); }
+.plan-gate-secondary { border: 1px solid var(--wb-brand); background: var(--wb-surface); color: var(--wb-brand); }
+.plan-gate-secondary:hover { background: var(--wb-fill); }
 
 .workspace-loading {
   position: absolute;
@@ -1258,11 +1302,11 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
   inset: 0;
   display: grid;
   place-items: center;
-  border-radius: 16px;
-  background: rgba(248, 251, 255, 0.82);
+  border-radius: var(--wb-radius-lg);
+  background: color-mix(in srgb, var(--wb-surface) 84%, transparent);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  color: var(--sk-label-2);
+  color: var(--wb-text-2);
   font-size: 13px;
 }
 
@@ -1285,8 +1329,9 @@ onBeforeUnmount(() => { stopRunPolling(); clearCompanionIdle(); cancelActiveStre
 }
 
 @media (max-width: 720px) {
-  .super-header { height: 58px; flex-basis: 58px; padding: 0 14px; }
-  .header-start, .header-end { width: auto; }
+  .sidebar-scrim { position: fixed; z-index: 35; inset: 0; display: block; background: rgba(15, 17, 26, 0.36); }
+  .super-header { height: 56px; flex-basis: 56px; padding: 0 12px; }
+  .header-title strong { max-width: 44vw; }
   .workspace-main { gap: 0; padding: 0; }
   .workspace-canvas { border: 0; border-radius: 0; padding: 18px 14px 24px; box-shadow: none; }
   .workspace-composer-shell { padding: 9px 10px 12px; }

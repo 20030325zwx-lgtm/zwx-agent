@@ -159,21 +159,21 @@ defineExpose({ fill, submit, focus })
 .task-composer { width: 100%; }
 
 .composer-card {
-  border: 1px solid var(--sk-separator);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 12px 32px rgba(37, 73, 133, 0.12);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg);
+  background: color-mix(in srgb, var(--wb-surface) 96%, transparent);
+  box-shadow: var(--wb-shadow-md);
   backdrop-filter: var(--sk-blur);
   -webkit-backdrop-filter: var(--sk-blur);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .composer-card:focus-within {
-  border-color: var(--zwx-primary-ring);
-  box-shadow: 0 0 0 3px var(--zwx-primary-ring), 0 12px 32px rgba(37, 73, 133, 0.14);
+  border-color: var(--wb-brand);
+  box-shadow: 0 0 0 3px var(--wb-brand-soft), var(--wb-shadow-md);
 }
 
-.composer-card.busy { border-color: rgba(37, 99, 235, 0.24); }
+.composer-card.busy { border-color: color-mix(in srgb, var(--wb-brand) 28%, transparent); }
 
 .composer-input-row { display: flex; padding: 14px 16px 4px; }
 
@@ -186,13 +186,13 @@ defineExpose({ fill, submit, focus })
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--sk-label);
+  color: var(--wb-text);
   font: inherit;
   font-size: 15px;
   line-height: 1.6;
 }
 
-.composer-input::placeholder { color: var(--sk-label-3); }
+.composer-input::placeholder { color: var(--wb-muted); }
 .composer-input:disabled { opacity: 0.6; }
 
 .composer-actions { display: flex; align-items: center; gap: 6px; padding: 4px 12px 11px; }
@@ -206,12 +206,12 @@ defineExpose({ fill, submit, focus })
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: var(--sk-label-2);
+  color: var(--wb-text-2);
   cursor: pointer;
 }
 
-.tool-button:hover { background: var(--sk-fill); color: var(--sk-label); }
-.tool-button.active { background: var(--zwx-primary-soft); color: var(--zwx-primary); }
+.tool-button:hover { background: var(--wb-fill); color: var(--wb-text); }
+.tool-button.active { background: var(--wb-brand-soft); color: var(--wb-brand); }
 
 .mode-select {
   position: relative;
@@ -221,11 +221,11 @@ defineExpose({ fill, submit, focus })
   gap: 4px;
   border-radius: 9px;
   padding: 0 7px;
-  color: var(--sk-label-2);
+  color: var(--wb-text-2);
   cursor: pointer;
 }
 
-.mode-select:hover { background: var(--sk-fill); color: var(--sk-label); }
+.mode-select:hover { background: var(--wb-fill); color: var(--wb-text); }
 .mode-select.mode-plan { color: #2563eb; }
 .mode-select.mode-yolo { color: #b45309; }
 .mode-select.mode-guarded { color: #7c3aed; }
@@ -294,7 +294,7 @@ defineExpose({ fill, submit, focus })
   transform: translateX(-50%) translateY(0);
 }
 
-.composer-hint { margin-right: auto; color: var(--sk-label-3); font-size: 11.5px; }
+.composer-hint { margin-right: auto; color: var(--wb-muted); font-size: 11.5px; }
 
 .send-button, .stop-button {
   display: grid;
@@ -308,22 +308,22 @@ defineExpose({ fill, submit, focus })
 }
 
 .send-button {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--zwx-primary) 88%, #ffffff), var(--zwx-primary));
-  color: #fff;
-  box-shadow: 0 4px 10px var(--zwx-primary-ring);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--wb-brand) 86%, #ffffff), var(--wb-brand));
+  color: var(--wb-brand-contrast);
+  box-shadow: 0 4px 10px var(--wb-brand-soft);
 }
 
 .send-button:hover:not(:disabled) { filter: brightness(1.06); }
 .send-button:active:not(:disabled) { transform: scale(0.94); }
-.send-button:disabled { background: var(--sk-fill-strong); color: var(--sk-label-3); box-shadow: none; cursor: default; }
+.send-button:disabled { background: var(--wb-fill); color: var(--wb-muted); box-shadow: none; cursor: default; }
 
 .stop-button {
-  border: 1px solid rgba(255, 59, 48, 0.28);
-  background: rgba(255, 59, 48, 0.1);
-  color: var(--sk-red);
+  border: 1px solid color-mix(in srgb, var(--wb-danger) 30%, transparent);
+  background: color-mix(in srgb, var(--wb-danger) 10%, transparent);
+  color: var(--wb-danger);
 }
 
-.stop-button:hover { background: rgba(255, 59, 48, 0.16); }
+.stop-button:hover { background: color-mix(in srgb, var(--wb-danger) 16%, transparent); }
 
 .file-input { display: none; }
 
@@ -345,8 +345,8 @@ defineExpose({ fill, submit, focus })
   overflow: hidden;
   border-radius: 9px;
   padding: 5px;
-  background: var(--sk-fill);
-  color: var(--sk-label-2);
+  background: var(--wb-fill);
+  color: var(--wb-text-2);
   font-size: 9px;
   text-overflow: ellipsis;
 }

@@ -64,3 +64,10 @@
 - 用当前前端重新执行 `build:web` + `prepare:assets`，`desktop/app` 已与网页端同源产物；差异仅 `base: './'`（相对路径），CSS/JS 内容一致。
 - 通过本地静态代理（桌面产物 + /api 转发 8123）在浏览器登录并对比：登录页、任务页、侧栏、图标、浅/深色表现与 3000 一致。
 - 顺带把桌面诊断页按钮的旧紫色换成品牌蓝。
+
+## 追加调整（同日）：桌面安装包重建
+
+- `desktop/package.json` 的 `start` 改为先 `build:web` 再 `prepare:assets`，避免改完前端直接 `npm start` 时加载旧的 `frontend/dist`（这是桌面端与网页端样式不一致最常见的来源）。
+- 重新打包：`prepare-backend`（mvn package，含 JWT 修复）→ `electron-builder`，产物 `desktop/release/Aster-0.1.2-arm64.dmg`（337MB）与 `Aster-0.1.2-arm64-mac.zip`。
+- 打包校验：`Aster.app/Contents/Resources/icon.icns` 与新源文件 SHA 一致；`app.asar` 中 CSS 指纹 `index-Bb4yJS5m.css` 与 `frontend/dist` 一致；`app.asar` 含固定端口 `47821`；`Contents/Resources/server/aster-agent.jar` 为 11:32 新构建。
+- 注意：已安装的旧版 App 不会自动更新，需要重新安装这份 DMG 才能看到新界面。

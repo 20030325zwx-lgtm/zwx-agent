@@ -11,7 +11,7 @@
     "prepare:pgserver": "sh scripts/prepare-pgserver.sh",
     "prepare:icon": "sh scripts/generate-icon.sh",
     "dist:mac": "npm run build:web && npm run prepare:assets && npm run prepare:backend && npm run prepare:runtime && npm run prepare:pgserver && npm run prepare:icon && electron-builder --mac dmg zip --arm64",
-    "start": "npm run prepare:assets && electron ."
+    "start": "npm run build:web && npm run prepare:assets && electron ."
   },
   "devDependencies": {
     "electron": "^37.0.0",

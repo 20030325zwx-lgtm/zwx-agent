@@ -1,0 +1,33 @@
+日期：2026-10-29
+主题：工作流画布拖拽新增节点时落点错位（屏幕坐标被当成画布坐标）
+
+问题现象
+新建一个工作流后，从「开始」节点的输出端口拖到空白处并选择节点类型，
+新节点没有出现在松手的位置，而是跑到画布右下角（缩放时偏得更远），
+画布看起来像"两个节点突然错位了"。
+
+影响范围
+工作流编辑页所有"拖拽到空白处新增节点"的操作；
+通过节点设置里的「添加下游节点」新增不受影响（那条路径直接用画布坐标）。
+
+原因
+clientToFlowPoint 用 querySelector('.vue-flow__viewport') 读取 transform 把
+屏幕坐标换算成画布坐标。当前版本 Vue Flow 把
+transform: translate(...) scale(...) 挂在 .vue-flow__transformationpane 上，
+.vue-flow__viewport 的 computed transform 是 none，于是矩阵退化成单位矩阵，
+换算结果等于"屏幕坐标"，再叠加 1.6 倍缩放和画布偏移，落点就明显偏离。
+（新建工作流刚加载时 fit-view 会把缩放拉到 1.6，所以错位特别明显。）
+
+解决方式
+改用 Vue Flow 官方转换：setup 里 const { screenToFlowCoordinate } = useVueFlow()，
+clientToFlowPoint 直接返回 screenToFlowCoordinate({ x, y })，不再手写 DOM 矩阵换算。
+
+验证结果
+新建工作流后从开始节点拖到屏幕 (420, 520) 松手并选择「模型对话」：
+新节点屏幕位置正好是 (420, 520)，开始节点保持原位；边连接正确。
+测试用的临时工作流已通过 API 删除。
+
+后续注意事项
+- 涉及画布坐标换算一律用 vue-flow 暴露的 API（screenToFlowCoordinate / flowToScreenCoordinate），
+  不要依赖内部 DOM 结构，版本升级会改变 transform 挂载的节点。
+- 拖拽新增节点依赖 fit-view 后的缩放，测试时注意在不同缩放级别下都验证一次。

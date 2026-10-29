@@ -203,7 +203,7 @@ import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import { Handle, MarkerType, Position, VueFlow } from '@vue-flow/core'
+import { Handle, MarkerType, Position, VueFlow, useVueFlow } from '@vue-flow/core'
 import { History } from 'lucide-vue-next'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -255,6 +255,7 @@ const NODE_HELP = {
 }
 
 const route = useRoute()
+const { screenToFlowCoordinate } = useVueFlow()
 const workflowKey = computed(() => String(route.params.workflowKey || ''))
 const definition = ref(null)
 const loadError = ref('')
@@ -473,21 +474,13 @@ function autoLayout() {
   graphDirty = true
 }
 
-/** 屏幕坐标 → 画布坐标（基于 vue-flow pane 的 transform） */
+/**
+ * 屏幕坐标 → 画布坐标。必须走 vue-flow 自己的转换：
+ * 缩放/平移的 transform 挂在 .vue-flow__transformationpane 上，
+ * 手动读取 .vue-flow__viewport 会拿到 none，新增节点就会落到错误位置。
+ */
 function clientToFlowPoint(clientX, clientY) {
-  const pane = document.querySelector('.canvas-area .vue-flow__viewport')
-  const wrap = document.querySelector('.canvas-area')
-  if (!pane || !wrap) return { x: 120, y: 120 }
-  const transform = window.getComputedStyle(pane).transform
-  const matrix = new DOMMatrixReadOnly(transform === 'none' ? '' : transform)
-  const wrapRect = wrap.getBoundingClientRect()
-  const localX = clientX - wrapRect.left
-  const localY = clientY - wrapRect.top
-  const scale = matrix.a || 1
-  return {
-    x: (localX - matrix.e) / scale,
-    y: (localY - matrix.f) / scale
-  }
+  return screenToFlowCoordinate({ x: clientX, y: clientY })
 }
 
 function onConnect(connection) {

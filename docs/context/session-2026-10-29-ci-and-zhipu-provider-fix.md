@@ -54,6 +54,13 @@
 - 节点设置面板改为画布左下角浮动卡片（360px，可滚动）。
 - 验证：浏览器实测全屏画布、运行记录插卡展开详情、节点浮层编辑均正常。
 
+## 追加：修复拖拽新增节点落点错位（同日）
+
+- 原因：clientToFlowPoint 读 .vue-flow__viewport 的 transform，实际变换挂在
+  .vue-flow__transformationpane 上，矩阵退化为单位矩阵，落点被当成屏幕坐标。
+- 修复：改用 useVueFlow().screenToFlowCoordinate。
+- 验证：屏幕 (420,520) 松手新增节点，节点 rect 正是 (420,520)，开始节点不动。
+
 ## 遗留事项
 
 - CI 仍未真正覆盖向量库读写链路；要覆盖需添加仓库 secret DASHSCOPE_API_KEY

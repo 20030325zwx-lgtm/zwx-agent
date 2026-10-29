@@ -1,200 +1,198 @@
 <template>
   <div class="wf-page">
-    <div class="wf-inner">
-      <header class="wf-head">
-        <div>
-          <router-link to="/workflows" class="back-link">← 返回工作流列表</router-link>
-          <h1>{{ definition?.name || '工作流编辑' }}</h1>
-          <p>{{ definition?.description || '节点画布：自定义节点与连线，保存新版本后按图执行' }}</p>
-        </div>
-      </header>
-
-      <div v-if="loadError" class="wf-empty">{{ loadError }}</div>
-
-      <section v-else class="wf-section">
-        <div class="wf-def-head">
-          <div>
-            <h2>{{ definition?.name }}</h2>
-            <p>{{ definition?.description }}</p>
-          </div>
-          <span class="wf-version">v{{ definition?.version }} · {{ graphNodes.length }} 个节点</span>
-        </div>
-
-        <div class="canvas-toolbar">
-          <div class="canvas-hint">从节点右侧端口拖到空白处新增节点 · 拖动连线端点可改接其他节点 · 点击节点编辑参数</div>
-          <div class="toolbar-right">
-            <button type="button" class="ghost-btn" @click="autoLayout">自动布局</button>
-            <button type="button" class="ghost-btn" :disabled="savingVersion" @click="saveVersion()">
-              {{ savingVersion ? '保存中…' : '保存新版本' }}
-            </button>
-            <input
-              v-model.trim="keyword"
-              class="wf-input compact"
-              placeholder="运行输入（关键词）"
-              maxlength="64"
-              @keydown.enter="start()"
-            />
-            <button type="button" class="wf-run" :disabled="starting || !keyword" @click="start()">
-              {{ starting ? '运行中…' : '运行工作流' }}
-            </button>
-          </div>
-        </div>
-
-        <div class="canvas-wrap">
-          <div v-if="connectDrag.dragging" class="drag-hint">
-            拖到空白处松手添加节点 · 拖到节点端口直接连线
-          </div>
-          <VueFlow
-            :nodes="flowNodes"
-            :edges="flowEdges"
-            :nodes-draggable="true"
-            :nodes-connectable="true"
-            :elements-selectable="true"
-            :edges-updatable="true"
-            :delete-key-code="null"
-            :min-zoom="0.4"
-            :max-zoom="1.6"
-            :default-viewport="{ x: 20, y: 20, zoom: 0.95 }"
-            fit-view-on-init
-            @connect="onConnect"
-            @connect-start="onConnectStart"
-            @connect-end="onConnectEnd"
-            @edge-update="onEdgeUpdate"
-            @node-click="onNodeClick"
-            @nodes-change="markDirtyOnChange"
-            @edges-change="markDirtyOnChange"
-          >
-            <Background pattern-color="#c7ccdb" :gap="18" :size="1.4" />
-            <Controls />
-            <template #node-default="nodeProps">
-              <div
-                class="wf-node"
-                :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass, { 'is-start': nodeProps.data.nodeType === 'start' }]"
-                :style="{ '--node-color': nodeColor(nodeProps.data.nodeType) }"
-              >
-                <Handle v-if="nodeProps.data.nodeType !== 'start'" type="target" :position="Position.Left" class="wf-handle target" />
-                <div class="node-main">
-                  <span class="node-type">{{ nodeTypeLabel(nodeProps.data.nodeType) }}</span>
-                  <span class="node-name">{{ nodeProps.data.label }}</span>
-                </div>
-                <span v-if="nodeProps.data.statusText" class="node-status">{{ nodeProps.data.statusText }}</span>
-                <Handle type="source" :position="Position.Right" class="wf-handle source" />
-              </div>
-            </template>
-          </VueFlow>
-        </div>
-
-        <div
-          v-if="addMenu.open"
-          class="add-menu"
-          :style="{ left: addMenu.x + 'px', top: addMenu.y + 'px' }"
-          @click.stop
+    <header class="wf-topbar">
+      <div class="topbar-left">
+        <router-link to="/workflows" class="back-link">← 工作流</router-link>
+        <h1>{{ definition?.name || '工作流编辑' }}</h1>
+        <span class="wf-version">v{{ definition?.version }} · {{ graphNodes.length }} 个节点</span>
+        <p v-if="definition?.description" class="topbar-desc">{{ definition.description }}</p>
+      </div>
+      <div class="topbar-actions">
+        <input
+          v-model.trim="keyword"
+          class="wf-input compact keyword-input"
+          placeholder="运行输入（关键词）"
+          maxlength="64"
+          @keydown.enter="start()"
+        />
+        <button type="button" class="wf-run" :disabled="starting || !keyword" @click="start()">
+          {{ starting ? '运行中…' : '运行' }}
+        </button>
+        <button type="button" class="ghost-btn" @click="autoLayout">自动布局</button>
+        <button type="button" class="ghost-btn" :disabled="savingVersion" @click="saveVersion()">
+          {{ savingVersion ? '保存中…' : '保存新版本' }}
+        </button>
+        <button
+          type="button"
+          class="ghost-btn runs-toggle"
+          :class="{ active: runPanelOpen }"
+          @click="runPanelOpen = !runPanelOpen"
         >
-          <p class="add-menu-title">
-            {{ addMenuSourceName ? `在「${addMenuSourceName}」之后添加` : '添加节点' }}
-            <span class="add-menu-sub">· 选择节点类型</span>
-          </p>
-          <button
-            v-for="nodeType in nodeTypes"
-            :key="nodeType.type"
-            type="button"
-            class="add-menu-item"
-            @click="addNode(nodeType.type, addMenu.sourceId, { x: addMenu.flowX, y: addMenu.flowY })"
-          >
-            <span class="palette-dot" :style="{ background: nodeType.color }" />
-            <span class="add-menu-label">{{ nodeType.label }}</span>
-            <span class="add-menu-hint">{{ nodeType.hint }}</span>
-          </button>
-        </div>
+          <History :size="14" />
+          运行记录
+          <span v-if="filteredRuns.length" class="run-badge">{{ filteredRuns.length }}</span>
+        </button>
+      </div>
+    </header>
 
-        <div v-if="selectedNode" class="node-inspector">
-          <div class="inspector-head">
-            <strong>节点设置：{{ selectedNode.data.label }}</strong>
-            <div class="inspector-actions">
-              <button type="button" class="ghost-btn" @click="openAddMenuForNode(selectedNode.id)">添加下游节点</button>
-              <button type="button" class="ghost-btn danger" @click="removeSelectedNode">删除节点</button>
+    <div v-if="loadError" class="wf-empty">{{ loadError }}</div>
+
+    <div v-else class="canvas-area">
+      <div v-if="connectDrag.dragging" class="drag-hint">
+        拖到空白处松手添加节点 · 拖到节点端口直接连线
+      </div>
+      <VueFlow
+        :nodes="flowNodes"
+        :edges="flowEdges"
+        :nodes-draggable="true"
+        :nodes-connectable="true"
+        :elements-selectable="true"
+        :edges-updatable="true"
+        :delete-key-code="null"
+        :min-zoom="0.4"
+        :max-zoom="1.6"
+        :default-viewport="{ x: 20, y: 20, zoom: 0.95 }"
+        fit-view-on-init
+        @connect="onConnect"
+        @connect-start="onConnectStart"
+        @connect-end="onConnectEnd"
+        @edge-update="onEdgeUpdate"
+        @node-click="onNodeClick"
+        @nodes-change="markDirtyOnChange"
+        @edges-change="markDirtyOnChange"
+      >
+        <Background pattern-color="#c7ccdb" :gap="18" :size="1.4" />
+        <Controls />
+        <template #node-default="nodeProps">
+          <div
+            class="wf-node"
+            :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass, { 'is-start': nodeProps.data.nodeType === 'start' }]"
+            :style="{ '--node-color': nodeColor(nodeProps.data.nodeType) }"
+          >
+            <Handle v-if="nodeProps.data.nodeType !== 'start'" type="target" :position="Position.Left" class="wf-handle target" />
+            <div class="node-main">
+              <span class="node-type">{{ nodeTypeLabel(nodeProps.data.nodeType) }}</span>
+              <span class="node-name">{{ nodeProps.data.label }}</span>
             </div>
+            <span v-if="nodeProps.data.statusText" class="node-status">{{ nodeProps.data.statusText }}</span>
+            <Handle type="source" :position="Position.Right" class="wf-handle source" />
           </div>
-          <label class="inspector-row">
-            <span>名称</span>
-            <input v-model.trim="selectedNode.data.label" class="wf-input compact" maxlength="24" />
-          </label>
-          <label v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row align-top">
-            <span class="param-key">{{ key }}</span>
-            <textarea
-              v-if="LONG_PARAMS.has(key)"
-              v-model="selectedNode.data.params[key]"
-              class="wf-input compact textarea"
-              rows="3"
-              :placeholder="paramPlaceholder(key)"
-            />
-            <input v-else v-model="selectedNode.data.params[key]" class="wf-input compact" :placeholder="paramPlaceholder(key)" />
-          </label>
-          <p class="inspector-help">{{ NODE_HELP[selectedNode.data.nodeType] || '' }}</p>
-          <p class="inspector-hint">
-            参数支持引用：<code v-text="'{{input.keyword}}'"></code> 引用运行输入，
-            <code v-text="'{{节点key.output}}'"></code> 引用上游输出。
-          </p>
-        </div>
-      </section>
+        </template>
+      </VueFlow>
 
-      <section class="wf-section">
-        <div class="section-head">
-          <h2>运行记录</h2>
-          <button v-if="runs.length" type="button" class="refresh" @click="refresh">{{ pollLabel }}</button>
-        </div>
-        <p v-if="loading" class="section-hint">加载中…</p>
-        <p v-else-if="!filteredRuns.length" class="section-hint">该工作流还没有运行记录，从上方发起第一次运行</p>
-        <div v-else class="run-list">
-          <button
-            v-for="run in filteredRuns"
-            :key="run.id"
-            type="button"
-            class="run-item"
-            :class="{ selected: run.id === selectedId }"
-            @click="selectRun(run.id)"
-          >
-            <span class="status-dot" :class="statusClass(run.status)" />
-            <span class="run-main">
-              <span class="run-title">{{ run.input?.keyword || run.workflowName }}</span>
-              <span class="run-meta">{{ run.workflowName }} · v{{ run.definitionVersion }} · {{ formatTime(run.createdAt) }}</span>
-            </span>
-            <span class="run-status" :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span>
-          </button>
-        </div>
-      </section>
+      <div
+        v-if="addMenu.open"
+        class="add-menu"
+        :style="{ left: addMenu.x + 'px', top: addMenu.y + 'px' }"
+        @click.stop
+      >
+        <p class="add-menu-title">
+          {{ addMenuSourceName ? `在「${addMenuSourceName}」之后添加` : '添加节点' }}
+          <span class="add-menu-sub">· 选择节点类型</span>
+        </p>
+        <button
+          v-for="nodeType in nodeTypes"
+          :key="nodeType.type"
+          type="button"
+          class="add-menu-item"
+          @click="addNode(nodeType.type, addMenu.sourceId, { x: addMenu.flowX, y: addMenu.flowY })"
+        >
+          <span class="palette-dot" :style="{ background: nodeType.color }" />
+          <span class="add-menu-label">{{ nodeType.label }}</span>
+          <span class="add-menu-hint">{{ nodeType.hint }}</span>
+        </button>
+      </div>
 
-      <section v-if="detail" class="wf-section">
-        <div class="section-head">
-          <h2>运行详情</h2>
-          <span class="run-status big" :class="statusClass(detail.status)">{{ statusLabel(detail.status) }}</span>
+      <div v-if="selectedNode" class="node-inspector">
+        <div class="inspector-head">
+          <strong>节点设置：{{ selectedNode.data.label }}</strong>
+          <div class="inspector-actions">
+            <button type="button" class="ghost-btn" @click="openAddMenuForNode(selectedNode.id)">添加下游节点</button>
+            <button type="button" class="ghost-btn danger" @click="removeSelectedNode">删除节点</button>
+          </div>
         </div>
-        <div class="detail-steps">
-          <div v-for="step in detail.steps" :key="step.key" class="detail-step-wrap">
-            <button type="button" class="detail-step" @click="toggleOutput(step.key)">
-              <span class="status-dot" :class="stepClass(step.status)" />
-              <span class="step-main">
-                <span class="step-name">{{ step.name }}</span>
-                <span class="step-message">{{ step.message || statusLabel(step.status) }}</span>
+        <label class="inspector-row">
+          <span>名称</span>
+          <input v-model.trim="selectedNode.data.label" class="wf-input compact" maxlength="24" />
+        </label>
+        <label v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row align-top">
+          <span class="param-key">{{ key }}</span>
+          <textarea
+            v-if="LONG_PARAMS.has(key)"
+            v-model="selectedNode.data.params[key]"
+            class="wf-input compact textarea"
+            rows="3"
+            :placeholder="paramPlaceholder(key)"
+          />
+          <input v-else v-model="selectedNode.data.params[key]" class="wf-input compact" :placeholder="paramPlaceholder(key)" />
+        </label>
+        <p class="inspector-help">{{ NODE_HELP[selectedNode.data.nodeType] || '' }}</p>
+        <p class="inspector-hint">
+          参数支持引用：<code v-text="'{{input.keyword}}'"></code> 引用运行输入，
+          <code v-text="'{{节点key.output}}'"></code> 引用上游输出。
+        </p>
+      </div>
+
+      <aside v-if="runPanelOpen" class="run-panel" aria-label="运行记录">
+        <div class="run-panel-head">
+          <strong>运行记录</strong>
+          <button v-if="filteredRuns.length" type="button" class="refresh" @click="refresh">{{ pollLabel }}</button>
+          <button type="button" class="panel-close" aria-label="关闭运行记录" @click="runPanelOpen = false">×</button>
+        </div>
+        <div class="run-panel-body">
+          <p v-if="loading" class="section-hint">加载中…</p>
+          <p v-else-if="!filteredRuns.length" class="section-hint">该工作流还没有运行记录，从右上角发起第一次运行</p>
+          <div v-else class="run-list">
+            <button
+              v-for="run in filteredRuns"
+              :key="run.id"
+              type="button"
+              class="run-item"
+              :class="{ selected: run.id === selectedId }"
+              @click="selectRun(run.id)"
+            >
+              <span class="status-dot" :class="statusClass(run.status)" />
+              <span class="run-main">
+                <span class="run-title">{{ run.input?.keyword || run.workflowName }}</span>
+                <span class="run-meta">v{{ run.definitionVersion }} · {{ formatTime(run.createdAt) }}</span>
               </span>
-              <span class="step-status">{{ stepStatusText(step.status) }}</span>
+              <span class="run-status" :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span>
             </button>
-            <div v-if="expandedOutput === step.key && step.output" class="step-output">
-              <pre>{{ step.output }}</pre>
-              <div class="output-actions">
-                <button type="button" class="ghost-btn mini" @click="copyOutput(step.output)">复制</button>
+          </div>
+
+          <div v-if="detail" class="run-detail">
+            <div class="run-detail-head">
+              <strong>运行详情</strong>
+              <span class="run-status big" :class="statusClass(detail.status)">{{ statusLabel(detail.status) }}</span>
+            </div>
+            <div class="detail-steps">
+              <div v-for="step in detail.steps" :key="step.key" class="detail-step-wrap">
+                <button type="button" class="detail-step" @click="toggleOutput(step.key)">
+                  <span class="status-dot" :class="stepClass(step.status)" />
+                  <span class="step-main">
+                    <span class="step-name">{{ step.name }}</span>
+                    <span class="step-message">{{ step.message || statusLabel(step.status) }}</span>
+                  </span>
+                  <span class="step-status">{{ stepStatusText(step.status) }}</span>
+                </button>
+                <div v-if="expandedOutput === step.key && step.output" class="step-output">
+                  <pre>{{ step.output }}</pre>
+                  <div class="output-actions">
+                    <button type="button" class="ghost-btn mini" @click="copyOutput(step.output)">复制</button>
+                  </div>
+                </div>
               </div>
             </div>
+            <p v-if="detail.error" class="detail-error">{{ detail.error }}</p>
+            <div v-for="artifact in detail.artifacts" :key="artifact.name" class="artifact">
+              <img v-if="artifact.url && artifact.type !== 'file'" :src="artifact.url" alt="工作流产物" class="artifact-image" />
+              <a v-if="artifact.url" class="download-btn" :href="artifact.url" :download="artifact.name" target="_blank" rel="noopener">
+                下载 {{ artifact.name }}
+              </a>
+            </div>
           </div>
         </div>
-        <p v-if="detail.error" class="detail-error">{{ detail.error }}</p>
-        <div v-for="artifact in detail.artifacts" :key="artifact.name" class="artifact">
-          <img v-if="artifact.url && artifact.type !== 'file'" :src="artifact.url" alt="工作流产物" class="artifact-image" />
-          <a v-if="artifact.url" class="download-btn" :href="artifact.url" :download="artifact.name" target="_blank" rel="noopener">
-            下载 {{ artifact.name }}
-          </a>
-        </div>
-      </section>
+      </aside>
     </div>
   </div>
 </template>
@@ -206,6 +204,7 @@ import { message } from 'ant-design-vue'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { Handle, MarkerType, Position, VueFlow } from '@vue-flow/core'
+import { History } from 'lucide-vue-next'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import {
@@ -262,6 +261,7 @@ const loadError = ref('')
 const runs = ref([])
 const detail = ref(null)
 const selectedId = ref(null)
+const runPanelOpen = ref(false)
 const keyword = ref('')
 const loading = ref(true)
 const starting = ref(false)
@@ -475,8 +475,8 @@ function autoLayout() {
 
 /** 屏幕坐标 → 画布坐标（基于 vue-flow pane 的 transform） */
 function clientToFlowPoint(clientX, clientY) {
-  const pane = document.querySelector('.canvas-wrap .vue-flow__viewport')
-  const wrap = document.querySelector('.canvas-wrap')
+  const pane = document.querySelector('.canvas-area .vue-flow__viewport')
+  const wrap = document.querySelector('.canvas-area')
   if (!pane || !wrap) return { x: 120, y: 120 }
   const transform = window.getComputedStyle(pane).transform
   const matrix = new DOMMatrixReadOnly(transform === 'none' ? '' : transform)
@@ -682,6 +682,7 @@ async function start() {
     const run = await startWorkflow(workflowKey.value, keyword.value)
     selectedId.value = run.id
     detail.value = run
+    runPanelOpen.value = true
     applyRunStatus(run)
     await refresh()
     message.success('工作流已开始运行')
@@ -726,23 +727,26 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.wf-page { flex: 1; overflow-y: auto; }
-.wf-inner { max-width: 1120px; margin: 0 auto; padding: 28px 32px 56px; display: flex; flex-direction: column; gap: 16px; }
-.wf-head h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: var(--wb-text); }
-.wf-head p { margin-top: 4px; font-size: 13px; color: var(--wb-text-2); }
-.back-link { display: inline-block; margin-bottom: 6px; color: var(--wb-brand); font-size: 12.5px; }
-.wf-empty, .section-hint { padding: 18px 4px; color: var(--wb-muted); font-size: 13px; }
-.wf-section { padding: 18px 20px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg); background: var(--wb-surface); }
-.wf-def-head { display: flex; align-items: flex-start; justify-content: space-between; }
-.wf-def-head h2 { font-size: 16px; font-weight: 600; color: var(--wb-text); }
-.wf-def-head p { margin-top: 4px; font-size: 12.5px; color: var(--wb-text-2); }
+.wf-page { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.wf-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--wb-border); background: var(--wb-surface); }
+.topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar-left h1 { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; color: var(--wb-text); white-space: nowrap; }
+.topbar-desc { margin-left: 4px; color: var(--wb-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.back-link { color: var(--wb-brand); font-size: 12.5px; white-space: nowrap; }
+.wf-empty { flex: 1; padding: 40px 24px; color: var(--wb-muted); font-size: 13px; }
+.section-hint { padding: 14px 4px; color: var(--wb-muted); font-size: 13px; }
 .wf-version { padding: 2px 10px; border-radius: 999px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 12px; white-space: nowrap; }
-.canvas-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.keyword-input { width: 180px; flex: 0 0 auto; }
+.runs-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.runs-toggle.active { border-color: var(--wb-brand); color: var(--wb-brand); }
+.run-badge { padding: 0 6px; border-radius: 999px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 11px; }
+.canvas-area { position: relative; flex: 1; min-height: 0; background: var(--wb-surface-2); }
+.canvas-area :deep(.vue-flow) { width: 100%; height: 100%; }
 .palette { display: flex; gap: 6px; flex-wrap: wrap; }
 .palette-item { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--wb-border); border-radius: 999px; background: var(--wb-surface); color: var(--wb-text-2); font-size: 12px; transition: border-color 0.15s; }
 .palette-item:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
 .palette-dot { width: 8px; height: 8px; border-radius: 50%; }
-.toolbar-right { display: flex; align-items: center; gap: 8px; }
 .ghost-btn { padding: 7px 14px; border: 1px solid var(--wb-border); border-radius: 9px; background: transparent; color: var(--wb-text-2); font-size: 12.5px; }
 .ghost-btn:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
 .ghost-btn.danger:hover { border-color: var(--wb-danger); color: var(--wb-danger); }
@@ -751,15 +755,14 @@ onBeforeUnmount(() => {
 .wf-input:focus { border-color: var(--wb-brand); box-shadow: 0 0 0 3px var(--wb-brand-soft); }
 .wf-run { padding: 9px 20px; border: 0; border-radius: 10px; background: var(--wb-brand); color: var(--wb-brand-contrast); font-size: 13px; font-weight: 500; }
 .wf-run:disabled { background: var(--wb-fill); color: var(--wb-muted); }
-.canvas-wrap { height: 440px; margin-top: 12px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); overflow: hidden; background: var(--wb-surface-2); }
-.canvas-wrap :deep(.vue-flow) { background: var(--wb-surface-2); }
-.canvas-wrap :deep(.vue-flow__node) {
+.canvas-area :deep(.vue-flow) { background: var(--wb-surface-2); }
+.canvas-area :deep(.vue-flow__node) {
   z-index: 6;
 }
-.canvas-wrap :deep(.vue-flow__edge) {
+.canvas-area :deep(.vue-flow__edge) {
   z-index: 1;
 }
-.canvas-wrap :deep(.vue-flow__node-default) {
+.canvas-area :deep(.vue-flow__node-default) {
   padding: 0;
   border: 0;
   background: transparent;
@@ -803,12 +806,10 @@ onBeforeUnmount(() => {
 .output-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
 .ghost-btn.mini { padding: 4px 10px; font-size: 11.5px; }
 .download-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 9px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12.5px; }
-.canvas-hint { color: var(--wb-muted); font-size: 12px; }
 .drag-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 8; padding: 6px 14px; border-radius: 999px; background: var(--wb-brand); color: var(--wb-brand-contrast); font-size: 12px; box-shadow: var(--wb-shadow-md); pointer-events: none; }
-.canvas-wrap { position: relative; }
-.canvas-wrap :deep(.vue-flow__connection-path) { stroke: var(--wb-brand); stroke-width: 2; stroke-dasharray: 6 4; }
-.canvas-wrap :deep(.vue-flow__edge-path) { stroke: #94A3B8; stroke-width: 1.8; }
-.canvas-wrap :deep(.vue-flow__edge.selected .vue-flow__edge-path) { stroke: var(--wb-brand); }
+.canvas-area :deep(.vue-flow__connection-path) { stroke: var(--wb-brand); stroke-width: 2; stroke-dasharray: 6 4; }
+.canvas-area :deep(.vue-flow__edge-path) { stroke: #94A3B8; stroke-width: 1.8; }
+.canvas-area :deep(.vue-flow__edge.selected .vue-flow__edge-path) { stroke: var(--wb-brand); }
 .add-menu { animation: menu-in 0.14s ease-out; position: fixed; z-index: 70; width: 320px; max-height: 420px; overflow-y: auto; padding: 8px; border: 1px solid var(--wb-border); border-radius: 12px; background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); }
 .add-menu-title { padding: 4px 8px 8px; color: var(--wb-text); font-size: 12px; font-weight: 550; }
 .add-menu-sub { color: var(--wb-muted); font-weight: 400; }
@@ -820,16 +821,25 @@ onBeforeUnmount(() => {
 .wf-node.is-running { border-color: var(--wb-info); box-shadow: 0 0 0 2px rgba(37, 144, 255, 0.18); }
 .wf-node.is-done { border-color: var(--wb-success); }
 .wf-node.is-failed { border-color: var(--wb-danger); box-shadow: 0 0 0 2px rgba(220, 47, 76, 0.18); }
-.node-inspector { margin-top: 12px; padding: 14px 16px; border: 1px dashed var(--wb-border-strong); border-radius: var(--wb-radius); background: var(--wb-surface-2); display: flex; flex-direction: column; gap: 10px; }
-.inspector-head { display: flex; align-items: center; justify-content: space-between; color: var(--wb-text); font-size: 13px; }
+.node-inspector { position: absolute; left: 16px; bottom: 16px; z-index: 20; width: 360px; max-height: 62%; overflow-y: auto; padding: 14px 16px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg); background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); display: flex; flex-direction: column; gap: 10px; }
+.inspector-head { display: flex; flex-direction: column; align-items: stretch; gap: 8px; color: var(--wb-text); font-size: 13px; }
+.inspector-actions { display: flex; gap: 6px; }
 .inspector-row { display: flex; align-items: center; gap: 12px; }
 .inspector-row > span { flex: 0 0 120px; color: var(--wb-text-2); font-size: 12.5px; font-family: var(--wb-font-mono, monospace); }
 .inspector-help { padding: 8px 10px; border-radius: 8px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12px; line-height: 1.6; }
 .inspector-hint { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
 .inspector-hint code { padding: 1px 6px; border-radius: 5px; background: var(--wb-fill); font-size: 11.5px; }
-.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.section-head h2 { font-size: 15px; font-weight: 600; color: var(--wb-text); }
-.refresh { border: 0; background: transparent; color: var(--wb-muted); font-size: 12.5px; }
+.run-panel { position: absolute; top: 12px; right: 16px; bottom: 16px; z-index: 25; width: 360px; display: flex; flex-direction: column; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg); background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); overflow: hidden; }
+.run-panel-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--wb-border); }
+.run-panel-head strong { color: var(--wb-text); font-size: 13.5px; font-weight: 600; }
+.run-panel-head .refresh { margin-left: auto; }
+.panel-close { padding: 0 2px; border: 0; background: transparent; color: var(--wb-muted); font-size: 20px; line-height: 1; }
+.panel-close:hover { color: var(--wb-text); }
+.run-panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 14px; }
+.run-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--wb-border); }
+.run-detail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.run-detail-head strong { color: var(--wb-text); font-size: 13px; font-weight: 600; }
+.refresh { border: 0; background: transparent; color: var(--wb-muted); font-size: 12px; }
 .run-list { display: flex; flex-direction: column; gap: 2px; }
 .run-item { display: flex; align-items: center; gap: 11px; padding: 10px; border: 0; border-radius: var(--wb-radius); background: transparent; text-align: left; }
 .run-item:hover, .run-item.selected { background: var(--wb-fill); }

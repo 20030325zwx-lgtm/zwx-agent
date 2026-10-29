@@ -76,7 +76,7 @@ app:
     cache-ttl-seconds: ${APP_CONFIG_CACHE_TTL_SECONDS:30}
     dashscope-base-url: ${APP_DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com}
     # 用户可配置的模型服务域名白名单；其他域名仍会做公网地址校验
-    model-host-allowlist: ${APP_CONFIG_MODEL_HOST_ALLOWLIST:dashscope.aliyuncs.com,api.openai.com}
+    model-host-allowlist: ${APP_CONFIG_MODEL_HOST_ALLOWLIST:dashscope.aliyuncs.com,api.openai.com,open.bigmodel.cn}
   security:
     jwt-secret: ${JWT_SECRET:zwx-agent-dev-jwt-secret-change-me-0123456789abcdef}
     jwt-ttl-hours: ${JWT_TTL_HOURS:72}

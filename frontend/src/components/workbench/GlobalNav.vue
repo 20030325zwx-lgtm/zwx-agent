@@ -1,7 +1,7 @@
 <template>
   <nav class="wb-nav" :class="{ collapsed }" aria-label="全局导航">
     <div class="wb-nav-brand">
-      <div class="wb-nav-logo">✦</div>
+      <div class="wb-nav-logo" aria-hidden="true"><AsterMark /></div>
       <span class="wb-nav-wordmark">Aster</span>
     </div>
 
@@ -55,6 +55,7 @@ import {
   Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
   PanelLeftClose, PanelLeftOpen, Workflow
 } from 'lucide-vue-next'
+import AsterMark from '../AsterMark.vue'
 import { resolvedTheme, themeMode, setThemeMode } from '../../design/apply-tokens'
 import { getCurrentUser } from '../../api/auth'
 
@@ -134,11 +135,13 @@ function cycleTheme() {
   height: 36px;
   flex: 0 0 36px;
   border-radius: 11px;
-  background: var(--wb-brand-soft);
-  color: var(--wb-brand);
-  font-size: 17px;
+  background: var(--wb-mark-bg);
+  color: var(--wb-mark-fg);
+  box-shadow: inset 0 0 0 1px var(--wb-mark-ring);
   user-select: none;
 }
+
+.wb-nav-logo svg { width: 20px; height: 20px; }
 
 .wb-nav-wordmark {
   color: var(--wb-text);

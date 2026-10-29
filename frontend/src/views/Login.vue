@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <form class="login-card" @submit.prevent="submit">
-      <div class="login-badge" aria-hidden="true">A</div>
+      <div class="login-badge" aria-hidden="true"><AsterMark /></div>
       <h1>Aster</h1>
       <p class="login-subtitle">登录后继续使用智能体服务</p>
 
@@ -26,6 +26,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import AsterMark from '../components/AsterMark.vue'
 import { login } from '../api/auth'
 
 const router = useRouter()
@@ -86,12 +87,12 @@ const submit = async () => {
   margin: 0 auto;
   place-items: center;
   border-radius: 15px;
-  background: linear-gradient(160deg, #3f9bff, var(--sk-blue) 58%, #0062cc);
-  color: #fff;
-  font-size: 24px;
-  font-weight: 700;
-  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  background: var(--wb-mark-bg);
+  color: var(--wb-mark-fg);
+  box-shadow: var(--wb-shadow-md), inset 0 0 0 1px var(--wb-mark-ring);
 }
+
+.login-badge :deep(svg) { width: 30px; height: 30px; }
 
 .login-card h1 {
   margin: 4px 0 0;

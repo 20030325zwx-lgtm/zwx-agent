@@ -1210,7 +1210,7 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-.empty-avatar { display: block; width: 72px; height: 72px; border-radius: 20px; box-shadow: 0 14px 30px rgba(37, 99, 235, 0.2); }
+.empty-avatar { display: block; width: 72px; height: 72px; border-radius: 20px; box-shadow: var(--wb-shadow-lg); }
 .empty-kicker { margin-top: 16px; color: var(--wb-muted); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
 .workspace-empty h1 { margin: 9px 0 8px; color: var(--wb-text); font-size: clamp(24px, 3vw, 34px); font-weight: 800; line-height: 1.25; letter-spacing: -0.03em; }
 .workspace-empty p { max-width: 600px; margin: 0; color: var(--wb-text-2); font-size: 13.5px; line-height: 1.7; }

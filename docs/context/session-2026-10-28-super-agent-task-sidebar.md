@@ -49,3 +49,11 @@
 - 原底部的「添加工作区」上移到该位置，搜索框下移到它下面；分组「+」由 hover 才显示改为常驻 55% 透明度、悬停加深。
 - 无任何分组时仍保留空状态的「新建第一个任务」入口，避免新用户无路可走。
 - 实测：连续刷新两次不会新增空对话；测试产生的空对话已清理，当前保留 1 个会话。
+
+## 追加调整（同日）：品牌标记
+
+- 卡通机器人图标替换为几何四角星标记，详见 `docs/design/2026-10-28-brand-mark.md`。
+- 新增 `AsterMark.vue`；`AsterAvatar`、全局导航品牌位、登录徽标全部切到新标记；新增 `--wb-mark-*` 令牌（深色模式用内描边而不是反色方块）。
+- 补齐 favicon：原 `index.html` 指向不存在的 `favicon.ico`，现改为 `favicon.svg` + `apple-touch-icon.png`，并补 `theme-color`。
+- 桌面 `desktop/assets/icon.svg` 重绘为 1024 墨色圆角方块 + 白星，`generate-icon.sh` 重新生成 `icon.icns`（被 gitignore，打包时再生成）。
+- 验证：构建通过；浅色/深色任务页截图正常；16px favicon 可辨认。临时预览页已删除。

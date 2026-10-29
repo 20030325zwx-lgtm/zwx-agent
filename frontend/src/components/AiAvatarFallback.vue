@@ -33,6 +33,6 @@ defineProps({
 }
 
 .default, .super {
-  background: linear-gradient(145deg, #4da2ff, #007aff);
+  background: var(--wb-mark-bg);
 }
 </style>

@@ -10,6 +10,24 @@ jobs:
   backend-tests:
     name: 后端单元测试
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: zwx_agent
+          POSTGRES_USER: zwx_agent
+          POSTGRES_PASSWORD: zwx_agent_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zwx_agent -d zwx_agent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/zwx_agent
+      SPRING_DATASOURCE_USERNAME: zwx_agent
+      SPRING_DATASOURCE_PASSWORD: zwx_agent_password
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

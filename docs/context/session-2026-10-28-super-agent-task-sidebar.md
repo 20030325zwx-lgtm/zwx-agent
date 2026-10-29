@@ -130,3 +130,11 @@
 ## 文档收尾
 
 - 根 README 增加「代码工作区」使用说明与安全边界；设计文档的后续项改为「应用前待审批队列」，与当前的事后撤销语义区分。
+
+## 追加修复（同日）：CI 后端测试红灯
+
+- 现象：GitHub Actions「后端单元测试」长期 failure，IDE 提交历史出现红色感叹号。
+- 原因：CI 未启动数据库，三个 @SpringBootTest 在无 datasource 情况下加载上下文失败。
+- 修复：ci.yml 增加 pgvector/pgvector:pg16 service 与 SPRING_DATASOURCE_* 环境变量。
+- 验证：本机用 scratch 库跑完整套件 346 tests / 0 failures / 0 errors / 1 skipped；scratch 库已删除。
+- 详见 `docs/bugs/bug-2026-10-28-ci-backend-tests-missing-database.txt`。

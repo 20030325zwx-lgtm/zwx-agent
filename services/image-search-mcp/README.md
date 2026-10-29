@@ -11,7 +11,7 @@
 
 ```bash
 mvn -DskipTests package
-DASHSCOPE_API_KEY=... java -jar target/aster-image-mcp-server-0.0.1-SNAPSHOT.jar
+DASHSCOPE_API_KEY=... PEXELS_API_KEY=... java -jar target/aster-image-mcp-server-0.0.1-SNAPSHOT.jar
 ```
 
 默认端口 `8127`，SSE 地址 `http://127.0.0.1:8127/sse`，健康检查 `GET /health`。
@@ -20,7 +20,7 @@ DASHSCOPE_API_KEY=... java -jar target/aster-image-mcp-server-0.0.1-SNAPSHOT.jar
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填入 DASHSCOPE_API_KEY
+# 编辑 .env，填入 DASHSCOPE_API_KEY；使用 searchImage 时还需填入 PEXELS_API_KEY
 docker compose up -d --build
 ```
 
@@ -59,4 +59,5 @@ docker tag docker.m.daocloud.io/library/eclipse-temurin:21-jre-alpine eclipse-te
 - 服务本身没有鉴权，默认只绑定 localhost；不要直接暴露公网。
 - `IMAGE_ALLOWED_HOSTS` 限制工具接受的图片 URL host，默认只允许阿里云 OSS、本机地址。
 - `DASHSCOPE_API_KEY` 只通过环境变量注入，不写入镜像或仓库。
+- `searchImage` 使用独立的 Pexels API Key。未设置 `PEXELS_API_KEY` 时会返回明确的配置错误；DashScope Key 不能用于 Pexels。
 - 跨主机部署时应加访问控制、TLS 和网络隔离。

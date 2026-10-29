@@ -23,6 +23,7 @@ services:
     mem_limit: 512m
     environment:
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
       DASHSCOPE_VISION_MODEL: ${DASHSCOPE_VISION_MODEL:-qwen3-vl-plus}
       IMAGE_ALLOWED_HOSTS: ${IMAGE_ALLOWED_HOSTS:-*.aliyuncs.com}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75}

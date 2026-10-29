@@ -1,0 +1,7 @@
+日期：2026-10-29
+问题现象：调用 searchImage 搜图时返回 getJSONArray("photos") 为 null 的空指针异常，重复调用仍失败。
+影响范围：图片搜索 MCP 工具；图片理解、OCR 和表格提取不受此路径影响。
+原因：Pexels API Key 是写死的占位字符串，HTTP 错误响应没有 photos 数组；代码未检查状态和响应结构。
+解决方式：从 PEXELS_API_KEY 读取密钥；请求前校验配置，按 HTTP 状态返回明确错误，并校验 photos 数组后解析。
+验证结果：mvn -q test 通过（图片搜索 3 例、服务启动 1 例）；本机 image-mcp 容器未配置 PEXELS_API_KEY。真实 Pexels 搜索仍需配置有效 Key 后验证。
+后续注意事项：部署环境需设置 PEXELS_API_KEY 并重建、重启 image-mcp；不能复用 DashScope Key。

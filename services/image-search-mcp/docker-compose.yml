@@ -13,6 +13,7 @@ services:
       - "127.0.0.1:8127:8127"
     environment:
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
       DASHSCOPE_VISION_MODEL: ${DASHSCOPE_VISION_MODEL:-qwen3-vl-plus}
       IMAGE_ALLOWED_HOSTS: ${IMAGE_ALLOWED_HOSTS:-*.aliyuncs.com,localhost,127.0.0.1}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75}

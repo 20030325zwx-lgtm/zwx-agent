@@ -41,6 +41,9 @@
         </div>
 
         <div class="canvas-wrap">
+          <div v-if="connectDrag.dragging" class="drag-hint">
+            拖到空白处松手添加节点 · 拖到节点端口直接连线
+          </div>
           <VueFlow
             :nodes="flowNodes"
             :edges="flowEdges"
@@ -87,7 +90,10 @@
           :style="{ left: addMenu.x + 'px', top: addMenu.y + 'px' }"
           @click.stop
         >
-          <p class="add-menu-title">{{ addMenuSourceName ? `从「${addMenuSourceName}」拖出 · 选择节点类型` : '选择节点类型' }}</p>
+          <p class="add-menu-title">
+            {{ addMenuSourceName ? `在「${addMenuSourceName}」之后添加` : '添加节点' }}
+            <span class="add-menu-sub">· 选择节点类型</span>
+          </p>
           <button
             v-for="nodeType in nodeTypes"
             :key="nodeType.type"
@@ -105,6 +111,7 @@
           <div class="inspector-head">
             <strong>节点设置：{{ selectedNode.data.label }}</strong>
             <div class="inspector-actions">
+              <button type="button" class="ghost-btn" @click="openAddMenuForNode(selectedNode.id)">添加下游节点</button>
               <button type="button" class="ghost-btn danger" @click="removeSelectedNode">删除节点</button>
             </div>
           </div>
@@ -123,6 +130,7 @@
             />
             <input v-else v-model="selectedNode.data.params[key]" class="wf-input compact" :placeholder="paramPlaceholder(key)" />
           </label>
+          <p class="inspector-help">{{ NODE_HELP[selectedNode.data.nodeType] || '' }}</p>
           <p class="inspector-hint">
             参数支持引用：<code v-text="'{{input.keyword}}'"></code> 引用运行输入，
             <code v-text="'{{节点key.output}}'"></code> 引用上游输出。
@@ -233,6 +241,19 @@ const PARAM_DEFAULTS = {
   poster_render: { image: '{{search_image.output}}', copy: '{{llm_text.output}}' }
 }
 const LONG_PARAMS = new Set(['prompt', 'body', 'sql', 'template', 'content', 'question'])
+const NODE_HELP = {
+  start: '开始节点：代表一次运行的输入。运行输入（如关键词）用 {{input.keyword}} 引用；{{start.output}} 是全部输入。',
+  search_image: '图片搜索：keyword 填搜索词（可直接写关键词或引用上游）。输出是图片 URL，可被图片理解/海报合成等节点引用。',
+  image_understand: '图片理解：image 填图片 URL 或引用上游图片节点输出；question 填想问的问题。输出为图片描述文本（服务不可用时降级为提示文本）。',
+  llm_text: '模型对话：prompt 写提示词，可嵌入 {{节点.output}} 与 {{input.字段}} 引用上游结果做二次编辑。输出为模型回复。使用“设置→模型”中绑定的对话模型。',
+  web_search: '联网搜索：query 填搜索词。输出为搜索结果文本（需要配置搜索 API Key）。',
+  image_generate: '图片生成：prompt 描述画面，size 如 1024*1024，model 默认 wanx2.1-t2i-turbo。输出为生成的图片（可预览下载），按张计费，需要 DashScope 供应商 Key。',
+  http_request: 'REST 请求：method 选 GET/POST 等，url 填地址，headers/body 填 JSON。输出为响应体（截断 4000 字）；非 2xx 视为失败。',
+  db_query: '数据库查询：sql 只能写单条 SELECT/WITH（最多 200 行、10 秒超时）。输出为结果 JSON。',
+  text_template: '文本模板：template 里可混合文字与引用，如“报告：{{llm_text.output}}”。输出为替换后的文本，不消耗模型。',
+  file_export: '文件导出：filename 写文件名（md/txt/json/csv），content 通常引用上游文本。输出为可下载文件。',
+  poster_render: '海报合成：image 引用商品图，copy 引用文案 JSON（标题/副标题/卖点/配色）。输出为海报 PNG。'
+}
 
 const route = useRoute()
 const workflowKey = computed(() => String(route.params.workflowKey || ''))
@@ -248,7 +269,7 @@ const savingVersion = ref(false)
 const flowNodes = ref([])
 const flowEdges = ref([])
 const selectedNode = ref(null)
-const connectDrag = reactive({ sourceId: '', justConnected: false })
+const connectDrag = reactive({ sourceId: '', justConnected: false, dragging: false })
 const expandedOutput = ref('')
 const addMenu = reactive({ open: false, x: 0, y: 0, sourceId: '', flowX: 0, flowY: 0 })
 const addMenuSourceName = computed(() => {
@@ -489,6 +510,7 @@ function onConnect(connection) {
 
 function onConnectStart(params) {
   connectDrag.sourceId = params?.nodeId || ''
+  connectDrag.dragging = true
 }
 
 /** 从端口拖拽到空白画布松手：就地弹类型菜单，选中后在该位置建节点并连线 */
@@ -496,6 +518,7 @@ function onConnectEnd(event) {
   const sourceId = connectDrag.sourceId
   connectDrag.sourceId = ''
   if (connectDrag.justConnected) return
+  connectDrag.dragging = false
   const native = event?.event || event
   const clientX = native?.clientX
   const clientY = native?.clientY
@@ -669,6 +692,20 @@ async function start() {
   }
 }
 
+function openAddMenuForNode(nodeId) {
+  const node = flowNodes.value.find(item => item.id === nodeId)
+  if (!node) return
+  const el = document.querySelector(`.vue-flow__node[data-id="${nodeId}"]`)
+  const rect = el?.getBoundingClientRect()
+  addMenu.open = true
+  addMenu.sourceId = nodeId
+  addMenu.flowX = node.position.x + 250
+  addMenu.flowY = node.position.y + 40
+  addMenu.x = Math.min((rect?.right || 400) + 14, window.innerWidth - 340)
+  addMenu.y = Math.min((rect?.top || 200) - 10, window.innerHeight - 430)
+  suppressMenuCloseUntil = Date.now() + 200
+}
+
 function closeAddMenu() {
   if (Date.now() < suppressMenuCloseUntil) return
   addMenu.open = false
@@ -736,6 +773,12 @@ onBeforeUnmount(() => {
   background: var(--wb-brand);
   transition: transform 0.12s, box-shadow 0.12s;
 }
+.wf-handle::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+}
 .wf-handle:hover {
   transform: scale(1.5);
   box-shadow: 0 0 0 4px var(--wb-brand-soft);
@@ -761,8 +804,15 @@ onBeforeUnmount(() => {
 .ghost-btn.mini { padding: 4px 10px; font-size: 11.5px; }
 .download-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 9px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12.5px; }
 .canvas-hint { color: var(--wb-muted); font-size: 12px; }
-.add-menu { position: fixed; z-index: 70; width: 320px; max-height: 420px; overflow-y: auto; padding: 8px; border: 1px solid var(--wb-border); border-radius: 12px; background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); }
-.add-menu-title { padding: 4px 8px 8px; color: var(--wb-muted); font-size: 11.5px; }
+.drag-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 8; padding: 6px 14px; border-radius: 999px; background: var(--wb-brand); color: var(--wb-brand-contrast); font-size: 12px; box-shadow: var(--wb-shadow-md); pointer-events: none; }
+.canvas-wrap { position: relative; }
+.canvas-wrap :deep(.vue-flow__connection-path) { stroke: var(--wb-brand); stroke-width: 2; stroke-dasharray: 6 4; }
+.canvas-wrap :deep(.vue-flow__edge-path) { stroke: #94A3B8; stroke-width: 1.8; }
+.canvas-wrap :deep(.vue-flow__edge.selected .vue-flow__edge-path) { stroke: var(--wb-brand); }
+.add-menu { animation: menu-in 0.14s ease-out; position: fixed; z-index: 70; width: 320px; max-height: 420px; overflow-y: auto; padding: 8px; border: 1px solid var(--wb-border); border-radius: 12px; background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); }
+.add-menu-title { padding: 4px 8px 8px; color: var(--wb-text); font-size: 12px; font-weight: 550; }
+.add-menu-sub { color: var(--wb-muted); font-weight: 400; }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 .add-menu-item { display: flex; width: 100%; align-items: center; gap: 9px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--wb-text); font-size: 12.5px; text-align: left; }
 .add-menu-item:hover { background: var(--wb-fill); }
 .add-menu-label { flex: 0 0 auto; }
@@ -774,6 +824,7 @@ onBeforeUnmount(() => {
 .inspector-head { display: flex; align-items: center; justify-content: space-between; color: var(--wb-text); font-size: 13px; }
 .inspector-row { display: flex; align-items: center; gap: 12px; }
 .inspector-row > span { flex: 0 0 120px; color: var(--wb-text-2); font-size: 12.5px; font-family: var(--wb-font-mono, monospace); }
+.inspector-help { padding: 8px 10px; border-radius: 8px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12px; line-height: 1.6; }
 .inspector-hint { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
 .inspector-hint code { padding: 1px 6px; border-radius: 5px; background: var(--wb-fill); font-size: 11.5px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }

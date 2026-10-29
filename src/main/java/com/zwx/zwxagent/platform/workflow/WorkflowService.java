@@ -51,8 +51,9 @@ import java.util.regex.Pattern;
 @Slf4j
 public class WorkflowService {
 
-    public static final Set<String> NODE_TYPES =
-            Set.of("search_image", "image_understand", "llm_text", "web_search", "poster_render");
+    public static final Set<String> NODE_TYPES = Set.of(
+            "start", "search_image", "image_understand", "llm_text", "web_search", "poster_render",
+            "image_generate", "http_request", "db_query", "text_template", "file_export");
 
     public record StepDef(String key, String name, String description) {
     }
@@ -132,6 +133,7 @@ public class WorkflowService {
     private final String ossBucket;
     private final String searchProvider;
     private final String searchApiKey;
+    private final boolean allowLocalEndpoints;
     private final ExecutorService executor = Executors.newFixedThreadPool(2, task -> {
         Thread thread = new Thread(task, "workflow-runner");
         thread.setDaemon(true);
@@ -151,7 +153,8 @@ public class WorkflowService {
                            OssClientProvider ossClientProvider,
                            @Value("${app.oss.bucket}") String ossBucket,
                            @Value("${search-api.provider:baidu}") String searchProvider,
-                           @Value("${search-api.api-key:}") String searchApiKey) {
+                           @Value("${search-api.api-key:}") String searchApiKey,
+                           @Value("${app.config.allow-local-model-endpoints:false}") boolean allowLocalEndpoints) {
         this.jdbcTemplate = jdbcTemplate;
         this.mcpServerConfigurationService = mcpServerConfigurationService;
         this.imageAnalysisService = imageAnalysisService;
@@ -162,6 +165,7 @@ public class WorkflowService {
         this.ossBucket = ossBucket;
         this.searchProvider = searchProvider;
         this.searchApiKey = searchApiKey;
+        this.allowLocalEndpoints = allowLocalEndpoints;
     }
 
     // ---------------------------------------------------------------- 定义版本
@@ -233,8 +237,7 @@ public class WorkflowService {
         if (existing != null && existing > 0) throw new IllegalArgumentException("工作流标识已存在：" + key);
         WorkflowGraph graph = request.graph();
         if (graph == null || graph.nodes() == null || graph.nodes().isEmpty()) {
-            graph = new WorkflowGraph(List.of(new GraphNodeDef("llm_text_start", "llm_text", "生成内容",
-                    Map.of("prompt", "根据输入生成内容：{{input.keyword}}"))), List.of());
+            graph = new WorkflowGraph(List.of(new GraphNodeDef("start", "start", "开始", Map.of())), List.of());
         }
         validateGraph(graph);
         String description = request.description() == null ? "" : request.description().trim();
@@ -307,6 +310,15 @@ public class WorkflowService {
                     throw new IllegalArgumentException("连线引用了不存在的节点");
                 }
             }
+        }
+        // 开始节点：最多一个，且不能有入边
+        long startCount = graph.nodes().stream().filter(node -> "start".equals(node.type())).count();
+        if (startCount > 1) throw new IllegalArgumentException("只能有一个开始节点");
+        if (startCount == 1 && graph.edges() != null) {
+            String startKey = graph.nodes().stream().filter(node -> "start".equals(node.type()))
+                    .findFirst().get().key();
+            boolean hasIncoming = graph.edges().stream().anyMatch(edge -> edge.to().equals(startKey));
+            if (hasIncoming) throw new IllegalArgumentException("开始节点不能有上游连线");
         }
         topologicalOrder(graph); // 有环时抛错
     }
@@ -412,6 +424,15 @@ public class WorkflowService {
             }
             case "web_search" -> webSearch(text(params.get("query")));
             case "poster_render" -> renderPoster(context, text(params.get("image")), text(params.get("copy")));
+            case "start" -> new NodeResult(toJson(context.input()), "开始");
+            case "http_request" -> httpRequest(context, params);
+            case "db_query" -> dbQuery(text(params.get("sql")));
+            case "image_generate" -> imageGenerate(context, text(params.get("prompt")),
+                    textOrDefault(text(params.get("size")), "1024*1024"),
+                    textOrDefault(text(params.get("model")), "wanx2.1-t2i-turbo"));
+            case "text_template" -> new NodeResult(text(params.get("template")), "文本已封装");
+            case "file_export" -> fileExport(context, textOrDefault(text(params.get("filename")), "output.md"),
+                    text(params.get("content")));
             default -> throw new IllegalArgumentException("未知节点类型：" + type);
         };
     }
@@ -478,6 +499,169 @@ public class WorkflowService {
         byte[] poster = PosterComposer.compose(productImage, copy);
         Artifact artifact = storeArtifact(context, poster);
         return new NodeResult(artifact.objectKey(), "海报已生成");
+    }
+
+    private NodeResult httpRequest(RunContext context, Map<String, Object> params) throws Exception {
+        String url = text(params.get("url"));
+        if (url == null || url.isBlank()) throw new IllegalArgumentException("REST 请求缺少 url");
+        String method = textOrDefault(text(params.get("method")).toUpperCase(Locale.ROOT), "GET");
+        String body = text(params.get("body"));
+        URI target = URI.create(url);
+        validateOutboundUrl(target);
+        HttpRequest.Builder builder = HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(30));
+        builder.header("User-Agent", "Aster-Workflow/0.1");
+        if (params.get("headers") instanceof Map<?, ?> headers) {
+            headers.forEach((key, value) -> builder.header(String.valueOf(key), String.valueOf(value)));
+        }
+        if (body != null && !body.isBlank()) {
+            builder.header("Content-Type", "application/json");
+            builder.method(method, HttpRequest.BodyPublishers.ofString(body));
+        } else {
+            builder.method(method, HttpRequest.BodyPublishers.noBody());
+        }
+        HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        String payload = response.body() == null ? "" : response.body();
+        if (response.statusCode() >= 400) {
+            throw new IllegalStateException("REST 请求失败：HTTP " + response.statusCode() + " "
+                    + truncate(payload, 200));
+        }
+        return new NodeResult(truncate(payload, MAX_OUTPUT_CHARS), "HTTP " + response.statusCode());
+    }
+
+    /** 只读数据库查询：仅允许单条 SELECT/WITH，限定 200 行与 10 秒超时。 */
+    private NodeResult dbQuery(String sql) {
+        String statement = sql == null ? "" : sql.trim();
+        if (statement.isEmpty()) throw new IllegalArgumentException("数据库查询缺少 sql");
+        String upper = statement.toUpperCase(Locale.ROOT);
+        if (!(upper.startsWith("SELECT") || upper.startsWith("WITH"))) {
+            throw new IllegalArgumentException("数据库查询仅支持 SELECT/WITH 只读语句");
+        }
+        if (statement.contains(";") && statement.indexOf(';') < statement.length() - 1) {
+            throw new IllegalArgumentException("数据库查询只允许单条语句");
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.query(connection -> {
+            java.sql.PreparedStatement ps = connection.prepareStatement(statement);
+            ps.setMaxRows(200);
+            ps.setQueryTimeout(10);
+            return ps;
+        }, rs -> {
+            List<Map<String, Object>> result = new ArrayList<>();
+            int columns = rs.getMetaData().getColumnCount();
+            while (rs.next()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                for (int i = 1; i <= columns; i++) {
+                    row.put(rs.getMetaData().getColumnLabel(i), rs.getObject(i));
+                }
+                result.add(row);
+            }
+            return result;
+        });
+        if (rows == null) rows = List.of();
+        return new NodeResult(truncate(toJson(rows), MAX_OUTPUT_CHARS), "查询返回 " + rows.size() + " 行");
+    }
+
+    /** 文生图：DashScope 异步任务（创建 → 轮询 → 下载），产物登记为图片。 */
+    private NodeResult imageGenerate(RunContext context, String prompt, String size, String model) throws Exception {
+        if (prompt == null || prompt.isBlank()) throw new IllegalArgumentException("生图提示词为空");
+        var selection = modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT);
+        var config = selection.config();
+        if (!"dashscope".equalsIgnoreCase(config.provider()) || !config.hasApiKey()) {
+            throw new IllegalStateException("图片生成需要 DashScope 供应商（请在模型设置中绑定带 Key 的 DashScope）");
+        }
+        String baseUrl = config.baseUrl() == null || config.baseUrl().isBlank()
+                ? "https://dashscope.aliyuncs.com" : config.baseUrl().replaceAll("/+$", "");
+        String createBody = toJson(Map.of(
+                "model", model,
+                "input", Map.of("prompt", prompt),
+                "parameters", Map.of("size", size, "n", 1)));
+        HttpRequest create = HttpRequest.newBuilder(URI.create(baseUrl + "/api/v1/services/aigc/text2image/image-synthesis"))
+                .timeout(Duration.ofSeconds(30))
+                .header("Authorization", "Bearer " + config.apiKey())
+                .header("X-DashScope-Async", "enable")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(createBody)).build();
+        HttpResponse<String> created = httpClient.send(create, HttpResponse.BodyHandlers.ofString());
+        if (created.statusCode() >= 400) {
+            throw new IllegalStateException("创建生图任务失败：HTTP " + created.statusCode() + " " + truncate(created.body(), 200));
+        }
+        String taskId = parseNode(created.body()).path("output").path("task_id").asText("");
+        if (taskId.isBlank()) throw new IllegalStateException("生图任务创建未返回 task_id");
+        String imageUrl = null;
+        long deadline = System.currentTimeMillis() + 120_000;
+        while (System.currentTimeMillis() < deadline) {
+            Thread.sleep(3000);
+            HttpRequest poll = HttpRequest.newBuilder(URI.create(baseUrl + "/api/v1/tasks/" + taskId))
+                    .timeout(Duration.ofSeconds(20))
+                    .header("Authorization", "Bearer " + config.apiKey())
+                    .GET().build();
+            HttpResponse<String> status = httpClient.send(poll, HttpResponse.BodyHandlers.ofString());
+            JsonNode output = parseNode(status.body()).path("output");
+            String state = output.path("task_status").asText("");
+            if ("SUCCEEDED".equals(state)) {
+                imageUrl = output.path("results").path(0).path("url").asText("");
+                break;
+            }
+            if ("FAILED".equals(state) || "CANCELED".equals(state)) {
+                throw new IllegalStateException("生图任务失败：" + truncate(status.body(), 200));
+            }
+        }
+        if (imageUrl == null || imageUrl.isBlank()) throw new IllegalStateException("生图任务超时未完成");
+        byte[] image = downloadImage(imageUrl);
+        String name = "生成图片" + (image.length > 0 ? ".png" : "");
+        Artifact artifact = storeArtifact(context, "image", name, "image/png", image, "workflow/" + context.userId()
+                + "/" + context.id() + "/generated-" + System.currentTimeMillis() + ".png");
+        return new NodeResult(artifact.objectKey(), "图片已生成");
+    }
+
+    /** 文件导出：把上游文本保存为可下载文件产物。 */
+    private NodeResult fileExport(RunContext context, String filename, String content) {
+        if (filename == null || filename.isBlank()) throw new IllegalArgumentException("文件导出缺少文件名");
+        String safeName = filename.replaceAll("[\\/:*?\"<>|]", "_");
+        String text = content == null ? "" : content;
+        String lower = safeName.toLowerCase(Locale.ROOT);
+        String contentType = lower.endsWith(".json") ? "application/json"
+                : lower.endsWith(".md") ? "text/markdown"
+                : lower.endsWith(".csv") ? "text/csv" : "text/plain";
+        String objectKey = "workflow/" + context.userId() + "/" + context.id() + "/" + safeName;
+        Artifact artifact = storeArtifact(context, "file", safeName, contentType,
+                text.getBytes(java.nio.charset.StandardCharsets.UTF_8), objectKey);
+        return new NodeResult(artifact.objectKey(), "文件已导出：" + safeName);
+    }
+
+    /**
+     * 出站地址策略（本地单用户工具）：域名放行（本机 HTTPS 代理/VPN 常把公网域名解析为保留段地址，
+     * 按解析结果拦截会误伤正常调用）；字面 IP 一律做内网/回环校验；保留云元数据地址拦截。
+     * 桌面模式另允许 localhost（本机服务）。
+     */
+    private void validateOutboundUrl(URI target) {
+        String scheme = target.getScheme() == null ? "" : target.getScheme().toLowerCase(Locale.ROOT);
+        if (!("http".equals(scheme) || "https".equals(scheme))) {
+            throw new IllegalArgumentException("REST 请求仅支持 HTTP(S)");
+        }
+        String host = target.getHost() == null ? "" : target.getHost().toLowerCase(Locale.ROOT);
+        if (host.isBlank()) throw new IllegalArgumentException("REST 请求地址无效");
+        if ("169.254.169.254".equals(host)) throw new IllegalArgumentException("禁止访问云元数据地址");
+        boolean localAllowed = allowLocalEndpoints && ("localhost".equals(host) || host.endsWith(".local"));
+        if (localAllowed) return;
+        if (isIpLiteral(host)) {
+            try {
+                java.net.InetAddress address = java.net.InetAddress.getByName(host);
+                if (address.isLoopbackAddress() || address.isSiteLocalAddress()
+                        || address.isLinkLocalAddress() || address.isAnyLocalAddress()) {
+                    throw new IllegalArgumentException("禁止访问内网或回环地址：" + host);
+                }
+            } catch (java.net.UnknownHostException exception) {
+                throw new IllegalArgumentException("REST 请求地址无效：" + host);
+            }
+            return;
+        }
+        if ("localhost".equals(host) || host.endsWith(".local") || host.endsWith(".internal")) {
+            throw new IllegalArgumentException("禁止访问本机或内网域名：" + host);
+        }
+    }
+
+    private static boolean isIpLiteral(String host) {
+        return host.contains(":") || host.matches("\\d{1,3}(\\.\\d{1,3}){3}");
     }
 
     // ---------------------------------------------------------------- 参数引用与工具
@@ -603,7 +787,7 @@ public class WorkflowService {
 
     /** 检索来源为外部公开媒体 CDN：本机代理/VPN 环境常解析为保留段 IP，按可信来源放行 */
     private static final Set<String> TRUSTED_IMAGE_HOSTS =
-            Set.of("wikimedia.org", "wikipedia.org", "pexels.com", "pixabay.com", "openverse.org");
+            Set.of("wikimedia.org", "wikipedia.org", "pexels.com", "pixabay.com", "openverse.org", "aliyuncs.com");
 
     private byte[] downloadImage(String url) throws Exception {
         URI target = URI.create(url);
@@ -630,12 +814,18 @@ public class WorkflowService {
     }
 
     private Artifact storeArtifact(RunContext context, byte[] poster) {
-        String objectKey = "workflow/" + context.userId() + "/" + context.id() + "/poster.png";
+        return storeArtifact(context, "poster", "海报.png", "image/png", poster,
+                "workflow/" + context.userId() + "/" + context.id() + "/poster.png");
+    }
+
+    private Artifact storeArtifact(RunContext context, String type, String name, String contentType,
+                                   byte[] bytes, String objectKey) {
         var metadata = new com.aliyun.oss.model.ObjectMetadata();
-        metadata.setContentLength((long) poster.length);
-        metadata.setContentType("image/png");
-        ossClientProvider.getClient().putObject(ossBucket, objectKey, new ByteArrayInputStream(poster), metadata);
-        Artifact artifact = new Artifact("poster", "海报.png", objectKey);
+        metadata.setContentLength((long) bytes.length);
+        metadata.setContentType(contentType);
+        ossClientProvider.getClient().putObject(ossBucket, objectKey,
+                new java.io.ByteArrayInputStream(bytes), metadata);
+        Artifact artifact = new Artifact(type, name, objectKey);
         context.artifacts().add(artifact);
         jdbcTemplate.update("UPDATE workflow_run SET artifacts = ?::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 toJson(context.artifacts()), context.id());
@@ -643,12 +833,21 @@ public class WorkflowService {
     }
 
     public String presignArtifact(String tenantId, String userId, String runId, String objectKey) {
+        return presignArtifact(tenantId, userId, runId, objectKey, null);
+    }
+
+    public String presignArtifact(String tenantId, String userId, String runId, String objectKey, String downloadName) {
         if (!objectKey.startsWith("workflow/" + userId + "/" + runId + "/")) {
             throw new IllegalArgumentException("无权访问该产物");
         }
         var request = new com.aliyun.oss.model.GeneratePresignedUrlRequest(ossBucket, objectKey,
                 com.aliyun.oss.HttpMethod.GET);
         request.setExpiration(java.util.Date.from(Instant.now().plus(Duration.ofHours(2))));
+        if (downloadName != null && !downloadName.isBlank()) {
+            request.addQueryParameter("response-content-disposition",
+                    "attachment; filename*=UTF-8''" + java.net.URLEncoder.encode(downloadName,
+                            java.nio.charset.StandardCharsets.UTF_8));
+        }
         return ossClientProvider.getClient().generatePresignedUrl(request).toString();
     }
 
@@ -734,9 +933,14 @@ public class WorkflowService {
         List<ArtifactView> artifacts = new ArrayList<>();
         row.artifacts().forEach(node -> {
             String objectKey = node.path("objectKey").asText();
-            String url = withArtifactUrl && !objectKey.isBlank()
-                    ? presignArtifact(row.tenantId(), row.userId(), row.id(), objectKey) : "";
-            artifacts.add(new ArtifactView(node.path("type").asText(), node.path("name").asText(), url));
+            String type = node.path("type").asText();
+            String name = node.path("name").asText();
+            String url = "";
+            if (withArtifactUrl && !objectKey.isBlank()) {
+                url = presignArtifact(row.tenantId(), row.userId(), row.id(), objectKey,
+                        "file".equals(type) ? name : null);
+            }
+            artifacts.add(new ArtifactView(type, name, url));
         });
         Map<String, Object> input = objectMapper.convertValue(row.input(), new TypeReference<>() {
         });

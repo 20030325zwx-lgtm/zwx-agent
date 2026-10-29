@@ -70,8 +70,8 @@
             <Background pattern-color="#c7ccdb" :gap="20" />
             <Controls />
             <template #node-default="nodeProps">
-              <div class="wf-node" :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass]">
-                <Handle type="target" :position="Position.Left" class="wf-handle" />
+              <div class="wf-node" :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass, { 'is-start': nodeProps.data.nodeType === 'start' }]">
+                <Handle v-if="nodeProps.data.nodeType !== 'start'" type="target" :position="Position.Left" class="wf-handle" />
                 <span class="node-type-dot" :style="{ background: nodeColor(nodeProps.data.nodeType) }" />
                 <div class="node-main">
                   <span class="node-name">{{ nodeProps.data.label }}</span>
@@ -95,9 +95,16 @@
             <span>名称</span>
             <input v-model.trim="selectedNode.data.label" class="wf-input compact" maxlength="24" />
           </label>
-          <label v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row">
+          <label v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row align-top">
             <span class="param-key">{{ key }}</span>
-            <input v-model="selectedNode.data.params[key]" class="wf-input compact" :placeholder="paramPlaceholder(key)" />
+            <textarea
+              v-if="LONG_PARAMS.has(key)"
+              v-model="selectedNode.data.params[key]"
+              class="wf-input compact textarea"
+              rows="3"
+              :placeholder="paramPlaceholder(key)"
+            />
+            <input v-else v-model="selectedNode.data.params[key]" class="wf-input compact" :placeholder="paramPlaceholder(key)" />
           </label>
           <p class="inspector-hint">
             参数支持引用：<code v-text="'{{input.keyword}}'"></code> 引用运行输入，
@@ -138,18 +145,29 @@
           <span class="run-status big" :class="statusClass(detail.status)">{{ statusLabel(detail.status) }}</span>
         </div>
         <div class="detail-steps">
-          <div v-for="step in detail.steps" :key="step.key" class="detail-step">
-            <span class="status-dot" :class="stepClass(step.status)" />
-            <span class="step-main">
-              <span class="step-name">{{ step.name }}</span>
-              <span class="step-message">{{ step.message || statusLabel(step.status) }}</span>
-            </span>
-            <span class="step-status">{{ stepStatusText(step.status) }}</span>
+          <div v-for="step in detail.steps" :key="step.key" class="detail-step-wrap">
+            <button type="button" class="detail-step" @click="toggleOutput(step.key)">
+              <span class="status-dot" :class="stepClass(step.status)" />
+              <span class="step-main">
+                <span class="step-name">{{ step.name }}</span>
+                <span class="step-message">{{ step.message || statusLabel(step.status) }}</span>
+              </span>
+              <span class="step-status">{{ stepStatusText(step.status) }}</span>
+            </button>
+            <div v-if="expandedOutput === step.key && step.output" class="step-output">
+              <pre>{{ step.output }}</pre>
+              <div class="output-actions">
+                <button type="button" class="ghost-btn mini" @click="copyOutput(step.output)">复制</button>
+              </div>
+            </div>
           </div>
         </div>
         <p v-if="detail.error" class="detail-error">{{ detail.error }}</p>
         <div v-for="artifact in detail.artifacts" :key="artifact.name" class="artifact">
-          <img v-if="artifact.url" :src="artifact.url" alt="工作流产物" class="artifact-image" />
+          <img v-if="artifact.url && artifact.type !== 'file'" :src="artifact.url" alt="工作流产物" class="artifact-image" />
+          <a v-if="artifact.url" class="download-btn" :href="artifact.url" :download="artifact.name" target="_blank" rel="noopener">
+            下载 {{ artifact.name }}
+          </a>
         </div>
       </section>
     </div>
@@ -162,7 +180,7 @@ import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import { Handle, Position, VueFlow } from '@vue-flow/core'
+import { Handle, MarkerType, Position, VueFlow } from '@vue-flow/core'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import {
@@ -174,19 +192,30 @@ import {
 } from '../api'
 
 const NODE_TYPES = [
-  { type: 'search_image', label: '搜集商品图', color: '#2E6BE6', hint: '通过图片搜索获取参考图；参数 keyword' },
+  { type: 'search_image', label: '图片搜索', color: '#2E6BE6', hint: '通过图片搜索获取参考图；参数 keyword' },
   { type: 'image_understand', label: '图片理解', color: '#7C5CF0', hint: '理解图片内容；参数 image / question' },
-  { type: 'llm_text', label: '文本生成', color: '#0F9D8A', hint: '调用对话模型生成文本；参数 prompt' },
+  { type: 'llm_text', label: '模型对话', color: '#0F9D8A', hint: '与对话模型交互；参数 prompt（含引用）' },
   { type: 'web_search', label: '联网搜索', color: '#C77B1E', hint: '搜索网页信息；参数 query' },
+  { type: 'image_generate', label: '图片生成', color: '#A34FA8', hint: '调用生图模型（DashScope 文生图）；参数 prompt / size / model' },
+  { type: 'http_request', label: 'REST 请求', color: '#3D7A3D', hint: '调用外部 API；参数 method / url / headers / body' },
+  { type: 'db_query', label: '数据库查询', color: '#8A6D3B', hint: '只读 SELECT/WITH 查询；参数 sql' },
+  { type: 'text_template', label: '文本模板', color: '#5B6B8C', hint: '拼接/封装上游结果；参数 template（含引用）' },
+  { type: 'file_export', label: '文件导出', color: '#B0562A', hint: '把文本保存为可下载文件；参数 filename / content' },
   { type: 'poster_render', label: '海报合成', color: '#C2455E', hint: '合成海报 PNG；参数 image / copy' }
 ]
 const PARAM_DEFAULTS = {
   search_image: { keyword: '{{input.keyword}}' },
   image_understand: { image: '{{search_image.output}}', question: '描述这张图片的内容与卖点' },
-  llm_text: { prompt: '根据以下信息生成一段文案：{{input.keyword}}' },
+  llm_text: { prompt: '根据以下信息生成内容：{{input.keyword}}' },
   web_search: { query: '{{input.keyword}}' },
+  image_generate: { prompt: '为「{{input.keyword}}」生成一张简洁的商品宣传图，纯色背景', size: '1024*1024', model: 'wanx2.1-t2i-turbo' },
+  http_request: { method: 'GET', url: 'https://', headers: '', body: '' },
+  db_query: { sql: 'SELECT 1' },
+  text_template: { template: '{{start.output}}' },
+  file_export: { filename: 'output.md', content: '{{llm_text.output}}' },
   poster_render: { image: '{{search_image.output}}', copy: '{{llm_text.output}}' }
 }
+const LONG_PARAMS = new Set(['prompt', 'body', 'sql', 'template', 'content', 'question'])
 
 const route = useRoute()
 const workflowKey = computed(() => String(route.params.workflowKey || ''))
@@ -202,6 +231,7 @@ const savingVersion = ref(false)
 const flowNodes = ref([])
 const flowEdges = ref([])
 const selectedNode = ref(null)
+const expandedOutput = ref('')
 let pollTimer = null
 let graphDirty = false
 let nodeCounter = 0
@@ -220,7 +250,24 @@ function nodeColor(type) {
   return NODE_TYPES.find(item => item.type === type)?.color || '#8A90A6'
 }
 function paramPlaceholder(key) {
-  return { keyword: '如：蓝牙耳机 或 {{input.keyword}}', image: '图片 URL 或 {{节点key.output}}', question: '问题描述', prompt: '提示词，可含引用', query: '搜索词', copy: '文案 JSON 或 {{节点key.output}}' }[key] || ''
+  return {
+    keyword: '如：蓝牙耳机 或 {{input.keyword}}',
+    image: '图片 URL 或 {{节点key.output}}',
+    question: '问题描述',
+    prompt: '提示词，可含引用',
+    query: '搜索词',
+    copy: '文案 JSON 或 {{节点key.output}}',
+    method: 'GET / POST',
+    url: 'https://api.example.com/path',
+    headers: 'JSON，如 {"X-Token":"abc"}',
+    body: 'JSON 请求体',
+    sql: 'SELECT ...（只读，最多 200 行）',
+    template: '可含引用，如 报告：{{llm_text.output}}',
+    filename: '输出文件名，如 report.md',
+    content: '文件内容，通常引用上游输出',
+    size: '1024*1024',
+    model: 'wanx2.1-t2i-turbo'
+  }[key] || ''
 }
 function statusLabel(status) {
   return { RUNNING: '运行中', SUCCEEDED: '成功', FAILED: '失败' }[status] || status
@@ -275,6 +322,10 @@ function layeredPositions(graph) {
 
 function applyGraph(versionView) {
   const graph = versionView?.graph || { nodes: [], edges: [] }
+  if (!graph.nodes.some(node => node.type === 'start')) {
+    // 旧版本没有开始节点：编辑时自动补一个虚拟开始节点（保存后入库）
+    graph.nodes.unshift({ key: 'start', type: 'start', name: '开始', params: {}, x: 40, y: 200 })
+  }
   const positioned = layeredPositions(graph)
   flowNodes.value = positioned.map(({ node, x, y }) => ({
     id: node.key,
@@ -293,7 +344,8 @@ function applyGraph(versionView) {
     source: edge.from,
     target: edge.to,
     type: 'default',
-    animated: false
+    animated: false,
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
   }))
   selectedNode.value = null
   graphDirty = false
@@ -329,6 +381,20 @@ function addNode(type) {
       }
     }
   ]
+  const startNode = flowNodes.value.find(node => node.data.nodeType === 'start')
+  if (startNode) {
+    flowEdges.value = [
+      ...flowEdges.value,
+      {
+        id: `e-${startNode.id}-${key}-${Date.now().toString(36)}`,
+        source: startNode.id,
+        target: key,
+        type: 'default',
+        animated: false,
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
+      }
+    ]
+  }
   graphDirty = true
 }
 
@@ -343,14 +409,23 @@ function onConnect(connection) {
       source: connection.source,
       target: connection.target,
       type: 'default',
-      animated: false
+      animated: false,
+      markerEnd: { type: MarkerType.ArrowClosed, color: '#8A90A6', width: 16, height: 16 }
     }
   ]
   graphDirty = true
 }
 
 function onNodesChange(changes) {
-  if (changes?.some(change => change.type === 'remove')) {
+  const removed = changes?.filter(change => change.type === 'remove') || []
+  if (removed.length) {
+    const startIds = flowNodes.value.filter(node => node.data.nodeType === 'start').map(node => node.id)
+    if (removed.some(change => startIds.includes(change.id))) {
+      // 开始节点被键盘删除：立即恢复
+      message.warning('开始节点不能删除')
+      applyGraph(definition.value?.graph || { nodes: [], edges: [] })
+      return
+    }
     graphDirty = true
     selectedNode.value = null
   }
@@ -363,8 +438,25 @@ function onNodeClick({ node }) {
   selectedNode.value = node
 }
 
+function toggleOutput(key) {
+  expandedOutput.value = expandedOutput.value === key ? '' : key
+}
+
+async function copyOutput(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success('已复制')
+  } catch (error) {
+    message.warning('复制失败，请手动选择文本')
+  }
+}
+
 function removeSelectedNode() {
   if (!selectedNode.value) return
+  if (selectedNode.value.data.nodeType === 'start') {
+    message.warning('开始节点不能删除')
+    return
+  }
   const id = selectedNode.value.id
   flowNodes.value = flowNodes.value.filter(node => node.id !== id)
   flowEdges.value = flowEdges.value.filter(edge => edge.source !== id && edge.target !== id)
@@ -531,6 +623,18 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
 .node-name { color: var(--wb-text); font-size: 13px; font-weight: 550; }
 .node-type { color: var(--wb-muted); font-size: 11.5px; }
 .node-status { margin-left: auto; padding: 1px 8px; border-radius: 999px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 11px; }
+.wf-node.is-start { border-color: var(--wb-brand); background: var(--wb-brand-soft); }
+.wf-node.is-start .node-name { color: var(--wb-brand); }
+.inspector-row.align-top { align-items: flex-start; }
+.textarea { resize: vertical; min-height: 64px; font-family: var(--wb-font-mono, monospace); font-size: 12px; line-height: 1.5; }
+.detail-step-wrap { border-bottom: 1px solid var(--wb-border); }
+.detail-step-wrap:last-child { border-bottom: 0; }
+.detail-step { width: 100%; border: 0; background: transparent; text-align: left; }
+.step-output { padding: 4px 14px 12px 30px; }
+.step-output pre { max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: 9px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+.output-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
+.ghost-btn.mini { padding: 4px 10px; font-size: 11.5px; }
+.download-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 9px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12.5px; }
 .wf-node.is-running { border-color: var(--wb-info); box-shadow: 0 0 0 2px rgba(37, 144, 255, 0.18); }
 .wf-node.is-done { border-color: var(--wb-success); }
 .wf-node.is-failed { border-color: var(--wb-danger); box-shadow: 0 0 0 2px rgba(220, 47, 76, 0.18); }

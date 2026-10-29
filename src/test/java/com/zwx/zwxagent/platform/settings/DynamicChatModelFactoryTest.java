@@ -22,6 +22,22 @@ class DynamicChatModelFactoryTest {
     }
 
     @Test
+    void completionsPathKeepsVersionSegmentInBaseUrl() {
+        Assertions.assertEquals("/chat/completions",
+                DynamicChatModelFactory.completionsPath("https://open.bigmodel.cn/api/paas/v4"));
+        Assertions.assertEquals("/chat/completions",
+                DynamicChatModelFactory.completionsPath("https://open.bigmodel.cn/api/paas/v4/"));
+        Assertions.assertEquals("/chat/completions",
+                DynamicChatModelFactory.completionsPath("https://api.openai.com/v1"));
+        Assertions.assertEquals("/chat/completions",
+                DynamicChatModelFactory.completionsPath("https://dashscope.aliyuncs.com/compatible-mode/v1"));
+        Assertions.assertEquals("/v1/chat/completions",
+                DynamicChatModelFactory.completionsPath("https://api.openai.com"));
+        Assertions.assertEquals("/v1/chat/completions",
+                DynamicChatModelFactory.completionsPath("https://api.example.com/openai"));
+    }
+
+    @Test
     void buildsDashScopeModelFromResolvedConfig() {
         ResolvedModelConfig config = new ResolvedModelConfig("chat", "dashscope",
                 "https://dashscope.aliyuncs.com", "qwen-plus", "sk-test", "USER");

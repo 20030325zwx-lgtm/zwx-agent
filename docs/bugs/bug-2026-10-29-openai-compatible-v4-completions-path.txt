@@ -1,0 +1,33 @@
+日期：2026-10-29
+主题：OpenAI 兼容协议对 /v4 版本前缀拼出 /v1/chat/completions，智谱测试 404
+
+问题现象
+模型设置里把智谱 BigModel（服务地址 https://open.bigmodel.cn/api/paas/v4）配置为
+「OpenAI 兼容」，连通性测试返回 404：
+{"status":404,"error":"Not Found","path":"/v4/v1/chat/completions"}。
+改地址为 https://open.bigmodel.cn 时则被 nginx 返回 405。
+
+影响范围
+所有服务地址不以 /v1 结尾的 OpenAI 兼容供应商（智谱 v4、部分网关）都无法测试，
+运行期对话也会打到错误路径。
+
+原因
+DynamicChatModelFactory 只在 baseUrl 以 /v1 结尾时才把 completionsPath 改成
+/chat/completions，其余情况沿用 Spring AI 默认的 /v1/chat/completions；
+智谱路径已经是 /api/paas/v4，于是拼成 /v4/v1/chat/completions。
+
+解决方式
+抽出 completionsPath(baseUrl)：base 以 /vN 结尾（/v1、/v4、/compatible-mode/v1 等，
+含尾斜杠）时只追加 /chat/completions，否则补 /v1/chat/completions，并始终显式设置。
+DynamicChatModelFactoryTest 增加 6 个用例覆盖两种分支。
+
+验证结果
+- DynamicChatModelFactoryTest：Tests run: 4, Failures: 0, Errors: 0，BUILD SUCCESS。
+- 重新打包并重启后端后，用假 Key 调 /settings/providers/2/test 返回 401
+  「令牌已过期或验证不正确」，不再是 404，说明请求已打到 /api/paas/v4/chat/completions。
+- 验证用的假 Key 已清除，model_provider 回到无密钥状态。
+
+后续注意事项
+- 若某个供应商的对话路径不是标准 /chat/completions，需要单独增加「接口路径」配置项，
+  不要继续在 baseUrl 上做字符串猜测。
+- 排查同类问题时优先看 last_test_message 里的 path，能直接判断拼接结果。

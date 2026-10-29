@@ -37,11 +37,8 @@ public class DynamicChatModelFactory {
         if (AppConfigurationService.PROVIDER_OPENAI_COMPATIBLE.equalsIgnoreCase(config.provider())) {
             OpenAiApi.Builder apiBuilder = OpenAiApi.builder()
                     .baseUrl(config.baseUrl())
-                    .apiKey(config.apiKey());
-            String normalizedBase = config.baseUrl().replaceAll("/+$", "");
-            if (normalizedBase.endsWith("/v1")) {
-                apiBuilder.completionsPath("/chat/completions");
-            }
+                    .apiKey(config.apiKey())
+                    .completionsPath(completionsPath(config.baseUrl()));
             OpenAiChatOptions options = OpenAiChatOptions.builder()
                     .model(config.modelName())
                     .build();
@@ -77,6 +74,15 @@ public class DynamicChatModelFactory {
                 && (config.baseUrl() == null || config.baseUrl().isBlank())) {
             throw new IllegalStateException("OpenAI 兼容接口需要配置服务地址");
         }
+    }
+
+    /**
+     * 服务地址已带版本段时（/v1、/v4、/compatible-mode/v1 等），只追加 /chat/completions；
+     * 否则按 OpenAI 约定补全 /v1/chat/completions。智谱是 /api/paas/v4，不能拼成 /v4/v1/chat/completions。
+     */
+    static String completionsPath(String baseUrl) {
+        String normalized = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return normalized.matches(".*/v\\d+$") ? "/chat/completions" : "/v1/chat/completions";
     }
 
     private static String nullToEmpty(String value) {

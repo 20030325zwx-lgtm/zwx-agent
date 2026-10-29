@@ -3,6 +3,7 @@ package com.zwx.zwxagent.knowledge.document;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -12,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 @SpringBootTest
+// 写入与检索都会调用真实 DashScope embedding；CI 没有 API Key，只在本地（application-local.yml）执行
+@DisabledIfEnvironmentVariable(named = "CI", matches = "true")
 class PgVectorVectorStoreConfigTest {
 
     @Resource

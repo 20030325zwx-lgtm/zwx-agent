@@ -5,8 +5,14 @@
         <header class="cr-head">
           <div>
             <p class="cr-kicker">AI 创作</p>
-            <h1 class="cr-title">图片创作</h1>
-            <p class="cr-sub">输入想法生成图片。任务与结果保存在服务端，刷新、离开页面或重启服务后仍能找回。</p>
+            <h1 class="cr-title">AI 创作</h1>
+            <p class="cr-sub">输入想法，创作图片、视频、小说与漫画。任务与结果保存在服务端，刷新、离开页面或重启服务后仍能找回。</p>
+            <div class="kind-strip" aria-label="创作类型">
+              <span class="kind-chip is-open">图片创作 · 已开放</span>
+              <span class="kind-chip">视频创作 · 规划中</span>
+              <span class="kind-chip">小说创作 · 规划中</span>
+              <span class="kind-chip">漫画创作 · 规划中</span>
+            </div>
           </div>
           <button type="button" class="cr-primary" @click="openCreate">
             <Plus :size="15" /> 新建项目
@@ -30,7 +36,7 @@
           <p v-if="loading" class="cr-hint">加载中…</p>
           <p v-else-if="loadError" class="cr-error">{{ loadError }}</p>
           <p v-else-if="!projects.length" class="cr-empty">
-            还没有创作项目。新建项目后输入提示词即可生成第一张图片。
+            还没有创作项目。新建项目后即可开始创作（当前开放图片创作）。
           </p>
           <div v-else class="cr-grid">
             <router-link
@@ -41,8 +47,11 @@
             >
               <div class="home-card-top">
                 <span class="home-card-icon"><Palette :size="17" /></span>
-                <span class="cr-status" :class="project.status === 'ACTIVE' ? 'success' : 'muted'">
-                  {{ project.status === 'ACTIVE' ? '进行中' : '已归档' }}
+                <span class="status-pair">
+                  <span class="cr-kind-badge">{{ kindLabel(project.kind) }}</span>
+                  <span class="cr-status" :class="project.status === 'ACTIVE' ? 'success' : 'muted'">
+                    {{ project.status === 'ACTIVE' ? '进行中' : '已归档' }}
+                  </span>
                 </span>
               </div>
               <strong class="cr-card-name">{{ project.name }}</strong>
@@ -77,6 +86,26 @@
     <div v-if="createOpen" class="cr-dialog-backdrop" @click.self="createOpen = false">
       <div class="cr-dialog" role="dialog" aria-modal="true" aria-labelledby="create-project-title">
         <h2 id="create-project-title">新建创作项目</h2>
+        <div class="cr-field">
+          <span class="cr-field-label"><span>创作类型</span></span>
+          <div class="kind-options" role="radiogroup" aria-label="创作类型">
+            <button
+              v-for="option in kindOptions"
+              :key="option.value"
+              type="button"
+              class="kind-option"
+              :class="{ selected: form.kind === option.value }"
+              :disabled="!option.enabled"
+              :aria-checked="form.kind === option.value"
+              role="radio"
+              @click="form.kind = option.value"
+            >
+              <strong>{{ option.label }}</strong>
+              <span>{{ option.enabled ? '可使用' : '规划中' }}</span>
+            </button>
+          </div>
+          <span class="cr-field-help">视频、小说与漫画会复用同一套项目、草稿与素材数据，能力上线后无需迁移项目。</span>
+        </div>
         <label class="cr-field">
           <span class="cr-field-label"><span>项目名称</span><span class="count">{{ form.name.length }}/80</span></span>
           <input v-model.trim="form.name" class="cr-input" maxlength="80" placeholder="如：秋季新品视觉" />
@@ -105,7 +134,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlertCircle, Palette, Plus } from 'lucide-vue-next'
 import { createCreativeProject, listCreativeJobs, listCreativeProjects, listModelCatalog } from '../../api'
-import { formatTime, statusMeta } from './shared'
+import { formatTime, kindLabel, statusMeta } from './shared'
 
 const router = useRouter()
 const projects = ref([])
@@ -115,7 +144,13 @@ const loadError = ref('')
 const createOpen = ref(false)
 const creating = ref(false)
 const createError = ref('')
-const form = reactive({ name: '', description: '' })
+const form = reactive({ name: '', description: '', kind: 'IMAGE' })
+const kindOptions = [
+  { value: 'IMAGE', label: '图片创作', enabled: true },
+  { value: 'VIDEO', label: '视频创作', enabled: false },
+  { value: 'NOVEL', label: '小说创作', enabled: false },
+  { value: 'COMIC', label: '漫画创作', enabled: false }
+]
 const imageBinding = ref(null)
 const bindingChecked = ref(false)
 const toast = reactive({ text: '', tone: '' })
@@ -130,6 +165,7 @@ function showToast(text, tone = '') {
 function openCreate() {
   form.name = ''
   form.description = ''
+  form.kind = 'IMAGE'
   createError.value = ''
   createOpen.value = true
 }
@@ -139,7 +175,11 @@ async function create() {
   creating.value = true
   createError.value = ''
   try {
-    const project = await createCreativeProject({ name: form.name, description: form.description || null })
+    const project = await createCreativeProject({
+      name: form.name,
+      description: form.description || null,
+      kind: form.kind
+    })
     createOpen.value = false
     router.push(`/creative/projects/${project.id}`)
   } catch (error) {
@@ -177,6 +217,55 @@ onMounted(load)
 <style scoped src="./creative.css"></style>
 
 <style scoped>
+.kind-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.kind-chip {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--wb-border);
+  color: var(--wb-muted);
+}
+.kind-chip.is-open {
+  color: var(--wb-brand);
+  border-color: color-mix(in srgb, var(--wb-brand) 40%, transparent);
+  background: var(--wb-brand-soft);
+}
+.kind-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.kind-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  background: var(--wb-bg);
+  color: var(--wb-text);
+  cursor: pointer;
+  text-align: left;
+}
+.kind-option strong { font-size: 12.5px; }
+.kind-option span { font-size: 11px; color: var(--wb-muted); }
+.kind-option.selected { border-color: var(--wb-brand); box-shadow: 0 0 0 2px var(--wb-brand-soft); }
+.kind-option:disabled { opacity: 0.55; cursor: not-allowed; }
+.status-pair { display: flex; align-items: center; gap: 6px; }
+.cr-kind-badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--wb-border);
+  color: var(--wb-text-2);
+}
+
 .home-card-top {
   display: flex;
   align-items: center;

@@ -193,6 +193,16 @@
 - 布局调整：结果图最大 320px、素材卡片占位高度、任务表显示提示词、详情长 ID 换行、
   窄屏（<900）自动收起全局导航、移动端隐藏「全部素材」并限制标题宽度；实测 390 宽度无横向溢出。
 
+### 创作类型通用化（2026-10-30 追加）
+
+- 用户指出 AI 创作不应写死为图片；项目新增 `kind`（IMAGE/VIDEO/NOVEL/COMIC），V10 迁移默认 IMAGE，
+  旧项目升级后按图片处理。
+- 后端：`CreativeKind`、`CreativeProjectRecord/ProjectView/CreateProjectRequest`、仓库 SQL 全链路支持；
+  `MediaJobService` 对非 IMAGE 项目拒绝 `text_to_image` 提交（422），避免把视频/小说项目当图片生成。
+- 前端：首页标题改为「AI 创作」，文案覆盖图片/视频/小说/漫画；新建项目可选类型（当前仅图片可选，
+  其余标注规划中并禁用）；项目卡片与创作台显示类型；任务/素材/工作台/路由文案同步。
+- 验证：`mvn clean test` 415 通过（新增 V9→V10 默认 IMAGE 与非法类型约束用例）；前端构建通过。
+
 ## 环境注意事项
 
 - application-local.yml 未读取密钥内容（仅测试解析 datasource 结构，不输出）。

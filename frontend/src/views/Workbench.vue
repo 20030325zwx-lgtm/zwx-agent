@@ -125,7 +125,7 @@
               </router-link>
             </div>
             <p v-if="!creativeJobs.length" class="section-hint">
-              输入想法生成图片；任务与素材保存在服务端，可随时找回。
+              图片、视频、小说与漫画创作；当前开放图片，任务与素材保存在服务端。
             </p>
             <div v-else class="creative-list">
               <router-link

@@ -6,7 +6,7 @@
           <div>
             <p class="cr-kicker">AI 创作</p>
             <h1 class="cr-title">任务记录</h1>
-            <p class="cr-sub">全部图片生成任务。状态来自服务端，刷新或重启后可继续查看。</p>
+            <p class="cr-sub">全部创作任务（当前开放图片生成）。状态来自服务端，刷新或重启后可继续查看。</p>
           </div>
           <router-link to="/creative" class="cr-secondary">返回创作</router-link>
         </header>
@@ -26,7 +26,7 @@
         </div>
 
         <p v-if="error" class="cr-error">{{ error }}</p>
-        <p v-if="!loading && !jobs.length" class="cr-empty">还没有任务。去创作台发起第一次生成。</p>
+        <p v-if="!loading && !jobs.length" class="cr-empty">还没有任务。去创作台发起第一次创作。</p>
 
         <table v-else class="task-table">
           <thead>

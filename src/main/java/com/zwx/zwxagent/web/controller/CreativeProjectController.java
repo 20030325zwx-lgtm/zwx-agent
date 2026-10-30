@@ -31,7 +31,7 @@ public class CreativeProjectController {
         this.draftService = draftService;
     }
 
-    public record CreateProjectBody(String name, String description) {
+    public record CreateProjectBody(String name, String description, String kind) {
     }
 
     public record UpdateProjectBody(String name, String description, String status, Long expectedVersion) {
@@ -48,7 +48,8 @@ public class CreativeProjectController {
     public CreativeProjectService.ProjectView create(CurrentActor actor,
                                                      @RequestBody CreateProjectBody body) {
         return projectService.create(actor, new CreativeProjectService.CreateProjectRequest(
-                body == null ? null : body.name(), body == null ? null : body.description()));
+                body == null ? null : body.name(), body == null ? null : body.description(),
+                body == null ? null : body.kind()));
     }
 
     @GetMapping("/projects")

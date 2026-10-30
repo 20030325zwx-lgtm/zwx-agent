@@ -205,6 +205,33 @@ class CreativeMigrationTest {
         assertTablesExist(database, "workflow_node_execution");
     }
 
+    @Test
+    void upgradesV9ProjectsWithImageKindAndRejectsUnknownKind() throws Exception {
+        String database = createScratchDatabase();
+        flyway(database, "9").migrate();
+        UUID projectId = UUID.randomUUID();
+        insertProject(database, projectId, "tenant-a", "user-a");
+        flyway(database, null).migrate();
+        try (Connection connection = connect(database)) {
+            try (var query = connection.prepareStatement("SELECT kind FROM creative_project WHERE id = ?")) {
+                query.setObject(1, projectId);
+                ResultSet rs = query.executeQuery();
+                Assertions.assertTrue(rs.next(), "V9→V10 升级不得删除旧项目");
+                Assertions.assertEquals("IMAGE", rs.getString("kind"), "旧项目默认按图片创作处理");
+            }
+            SQLException invalid = Assertions.assertThrows(SQLException.class, () -> {
+                try (var insert = connection.prepareStatement("""
+                        INSERT INTO creative_project (id, tenant_id, user_id, name, kind)
+                        VALUES (?, 'tenant-a', 'user-a', '非法类型', 'MUSIC')
+                        """)) {
+                    insert.setObject(1, UUID.randomUUID());
+                    insert.execute();
+                }
+            });
+            Assertions.assertEquals("23514", invalid.getSQLState(), "未知创作类型必须被约束拒绝");
+        }
+    }
+
     private int historyRowCount(String database) throws SQLException {
         try (Connection connection = connect(database);
              var statement = connection.prepareStatement("SELECT count(*) FROM flyway_schema_history")) {

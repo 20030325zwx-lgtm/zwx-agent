@@ -1,5 +1,6 @@
 package com.zwx.zwxagent.creative.service;
 
+import com.zwx.zwxagent.creative.domain.CreativeKind;
 import com.zwx.zwxagent.creative.domain.CreativeProjectRecord;
 import com.zwx.zwxagent.creative.domain.CreativeConflictException;
 import com.zwx.zwxagent.creative.domain.ProjectStatus;
@@ -23,11 +24,14 @@ public class CreativeProjectService {
     public static final int DEFAULT_PAGE_SIZE = 20;
     public static final int MAX_PAGE_SIZE = 100;
 
-    public record ProjectView(UUID id, String name, String description, String status,
+    public record ProjectView(UUID id, String name, String description, String kind, String status,
                               long version, Instant createdAt, Instant updatedAt) {
     }
 
-    public record CreateProjectRequest(String name, String description) {
+    public record CreateProjectRequest(String name, String description, String kind) {
+        public CreateProjectRequest(String name, String description) {
+            this(name, description, null);
+        }
     }
 
     public record UpdateProjectRequest(String name, String description, String status, Long expectedVersion) {
@@ -45,8 +49,9 @@ public class CreativeProjectService {
     public ProjectView create(CurrentActor actor, CreateProjectRequest request) {
         String name = normalizeName(request == null ? null : request.name());
         String description = normalizeDescription(request == null ? null : request.description());
+        CreativeKind kind = CreativeKind.parse(request == null ? null : request.kind());
         var record = new CreativeProjectRecord(UUID.randomUUID(), actor.tenantId(), actor.userId(),
-                name, description, ProjectStatus.ACTIVE, 1, Instant.now(), Instant.now());
+                name, description, kind, ProjectStatus.ACTIVE, 1, Instant.now(), Instant.now());
         repository.insert(record);
         return toView(record);
     }
@@ -142,6 +147,7 @@ public class CreativeProjectService {
 
     private static ProjectView toView(CreativeProjectRecord record) {
         return new ProjectView(record.id(), record.name(), record.description(),
-                record.status().name(), record.version(), record.createdAt(), record.updatedAt());
+                record.kind().name(), record.status().name(), record.version(),
+                record.createdAt(), record.updatedAt());
     }
 }

@@ -64,7 +64,7 @@ const routes = [
         component: () => import('../views/creative/CreativeHome.vue'),
         meta: {
           title: 'AI 创作 - Aster',
-          description: '输入想法生成图片：任务与素材保存在服务端，可随时找回。'
+          description: '图片、视频、小说与漫画创作：任务与素材保存在服务端，可随时找回。'
         }
       },
       {

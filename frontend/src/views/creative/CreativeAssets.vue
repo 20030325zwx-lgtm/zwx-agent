@@ -6,7 +6,7 @@
           <div>
             <p class="cr-kicker">AI 创作</p>
             <h1 class="cr-title">素材库</h1>
-            <p class="cr-sub">跨项目的个人素材：生成结果与上传图片。仅本人可见。</p>
+            <p class="cr-sub">跨项目的个人素材：生成结果与上传文件（当前为图片）。仅本人可见。</p>
           </div>
           <router-link to="/creative" class="cr-secondary">返回创作</router-link>
         </header>
@@ -34,7 +34,7 @@
 
         <p v-if="error" class="cr-error">{{ error }}</p>
         <p v-if="!loading && !assets.length" class="cr-empty">
-          还没有素材。生成结果会自动保存到这里；也可以在项目内上传图片。
+          还没有素材。生成结果会自动保存到这里；也可以在项目内上传文件。
         </p>
 
         <div v-else class="asset-grid">

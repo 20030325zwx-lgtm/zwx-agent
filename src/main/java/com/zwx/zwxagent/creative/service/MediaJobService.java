@@ -242,6 +242,9 @@ public class MediaJobService {
             if (project.status() != ProjectStatus.ACTIVE) {
                 throw new CreativeConflictException("项目已归档，不能发起新任务");
             }
+            if (project.kind() != com.zwx.zwxagent.creative.domain.CreativeKind.IMAGE) {
+                throw CreativeException.unsupportedParameter("当前仅支持图片创作项目的生成任务");
+            }
             return jobRepository.findByIdempotencyKey(actor.tenantId(), actor.userId(), idempotencyKey)
                     .map(job -> {
                         if (!job.requestHash().equals(hash)) {
@@ -286,6 +289,9 @@ public class MediaJobService {
                 .orElseThrow(() -> new IllegalArgumentException("创作项目不存在"));
         if (project.status() != ProjectStatus.ACTIVE) {
             throw new CreativeConflictException("项目已归档，不能发起新任务");
+        }
+        if (project.kind() != com.zwx.zwxagent.creative.domain.CreativeKind.IMAGE) {
+            throw CreativeException.unsupportedParameter("当前仅支持图片创作项目的生成任务");
         }
         int queued = jobRepository.countByOwnerAndStatus(actor.tenantId(), actor.userId(), MediaJobStatus.QUEUED);
         int maxQueued = maxQueuedFor(actor.userId());

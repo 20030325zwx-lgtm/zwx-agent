@@ -7,6 +7,7 @@
         </router-link>
         <div class="studio-title-wrap">
           <h1 class="studio-title">{{ project?.name || '创作台' }}</h1>
+          <span v-if="project" class="cr-kind-badge">{{ kindLabel(project.kind) }}创作</span>
           <span v-if="project" class="cr-status" :class="project.status === 'ACTIVE' ? 'success' : 'muted'">
             {{ project.status === 'ACTIVE' ? '进行中' : '已归档' }}
           </span>
@@ -29,7 +30,14 @@
     <!-- 创作视图 -->
     <div v-if="tab === 'studio'" class="studio-body">
       <section class="studio-results" aria-label="生成结果">
-        <div v-if="!imageBinding" class="cr-banner studio-banner">
+        <div v-if="project && project.kind !== 'IMAGE'" class="cr-banner studio-banner">
+          <AlertCircle :size="18" />
+          <div class="cr-banner-body">
+            <strong>{{ kindLabel(project.kind) }}创作尚未开放</strong>
+            <p>项目与草稿已保存；该类型的生成链路上线后可直接继续使用，无需重建项目。</p>
+          </div>
+        </div>
+        <div v-else-if="!imageBinding" class="cr-banner studio-banner">
           <AlertCircle :size="18" />
           <div class="cr-banner-body">
             <strong>还没有配置图片生成模型</strong>
@@ -293,7 +301,7 @@ import {
   listModelCatalog, optimizeCreativePrompt, resumeCreativeJobIngest, retryCreativeJob,
   updateCreativeAsset, updateCreativeDraft, uploadCreativeAsset
 } from '../../api'
-import { useAssetUrls, downloadBlob, formatBytes, formatTime, statusMeta } from './shared'
+import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta } from './shared'
 
 const PROMPT_MAX = 500
 const route = useRoute()
@@ -340,6 +348,7 @@ const assetError = ref('')
 
 const canOptimize = computed(() => (idea.value.trim() || effective.value.trim()).length > 0)
 const canGenerate = computed(() => project.value?.status === 'ACTIVE'
+  && project.value?.kind === 'IMAGE'
   && !!imageBinding.value && (idea.value.trim() || effective.value.trim()).length > 0)
 const activeCount = computed(() => jobs.value.filter(job => !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(job.status)).length)
 const cleanJobList = computed(() => jobs.value)
@@ -775,6 +784,14 @@ onBeforeUnmount(() => {
 }
 .studio-back:hover { background: var(--wb-fill); color: var(--wb-text); }
 .studio-title-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cr-kind-badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--wb-border);
+  color: var(--wb-text-2);
+  white-space: nowrap;
+}
 .studio-title {
   margin: 0;
   font-size: 15px;
@@ -1028,7 +1045,15 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .studio-body { display: flex; flex-direction: column; overflow-y: auto; }
   .studio-bar-right { display: none; }
-  .studio-title { max-width: 150px; }
+  .cr-kind-badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--wb-border);
+  color: var(--wb-text-2);
+  white-space: nowrap;
+}
+.studio-title { max-width: 150px; }
   .studio-results { overflow: visible; }
   .studio-panel { border-left: none; border-top: 1px solid var(--wb-border); overflow: visible; }
   .studio-tabs { margin-left: 0; }

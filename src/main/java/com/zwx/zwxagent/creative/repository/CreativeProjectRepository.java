@@ -1,5 +1,6 @@
 package com.zwx.zwxagent.creative.repository;
 
+import com.zwx.zwxagent.creative.domain.CreativeKind;
 import com.zwx.zwxagent.creative.domain.CreativeProjectRecord;
 import com.zwx.zwxagent.creative.domain.ProjectStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -31,8 +32,8 @@ public class CreativeProjectRepository {
 
     public void insert(CreativeProjectRecord project) {
         jdbcTemplate.update("""
-                        INSERT INTO creative_project (id, tenant_id, user_id, name, description, status, version)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO creative_project (id, tenant_id, user_id, name, description, kind, status, version)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                 ps -> {
                     ps.setObject(1, project.id());
@@ -40,14 +41,15 @@ public class CreativeProjectRepository {
                     ps.setString(3, project.userId());
                     ps.setString(4, project.name());
                     ps.setString(5, project.description());
-                    ps.setString(6, project.status().name());
-                    ps.setLong(7, project.version());
+                    ps.setString(6, project.kind().name());
+                    ps.setString(7, project.status().name());
+                    ps.setLong(8, project.version());
                 });
     }
 
     public Optional<CreativeProjectRecord> findByIdForOwner(String tenantId, String userId, UUID id) {
         return jdbcTemplate.query("""
-                        SELECT id, tenant_id, user_id, name, description, status, version, created_at, updated_at
+                        SELECT id, tenant_id, user_id, name, description, kind, status, version, created_at, updated_at
                         FROM creative_project WHERE id = ? AND tenant_id = ? AND user_id = ?
                         """,
                 MAPPER, id, tenantId, userId).stream().findFirst();
@@ -56,7 +58,7 @@ public class CreativeProjectRepository {
     /** SELECT ... FOR UPDATE：归档与提交互锁（BR15）必须在事务内先锁项目行。 */
     public Optional<CreativeProjectRecord> lockByIdForOwner(String tenantId, String userId, UUID id) {
         return jdbcTemplate.query("""
-                        SELECT id, tenant_id, user_id, name, description, status, version, created_at, updated_at
+                        SELECT id, tenant_id, user_id, name, description, kind, status, version, created_at, updated_at
                         FROM creative_project WHERE id = ? AND tenant_id = ? AND user_id = ? FOR UPDATE
                         """,
                 MAPPER, id, tenantId, userId).stream().findFirst();
@@ -67,14 +69,14 @@ public class CreativeProjectRepository {
                                                    Instant cursorCreatedAt, UUID cursorId, int limit) {
         if (cursorCreatedAt == null || cursorId == null) {
             return jdbcTemplate.query("""
-                            SELECT id, tenant_id, user_id, name, description, status, version, created_at, updated_at
+                            SELECT id, tenant_id, user_id, name, description, kind, status, version, created_at, updated_at
                             FROM creative_project WHERE tenant_id = ? AND user_id = ?
                             ORDER BY created_at DESC, id DESC LIMIT ?
                             """,
                     MAPPER, tenantId, userId, limit);
         }
         return jdbcTemplate.query("""
-                        SELECT id, tenant_id, user_id, name, description, status, version, created_at, updated_at
+                        SELECT id, tenant_id, user_id, name, description, kind, status, version, created_at, updated_at
                         FROM creative_project WHERE tenant_id = ? AND user_id = ?
                           AND (created_at, id) < (?, ?)
                         ORDER BY created_at DESC, id DESC LIMIT ?
@@ -131,6 +133,7 @@ public class CreativeProjectRepository {
                 rs.getString("user_id"),
                 rs.getString("name"),
                 rs.getString("description"),
+                CreativeKind.valueOf(rs.getString("kind")),
                 ProjectStatus.valueOf(rs.getString("status")),
                 rs.getLong("version"),
                 toInstant(rs.getTimestamp("created_at")),

@@ -1,6 +1,17 @@
 import { onBeforeUnmount, reactive } from 'vue'
 import { getCreativeAssetBlob } from '../../api'
 
+export const KIND_LABEL = {
+  IMAGE: '图片',
+  VIDEO: '视频',
+  NOVEL: '小说',
+  COMIC: '漫画'
+}
+
+export function kindLabel(kind) {
+  return KIND_LABEL[kind] || '图片'
+}
+
 export const JOB_STATUS = {
   QUEUED: { label: '排队中', tone: 'muted', hint: '等待调度，不会产生不必要的重复请求' },
   SUBMITTING: { label: '提交中', tone: 'info', hint: '正在提交给供应商' },

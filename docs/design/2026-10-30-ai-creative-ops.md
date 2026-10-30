@@ -8,8 +8,10 @@
 | --- | --- | --- |
 | `creative.enabled` | `true` | 模块总开关（当前仅用于文档标记，接口仍以身份为准） |
 | `creative.submissions-enabled` | `true` | 关闭后新任务返回 503 `SUBMISSIONS_DISABLED`，已有任务继续查询/入库 |
-| `creative.scheduler.enabled` | `false` | 媒体任务调度循环；关闭时可用外部触发器或测试直接调 `tick()` |
+| `creative.scheduler.enabled` | `true`（可用 `CREATIVE_SCHEDULER_ENABLED` 覆盖） | 媒体任务调度循环；测试通过 `src/test/resources/application.properties` 关闭，保持用例确定性 |
 | `creative.scheduler.user-max-inflight` | `2` | 用户同时提交上限（全局/供应商上限存于 `media_provider_quota`） |
+| `creative.scheduler.interval-ms` / `batch-size` / `lease-seconds` | `1000` / `10` / `60` | 可用 `CREATIVE_SCHEDULER_INTERVAL_MS` 等环境变量调整 |
+| `CREATIVE_SCHEDULER_ENABLED` | `true` | 关闭后新任务不再被认领（用于停止新提交后的排空演练） |
 | `creative.storage.backend` | `oss` | `oss` 或 `local`；配置为 oss 但缺少凭据时自动回退本地并告警 |
 | `creative.storage.local-dir` | `~/.aster/creative-media` | 本地媒体根目录（桌面端默认） |
 | `creative.download.allow-local` | `false` | 仅桌面/隔离测试可开启；云端必须关闭以防 SSRF |

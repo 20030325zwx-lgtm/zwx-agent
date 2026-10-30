@@ -38,6 +38,7 @@ import java.util.UUID;
  * 全部使用进程内 Mock adapter + 本地媒体目录，不发起真实模型调用。
  */
 @SpringBootTest(properties = {
+        "creative.scheduler.enabled=false",
         "creative.ingest.backend=storage",
         "creative.storage.backend=local",
         "creative.storage.local-dir=target/creative-test-media",

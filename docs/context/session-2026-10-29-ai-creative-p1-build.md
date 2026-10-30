@@ -203,6 +203,15 @@
   其余标注规划中并禁用）；项目卡片与创作台显示类型；任务/素材/工作台/路由文案同步。
 - 验证：`mvn clean test` 415 通过（新增 V9→V10 默认 IMAGE 与非法类型约束用例）；前端构建通过。
 
+### 调度器默认开启（2026-10-30 修复 P0）
+
+- 问题：`creative.scheduler.enabled` 硬编码 false，正式服务与桌面端启动时未覆盖，任务永远停在 QUEUED。
+- 修复：默认 `${CREATIVE_SCHEDULER_ENABLED:true}`，其余调度参数改为环境变量可覆盖；
+  `src/test/resources/application.properties` 关闭调度，保持用例确定性；`MediaJobSchedulerTest` 显式关闭。
+- 运维手册同步默认值与环境变量；新增 bug 记录 bug-2026-10-30-creative-scheduler-disabled-by-default.txt。
+- 验证：`mvn clean test` 415 通过；正式服务 `/ai/creative/health` 应显示 schedulerEnabled=true；
+  默认启动（仅覆盖本地存储）的隔离实例提交 Mock 任务可完成。
+
 ## 环境注意事项
 
 - application-local.yml 未读取密钥内容（仅测试解析 datasource 结构，不输出）。

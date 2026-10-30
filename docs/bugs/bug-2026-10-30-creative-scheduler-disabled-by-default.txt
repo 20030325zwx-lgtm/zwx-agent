@@ -1,0 +1,14 @@
+日期：2026-10-30
+问题现象：正式服务（8123）与桌面端点击「生成图片」后任务一直停在「排队中」。隔离验收实例显式传了
+`--creative.scheduler.enabled=true`，所以浏览器验收全部正常，问题没有暴露。
+影响范围：所有通过网页/桌面/智能体/工作流创建的图片任务；提交层正常、调度层从未运行，用户会以为功能坏了。
+原因：`application.yml` 中 `creative.scheduler.enabled` 硬编码为 `false`，设计上把它当成"测试默认关闭"的开关，
+但生产与桌面启动命令（launchctl、Electron `SPRING_PROFILES_ACTIVE=desktop`）都没有覆盖它。
+解决方式：
+1. 默认改为 `${CREATIVE_SCHEDULER_ENABLED:true}`，并把间隔、批大小、租约、退避等改为可环境变量覆盖；
+2. 新增 `src/test/resources/application.properties` 设置 `creative.scheduler.enabled=false`，保持测试确定性；
+3. 重启后用一个绑定 Mock 适配器的测试账号提交任务，验证 QUEUED→RUNNING→SUCCEEDED。
+验证结果：正式服务实测任务在数秒内完成（Mock 适配器，无计费）；全量测试通过。
+后续注意事项：
+- 「默认关闭、显式开启」的开关必须在部署/桌面启动参数里落地，否则验收环境与真实环境行为不一致；
+- 验收时至少有一条用例要走真实启动命令，不能只在自定义参数的实例上验证。

@@ -271,7 +271,7 @@ logging:
 
 # AI 创作模块（P1）：调度器默认关闭，测试直接调用 tick()；生产经由配置打开
 creative:
-  enabled: true
+  enabled: ${CREATIVE_ENABLED:true}
   # 入库实现：storage=真实对象存储（默认）；mock=仅测试，不落对象
   ingest:
     backend: ${CREATIVE_INGEST_BACKEND:storage}
@@ -283,12 +283,13 @@ creative:
     allow-local: ${CREATIVE_DOWNLOAD_ALLOW_LOCAL:false}
     max-bytes: ${CREATIVE_DOWNLOAD_MAX_BYTES:20971520}
   scheduler:
-    enabled: false
-    interval-ms: 1000
-    batch-size: 10
-    lease-seconds: 60
-    query-backoff-ms: 3000
-    query-backoff-max-ms: 15000
-    reconcile-delay-ms: 60000
-    user-max-inflight: 2
-    quota-queries-before-attention: 40
+    # 生产/桌面默认开启；测试通过 src/test/resources/application.properties 关闭
+    enabled: ${CREATIVE_SCHEDULER_ENABLED:true}
+    interval-ms: ${CREATIVE_SCHEDULER_INTERVAL_MS:1000}
+    batch-size: ${CREATIVE_SCHEDULER_BATCH_SIZE:10}
+    lease-seconds: ${CREATIVE_SCHEDULER_LEASE_SECONDS:60}
+    query-backoff-ms: ${CREATIVE_SCHEDULER_QUERY_BACKOFF_MS:3000}
+    query-backoff-max-ms: ${CREATIVE_SCHEDULER_QUERY_BACKOFF_MAX_MS:15000}
+    reconcile-delay-ms: ${CREATIVE_SCHEDULER_RECONCILE_DELAY_MS:60000}
+    user-max-inflight: ${CREATIVE_SCHEDULER_USER_MAX_INFLIGHT:2}
+    quota-queries-before-attention: ${CREATIVE_SCHEDULER_QUOTA_QUERIES_BEFORE_ATTENTION:40}

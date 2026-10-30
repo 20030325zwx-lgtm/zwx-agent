@@ -1,0 +1,13 @@
+日期：2026-10-30
+问题现象（R1）：进程快速重启时，SUBMITTING 且无 taskId 的任务因租约尚未过期而不会被恢复；
+恢复器只在启动时执行一次，之后该任务会一直停在 SUBMITTING，直到下一次重启。
+问题现象（R2）：调度器在动作结束后无条件清空 lease_owner/lease_until；若任务已被其他 worker 接管
+（lease_epoch 增加），旧 worker 仍会清掉新 worker 的租约，破坏互斥。
+影响范围：提交阶段崩溃/重启后的任务恢复；多实例并发时的租约互斥。
+原因：恢复只在 @PostConstruct 调用一次；释放租约没有版本/epoch 条件。
+解决方式：
+1. 调度循环每 30 秒执行一次 recover()，并可通过 creative.scheduler.recovery-interval-ms 调整；
+2. 释放租约改为 `releaseLease(id, expectedLeaseEpoch)`，SQL 带 lease_epoch 条件；
+3. 新增用例 leaseReleaseIsFencedByEpoch 覆盖旧 epoch 释放被拒绝。
+验证结果：MediaJobSchedulerTest 10/10 通过；全量 424 通过。
+后续注意事项：恢复是"可重复执行的收敛过程"，不能假设只在启动时跑一次；释放类操作必须带围栏条件。

@@ -15,11 +15,13 @@ public class LocalMediaStorage implements MediaStorage {
     private final Path baseDir;
 
     public LocalMediaStorage(Path baseDir) {
-        this.baseDir = baseDir.toAbsolutePath().normalize();
+        Path normalized = baseDir.toAbsolutePath().normalize();
         try {
-            java.nio.file.Files.createDirectories(this.baseDir);
+            java.nio.file.Files.createDirectories(normalized);
+            // 以真实路径作为边界，避免基础目录本身是符号链接时判断失效
+            this.baseDir = normalized.toRealPath();
         } catch (IOException exception) {
-            throw new IllegalStateException("本地媒体目录创建失败：" + this.baseDir, exception);
+            throw new IllegalStateException("本地媒体目录创建失败：" + normalized, exception);
         }
     }
 
@@ -42,7 +44,13 @@ public class LocalMediaStorage implements MediaStorage {
         Path target = resolve(objectKey);
         try {
             Files.createDirectories(target.getParent());
-            Path temp = Files.createTempFile(target.getParent(), "upload-", ".tmp");
+            // 父目录必须真实位于基础目录内：拦截通过符号链接目录写到外部
+            Path realParent = target.getParent().toRealPath();
+            if (!realParent.startsWith(baseDir)) {
+                throw new IllegalArgumentException("非法的对象键：" + objectKey);
+            }
+            target = realParent.resolve(target.getFileName());
+            Path temp = Files.createTempFile(realParent, "upload-", ".tmp");
             try (in) {
                 Files.copy(in, temp, StandardCopyOption.REPLACE_EXISTING);
             }
@@ -55,16 +63,26 @@ public class LocalMediaStorage implements MediaStorage {
     @Override
     public InputStream open(String objectKey) {
         try {
-            return Files.newInputStream(resolve(objectKey));
+            Path real = resolveReal(objectKey);
+            return Files.newInputStream(real);
         } catch (IOException exception) {
             throw new IllegalStateException("本地媒体读取失败：" + objectKey, exception);
         }
     }
 
+    /** 已存在对象的真实路径校验：拒绝文件本身或任一级父目录的符号链接逃逸。 */
+    private Path resolveReal(String objectKey) throws IOException {
+        Path real = resolve(objectKey).toRealPath();
+        if (!real.startsWith(baseDir)) {
+            throw new IllegalArgumentException("非法的对象键：" + objectKey);
+        }
+        return real;
+    }
+
     @Override
     public long size(String objectKey) {
         try {
-            return Files.size(resolve(objectKey));
+            return Files.size(resolveReal(objectKey));
         } catch (IOException exception) {
             throw new IllegalStateException("本地媒体 stat 失败：" + objectKey, exception);
         }
@@ -73,7 +91,7 @@ public class LocalMediaStorage implements MediaStorage {
     @Override
     public void delete(String objectKey) {
         try {
-            Files.deleteIfExists(resolve(objectKey));
+            Files.deleteIfExists(resolveReal(objectKey));
         } catch (IOException exception) {
             throw new IllegalStateException("本地媒体删除失败：" + objectKey, exception);
         }

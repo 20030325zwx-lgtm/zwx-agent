@@ -370,6 +370,28 @@ class MediaJobSchedulerTest {
     }
 
     @Test
+    @Order(10)
+    void leaseReleaseIsFencedByEpoch() {
+        mockAdapter.reset();
+        mockAdapter.setDefaultQueryScript(
+                new MockMediaProviderAdapter.QueryScript(1000, MockMediaProviderAdapter.QueryState.SUCCEEDED,
+                        List.of(), null));
+        var job = createQueued("sched-lease-fence", "租约围栏");
+        scheduler.tick();
+        long epoch = jobRepository.findById(job.id()).orElseThrow().leaseEpoch();
+        jdbcTemplate.update("""
+                UPDATE media_job SET lease_owner = 'other-worker',
+                    lease_until = now() + interval '1 minute' WHERE id = ?
+                """, job.id());
+        // 旧 epoch 的释放不得清除新 worker 的租约
+        jobRepository.releaseLease(job.id(), epoch - 1);
+        Assertions.assertEquals("other-worker",
+                jobRepository.findById(job.id()).orElseThrow().leaseOwner());
+        jobRepository.releaseLease(job.id(), epoch);
+        Assertions.assertNull(jobRepository.findById(job.id()).orElseThrow().leaseOwner());
+    }
+
+    @Test
     @Order(9)
     void unsupportedCancelKeepsRunningAndExplainsWhy() {
         mockAdapter.reset();

@@ -230,6 +230,14 @@ public class MediaJobRepository {
         jdbcTemplate.update("UPDATE media_job SET lease_owner = NULL, lease_until = NULL WHERE id = ?", id);
     }
 
+    /** 带 epoch 围栏的释放：若任务已被新 worker 接管（epoch 变化），不得清除其租约。 */
+    public void releaseLease(UUID id, long expectedLeaseEpoch) {
+        jdbcTemplate.update("""
+                UPDATE media_job SET lease_owner = NULL, lease_until = NULL
+                WHERE id = ? AND lease_epoch = ?
+                """, id, expectedLeaseEpoch);
+    }
+
     /** 认领：写租约持有者与 epoch（在同一事务内执行）。 */
     public void claim(UUID id, String workerId, Instant leaseUntil) {
         jdbcTemplate.update("""

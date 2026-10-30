@@ -226,6 +226,15 @@
 - 文档：验收标准补充 `PASS（部分）` 口径；结果表更新 HEAD、A17/A22/A24/A31–A34 说明；台账同步 V10 与上述实现。
 - 验证：`mvn clean test` 421 通过 / 0 失败 / 6 跳过；新增缩略图、来源、事件 reset、取消不支持用例。
 
+### 进度核查 R1–R3 修复与清理（2026-10-30）
+
+- R1：调度器新增每 30 秒周期恢复，避免快速重启时 SUBMITTING 任务因租约未过期而永久搁置。
+- R2：释放租约增加 epoch 围栏（`releaseLease(id, expectedEpoch)`），旧 worker 不会清掉新 worker 的租约。
+- R3：`LocalMediaStorage` 以真实路径为边界，读写删除拒绝符号链接逃逸；新增 `LocalMediaStorageTest`。
+- 清理：删除两份过期的 `WorkflowEditor 2.vue` / `Workflows 2.vue` 副本（未被引用、早于当前版本）。
+- 收录进度核查报告到 `docs/test/results/2026-10-30-ai-creative-progress-review.md` 与 `docs/context/`，并修正验收汇总为逐行核对的 16/11/12/1。
+- 验证：`mvn clean test` 424 通过 / 0 失败 / 6 跳过。
+
 ## 环境注意事项
 
 - application-local.yml 未读取密钥内容（仅测试解析 datasource 结构，不输出）。

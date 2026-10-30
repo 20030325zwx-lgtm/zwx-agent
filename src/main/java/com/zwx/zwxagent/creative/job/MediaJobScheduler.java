@@ -81,12 +81,15 @@ public class MediaJobScheduler {
     private int userMaxInflight;
     @Value("${creative.scheduler.quota-queries-before-attention:40}")
     private int quotaQueriesBeforeAttention;
+    @Value("${creative.scheduler.recovery-interval-ms:30000}")
+    private long recoveryIntervalMs;
     @Value("${creative.download.allow-local:false}")
     private boolean downloadAllowLocal;
     @Value("${creative.download.max-bytes:20971520}")
     private long downloadMaxBytes;
 
     private ScheduledExecutorService loop;
+    private volatile long lastRecoveryAt = 0;
     private final String workerId = "worker-" + UUID.randomUUID().toString().substring(0, 8);
 
     public MediaJobScheduler(MediaJobRepository jobRepository, MediaJobEventRepository eventRepository,
@@ -115,6 +118,7 @@ public class MediaJobScheduler {
         // 启动恢复：有 taskId 的任务继续查询；提交结果不明的进入 RECONCILING，绝不重发
         try {
             recover();
+            lastRecoveryAt = System.currentTimeMillis();
         } catch (Exception exception) {
             log.warn("媒体任务启动恢复失败：{}", exception.getMessage(), exception);
         }
@@ -133,6 +137,12 @@ public class MediaJobScheduler {
 
     private void safeTick() {
         try {
+            // 周期恢复：启动时租约未过期的 SUBMITTING 任务也必须在之后被接管，不能只依赖启动一次
+            long now = System.currentTimeMillis();
+            if (now - lastRecoveryAt >= Math.max(5_000, recoveryIntervalMs)) {
+                lastRecoveryAt = now;
+                recover();
+            }
             tick();
         } catch (Exception exception) {
             // 单轮失败不影响下一轮，但必须留下可定位日志
@@ -152,14 +162,18 @@ public class MediaJobScheduler {
         if (claimed == null || claimed.isEmpty()) return 0;
         int handled = 0;
         for (UUID id : claimed) {
+            long claimedEpoch = -1;
             try {
                 var job = jobRepository.findById(id).orElse(null);
                 if (job == null) continue;
+                claimedEpoch = job.leaseEpoch();
                 handleClaimed(job);
                 handled++;
             } finally {
-                // 动作结束即释放租约；下一次由 next_action_at 控制，崩溃时租约仍会自然过期
-                jobRepository.releaseLease(id);
+                // 动作结束即释放租约；带 epoch 围栏，避免清掉新 worker 已接管的租约
+                if (claimedEpoch >= 0) {
+                    jobRepository.releaseLease(id, claimedEpoch);
+                }
             }
         }
         return handled;

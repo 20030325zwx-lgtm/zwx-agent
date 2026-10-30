@@ -22,12 +22,14 @@ public class CreativeImageTool {
     private final CurrentActor actor;
     private final MediaJobService jobService;
     private final CreativeProjectService projectService;
+    private final String runId;
 
-    public CreativeImageTool(String tenantId, String userId,
+    public CreativeImageTool(String tenantId, String userId, String runId,
                              MediaJobService jobService, CreativeProjectService projectService) {
         this.actor = new CurrentActor(userId, tenantId, userId, Role.USER);
         this.jobService = jobService;
         this.projectService = projectService;
+        this.runId = runId;
     }
 
     @Tool(description = """
@@ -57,7 +59,8 @@ public class CreativeImageTool {
         try {
             var result = jobService.create(actor, "agent-" + UUID.randomUUID(), project,
                     new MediaJobService.CreateJobRequest(project, "text_to_image", null,
-                            prompt, prompt, parameters, List.of(), null, null, false));
+                            prompt, prompt, parameters, List.of(), null, null, false),
+                    com.zwx.zwxagent.creative.domain.JobSourceType.AGENT, runId, null);
             return "{\"jobId\":\"" + result.jobId() + "\",\"status\":\"" + result.status()
                     + "\",\"projectId\":\"" + project
                     + "\",\"message\":\"任务已受理，图片完成后会出现在 AI 创作素材库\"}";

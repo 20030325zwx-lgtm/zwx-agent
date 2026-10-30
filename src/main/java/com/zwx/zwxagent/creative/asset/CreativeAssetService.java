@@ -94,6 +94,7 @@ public class CreativeAssetService {
         assetRepository.insert(record);
         try {
             storage.put(objectKey, mimeOf(extension), new ByteArrayInputStream(bytes), bytes.length);
+            putThumbnailBestEffort(objectKey, bytes);
         } catch (RuntimeException exception) {
             assetRepository.softDelete(assetId); // 不残留 PENDING 孤儿（A14）
             throw new IllegalStateException("素材保存失败", exception);
@@ -118,6 +119,36 @@ public class CreativeAssetService {
     }
 
     public record ContentContent(String mimeType, String displayName, byte[] bytes) {
+    }
+
+    /** 缩略图读取（A17）：没有缩略图时返回 null，由接口给 404，界面回退到原图。 */
+    public byte[] thumbnail(CurrentActor actor, UUID assetId) {
+        var asset = requireOwned(actor, assetId);
+        if (asset.status() == com.zwx.zwxagent.creative.domain.AssetStatus.DELETED) {
+            return null;
+        }
+        try (var in = storage.open(ThumbnailEncoder.thumbnailKey(asset.objectKey()))) {
+            return in.readAllBytes();
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    /** 缩略图失败不影响原件：生成失败只记录日志级别信息并继续。 */
+    public static void putThumbnailBestEffort(MediaStorage storage, String objectKey, String mimeType,
+                                              byte[] bytes) {
+        byte[] thumbnail = ThumbnailEncoder.encode(bytes);
+        if (thumbnail == null) return;
+        try {
+            storage.put(ThumbnailEncoder.thumbnailKey(objectKey),
+                    "image/png", new ByteArrayInputStream(thumbnail), thumbnail.length);
+        } catch (RuntimeException ignored) {
+            // 缩略图是增强信息，不阻断入库
+        }
+    }
+
+    private void putThumbnailBestEffort(String objectKey, byte[] bytes) {
+        putThumbnailBestEffort(storage, objectKey, "image/png", bytes);
     }
 
     public AssetView update(CurrentActor actor, UUID assetId, UpdateAssetRequest request) {

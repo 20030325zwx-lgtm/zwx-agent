@@ -39,6 +39,13 @@ public class MediaJobEventRepository {
         return seq;
     }
 
+    /** 当前最大 seq（无事件返回 0），用于判断游标是否越界。 */
+    public long maxSeq(UUID jobId) {
+        Long value = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(max(seq), 0) FROM media_job_event WHERE job_id = ?", Long.class, jobId);
+        return value == null ? 0 : value;
+    }
+
     public List<MediaJobEventRecord> listAfter(UUID jobId, long afterSeq, int limit) {
         return jdbcTemplate.query("""
                         SELECT seq, job_id, tenant_id, user_id, event_type, payload, created_at

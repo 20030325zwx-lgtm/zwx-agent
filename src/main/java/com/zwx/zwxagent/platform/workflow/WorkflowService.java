@@ -472,9 +472,8 @@ public class WorkflowService {
         String type = node.type();
         return switch (type) {
             case "search_image" -> searchProductImage(context.tenantId(), text(params.get("keyword")));
-            case "image_understand" -> understandImage(context.tenantId(),
-                    resolveImageUrl(context, text(params.get("image")), text(params.get("imageAssetId"))),
-                    text(params.get("question")));
+            case "image_understand" -> understandImage(context, text(params.get("image")),
+                    text(params.get("imageAssetId")), text(params.get("question")));
             case "llm_text" -> {
                 var selection = modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT);
                 ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
@@ -529,12 +528,59 @@ public class WorkflowService {
         throw new IllegalStateException("图片搜索没有返回结果（" + mcpFailure + "，Commons 无结果），请更换关键词重试");
     }
 
-    private NodeResult understandImage(String tenantId, String imageUrl, String question) {
+    /**
+     * 图片理解：联网图片与 OSS 素材走 MCP URL；本地存储素材改走视觉模型（字节直传），
+     * 使桌面端不依赖公网可达地址。两条路径失败都保留原有降级行为。
+     */
+    private NodeResult understandImage(RunContext context, String image, String imageAssetId, String question) {
+        String assetId = resolveAssetId(image, imageAssetId);
+        if (assetId == null) {
+            return understandImageViaMcp(context.tenantId(), image, question);
+        }
+        var asset = requireAsset(context, assetId);
+        if (asset.storageBackend() == com.zwx.zwxagent.creative.domain.StorageBackend.OSS) {
+            return understandImageViaMcp(context.tenantId(), presignedAssetUrl(asset), question);
+        }
+        return understandLocalAsset(context, asset, question);
+    }
+
+    private NodeResult understandImageViaMcp(String tenantId, String imageUrl, String question) {
         String analysis = imageAnalysisService.analyze(tenantId, imageUrl, question).summary();
         if (analysis == null || analysis.isBlank()) {
             return new NodeResult("商品画像不可用，请基于关键词直接生成。", "图片理解不可用，已降级");
         }
         return new NodeResult(analysis, "商品画像已生成");
+    }
+
+    private NodeResult understandLocalAsset(RunContext context,
+                                            com.zwx.zwxagent.creative.domain.CreativeAssetRecord asset,
+                                            String question) {
+        var selection = modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_VISION);
+        if (!selection.config().hasApiKey()) {
+            throw new IllegalStateException("本地素材的图片理解需要配置视觉模型，请在设置→模型绑定 vision 用途");
+        }
+        try {
+            byte[] bytes;
+            try (var in = mediaStorage.open(asset.objectKey())) {
+                bytes = in.readAllBytes();
+            }
+            ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
+            String prompt = question == null || question.isBlank()
+                    ? "描述这张图片的主体、场景、文字与要点。" : question;
+            String answer = client.prompt()
+                    .user(spec -> spec.text(prompt)
+                            .media(new org.springframework.ai.content.Media(
+                                    org.springframework.util.MimeTypeUtils.parseMimeType(asset.mimeType()),
+                                    new org.springframework.core.io.ByteArrayResource(bytes))))
+                    .call()
+                    .content();
+            if (answer == null || answer.isBlank()) {
+                return new NodeResult("商品画像不可用，请基于关键词直接生成。", "图片理解不可用，已降级");
+            }
+            return new NodeResult(answer, "商品画像已生成（视觉模型）");
+        } catch (Exception exception) {
+            throw new IllegalStateException("本地素材图片理解失败：" + exception.getMessage(), exception);
+        }
     }
 
     private NodeResult webSearch(String query) throws Exception {
@@ -874,14 +920,8 @@ public class WorkflowService {
         return host.contains(":") || host.matches("\\d{1,3}(\\.\\d{1,3}){3}");
     }
 
-    /** 素材引用 → 可供 MCP 理解的短期 URL（仅 OSS 存储；本地存储明确拒绝）。 */
-    private String resolveImageUrl(RunContext context, String image, String imageAssetId) {
-        String assetId = resolveAssetId(image, imageAssetId);
-        if (assetId == null) return image;
-        var asset = requireAsset(context, assetId);
-        if (asset.storageBackend() != com.zwx.zwxagent.creative.domain.StorageBackend.OSS) {
-            throw new IllegalArgumentException("本地存储的素材不能作为图片理解输入，请改用 OSS 或联网图片");
-        }
+    /** OSS 素材 → 10 分钟预签名 URL（不暴露对象键给工作流输出）。 */
+    private String presignedAssetUrl(com.zwx.zwxagent.creative.domain.CreativeAssetRecord asset) {
         return ossClientProvider.getClient().generatePresignedUrl(ossBucket, asset.objectKey(),
                 java.util.Date.from(Instant.now().plusSeconds(600))).toString();
     }

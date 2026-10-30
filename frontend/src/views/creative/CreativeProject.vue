@@ -225,7 +225,7 @@
         <p v-if="!assets.length" class="cr-empty">还没有素材。生成结果会自动进入这里；也可以上传 PNG/JPEG/WebP。</p>
         <div v-else class="asset-grid">
           <figure v-for="asset in assets" :key="asset.id" class="asset-card">
-            <img v-if="urls[asset.id]" :src="urls[asset.id]" :alt="asset.displayName" />
+            <img v-if="thumbs[asset.id] || urls[asset.id]" :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
             <div v-else class="asset-placeholder">加载中…</div>
             <figcaption>
               <span class="asset-name">{{ asset.displayName }}</span>
@@ -257,6 +257,7 @@
           <div><dt>状态</dt><dd><span class="cr-status" :class="statusMeta(detailJob.status).tone">{{ statusMeta(detailJob.status).label }}</span></dd></div>
           <div><dt>提示词</dt><dd class="detail-prompt">{{ detailJob.prompt || '—' }}</dd></div>
           <div><dt>模型</dt><dd>{{ detailJob.modelName || '—' }}</dd></div>
+          <div><dt>来源</dt><dd>{{ sourceLabel(detailJob) }}</dd></div>
           <div><dt>尺寸</dt><dd>{{ detailJob.parameters?.size || '—' }}</dd></div>
           <div><dt>创建时间</dt><dd>{{ formatTime(detailJob.createdAt) }}</dd></div>
           <div><dt>更新时间</dt><dd>{{ formatTime(detailJob.updatedAt) }}</dd></div>
@@ -306,7 +307,7 @@ import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusM
 const PROMPT_MAX = 500
 const route = useRoute()
 const router = useRouter()
-const { urls, urlFor } = useAssetUrls()
+const { urls, thumbs, urlFor, thumbFor } = useAssetUrls()
 
 const projectId = computed(() => route.params.projectId)
 const project = ref(null)
@@ -370,8 +371,17 @@ function showToast(text, tone = '') {
 function blockedText(reason) {
   return {
     SUBMISSION_UNCERTAIN: '提交结果未确认：不会自动重发，可稍后再查询。',
-    SCHEDULER_ERROR: '调度出现异常，已标记为需要关注。'
+    SCHEDULER_ERROR: '调度出现异常，已标记为需要关注。',
+    UPSTREAM_CANCEL_UNSUPPORTED: '上游不支持取消，任务会继续生成；供应商可能仍产生费用。'
   }[reason] || reason
+}
+
+function sourceLabel(job) {
+  const base = { UI: '网页', AGENT: '智能体', WORKFLOW: '工作流', TEST: '测试' }[job.sourceType]
+    || job.sourceType || '网页'
+  if (job.sourceNodeId) return `${base} · 节点 ${job.sourceNodeId}`
+  if (job.sourceRunId) return `${base} · 运行 ${String(job.sourceRunId).slice(0, 8)}`
+  return base
 }
 
 function jobImages(job) {
@@ -482,7 +492,7 @@ async function loadAssets() {
   try {
     const data = await listCreativeAssets({ projectId: projectId.value, limit: 60 })
     assets.value = data.items || []
-    assets.value.forEach(asset => urlFor(asset.id))
+    assets.value.forEach(asset => thumbFor(asset.id))
   } catch (error) {
     assetError.value = '素材加载失败'
   }
@@ -725,7 +735,7 @@ async function toggleStar(asset) {
 }
 
 function downloadAsset(asset) {
-  downloadBlob(urls[asset.id], `${asset.displayName || asset.id}.png`)
+  urlFor(asset.id).then(url => downloadBlob(url, `${asset.displayName || asset.id}.png`))
 }
 
 async function removeAsset(asset) {

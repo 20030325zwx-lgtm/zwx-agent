@@ -129,7 +129,7 @@ public class ToolFactory {
         tools.add(new PDFGenerationTool(sandbox, workDir));
         tools.add(new CurrentTimeTool());
         if (userId != null && !userId.isBlank()) {
-            tools.add(new CreativeImageTool(tenantId, userId, mediaJobService, creativeProjectService));
+            tools.add(new CreativeImageTool(tenantId, userId, runId, mediaJobService, creativeProjectService));
         }
         if (project != null) {
             Path projectRoot = runWorkspace == null ? project.root() : runWorkspace.checkoutRoot();

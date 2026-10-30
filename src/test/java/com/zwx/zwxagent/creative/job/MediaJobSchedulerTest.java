@@ -370,6 +370,34 @@ class MediaJobSchedulerTest {
     }
 
     @Test
+    @Order(9)
+    void unsupportedCancelKeepsRunningAndExplainsWhy() {
+        mockAdapter.reset();
+        mockAdapter.setDefaultQueryScript(
+                new MockMediaProviderAdapter.QueryScript(1000, MockMediaProviderAdapter.QueryState.SUCCEEDED,
+                        List.of(), null));
+        var job = createQueued("sched-cancel-unsupported", "取消能力校验");
+        scheduler.tick();
+        Assertions.assertEquals(MediaJobStatus.RUNNING,
+                jobRepository.findById(job.id()).orElseThrow().status());
+        // 模拟用户请求取消：调度器调用供应商取消，Mock 返回 UNSUPPORTED
+        jdbcTemplate.update("""
+                UPDATE media_job SET status = 'CANCEL_REQUESTED', next_action_at = now(),
+                    lease_until = now() - interval '1 second', version = version + 1
+                WHERE id = ?
+                """, job.id());
+        scheduler.tick();
+        var after = jobRepository.findById(job.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.RUNNING, after.status(), "不支持取消时不得假报已取消");
+        Assertions.assertEquals("UPSTREAM_CANCEL_UNSUPPORTED", after.blockedReason());
+        Integer events = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM media_job_event WHERE job_id = ? AND event_type = 'CANCEL_UNSUPPORTED'",
+                Integer.class, job.id());
+        Assertions.assertEquals(1, events, "应记录取消不支持的明确事件");
+        Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + job.id() + "-1"));
+    }
+
+    @Test
     @Order(8)
     void expiredResultUrlStaysIngestFailedWithoutResubmit() {
         mockAdapter.reset();

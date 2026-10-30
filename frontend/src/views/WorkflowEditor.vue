@@ -321,7 +321,7 @@ function paramPlaceholder(key) {
   }[key] || ''
 }
 function statusLabel(status) {
-  return { RUNNING: '运行中', SUCCEEDED: '成功', FAILED: '失败' }[status] || status
+  return { RUNNING: '运行中', WAITING_EXTERNAL: '等待图片生成', SUCCEEDED: '成功', FAILED: '失败' }[status] || status
 }
 function statusClass(status) {
   return { RUNNING: 'is-running', SUCCEEDED: 'is-done', FAILED: 'is-failed' }[status] || ''

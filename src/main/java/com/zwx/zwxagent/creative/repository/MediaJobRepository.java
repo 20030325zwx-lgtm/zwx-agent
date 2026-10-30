@@ -99,19 +99,28 @@ public class MediaJobRepository {
      */
     public boolean updateStatusFenced(UUID id, long expectedVersion, long expectedLeaseEpoch,
                                       MediaJobStatus target, Instant nextActionAt, Instant finishedAt) {
+        return updateStatusFenced(id, expectedVersion, expectedLeaseEpoch, target, nextActionAt,
+                finishedAt, null);
+    }
+
+    /** 状态迁移并可同时写入/清除 blocked_reason（如上游不支持取消时说明原因）。 */
+    public boolean updateStatusFenced(UUID id, long expectedVersion, long expectedLeaseEpoch,
+                                      MediaJobStatus target, Instant nextActionAt, Instant finishedAt,
+                                      String blockedReason) {
         return jdbcTemplate.update("""
                         UPDATE media_job
                         SET status = ?, version = version + 1, next_action_at = ?, finished_at = ?,
-                            updated_at = now()
+                            blocked_reason = ?, updated_at = now()
                         WHERE id = ? AND version = ? AND lease_epoch = ?
                         """,
                 ps -> {
                     ps.setString(1, target.name());
                     ps.setTimestamp(2, Timestamp.from(nextActionAt == null ? Instant.now() : nextActionAt));
                     ps.setTimestamp(3, finishedAt == null ? null : Timestamp.from(finishedAt));
-                    ps.setObject(4, id);
-                    ps.setLong(5, expectedVersion);
-                    ps.setLong(6, expectedLeaseEpoch);
+                    ps.setString(4, blockedReason);
+                    ps.setObject(5, id);
+                    ps.setLong(6, expectedVersion);
+                    ps.setLong(7, expectedLeaseEpoch);
                 }) > 0;
     }
 
@@ -179,7 +188,7 @@ public class MediaJobRepository {
         return jdbcTemplate.update("""
                         UPDATE media_job
                         SET status = ?, inflight_reserved = FALSE, error_code = ?, error_summary = ?,
-                            finished_at = now(), version = version + 1, updated_at = now()
+                            blocked_reason = NULL, finished_at = now(), version = version + 1, updated_at = now()
                         WHERE id = ? AND version = ? AND lease_epoch = ?
                         """,
                 ps -> {

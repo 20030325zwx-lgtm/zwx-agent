@@ -230,4 +230,40 @@ class MediaJobServiceTest {
         Assertions.assertThrows(IllegalArgumentException.class,
                 () -> jobService.getForOwner(stranger, jobId));
     }
+
+    @Test
+    @Order(7)
+    void trustedSourceIsPersistedAndVisible() {
+        var result = jobService.create(actor, "key-source-agent", projectId, request("来源追踪"),
+                com.zwx.zwxagent.creative.domain.JobSourceType.AGENT, "run-123", null);
+        var job = jobService.getForOwner(actor, result.jobId());
+        Assertions.assertEquals(com.zwx.zwxagent.creative.domain.JobSourceType.AGENT, job.sourceType());
+        Assertions.assertEquals("run-123", job.sourceRunId());
+        Assertions.assertNull(job.sourceNodeId());
+
+        var workflow = jobService.create(actor, "key-source-workflow", projectId, request("工作流来源"),
+                com.zwx.zwxagent.creative.domain.JobSourceType.WORKFLOW, "run-9", "node-gen");
+        var workflowJob = jobService.getForOwner(actor, workflow.jobId());
+        Assertions.assertEquals(com.zwx.zwxagent.creative.domain.JobSourceType.WORKFLOW,
+                workflowJob.sourceType());
+        Assertions.assertEquals("node-gen", workflowJob.sourceNodeId());
+    }
+
+    @Test
+    @Order(8)
+    void eventCursorBeyondMaxRequestsReset() {
+        var job = jobService.create(actor, "key-event-reset", projectId, request("事件重置"));
+        var normal = jobService.eventPage(actor, job.jobId(), 0, 100);
+        Assertions.assertFalse(normal.reset());
+        Assertions.assertEquals(1, normal.events().size(), "初始应只有 JOB_CREATED");
+        Assertions.assertEquals(normal.nextSeq(), normal.events().getFirst().seq());
+
+        var reset = jobService.eventPage(actor, job.jobId(), normal.nextSeq() + 50, 100);
+        Assertions.assertTrue(reset.reset(), "越界游标必须要求客户端重置");
+        Assertions.assertTrue(reset.events().isEmpty());
+        Assertions.assertEquals(normal.nextSeq(), reset.nextSeq());
+        Assertions.assertNotNull(reset.snapshot(), "重置应附带最新任务快照");
+        Assertions.assertThrows(IllegalArgumentException.class,
+                () -> jobService.eventPage(actor, job.jobId(), -1, 100));
+    }
 }

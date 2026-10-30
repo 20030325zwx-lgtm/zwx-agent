@@ -39,7 +39,7 @@
 
         <div v-else class="asset-grid">
           <figure v-for="asset in assets" :key="asset.id" class="asset-card">
-            <img v-if="urls[asset.id]" :src="urls[asset.id]" :alt="asset.displayName" />
+            <img v-if="thumbs[asset.id] || urls[asset.id]" :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
             <div v-else class="asset-placeholder">加载中…</div>
             <figcaption>
               <span class="asset-name">{{ asset.displayName }}</span>
@@ -78,7 +78,7 @@ import {
 import { useAssetUrls, downloadBlob, formatBytes, formatTime } from './shared'
 
 const router = useRouter()
-const { urls, urlFor } = useAssetUrls()
+const { urls, thumbs, urlFor, thumbFor } = useAssetUrls()
 
 const assets = ref([])
 const projects = ref([])
@@ -109,7 +109,7 @@ async function load(cursor = null, append = false) {
     })
     assets.value = append ? [...assets.value, ...(data.items || [])] : (data.items || [])
     nextCursor.value = data.nextCursor
-    assets.value.forEach(asset => urlFor(asset.id))
+    assets.value.forEach(asset => thumbFor(asset.id))
   } catch (exception) {
     error.value = exception.response?.data?.error || '素材加载失败'
   } finally {
@@ -132,7 +132,7 @@ async function toggleStar(asset) {
 }
 
 function downloadAsset(asset) {
-  downloadBlob(urls[asset.id], `${asset.displayName || asset.id}.png`)
+  urlFor(asset.id).then(url => downloadBlob(url, `${asset.displayName || asset.id}.png`))
 }
 
 async function continueFrom(asset) {

@@ -46,6 +46,7 @@ public class StorageAssetIngestService implements AssetIngestService {
                 job.tenantId(), job.userId(), slot.assetId());
         // 对象键由槽位固定，重试覆盖同一对象，不会产生第二份产物
         storage.put(slot.objectKey(), contentType, new ByteArrayInputStream(bytes), bytes.length);
+        CreativeAssetService.putThumbnailBestEffort(storage, slot.objectKey(), contentType, bytes);
         String sha256 = MockAssetIngestService.sha256(bytes);
         // 尺寸解析是增强信息：解析失败不能让已生成的图片丢失
         Integer width = null;

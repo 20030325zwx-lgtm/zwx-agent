@@ -203,8 +203,30 @@ public class MediaJobService {
     /** 事件游标读取（A24）：只返回 seq 之后已提交的事件，调用方按 seq 去重。 */
     public List<com.zwx.zwxagent.creative.domain.MediaJobEventRecord> events(
             CurrentActor actor, UUID jobId, long afterSeq, int limit) {
-        getForOwner(actor, jobId);
-        return eventRepository.listAfter(jobId, afterSeq, Math.max(1, Math.min(limit, 500)));
+        return eventPage(actor, jobId, afterSeq, limit).events();
+    }
+
+    /**
+     * 事件分页：游标越界（大于当前最大 seq）时返回 reset + 最新快照，客户端丢弃本地事件重新同步；
+     * 负游标直接拒绝。事件不删除，因此不存在"过期"缺口，但客户端可能持有其他任务的游标。
+     */
+    public EventPage eventPage(CurrentActor actor, UUID jobId, long afterSeq, int limit) {
+        MediaJobRecord job = getForOwner(actor, jobId);
+        if (afterSeq < 0) {
+            throw new IllegalArgumentException("事件游标不能为负数");
+        }
+        long maxSeq = eventRepository.maxSeq(jobId);
+        if (afterSeq > maxSeq) {
+            return new EventPage(List.of(), maxSeq, true, job);
+        }
+        List<com.zwx.zwxagent.creative.domain.MediaJobEventRecord> events =
+                eventRepository.listAfter(jobId, afterSeq, Math.max(1, Math.min(limit, 500)));
+        long nextSeq = events.isEmpty() ? maxSeq : events.get(events.size() - 1).seq();
+        return new EventPage(events, nextSeq, false, null);
+    }
+
+    public record EventPage(List<com.zwx.zwxagent.creative.domain.MediaJobEventRecord> events,
+                            long nextSeq, boolean reset, MediaJobRecord snapshot) {
     }
 
     /**
@@ -213,6 +235,16 @@ public class MediaJobService {
      */
     public CreateJobResult create(CurrentActor actor, String idempotencyKey, UUID projectId,
                                   CreateJobRequest request) {
+        return create(actor, idempotencyKey, projectId, request, JobSourceType.UI, null, null);
+    }
+
+    /**
+     * 可信服务入口创建任务：来源由服务端注入（HTTP DTO 不接受该字段）。
+     * agent 传 runId，工作流传 runId+nodeKey，用于费用归属与恢复追踪。
+     */
+    public CreateJobResult create(CurrentActor actor, String idempotencyKey, UUID projectId,
+                                  CreateJobRequest request, JobSourceType sourceType,
+                                  String sourceRunId, String sourceNodeId) {
         if (!submissionsEnabled) {
             throw CreativeException.submissionsDisabled();
         }
@@ -272,7 +304,8 @@ public class MediaJobService {
 
         try {
             var job = transactionTemplate.execute(status ->
-                    accept(actor, projectId, idempotencyKey, hash, input, modelSnapshot, request));
+                    accept(actor, projectId, idempotencyKey, hash, input, modelSnapshot, request,
+                            sourceType, sourceRunId, sourceNodeId));
             return toResult(job, false);
         } catch (DuplicateKeyException exception) {
             // 并发下另一事务先插入：回读原记录（A07）
@@ -284,7 +317,8 @@ public class MediaJobService {
 
     /** 受理事务：锁项目校验 ACTIVE → 排队配额 → 插入 QUEUED 与初始事件（同事务）。 */
     private MediaJobRecord accept(CurrentActor actor, UUID projectId, String idempotencyKey, String hash,
-                                  InputSnapshot input, ModelSnapshot modelSnapshot, CreateJobRequest request) {
+                                  InputSnapshot input, ModelSnapshot modelSnapshot, CreateJobRequest request,
+                                  JobSourceType sourceType, String sourceRunId, String sourceNodeId) {
         var project = projectRepository.lockByIdForOwner(actor.tenantId(), actor.userId(), projectId)
                 .orElseThrow(() -> new IllegalArgumentException("创作项目不存在"));
         if (project.status() != ProjectStatus.ACTIVE) {
@@ -299,7 +333,8 @@ public class MediaJobService {
             throw new CreativeQuotaException("排队任务已达上限（" + maxQueued + "），请等待已有任务完成");
         }
         var job = new MediaJobRecord(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
-                JobSourceType.UI, null, null, request == null ? null : request.parentJobId(),
+                sourceType == null ? JobSourceType.UI : sourceType, sourceRunId, sourceNodeId,
+                request == null ? null : request.parentJobId(),
                 input.operation(), MediaJobStatus.QUEUED, idempotencyKey, hash, input, modelSnapshot,
                 modelSnapshot.providerId(), null, null, 1, null, null, 0, false,
                 Instant.now(), null, false, null, null, null,

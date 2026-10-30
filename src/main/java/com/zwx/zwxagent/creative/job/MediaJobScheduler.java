@@ -392,8 +392,15 @@ public class MediaJobScheduler {
             return;
         }
         // REQUESTED/UNSUPPORTED：不假称已取消，继续跟踪结果（BR13）
-        transition(job.id(), version, epoch, MediaJobStatus.RUNNING,
-                Instant.now().plusMillis(queryBackoffMs));
+        if (outcome == MediaProviderAdapter.CancelOutcome.UNSUPPORTED) {
+            transition(job.id(), version, epoch, MediaJobStatus.RUNNING,
+                    Instant.now().plusMillis(queryBackoffMs), "UPSTREAM_CANCEL_UNSUPPORTED");
+            event(job.id(), job.tenantId(), job.userId(), "CANCEL_UNSUPPORTED");
+        } else {
+            transition(job.id(), version, epoch, MediaJobStatus.RUNNING,
+                    Instant.now().plusMillis(queryBackoffMs), null);
+            event(job.id(), job.tenantId(), job.userId(), "CANCEL_TRACKING");
+        }
     }
 
     // ---------------------------------------------------------------- 恢复
@@ -491,10 +498,16 @@ public class MediaJobScheduler {
     }
 
     private void transition(UUID jobId, long version, long epoch, MediaJobStatus target, Instant nextActionAt) {
+        transition(jobId, version, epoch, target, nextActionAt, null);
+    }
+
+    private void transition(UUID jobId, long version, long epoch, MediaJobStatus target,
+                            Instant nextActionAt, String blockedReason) {
         transactionTemplate.executeWithoutResult(status -> {
             var job = jobRepository.lockById(jobId).orElse(null);
             if (job == null) return;
-            if (!jobRepository.updateStatusFenced(jobId, version, epoch, target, nextActionAt, null)) return;
+            if (!jobRepository.updateStatusFenced(jobId, version, epoch, target, nextActionAt,
+                    null, blockedReason)) return;
             event(jobId, job.tenantId(), job.userId(), "STATUS_CHANGED");
         });
     }

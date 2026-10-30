@@ -1,5 +1,5 @@
 import { onBeforeUnmount, reactive } from 'vue'
-import { getCreativeAssetBlob } from '../../api'
+import { getCreativeAssetBlob, getCreativeAssetThumbnail } from '../../api'
 
 export const KIND_LABEL = {
   IMAGE: '图片',
@@ -57,6 +57,7 @@ export function formatBytes(size) {
  */
 export function useAssetUrls() {
   const state = reactive({})
+  const thumbs = reactive({})
   const pending = new Map()
   const created = new Set()
 
@@ -77,15 +78,36 @@ export function useAssetUrls() {
     return task
   }
 
+  /** 列表优先取缩略图；缩略图缺失或失败时回退原图，保证不会出现空图。 */
+  async function thumbFor(assetId) {
+    if (!assetId) return ''
+    if (thumbs[assetId]) return thumbs[assetId]
+    const key = `thumb:${assetId}`
+    if (pending.has(key)) return pending.get(key)
+    const task = getCreativeAssetThumbnail(assetId)
+      .then(blob => {
+        if (!blob || blob.size === 0) throw new Error('empty thumbnail')
+        const url = URL.createObjectURL(blob)
+        created.add(url)
+        thumbs[assetId] = url
+        return url
+      })
+      .catch(() => urlFor(assetId))
+      .finally(() => pending.delete(key))
+    pending.set(key, task)
+    return task
+  }
+
   function release() {
     created.forEach(url => URL.revokeObjectURL(url))
     created.clear()
     Object.keys(state).forEach(key => delete state[key])
+    Object.keys(thumbs).forEach(key => delete thumbs[key])
     pending.clear()
   }
 
   onBeforeUnmount(release)
-  return { urls: state, urlFor, release }
+  return { urls: state, thumbs, urlFor, thumbFor, release }
 }
 
 export function downloadBlob(url, filename) {

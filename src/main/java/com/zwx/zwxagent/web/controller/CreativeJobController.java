@@ -131,10 +131,14 @@ public class CreativeJobController {
     public Map<String, Object> events(CurrentActor actor, @PathVariable UUID jobId,
                                       @RequestParam(defaultValue = "0") long afterSeq,
                                       @RequestParam(defaultValue = "200") int limit) {
-        List<MediaJobEventRecord> events = jobService.events(actor, jobId, afterSeq, limit);
+        var page = jobService.eventPage(actor, jobId, afterSeq, limit);
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("events", events.stream().map(this::eventView).toList());
-        body.put("nextSeq", events.isEmpty() ? afterSeq : events.get(events.size() - 1).seq());
+        body.put("events", page.events().stream().map(this::eventView).toList());
+        body.put("nextSeq", page.nextSeq());
+        body.put("reset", page.reset());
+        if (page.reset() && page.snapshot() != null) {
+            body.put("snapshot", summary(page.snapshot()));
+        }
         return body;
     }
 
@@ -148,7 +152,15 @@ public class CreativeJobController {
             long cursor = afterSeq;
             try {
                 for (int i = 0; i < 120; i++) {
-                    var events = jobService.events(actor, jobId, cursor, 200);
+                    var page = jobService.eventPage(actor, jobId, cursor, 200);
+                    if (page.reset()) {
+                        // 游标越界：先让客户端重置，再以快照的 nextSeq 继续，避免漏事件
+                        emitter.send(SseEmitter.event().name("job-reset")
+                                .data(summary(page.snapshot())));
+                        cursor = page.nextSeq();
+                        continue;
+                    }
+                    var events = page.events();
                     for (var event : events) {
                         emitter.send(SseEmitter.event().id(Long.toString(event.seq()))
                                 .name("job-event").data(eventView(event)));
@@ -178,6 +190,9 @@ public class CreativeJobController {
         map.put("jobId", job.id().toString());
         map.put("projectId", job.projectId().toString());
         map.put("operation", job.operation());
+        map.put("sourceType", job.sourceType().name());
+        map.put("sourceRunId", job.sourceRunId());
+        map.put("sourceNodeId", job.sourceNodeId());
         map.put("prompt", job.inputSnapshot().prompt());
         map.put("status", job.status().name());
         map.put("version", job.version());

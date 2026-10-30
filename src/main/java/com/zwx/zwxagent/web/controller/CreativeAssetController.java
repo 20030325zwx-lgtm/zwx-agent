@@ -61,6 +61,18 @@ public class CreativeAssetController {
         return assetService.list(actor, projectId, mediaType, starred, cursor, limit);
     }
 
+    @GetMapping("/{assetId}/thumbnail")
+    public ResponseEntity<byte[]> thumbnail(CurrentActor actor, @PathVariable UUID assetId) {
+        byte[] bytes = assetService.thumbnail(actor, assetId);
+        if (bytes == null || bytes.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .header("Cache-Control", "private, max-age=3600")
+                .body(bytes);
+    }
+
     @GetMapping("/{assetId}/content")
     public ResponseEntity<byte[]> content(CurrentActor actor, @PathVariable UUID assetId) {
         var content = assetService.content(actor, assetId);

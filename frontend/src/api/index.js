@@ -346,6 +346,9 @@ export const uploadCreativeAsset = (projectId, file) => {
     headers: { 'Content-Type': 'multipart/form-data' }
   }).then(response => response.data)
 }
+export const getCreativeAssetThumbnail = assetId =>
+  request.get(`/ai/creative/assets/${encodeURIComponent(assetId)}/thumbnail`, { responseType: 'blob' })
+    .then(response => response.data)
 export const getCreativeAssetBlob = assetId =>
   request.get(`/ai/creative/assets/${encodeURIComponent(assetId)}/content`, { responseType: 'blob' })
     .then(response => response.data)

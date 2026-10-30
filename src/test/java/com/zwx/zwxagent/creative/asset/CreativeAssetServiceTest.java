@@ -97,6 +97,13 @@ class CreativeAssetServiceTest {
         Assertions.assertEquals(2, view.height());
         var content = assetService.content(actor, view.id());
         Assertions.assertArrayEquals(bytes, content.bytes());
+        // A17：缩略图生成成功，且保持原比例
+        byte[] thumbnail = assetService.thumbnail(actor, view.id());
+        Assertions.assertNotNull(thumbnail, "有效 PNG 应生成缩略图");
+        var decoded = ImageIO.read(new java.io.ByteArrayInputStream(thumbnail));
+        Assertions.assertNotNull(decoded);
+        Assertions.assertEquals(3, decoded.getWidth());
+        Assertions.assertEquals(2, decoded.getHeight());
     }
 
     @Test

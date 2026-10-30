@@ -212,6 +212,20 @@
 - 验证：`mvn clean test` 415 通过；正式服务 `/ai/creative/health` 应显示 schedulerEnabled=true；
   默认启动（仅覆盖本地存储）的隔离实例提交 Mock 任务可完成。
 
+### C16 补充：来源追踪、SSE reset、取消反馈、缩略图与本地素材理解（2026-10-30）
+
+- 来源追踪：`MediaJobService.create` 新增可信重载（sourceType/runId/nodeId），HTTP DTO 不暴露该字段；
+  智能体工具传 AGENT+runId，工作流媒体节点传 WORKFLOW+runId+nodeId；详情/列表返回来源，前端详情抽屉展示。
+- SSE/事件：`eventPage` 对越界游标返回 `reset=true` + 最新快照，负游标 400；SSE 连接先发 `job-reset` 再续传。
+- 取消：上游 `UNSUPPORTED` 时回到 RUNNING，写 `blockedReason=UPSTREAM_CANCEL_UNSUPPORTED` 与
+  `CANCEL_UNSUPPORTED` 事件；界面显示"上游不支持取消，仍可能产生费用"。
+- 缩略图：`ThumbnailEncoder`（最长边 320，失败返回 null），上传与生成入库都 best-effort 生成；
+  `/assets/{id}/thumbnail` 无缩略图 404，素材列表优先缩略图并回退原图；删除仍只软删记录，未做对象清理。
+- 本地素材理解：`image_understand` 引用本地素材时改用视觉模型（bytes 直传），OSS 素材仍用 10 分钟预签名 URL；
+  未配置 vision 绑定时明确报错，不再笼统拒绝本地存储。
+- 文档：验收标准补充 `PASS（部分）` 口径；结果表更新 HEAD、A17/A22/A24/A31–A34 说明；台账同步 V10 与上述实现。
+- 验证：`mvn clean test` 421 通过 / 0 失败 / 6 跳过；新增缩略图、来源、事件 reset、取消不支持用例。
+
 ## 环境注意事项
 
 - application-local.yml 未读取密钥内容（仅测试解析 datasource 结构，不输出）。

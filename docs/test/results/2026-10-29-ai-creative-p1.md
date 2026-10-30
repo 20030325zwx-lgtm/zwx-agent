@@ -1,7 +1,7 @@
 # AI创作 P1 验收结果
 
 - 验收日期/执行者：2026-10-29 起，执行智能体（ZCode 会话，接手 C00–C16）
-- HEAD及未提交差异/构建ID：基线 `94a53e8`；差异＝docs（设计/实施/验收/会话/索引）未提交 + 其他会话副本文件（`WorkflowEditor 2.vue`、`Workflows 2.vue`）
+- HEAD及未提交差异/构建ID：基线 `52e50f1`（本批 C16 补充提交后以 `git log` 为准）；工作区仅其他会话副本文件（`WorkflowEditor 2.vue`、`Workflows 2.vue`）
 - OS、硬件、JDK/Node/PostgreSQL：macOS arm64；后端本机 8123（launchctl）；数据库＝本机 Docker PostgreSQL（开发库，A02 等需要时另建隔离库）
 - 发布形态：网页 / 桌面（未到发布阶段）
 - 模型/适配版本/区域；费用授权范围与实际费用是否已知：DashScope `wanx2.1-t2i-plus`（绑定）/`wanx2.1-t2i-turbo`；区域默认；单价未知（NULL）
@@ -26,21 +26,21 @@
 | A14 | PASS | PNG/JPEG/WebP 上传 READY 且尺寸解析正确；伪造扩展名、>20MiB、>40MP 全部拒绝且无残留 | CreativeAssetServiceTest（LOCAL/PG，独立服务栈） | — |
 | A15 | PASS | 本地存储拒绝 ../ 逃逸；跨用户 content/update/delete 全部拒绝 | CreativeAssetServiceTest（哨兵=路径规范化校验；越权用例） | — |
 | A16 | PASS | 活动任务引用素材时删除 409；任务终态后软删除成功，历史任务记录保留 | CreativeAssetServiceTest.softDeleteBlockedByActiveJobReferenceThenAllowed（PG） | — |
-| A17 | PASS（部分） | 本地 put/open/stat/delete 往返摘要一致；OSS 适配器已实现（复用 OssClientProvider），真实 OSS 往返在 C16 用真实环境补验；缩略图待 C11 | CreativeAssetServiceTest.localStorageRejectsTraversalAndRoundTrips | — |
+| A17 | PASS（部分） | 本地 put/open/stat/delete 往返摘要一致；缩略图已实现（320px 以内、失败不影响原件，上传与生成入库均生成），有单测与上传用例；OSS 真实往返仍待环境补验 | CreativeAssetServiceTest.localStorageRejectsTraversalAndRoundTrips / uploadsValidPngAndParsesDimensions；ThumbnailEncoderTest | — |
 | A18 | BLOCKED | 真实模型调用需要费用授权（模型 `wanx2.1-t2i-plus`、1 次、单价未知）；未执行任何计费调用 | 适配器与契约已就绪；授权后可执行 | — |
 | A19 | PASS | 注入对象存储写失败：job → INGEST_FAILED，submit 次数保持 1；恢复后 INGEST_FAILED→FETCHING→SUCCEEDED，对象落盘、素材 1 条 | MediaJobSchedulerTest.ingestFailureRetriesWithoutSecondSubmit（PG/LOCAL/MOCK） | — |
 | A20 | PASS | 对象写入成功但素材插入失败 → 复用同一 assetId/objectKey 重试成功，素材不重复；结果 URL 不可达时保持 INGEST_FAILED 且不重发提交 | MediaJobSchedulerTest.objectWrittenButAssetInsertFailsReusesSameSlot / expiredResultUrlStaysIngestFailedWithoutResubmit | — |
 | A21 | PASS | 401→PROVIDER_AUTH_FAILED；429+Retry-After→throttled(17s)；5xx→Unknown；2xx 无 task_id→Unknown；连接失败→Unknown；429 默认退避；回环/内网/169.254 拦截；重定向到元数据地址拦截；超限下载中途终止 | DashScopeImageAdapterTest 13 例 / SafeMediaDownloaderTest 6 例（本地 HTTP Mock，无外网） | — |
-| A22 | PASS（部分） | QUEUED 取消 → CANCELLED，无上游调用；重复取消幂等返回 CANCELLED；事件为 JOB_CREATED→CANCELLED。RUNNING 取消/不支持取消的上游语义未执行 | 隔离实例（scheduler 关闭）HTTP 实测；MediaJobServiceRulesTest | — |
+| A22 | PASS（部分） | QUEUED 取消 → CANCELLED，无上游调用；重复取消幂等返回 CANCELLED；事件为 JOB_CREATED→CANCELLED；RUNNING 请求取消且上游不支持时回到 RUNNING，写入 `UPSTREAM_CANCEL_UNSUPPORTED` 与 CANCEL_UNSUPPORTED 事件，不假报已取消 | 隔离实例 HTTP 实测；MediaJobServiceRulesTest；MediaJobSchedulerTest.unsupportedCancelKeepsRunningAndExplainsWhy | — |
 | A23 | PASS（部分） | CANCELLED 重试创建新 job 且 parentJobId 正确、模型快照保留；INGEST_FAILED 调用 resume-ingest 后 SUCCEEDED（只重新入库）。FAILED 普通重试、RECONCILING 确认重试未执行 | 隔离实例 HTTP 实测；MediaJobSchedulerTest A19 | — |
-| A24 | PASS（部分） | 事件按 seq 返回 JOB_CREATED/CANCELLED，详情含 outputs/version。断线重连、重复消息、过期游标 reset 未执行 | GET /jobs/{id}/events 实测 | — |
+| A24 | PASS（部分） | 事件按 seq 返回 JOB_CREATED/CANCELLED，详情含 outputs/version；越界游标返回 `reset=true` + 最新快照，负游标 400，SSE 连接先发 `job-reset` 再续传；断线重连与重复消息的浏览器端验证仍未执行 | MediaJobServiceTest.eventCursorBeyondMaxRequestsReset；GET /jobs/{id}/events 实测 | — |
 | A25 | NOT_RUN | 供应商删除保护与 attention 展示未逐条执行 | — | — |
 | A26 | NOT_RUN | 优化链路需要对话模型调用（可能计费），本轮只验证解析规则（4 例） | PromptOptimizationServiceTest | — |
 | A27 | PASS（部分） | 无绑定 → 引导条 + 生成禁用；新建项目 → 自动保存草稿 → 刷新后草稿保留；错误文案可读。两个页签冲突未执行 | 浏览器实测（1280/1440/1024/390） | — |
 | A28 | PASS（部分） | 刷新不重复提交；再次生成产生新 job、卡片按 jobId 合并；生成中按钮禁用防双击。弱网超时重试未执行 | 浏览器实测 + 任务列表计数 | — |
 | A29 | PASS（部分） | 生成中/已完成/保存失败文案与 allowedActions 对应；无假进度、无免费声明；取消/待确认/取消中状态未逐一截图 | 浏览器实测截图 + 任务详情 | — |
 | A30 | PASS（部分） | 素材列表、项目筛选、收藏/下载/删除/继续创作按钮存在；分页与真实下载校验未执行 | 浏览器实测；CreativeAssetServiceTest | — |
-| A31–A34 | NOT_RUN | 智能体工具、工作流等待与媒体节点端到端未执行（C12–C14 代码已编译） | — | — |
+| A31–A34 | NOT_RUN | 智能体工具、工作流等待与媒体节点端到端未执行；本批已补来源追踪（AGENT/WORKFLOW + runId/nodeId）与本地素材视觉理解回退，尚未跑端到端 | — | — |
 | A35 | PASS（部分） | `submissions-enabled=false` 时新任务返回 503 + code，已有任务仍可查询；暂停/恢复调度未演练 | 隔离实例 HTTP 实测 | — |
 | A36 | PASS（部分） | `/ai/creative/health` 返回开关/存储/绑定/DB/本人计数，无密钥或对象键；日志脱敏扫描未做 | HTTP 实测；CreativeHealthController | — |
 | A37–A38 | NOT_RUN | 桌面安装包与备份恢复演练未执行 | — | — |
@@ -48,6 +48,7 @@
 | A40 | NOT_RUN | 负载、状态可见 P95、资源与可用性阈值未测量 | — | — |
 
 - 统计：PASS 17 / PASS（部分）10 / FAIL 0 / BLOCKED 1（A18）/ NOT_RUN 12（总数 40）
+- 最近一次全量测试：421 通过 / 0 失败 / 6 跳过（`mvn clean test`，CI 环境变量关闭真实模型用例）
 - 真实生成：本阶段未新增计费调用；历史验证（2026-10-29 wanx2.1 两模型各 1 张成功）仅作参考
 - P0/P1 缺陷：无未修复项；本轮修复 6 个问题（作业列表 SQL、租约阻塞轮询、配额竞态、前端导入/草稿竞态、维度解析导致入库失败），均见 docs/bugs/bug-2026-10-30-*
 - 未覆盖环境和原因：REAL（A18 需费用授权，本轮无计费调用）；WEB 使用隔离测试账号与 Mock 模型（不使用、不输出用户密钥）；DESKTOP/OSS/备份演练未执行

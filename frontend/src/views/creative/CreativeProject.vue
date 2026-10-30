@@ -15,6 +15,7 @@
       </div>
       <nav class="studio-tabs" aria-label="创作台视图">
         <button type="button" :class="{ active: tab === 'studio' }" @click="tab = 'studio'">创作</button>
+        <button type="button" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
         <button type="button" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">
           任务记录<span v-if="activeCount" class="tab-badge">{{ activeCount }}</span>
         </button>
@@ -186,6 +187,58 @@
       </aside>
     </div>
 
+    <!-- 工作流 -->
+    <div v-else-if="tab === 'workflow'" class="cr-scroll studio-sub">
+      <div class="cr-inner">
+        <div class="cr-section-head">
+          <h2>工作流运行</h2>
+          <button type="button" class="cr-ghost" :disabled="wfLoading" @click="loadWorkflowRuns">刷新</button>
+        </div>
+        <p class="cr-hint">绑定本项目的运行；媒体产物会进入本项目素材库与任务记录，来源标记为「工作流」。</p>
+        <p v-if="wfLoading" class="cr-hint">加载中…</p>
+        <p v-else-if="wfError" class="cr-error">{{ wfError }}</p>
+        <p v-else-if="!wfRuns.length" class="cr-empty">
+          还没有绑定本项目的工作流运行。到
+          <router-link to="/creative">创作首页</router-link>
+          的「工作流创作」发起，或打开
+          <router-link to="/workflows">工作流画布</router-link>
+          编辑流程。
+        </p>
+        <article v-for="run in wfRuns" :key="run.id" class="wf-run-card">
+          <header class="wf-run-head">
+            <span class="cr-status" :class="wfStatusMeta(run.status).tone">{{ wfStatusMeta(run.status).label }}</span>
+            <strong class="wf-run-name">{{ run.workflowName }}</strong>
+            <span class="wf-run-meta">v{{ run.definitionVersion }}</span>
+            <span class="wf-run-meta">{{ formatTime(run.createdAt) }}</span>
+            <button type="button" class="cr-ghost" @click="toggleRunDetail(run)">
+              {{ wfDetails[run.id] ? '收起' : '查看详情' }}
+            </button>
+            <router-link class="cr-ghost" :to="`/workflows/${run.workflowKey}`">打开画布</router-link>
+          </header>
+          <p v-if="run.error" class="cr-error">{{ run.error }}</p>
+          <template v-if="wfDetails[run.id]">
+            <ol class="wf-run-steps">
+              <li v-for="step in wfDetails[run.id].steps" :key="step.key" class="wf-step" :class="step.status.toLowerCase()">
+                <span class="wf-step-dot" />
+                <span class="wf-step-name">{{ step.name }}</span>
+                <span class="wf-step-status">{{ wfStepLabel(step.status) }}</span>
+                <span v-if="step.message" class="wf-step-msg">{{ step.message }}</span>
+              </li>
+            </ol>
+            <div v-if="artifactList(wfDetails[run.id]).length" class="wf-run-artifacts">
+              <figure v-for="artifact in artifactList(wfDetails[run.id])" :key="artifact.objectKey" class="wf-artifact">
+                <a v-if="artifact.url && artifact.type === 'image'" :href="artifact.url" target="_blank" rel="noopener">
+                  <img :src="artifact.url" :alt="artifact.name" />
+                </a>
+                <a v-else-if="artifact.url" :href="artifact.url" target="_blank" rel="noopener">{{ artifact.name }}</a>
+                <span v-else>{{ artifact.name }}</span>
+              </figure>
+            </div>
+          </template>
+        </article>
+      </div>
+    </div>
+
     <!-- 任务记录 -->
     <div v-else-if="tab === 'tasks'" class="cr-scroll studio-sub">
       <div class="cr-inner">
@@ -298,9 +351,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { AlertCircle, ArrowLeft, ImagePlus, Sparkles, Upload } from 'lucide-vue-next'
 import {
   cancelCreativeJob, createCreativeDraft, createCreativeJob, deleteCreativeAsset,
-  getCreativeJob, getCreativeProject, listCreativeAssets, listCreativeDrafts, listCreativeJobs,
-  listModelCatalog, optimizeCreativePrompt, resumeCreativeJobIngest, retryCreativeJob,
-  updateCreativeAsset, updateCreativeDraft, uploadCreativeAsset
+  getCreativeJob, getCreativeProject, getWorkflowRun, listCreativeAssets, listCreativeDrafts,
+  listCreativeJobs, listModelCatalog, listWorkflowRuns, optimizeCreativePrompt,
+  resumeCreativeJobIngest, retryCreativeJob, updateCreativeAsset, updateCreativeDraft,
+  uploadCreativeAsset
 } from '../../api'
 import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta } from './shared'
 
@@ -313,7 +367,7 @@ const projectId = computed(() => route.params.projectId)
 const project = ref(null)
 const imageBinding = ref(null)
 const pageError = ref('')
-const tab = ref('studio')
+const tab = ref(route.query.tab === 'workflow' ? 'workflow' : 'studio')
 
 const idea = ref('')
 const effective = ref('')
@@ -751,20 +805,119 @@ async function removeAsset(asset) {
 
 watch(tab, value => {
   if (value === 'assets') loadAssets()
+  if (value === 'workflow') loadWorkflowRuns()
 })
+
+// ---------------------------------------------------------------- 工作流运行
+
+const wfRuns = ref([])
+const wfDetails = ref({})
+const wfLoading = ref(false)
+const wfError = ref('')
+let wfPollTimer = null
+
+function wfStatusMeta(status) {
+  switch (status) {
+    case 'SUCCEEDED': return { label: '已完成', tone: 'success' }
+    case 'FAILED': return { label: '失败', tone: 'error' }
+    case 'WAITING_EXTERNAL': return { label: '等待生成', tone: 'warn' }
+    case 'RUNNING': return { label: '进行中', tone: 'warn' }
+    default: return { label: status || '未知', tone: 'muted' }
+  }
+}
+
+function wfStepLabel(status) {
+  switch (status) {
+    case 'SUCCEEDED': return '完成'
+    case 'RUNNING': return '进行中'
+    case 'SKIPPED': return '已跳过'
+    case 'FAILED': return '失败'
+    default: return '待执行'
+  }
+}
+
+function artifactList(detail) {
+  return (detail.artifacts || []).filter(artifact => artifact.url || artifact.name)
+}
+
+async function loadWorkflowRuns() {
+  wfLoading.value = true
+  wfError.value = ''
+  try {
+    const data = await listWorkflowRuns({ projectId: projectId.value, limit: 20 })
+    wfRuns.value = data || []
+    // 自动展开从创作首页跳转过来的那次运行
+    const focusRunId = route.query.runId
+    if (focusRunId && wfRuns.value.some(run => run.id === focusRunId)) {
+      await toggleRunDetail(wfRuns.value.find(run => run.id === focusRunId))
+      router.replace({ query: { ...route.query, runId: undefined } })
+    }
+  } catch (error) {
+    wfError.value = error.response?.data?.error || '工作流运行加载失败'
+  } finally {
+    wfLoading.value = false
+  }
+  scheduleWorkflowPoll()
+}
+
+async function toggleRunDetail(run) {
+  if (wfDetails.value[run.id]) {
+    const next = { ...wfDetails.value }
+    delete next[run.id]
+    wfDetails.value = next
+    return
+  }
+  try {
+    const detail = await getWorkflowRun(run.id)
+    wfDetails.value = { ...wfDetails.value, [run.id]: detail }
+  } catch (error) {
+    showToast(error.response?.data?.error || '运行详情加载失败', 'error')
+  }
+}
+
+function scheduleWorkflowPoll() {
+  window.clearTimeout(wfPollTimer)
+  const active = wfRuns.value.some(run => ['RUNNING', 'WAITING_EXTERNAL'].includes(run.status))
+  if (!active || tab.value !== 'workflow') return
+  wfPollTimer = window.setTimeout(async () => {
+    if (document.visibilityState !== 'hidden') {
+      try {
+        const data = await listWorkflowRuns({ projectId: projectId.value, limit: 20 })
+        wfRuns.value = data || []
+        // 已展开的运行进入终态后自动刷新详情，避免步骤/产物停留在旧状态
+        for (const run of wfRuns.value) {
+          if (wfDetails.value[run.id] && !['RUNNING', 'WAITING_EXTERNAL'].includes(run.status)) {
+            try {
+              wfDetails.value = { ...wfDetails.value, [run.id]: await getWorkflowRun(run.id) }
+            } catch (error) { /* 保持旧详情，下一次轮询重试 */ }
+          }
+        }
+      } catch (error) { /* 下一次轮询重试 */ }
+      scheduleWorkflowPoll()
+      return
+    }
+    scheduleWorkflowPoll()
+  }, 3000)
+}
 
 watch(() => route.params.projectId, () => {
   draft.value = null
   jobs.value = []
   details.value = {}
   assets.value = []
+  wfRuns.value = []
+  wfDetails.value = {}
   loadProject()
 })
 
-onMounted(loadProject)
+onMounted(() => {
+  loadProject()
+  if (tab.value === 'workflow') loadWorkflowRuns()
+})
 onBeforeUnmount(() => {
   window.clearTimeout(saveTimer)
   window.clearTimeout(pollTimer)
+  window.clearTimeout(wfPollTimer)
 })
 </script>
 
@@ -1069,4 +1222,71 @@ onBeforeUnmount(() => {
   .studio-tabs { margin-left: 0; }
   .studio-bar { flex-wrap: wrap; }
 }
+
+.wf-run-card {
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg);
+  background: var(--wb-surface);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.wf-run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.wf-run-name { font-size: 13px; }
+.wf-run-meta { color: var(--wb-muted); font-size: 11.5px; }
+.wf-run-head .cr-ghost { margin-left: auto; }
+.wf-run-steps {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wf-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--wb-text-2);
+}
+.wf-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--wb-border);
+  flex-shrink: 0;
+}
+.wf-step.succeeded .wf-step-dot { background: var(--wb-success, #2e9e5b); }
+.wf-step.running .wf-step-dot { background: var(--wb-brand); }
+.wf-step.failed .wf-step-dot { background: var(--wb-danger, #d64545); }
+.wf-step.skipped .wf-step-dot { background: var(--wb-muted); }
+.wf-step-name { font-weight: 550; color: var(--wb-text); }
+.wf-step-status { color: var(--wb-muted); font-size: 11px; }
+.wf-step-msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wb-muted);
+}
+.wf-run-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.wf-artifact img {
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: var(--wb-radius);
+  border: 1px solid var(--wb-border);
+  display: block;
+}
+.wf-artifact a { color: var(--wb-brand); font-size: 12px; }
 </style>

@@ -89,7 +89,7 @@ public class WorkflowService {
     public record WorkflowRunView(String id, String workflowKey, String workflowName, int definitionVersion,
                                   String status, String currentStep, Map<String, Object> input,
                                   List<StepState> steps, List<ArtifactView> artifacts, String error,
-                                  Instant createdAt, Instant updatedAt) {
+                                  Instant createdAt, Instant updatedAt, UUID creativeProjectId) {
     }
 
     public record ArtifactView(String type, String name, String url) {
@@ -98,7 +98,11 @@ public class WorkflowService {
     public record SaveVersionRequest(String name, String description, WorkflowGraph graph) {
     }
 
-    public record StartRequest(String keyword, Map<String, Object> input) {
+    public record StartRequest(String keyword, Map<String, Object> input, UUID projectId) {
+
+        public StartRequest(String keyword, Map<String, Object> input) {
+            this(keyword, input, null);
+        }
     }
 
     private record DefVersionRow(int version, String name, String description, WorkflowGraph graph, Instant createdAt) {
@@ -107,12 +111,13 @@ public class WorkflowService {
     private record WorkflowRunRow(String id, String tenantId, String userId, String workflowKey, int definitionVersion,
                                   String status, String currentStep, JsonNode input, JsonNode steps,
                                   JsonNode artifacts, String error, Instant createdAt, Instant updatedAt,
-                                  JsonNode graphSnapshot) {
+                                  JsonNode graphSnapshot, UUID creativeProjectId) {
     }
 
     private record RunContext(String id, String tenantId, String userId, String workflowKey,
                               int definitionVersion, String name, String description, WorkflowGraph graph,
-                              Map<String, Object> input, List<StepState> steps, List<Artifact> artifacts) {
+                              Map<String, Object> input, List<StepState> steps, List<Artifact> artifacts,
+                              UUID creativeProjectId) {
     }
 
     private record NodeResult(String output, String message) {
@@ -151,6 +156,7 @@ public class WorkflowService {
     private final boolean allowLocalEndpoints;
     private final com.zwx.zwxagent.creative.service.MediaJobService mediaJobService;
     private final com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService;
+    private final com.zwx.zwxagent.creative.asset.CreativeAssetService creativeAssetService;
     private final com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository;
     private final com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage;
     private final ExecutorService executor = Executors.newFixedThreadPool(2, task -> {
@@ -176,6 +182,7 @@ public class WorkflowService {
                            @Value("${app.config.allow-local-model-endpoints:false}") boolean allowLocalEndpoints,
                            com.zwx.zwxagent.creative.service.MediaJobService mediaJobService,
                            com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService,
+                           com.zwx.zwxagent.creative.asset.CreativeAssetService creativeAssetService,
                            com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository,
                            com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage) {
         this.jdbcTemplate = jdbcTemplate;
@@ -191,6 +198,7 @@ public class WorkflowService {
         this.allowLocalEndpoints = allowLocalEndpoints;
         this.mediaJobService = mediaJobService;
         this.creativeProjectService = creativeProjectService;
+        this.creativeAssetService = creativeAssetService;
         this.creativeAssetRepository = creativeAssetRepository;
         this.mediaStorage = mediaStorage;
     }
@@ -391,6 +399,14 @@ public class WorkflowService {
         if (input.isEmpty()) throw new IllegalArgumentException("请填写运行输入");
         if (definition.graph().nodes().isEmpty()) throw new IllegalArgumentException("该工作流没有可执行的节点");
         topologicalOrder(definition.graph());
+        // 运行可绑定创作项目（工作流作为 AI 创作的一部分）：校验归属后落库，
+        // 媒体节点产物归入该项目素材库，项目详情页可按项目筛选运行
+        UUID creativeProjectId = request == null ? null : request.projectId();
+        if (creativeProjectId != null) {
+            var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
+                    userId, tenantId, userId, com.zwx.zwxagent.platform.security.Role.USER);
+            creativeProjectService.get(actor, creativeProjectId);
+        }
 
         String id = UUID.randomUUID().toString();
         List<StepState> steps = new ArrayList<>(definition.graph().nodes().stream()
@@ -398,14 +414,16 @@ public class WorkflowService {
                 .toList());
         jdbcTemplate.update("""
                         INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, definition_version,
-                                                  status, current_step, input, steps, artifacts, graph_snapshot)
-                        VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?::jsonb, ?::jsonb, '[]'::jsonb, ?::jsonb)
+                                                  status, current_step, input, steps, artifacts, graph_snapshot,
+                                                  creative_project_id)
+                        VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?::jsonb, ?::jsonb, '[]'::jsonb, ?::jsonb, ?)
                         """,
                 id, tenantId, userId, workflowKey, definition.version(),
                 definition.graph().nodes().getFirst().key(),
-                toJson(input), toJson(steps), toJson(definition.graph()));
+                toJson(input), toJson(steps), toJson(definition.graph()), creativeProjectId);
         RunContext context = new RunContext(id, tenantId, userId, workflowKey, definition.version(),
-                definition.name(), definition.description(), definition.graph(), input, steps, new ArrayList<>());
+                definition.name(), definition.description(), definition.graph(), input, steps, new ArrayList<>(),
+                creativeProjectId);
         executor.submit(() -> execute(context));
         return view(id, tenantId, userId);
     }
@@ -609,6 +627,19 @@ public class WorkflowService {
                 ? downloadImage(imageUrl) : readAssetBytes(context, imageAssetId);
         byte[] poster = PosterComposer.compose(productImage, copy);
         Artifact artifact = storeArtifact(context, poster);
+        if (context.creativeProjectId() != null) {
+            // 运行绑定了创作项目：海报同步登记进项目素材库（尽力而为，失败不阻塞工作流）
+            try {
+                var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
+                        context.userId(), context.tenantId(), context.userId(),
+                        com.zwx.zwxagent.platform.security.Role.USER);
+                creativeAssetService.upload(actor, context.creativeProjectId(),
+                        "poster-" + context.id() + ".png", poster);
+            } catch (Exception exception) {
+                log.warn("海报登记创作素材库失败（不阻塞工作流）：runId={}；{}",
+                        context.id(), exception.getMessage());
+            }
+        }
         return new NodeResult(artifact.objectKey(), "海报已生成");
     }
 
@@ -744,11 +775,15 @@ public class WorkflowService {
         var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
                 context.userId(), context.tenantId(), context.userId(),
                 com.zwx.zwxagent.platform.security.Role.USER);
-        UUID projectId = workflowProject(actor, text(params.get("projectId")));
+        // 项目归属：运行绑定的创作项目优先（用户在发起时的选择），节点参数其次，最后兜底
+        UUID projectId = context.creativeProjectId() != null
+                ? context.creativeProjectId()
+                : workflowProject(actor, text(params.get("projectId")));
         com.zwx.zwxagent.creative.service.MediaJobService.CreateJobResult created = mediaJobService.create(actor,
                 "workflow-" + context.id() + "-" + node.key(), projectId,
                 new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, "text_to_image", null,
-                        prompt, prompt, Map.of("size", size), List.of(), null, null, false));
+                        prompt, prompt, Map.of("size", size), List.of(), null, null, false),
+                com.zwx.zwxagent.creative.domain.JobSourceType.WORKFLOW, context.id(), node.key());
         jdbcTemplate.update("""
                         INSERT INTO workflow_node_execution (run_id, node_key, status, media_job_id, attempt)
                         VALUES (?, ?, 'WAITING_EXTERNAL', ?, 1)
@@ -847,7 +882,8 @@ public class WorkflowService {
         row.artifacts().forEach(node -> artifacts.add(new Artifact(
                 node.path("type").asText(), node.path("name").asText(), node.path("objectKey").asText())));
         RunContext context = new RunContext(row.id(), row.tenantId(), row.userId(), row.workflowKey(),
-                row.definitionVersion(), row.workflowKey(), "", graph, input, parseSteps(row.steps()), artifacts);
+                row.definitionVersion(), row.workflowKey(), "", graph, input, parseSteps(row.steps()), artifacts,
+                row.creativeProjectId());
         executor.submit(() -> execute(context));
         return true;
     }
@@ -1207,10 +1243,19 @@ public class WorkflowService {
     }
 
     public List<WorkflowRunView> list(String tenantId, String userId, int limit) {
-        return jdbcTemplate.query("""
-                        SELECT * FROM workflow_run WHERE tenant_id = ? AND user_id = ?
-                        ORDER BY created_at DESC LIMIT ?
-                        """, (rs, rowNum) -> mapRow(rs), tenantId, userId, Math.max(1, Math.min(limit, 50)))
+        return list(tenantId, userId, null, limit);
+    }
+
+    /** 按创作项目筛选运行（项目详情页工作流 tab）；projectId 为 null 时不过滤。 */
+    public List<WorkflowRunView> list(String tenantId, String userId, UUID projectId, int limit) {
+        String sql = """
+                SELECT * FROM workflow_run WHERE tenant_id = ? AND user_id = ?
+                """ + (projectId == null ? "" : " AND creative_project_id = ? ")
+                + " ORDER BY created_at DESC LIMIT ?";
+        Object[] args = projectId == null
+                ? new Object[]{tenantId, userId, Math.max(1, Math.min(limit, 50))}
+                : new Object[]{tenantId, userId, projectId, Math.max(1, Math.min(limit, 50))};
+        return jdbcTemplate.query(sql, (rs, rowNum) -> mapRow(rs), args)
                 .stream().map(row -> toView(row, false)).toList();
     }
 
@@ -1223,6 +1268,9 @@ public class WorkflowService {
     }
 
     private WorkflowRunRow mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        java.util.UUID projectId = null;
+        Object projectRef = rs.getObject("creative_project_id");
+        if (projectRef instanceof java.util.UUID uuid) projectId = uuid;
         return new WorkflowRunRow(rs.getString("id"), rs.getString("tenant_id"), rs.getString("user_id"),
                 rs.getString("workflow_key"), rs.getInt("definition_version"), rs.getString("status"),
                 rs.getString("current_step"),
@@ -1231,7 +1279,8 @@ public class WorkflowService {
                 parseNode(rs.getString("artifacts")),
                 rs.getString("error"),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-                rs.getString("graph_snapshot") == null ? null : parseNode(rs.getString("graph_snapshot")));
+                rs.getString("graph_snapshot") == null ? null : parseNode(rs.getString("graph_snapshot")),
+                projectId);
     }
 
     private WorkflowRunView toView(WorkflowRunRow row, boolean withArtifactUrl) {
@@ -1262,7 +1311,7 @@ public class WorkflowService {
         }
         return new WorkflowRunView(row.id(), row.workflowKey(), name, row.definitionVersion(),
                 row.status(), row.currentStep(), input, steps, artifacts, row.error(),
-                row.createdAt(), row.updatedAt());
+                row.createdAt(), row.updatedAt(), row.creativeProjectId());
     }
 
     // ---------------------------------------------------------------- 工具

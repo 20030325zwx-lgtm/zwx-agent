@@ -212,10 +212,14 @@ public class MediaJobRepository {
                 id, expectedVersion, expectedLeaseEpoch) > 0;
     }
 
-    /** 调度候选：未终态、到期、租约过期（SKIP LOCKED 由调用方事务提供）。 */
+    /**
+     * 调度候选：未终态、到期、租约过期（SKIP LOCKED 由调用方事务提供）。
+     * SUBMITTING 不进入普通认领：提交结果不明，只能由恢复器判定去向，普通 tick 空操作
+     * 会把租约清成 NULL 导致周期恢复永远选不到（R1）。
+     */
     public List<MediaJobRecord> findDueForClaim(Instant now, int limit) {
         return jdbcTemplate.query(SELECT + """
-                        WHERE status IN ('QUEUED','SUBMITTING','RECONCILING','RUNNING','CANCEL_REQUESTED','FETCHING','INGEST_FAILED')
+                        WHERE status IN ('QUEUED','RECONCILING','RUNNING','CANCEL_REQUESTED','FETCHING','INGEST_FAILED')
                           AND next_action_at <= ?
                           AND (lease_until IS NULL OR lease_until < ?)
                         ORDER BY next_action_at
@@ -238,13 +242,58 @@ public class MediaJobRepository {
                 """, id, expectedLeaseEpoch);
     }
 
-    /** 认领：写租约持有者与 epoch（在同一事务内执行）。 */
-    public void claim(UUID id, String workerId, Instant leaseUntil) {
-        jdbcTemplate.update("""
+    /**
+     * 认领令牌：认领事务当场冻结的 (jobId, owner, epoch)。调用方后续执行、回写、释放
+     * 都必须使用该令牌，不得重新读取记录取 epoch——否则旧 worker 会拿到新 worker 的
+     * epoch，围栏失效（R2）。
+     */
+    public record ClaimToken(UUID jobId, String owner, long leaseEpoch) {
+    }
+
+    /** 认领：写租约持有者与 epoch（在同一事务内执行），返回冻结的认领令牌。 */
+    public ClaimToken claim(UUID id, String workerId, Instant leaseUntil) {
+        return jdbcTemplate.queryForObject("""
                         UPDATE media_job SET lease_owner = ?, lease_until = ?, lease_epoch = lease_epoch + 1
                         WHERE id = ?
+                        RETURNING id, lease_owner, lease_epoch
                         """,
+                (rs, rowNum) -> new ClaimToken(UUID.fromString(rs.getString("id")),
+                        rs.getString("lease_owner"), rs.getLong("lease_epoch")),
                 workerId, Timestamp.from(leaseUntil), id);
+    }
+
+    /**
+     * 同步适配器提交前的租约延长：只以认领令牌的 epoch 围栏，不动 version
+     * （租约延长不是状态迁移，version 仍归状态写回路径管理）。
+     */
+    public boolean extendLeaseFenced(UUID id, long expectedLeaseEpoch, Instant leaseUntil) {
+        return jdbcTemplate.update("""
+                        UPDATE media_job SET lease_until = ?, updated_at = now()
+                        WHERE id = ? AND lease_epoch = ?
+                        """,
+                Timestamp.from(leaseUntil), id, expectedLeaseEpoch) > 0;
+    }
+
+    /**
+     * 进入 RECONCILING 并写入观察截止时间：同步适配器（无上游任务号可对账）在
+     * 观察窗口过后仍未获得结果时，由查询路径如实收敛为 FAILED。
+     */
+    public boolean reconcileUncertainFenced(UUID id, long expectedVersion, long expectedLeaseEpoch,
+                                            Instant nextActionAt, Instant observationDeadline) {
+        return jdbcTemplate.update("""
+                        UPDATE media_job
+                        SET status = ?, next_action_at = ?, observation_deadline_at = ?,
+                            version = version + 1, updated_at = now()
+                        WHERE id = ? AND version = ? AND lease_epoch = ?
+                        """,
+                ps -> {
+                    ps.setString(1, MediaJobStatus.RECONCILING.name());
+                    ps.setTimestamp(2, Timestamp.from(nextActionAt));
+                    ps.setTimestamp(3, observationDeadline == null ? null : Timestamp.from(observationDeadline));
+                    ps.setObject(4, id);
+                    ps.setLong(5, expectedVersion);
+                    ps.setLong(6, expectedLeaseEpoch);
+                }) > 0;
     }
 
     /** 统计某作用域下占用在途槽位的活跃任务数。 */

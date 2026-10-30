@@ -1,0 +1,34 @@
+日期：2026-10-31（问题由 2026-10-30 复核报告 R1 指出，源码确认）
+主题：SUBMITTING 任务被普通 tick 空操作后永久漏恢复
+
+问题现象：
+SUBMITTING 状态的媒体任务在租约过期后，普通 tick 会认领它并空操作、随后把
+lease_until 清成 NULL；而周期恢复（recover）只选 lease_until < now()，NULL 不匹配。
+该任务此后既不被 tick 有效处理，也不被恢复器选中，永久滞留。
+
+影响范围：
+所有进入 SUBMITTING 后中断的任务（进程重启、提交方线程死亡、租约在两次恢复之间
+到期）。任务状态不收敛、占用用户/供应商在途配额，前端永远显示"提交中"。
+
+原因（修复前）：
+1. MediaJobRepository.findDueForClaim 认领范围包含 SUBMITTING；
+2. MediaJobScheduler.handleClaimed 对 SUBMITTING 是空操作分支，finally 仍释放租约
+   （lease_until 置 NULL）；
+3. recover 的候选 SQL 要求 provider_task_id IS NULL AND lease_until < now()，
+   不包含 NULL 租约，也不包含已拿到 taskId 的 SUBMITTING。
+
+解决方式：
+1. findDueForClaim 认领范围排除 SUBMITTING（普通 tick 不再吞掉提交中任务）；
+2. recover 候选扩为 status='SUBMITTING' AND (lease_until IS NULL OR lease_until < now())，
+   锁内重校验租约仍有效则不接管；有 provider_task_id 转 RUNNING 恢复查询，
+   无 task id 转 RECONCILING（提交结果不明）。
+
+验证结果：
+MediaJobSchedulerTest#submittingJobSurvivesTickAndIsRecovered 通过（12/12 全绿）。
+覆盖：未来租约 tick 不动、过期租约 tick 不动、NULL 租约被恢复器选中转 RECONCILING、
+带 taskId 转 RUNNING 且恢复查询不重发。
+
+后续注意事项：
+- 普通调度语义变为"SUBMITTING 只属于恢复器"，新增状态相关代码不要把 SUBMITTING
+  加回 findDueForClaim。
+- 恢复器锁内重校验依赖 FOR UPDATE，改恢复 SQL 时必须保持锁内二次检查。

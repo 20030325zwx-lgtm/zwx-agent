@@ -232,6 +232,44 @@ class CreativeMigrationTest {
         }
     }
 
+    /** V11：workflow_run 增加可空的 creative_project_id（外键 + 按项目索引），旧运行不受影响。 */
+    @Test
+    void upgradesWorkflowRunWithNullableProjectBinding() throws Exception {
+        String database = createScratchDatabase();
+        flyway(database, "10").migrate();
+        try (Connection connection = connect(database);
+             var insert = connection.prepareStatement("""
+                     INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, status)
+                     VALUES ('run-legacy', 'tenant-a', 'user-a', 'product-poster', 'SUCCEEDED')
+                     """)) {
+            insert.execute();
+        }
+        flyway(database, null).migrate();
+        UUID projectId = UUID.randomUUID();
+        insertProject(database, projectId, "tenant-a", "user-a");
+        try (Connection connection = connect(database)) {
+            try (var query = connection.prepareStatement(
+                    "SELECT creative_project_id FROM workflow_run WHERE id = 'run-legacy'")) {
+                ResultSet rs = query.executeQuery();
+                Assertions.assertTrue(rs.next(), "V10→V11 升级不得删除旧运行");
+                Assertions.assertNull(rs.getObject(1), "旧运行的绑定为 NULL");
+            }
+            try (var bind = connection.prepareStatement(
+                    "UPDATE workflow_run SET creative_project_id = ? WHERE id = 'run-legacy'")) {
+                bind.setObject(1, projectId);
+                bind.executeUpdate();
+            }
+            SQLException foreign = Assertions.assertThrows(SQLException.class, () -> {
+                try (var bad = connection.prepareStatement(
+                        "UPDATE workflow_run SET creative_project_id = ? WHERE id = 'run-legacy'")) {
+                    bad.setObject(1, UUID.randomUUID());
+                    bad.execute();
+                }
+            });
+            Assertions.assertEquals("23503", foreign.getSQLState(), "绑定不存在的项目必须被外键拒绝");
+        }
+    }
+
     private int historyRowCount(String database) throws SQLException {
         try (Connection connection = connect(database);
              var statement = connection.prepareStatement("SELECT count(*) FROM flyway_schema_history")) {

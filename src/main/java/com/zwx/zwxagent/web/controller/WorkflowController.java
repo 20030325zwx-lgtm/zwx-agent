@@ -65,8 +65,10 @@ public class WorkflowController {
     }
 
     @GetMapping("/runs")
-    public List<WorkflowService.WorkflowRunView> list(CurrentActor actor, @RequestParam(defaultValue = "20") int limit) {
-        return workflowService.list(actor.tenantId(), actor.userId(), limit);
+    public List<WorkflowService.WorkflowRunView> list(CurrentActor actor,
+                                                      @RequestParam(required = false) java.util.UUID projectId,
+                                                      @RequestParam(defaultValue = "20") int limit) {
+        return workflowService.list(actor.tenantId(), actor.userId(), projectId, limit);
     }
 
     @GetMapping("/runs/{runId}")

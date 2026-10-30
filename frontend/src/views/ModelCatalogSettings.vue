@@ -102,14 +102,30 @@
             <div v-if="!isNew" class="detail-card">
               <div class="card-head">
                 <h2>模型列表</h2>
-                <span class="card-hint">能力声明仅表示配置意图，未验证不自动标支持</span>
+                <div class="head-actions">
+                  <AButton
+                    v-if="selected?.protocol === 'openai-compatible'"
+                    size="small"
+                    :loading="fetchingModels"
+                    title="调用中转站 /v1/models，新模型默认停用"
+                    @click="fetchModels"
+                  >从中转站拉取模型列表</AButton>
+                  <span class="card-hint">能力声明仅表示配置意图，未验证不自动标支持</span>
+                </div>
               </div>
               <div v-for="model in selected.models" :key="model.id" class="model-row">
                 <span class="model-id">{{ model.modelId }}</span>
                 <span class="model-name">{{ model.displayName }}</span>
-                <span class="model-caps">
-                  <span v-for="cap in model.capabilities" :key="cap" class="cap-tag">{{ capLabel(cap) }}</span>
-                </span>
+                <ASelect
+                  :value="model.capabilities"
+                  mode="multiple"
+                  size="small"
+                  class="model-caps-edit"
+                  :options="capabilityOptions"
+                  :max-tag-count="2"
+                  placeholder="能力"
+                  @change="value => updateCaps(model, value)"
+                />
                 <ASwitch
                   :checked="model.enabled"
                   size="small"
@@ -179,6 +195,7 @@ import {
   createModelProvider,
   deleteModelProvider,
   deleteProviderModel,
+  fetchProviderModels,
   listModelCatalog,
   setModelBinding,
   testModelProvider,
@@ -191,6 +208,7 @@ const selectedId = ref(null)
 const isNew = ref(false)
 const busy = ref(false)
 const testing = ref(false)
+const fetchingModels = ref(false)
 const loadError = ref('')
 const testResult = ref(null)
 const form = reactive({ name: '', protocol: 'openai-compatible', baseUrl: '', apiKey: '', enabled: true, clearApiKey: false })
@@ -210,7 +228,8 @@ const protocolOptions = [
 const capabilityOptions = [
   { value: 'tools', label: '工具调用' },
   { value: 'vision', label: '视觉' },
-  { value: 'embedding', label: 'Embedding' }
+  { value: 'embedding', label: 'Embedding' },
+  { value: 'image_generation', label: '图片生成' }
 ]
 const PURPOSES = [
   { key: 'chat', label: '对话模型' },
@@ -235,7 +254,7 @@ function protocolLabel(protocol) {
   return protocol === 'dashscope' ? 'DashScope' : 'OpenAI 兼容'
 }
 function capLabel(cap) {
-  return { tools: '工具', vision: '视觉', embedding: '向量' }[cap] || cap
+  return { tools: '工具', vision: '视觉', embedding: '向量', image_generation: '生图' }[cap] || cap
 }
 function testDotClass(provider) {
   if (provider.lastTestOk === true) return 'ok'
@@ -376,6 +395,34 @@ async function toggleModel(model, value) {
     replaceProvider(updated)
   } catch (error) {
     message.error(extractError(error, '更新失败'))
+  }
+}
+
+async function updateCaps(model, capabilities) {
+  try {
+    const updated = await updateProviderModel(selectedId.value, model.id, {
+      modelId: model.modelId,
+      displayName: model.displayName,
+      capabilities: capabilities || [],
+      enabled: model.enabled
+    })
+    replaceProvider(updated)
+  } catch (error) {
+    message.error(extractError(error, '能力更新失败'))
+  }
+}
+
+async function fetchModels() {
+  fetchingModels.value = true
+  try {
+    const result = await fetchProviderModels(selectedId.value)
+    message.success(`中转站返回 ${result.total} 个模型，新增 ${result.added} 个（默认停用，请启用并勾选能力）`)
+    await refresh()
+    if (!selected.value) selectedId.value = null
+  } catch (error) {
+    message.error(extractError(error, '拉取模型列表失败'))
+  } finally {
+    fetchingModels.value = false
   }
 }
 
@@ -592,6 +639,16 @@ onMounted(() => refresh(false))
 .card-hint {
   color: var(--wb-muted);
   font-size: 12px;
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.model-caps-edit {
+  flex: 0 0 190px;
 }
 
 .form-grid {

@@ -6,6 +6,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
+import java.net.http.HttpRequest;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -301,6 +303,93 @@ public class ModelCatalogService {
                         """,
                 result.ok(), result.message(), providerId);
         return result;
+    }
+
+    // ---------------------------------------------------------------- 中转站模型拉取
+
+    /** 拉取模型列表结果：total=中转站返回的模型数，added=本次新入库条数。 */
+    public record FetchModelsResult(int total, int added, List<String> models) {
+    }
+
+    private final java.net.http.HttpClient fetchHttpClient = java.net.http.HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
+
+    /**
+     * 从中转站（OpenAI 兼容聚合网关）拉取 /v1/models 并增量入库（ccswitch 式体验）：
+     * 新模型默认 enabled=false、无能力标记，由用户手动启用并勾选能力。
+     * 仅个人 openai-compatible 供应商可拉取；系统供应商为共享数据，不允许批量写入。
+     */
+    @Transactional
+    public FetchModelsResult fetchModels(String userId, long providerId) {
+        ProviderRow provider = requireAccessibleProvider(userId, providerId);
+        if (!provider.ownerId().equals(owner(userId))) {
+            throw new IllegalArgumentException("系统供应商不支持拉取模型列表，请新建个人供应商");
+        }
+        if (!"openai-compatible".equalsIgnoreCase(provider.protocol())) {
+            throw new IllegalArgumentException("仅 openai-compatible 协议支持拉取模型列表");
+        }
+        if (provider.baseUrl() == null || provider.baseUrl().isBlank()) {
+            throw new IllegalArgumentException("该供应商未配置服务地址");
+        }
+        String apiKey = decrypt(provider);
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalArgumentException("该供应商未保存 API Key，请先更新密钥");
+        }
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(modelsEndpoint(provider.baseUrl())))
+                .timeout(Duration.ofSeconds(20))
+                .header("Authorization", "Bearer " + apiKey)
+                .GET()
+                .build();
+        List<String> modelIds = new ArrayList<>();
+        try {
+            java.net.http.HttpResponse<String> response =
+                    fetchHttpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 401 || response.statusCode() == 403) {
+                throw new IllegalArgumentException("中转站鉴权失败（HTTP " + response.statusCode() + "），请检查 API Key");
+            }
+            if (response.statusCode() >= 400) {
+                throw new IllegalArgumentException("中转站返回 HTTP " + response.statusCode() + "，无法拉取模型列表");
+            }
+            var root = new ObjectMapper().readTree(response.body() == null ? "" : response.body());
+            root.path("data").forEach(node -> {
+                String id = node.path("id").asText("").trim();
+                if (!id.isEmpty()) modelIds.add(id);
+            });
+        } catch (IllegalArgumentException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("连接中转站失败：" + exception.getMessage(), exception);
+        }
+        if (modelIds.isEmpty()) {
+            throw new IllegalArgumentException("中转站未返回任何模型（/v1/models 为空）");
+        }
+        List<String> distinct = modelIds.stream().distinct().sorted().toList();
+        List<String> existing = jdbcTemplate.query(
+                "SELECT model_id FROM model_provider_model WHERE provider_id = ?",
+                (rs, rowNum) -> rs.getString(1), providerId);
+        var known = new java.util.HashSet<>(existing);
+        int added = 0;
+        for (String modelId : distinct) {
+            if (!known.add(modelId)) continue;
+            jdbcTemplate.update("""
+                            INSERT INTO model_provider_model (provider_id, model_id, display_name, capabilities, enabled)
+                            VALUES (?, ?, ?, '[]'::jsonb, FALSE)
+                            ON CONFLICT (provider_id, model_id) DO NOTHING
+                            """,
+                    providerId, modelId, modelId);
+            added++;
+        }
+        if (added > 0) bumpRevision();
+        return new FetchModelsResult(distinct.size(), added, distinct);
+    }
+
+    /** 与 DynamicChatModelFactory 的 /v1 路径约定一致（中转站常见两种 baseUrl 写法都兼容）。 */
+    private static String modelsEndpoint(String baseUrl) {
+        String base = baseUrl.replaceAll("/+$", "");
+        String effective = base.matches(".*(/v[0-9]+)$") ? base : base + "/v1";
+        return effective + "/models";
     }
 
     // ---------------------------------------------------------------- 用途绑定

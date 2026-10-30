@@ -17,6 +17,9 @@
 | `creative.download.allow-local` | `false` | 仅桌面/隔离测试可开启；云端必须关闭以防 SSRF |
 | `creative.download.max-bytes` | `20971520` | 产物下载上限，流式读取中即中断 |
 | `app.workflow.media-resume.interval-ms` | `5000` | 工作流媒体等待恢复轮询间隔 |
+| `creative.scheduler.recovery-interval-ms` | `30000` | 周期恢复间隔：接管启动时租约未过期的 SUBMITTING 等任务（2026-10-31 R1 修复后普通 tick 不再认领 SUBMITTING） |
+| `creative.scheduler.sync-observation-seconds` | `600` | 同步适配器（openai-images）提交不明的观察窗口；到期仍无结果如实转 FAILED 并提示费用可能已产生 |
+| `creative.adapters.openai-images.timeout-seconds` | `240` | OpenAI images 兼容（中转站）同步提交 HTTP 超时，同时是提交前租约延长窗口 |
 
 配置文件：`src/main/resources/application.yml`；本地连接仍由 Git 忽略的 `application-local.yml` 提供，禁止修改或输出其中内容。
 

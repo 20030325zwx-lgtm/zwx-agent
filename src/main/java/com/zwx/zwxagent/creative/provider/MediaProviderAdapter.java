@@ -28,6 +28,15 @@ public interface MediaProviderAdapter {
         return CancelOutcome.UNSUPPORTED;
     }
 
+    /**
+     * 同步提交的 HTTP 超时上限（秒）；0 表示异步适配器（提交后凭 taskId 轮询）。
+     * 同步适配器（如 OpenAI images 兼容接口）没有上游任务号，调用方据此在提交前
+     * 延长租约覆盖整个调用窗口，并为提交不明的结果设置观察截止时间。
+     */
+    default int syncSubmitTimeoutSeconds() {
+        return 0;
+    }
+
     enum SubmitOutcome { ACCEPTED, COMPLETED, REJECTED, UNKNOWN }
 
     enum QueryState { RUNNING, SUCCEEDED, FAILED, UNKNOWN }

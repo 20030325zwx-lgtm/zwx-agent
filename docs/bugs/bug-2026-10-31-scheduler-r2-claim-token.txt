@@ -1,0 +1,37 @@
+日期：2026-10-31（问题由 2026-10-30 复核报告 R2 指出，源码确认）
+主题：认领令牌未冻结，旧 worker 可用新 worker 的 epoch 清租约/回写
+
+问题现象：
+调度器一次认领整批任务但只保存任务 ID；逐个处理前重新 findById，用记录当前的
+lease_epoch 执行与释放。慢任务跨租约场景：worker A 处理批次前面的慢任务，后面的
+任务租约到期被 worker B 接管（epoch+1），A 处理到该任务时读到 B 的新 epoch，
+释放租约会清掉 B 的租约，并可能并行执行查询/入库动作。
+
+影响范围：
+批量认领 + 慢任务 + 租约到期的并发场景。双 worker 并发操作同一任务：重复查询、
+重复入库尝试、租约被错误清除导致第三个 worker 再次接管。原有
+releaseLease(id, epoch) 的 epoch 围栏因调用方读的是新 epoch 而失效。
+
+原因（修复前）：
+MediaJobScheduler.tick 只保存 ID 列表；处理循环里 claimedEpoch = job.leaseEpoch()
+取的是重新读取后的当前值，不是认领时刻的值。
+
+解决方式：
+1. MediaJobRepository.claim 改为 UPDATE ... RETURNING，返回冻结的
+   ClaimToken(jobId, owner, leaseEpoch)；
+2. tick 携带令牌，handleClaimed/handleSubmit/handleQueryOrIngest/handleCancelRequested
+   一律使用令牌 epoch，不重新读取 epoch；
+3. 回写仍走既有 version+epoch 双围栏方法（updateStatusFenced/finishFenced 等），
+   释放用 releaseLease(id, token.epoch)。
+4. 配套：同步适配器（OpenAI images 类）提交前用新 extendLeaseFenced 以 epoch 围栏
+   延长租约，覆盖同步 HTTP 调用窗口。
+
+验证结果：
+MediaJobSchedulerTest#staleWorkerUsesFrozenTokenAndKeepsNewWorkersLease 通过
+（12/12 全绿）：worker A 阻塞在慢任务提交、victim 被 worker-b 接管后，A 处理完
+victim 释放租约，worker-b 的租约保持不变。原 releaseLeaseIsFencedByEpoch 仍通过。
+
+后续注意事项：
+- 任何新的调度路径不得在处理后重新读取 lease_epoch 用于回写/释放，必须传令牌。
+- 批量串行处理仍无续租；批内任务总耗时超过租约时依赖"普通 tick 不认领 SUBMITTING"
+  与 fenced 回写保证一致性，长批次建议后续按处理能力拆批。

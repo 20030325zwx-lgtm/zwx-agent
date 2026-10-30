@@ -24,6 +24,7 @@ import java.util.Optional;
 public class MediaModelResolver {
 
     public static final String ADAPTER_DASHSCOPE_TEXT2IMAGE = "dashscope-text2image";
+    public static final String ADAPTER_OPENAI_IMAGES = "openai-images";
     private static final String OPERATION_TEXT_TO_IMAGE = ParameterSchema.IMAGE_GENERATION;
 
     private final ModelCatalogService modelCatalogService;
@@ -61,32 +62,54 @@ public class MediaModelResolver {
     }
 
     /**
-     * 已知适配器映射：DashScope 协议的生图绑定自动补/刷新默认档案（适配器是 schema 的权威来源）；
-     * 已被其他适配器（如测试 Mock）接管的模型尊重现状；其他协议无适配，明确拒绝。
+     * 已知协议→适配器映射：dashscope → dashscope-text2image（真实 Key 已验证），
+     * openai-compatible → openai-images（中转站，未经真实验证标 UNVERIFIED）。
+     * 生图绑定自动补/刷新默认档案（适配器是 schema 的权威来源）；
+     * 已被其他适配器（如测试 Mock）接管的模型尊重现状；未知协议明确拒绝。
      */
     private MediaModelProfileRepository.MediaModelProfileRecord ensureProfile(
             ModelCatalogService.ImageBinding binding) {
         var existing = profileRepository.findByModelRowId(binding.modelRowId());
-        if (existing.isPresent() && !ADAPTER_DASHSCOPE_TEXT2IMAGE.equals(existing.get().adapterKey())) {
-            return existing.get();
+        if (existing.isPresent()) {
+            String current = existing.get().adapterKey();
+            if (!ADAPTER_DASHSCOPE_TEXT2IMAGE.equals(current) && !ADAPTER_OPENAI_IMAGES.equals(current)) {
+                return existing.get(); // 已被 Mock 等其他适配器接管，尊重现状
+            }
         }
-        if (!"dashscope".equalsIgnoreCase(binding.config().provider())) {
-            throw CreativeException.modelNotConfigured(
-                    "该模型没有可用的图片生成适配器：" + binding.config().provider() + "/" + binding.config().modelName());
+        String protocol = String.valueOf(binding.config().provider());
+        String adapterKey;
+        ParameterSchema schema;
+        VerificationStatus verification;
+        switch (protocol.toLowerCase()) {
+            case "dashscope" -> {
+                adapterKey = ADAPTER_DASHSCOPE_TEXT2IMAGE;
+                schema = ParameterSchema.dashscopeTextToImage();
+                // 2026-10-29 已用真实 Key 验证 wanx2.1 系列出图（见模型契约文档）
+                verification = VerificationStatus.VERIFIED;
+            }
+            case "openai-compatible" -> {
+                adapterKey = ADAPTER_OPENAI_IMAGES;
+                schema = ParameterSchema.openAiImages();
+                // 中转站模型未经真实出图验证，不标 VERIFIED
+                verification = VerificationStatus.UNVERIFIED;
+            }
+            default -> throw CreativeException.modelNotConfigured(
+                    "该模型没有可用的图片生成适配器：" + binding.config().provider() + "/"
+                            + binding.config().modelName());
         }
-        profileRepository.upsert(binding.modelRowId(), ADAPTER_DASHSCOPE_TEXT2IMAGE, "1",
+        profileRepository.upsert(binding.modelRowId(), adapterKey, "1",
                 Map.of(OPERATION_TEXT_TO_IMAGE, true),
                 Map.of("operation", ParameterSchema.IMAGE_GENERATION,
-                        "parameters", ParameterSchema.dashscopeTextToImage().parameters()),
-                // 2026-10-29 已用真实 Key 验证 wanx2.1 系列出图（见模型契约文档）
-                VerificationStatus.VERIFIED, Instant.now());
+                        "parameters", schema.parameters()),
+                verification, Instant.now());
         return profileRepository.findByModelRowId(binding.modelRowId()).orElseThrow();
     }
 
     private ParameterSchema parseSchema(Map<String, Object> schemaJson) {
-        if (schemaJson == null || schemaJson.isEmpty()) return ParameterSchema.dashscopeTextToImage();
+        ParameterSchema fallback = ParameterSchema.dashscopeTextToImage();
+        if (schemaJson == null || schemaJson.isEmpty()) return fallback;
         Object parameters = schemaJson.get("parameters");
-        if (!(parameters instanceof List<?> list)) return ParameterSchema.dashscopeTextToImage();
+        if (!(parameters instanceof List<?> list)) return fallback;
         try {
             String json = CreativeJson.toJson(list);
             var specs = CreativeJson.fromJson(json, new com.fasterxml.jackson.core.type.TypeReference<
@@ -94,7 +117,7 @@ public class MediaModelResolver {
             return new ParameterSchema(
                     String.valueOf(schemaJson.getOrDefault("operation", ParameterSchema.IMAGE_GENERATION)), specs);
         } catch (Exception exception) {
-            return ParameterSchema.dashscopeTextToImage();
+            return fallback;
         }
     }
 

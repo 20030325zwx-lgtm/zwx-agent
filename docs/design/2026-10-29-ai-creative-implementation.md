@@ -92,7 +92,7 @@
 | C02 | 图片模型目录与能力 | C01 | IN_REVIEW | MediaModelResolver/MediaModelProfileRepository/ParameterSchema；MediaModelResolverTest（A03 PASS：用户绑定、显式行、无绑定阻断、越权拒绝）；A04 待 C04 Mock |
 | C03 | 项目、草稿、权限 | C01 | IN_REVIEW | CreativeProjectService/CreativeDraftService/CreativeProjectController；CreativeProjectServiceTest（隔离、草稿乐观锁 409、归档拒绝新草稿、名称校验）；V10 增加项目类型 `kind`（IMAGE/VIDEO/NOVEL/COMIC，默认 IMAGE），迁移用例覆盖旧项目升级与非法类型；A05/A06 全量验收待 C04/C06 的 job/素材实体 |
 | C04 | 任务创建、幂等、快照 | C02,C03 | IN_REVIEW | MediaJobService/CreativeJobController；MediaJobServiceTest（A07：20 并发同键 1 job+1 事件；A08：同键改内容/换模型 409、复用返回冻结快照；A09：事件写入故障整体回滚、排队上限 429 无半成品）；完整环境复验在 C16 |
-| C05 | 租约调度、限流、恢复 | C04 | DONE | MediaJobScheduler/MediaJobRecoveryService/MockMediaProviderAdapter；MediaJobSchedulerTest（A10：双实例并发 + 用户在途上限 1；A11：旧 epoch 回写被拒；A12：恢复查询不重发；A13：提交不明 → RECONCILING 不重发）；复查修复：动作结束释放租约（不再被 60s 租约阻塞轮询）、配额检查+占位同事务持锁、启动调用 recover()；双实例压测在 C16 复验 |
+| C05 | 租约调度、限流、恢复 | C04 | DONE | MediaJobScheduler/MockMediaProviderAdapter（恢复逻辑内联于调度器，无独立 RecoveryService）；MediaJobSchedulerTest（A10：双实例并发 + 用户在途上限 1；A11：旧 epoch 回写被拒；A12：恢复查询不重发；A13：提交不明 → RECONCILING 不重发）；复查修复：动作结束释放租约（不再被 60s 租约阻塞轮询）、配额检查+占位同事务持锁、启动调用 recover()；2026-10-31 修复复核报告 R1/R2（认领 RETURNING 冻结令牌、tick 排除 SUBMITTING、recover 覆盖 NULL/过期租约），bug 记录 docs/bugs/bug-2026-10-31-scheduler-r*.txt，测试 12/12；双实例压测在 C16 复验 |
 | C06 | 文件存储与素材 | C01,C03 | IN_REVIEW | MediaStorage/OssMediaStorage/LocalMediaStorage/MediaStorageConfig；CreativeAssetService+Controller；ImageInspector；CreativeAssetServiceTest（A14：PNG/JPEG/WebP 上传与伪造/超限/巨像素拒绝；A15：遍历拒绝+越权；A16：活动引用 409 + 终态后软删除；A17：本地往返 ✓，OSS 往返待真实环境）；缩略图待 C11 |
 | C07 | 供应商与结果入库 | C05,C06 | IN_REVIEW | DashScopeImageAdapter + SafeMediaDownloader（逐跳 SSRF 校验、流式限额）+ StorageAssetIngestService（真实入库、同槽位重试）；DashScopeImageAdapterTest 13 例 / SafeMediaDownloaderTest 6 例 PASS（A21 分类：401/429+Retry-After/5xx/超时/无 task_id/私网与元数据拦截/超限中断）；MediaJobSchedulerTest 覆盖 A19/A20；A18 真实模型调用 BLOCKED（待费用授权） |
 | C08 | 查询、取消、对账、事件 | C07 | IN_REVIEW | MediaJobService 增加列表/取消/重试/恢复入库/事件游标；CreativeJobController 增加项目筛选、详情 allowedActions、取消/重试/resume-ingest、事件 JSON 与 SSE；ModelCatalogService 删除供应商前检查在途媒体任务（A25）；任务来源由可信入口注入（UI/AGENT/WORKFLOW + runId/nodeId），详情可见；事件越界游标返回 reset+快照，SSE 先发 job-reset；上游不支持取消写 blockedReason 与事件；隔离实例实测 QUEUED 取消/幂等/事件顺序、CANCELLED 重试 parent 关联、resume-ingest 恢复（A22–A24 部分 PASS） |
@@ -104,8 +104,8 @@
 | C14 | 工作流节点与兼容 | C13,C11 | IN_REVIEW | 新节点 media_image_generate 输出 {jobId,assetId,mediaType}，支持 {{node.output.assetId}}；image_understand/poster_render 增加 imageAssetId（OSS 短期 URL / 本地字节）；旧 image_generate 未改动；编辑器新增节点与说明；本地存储素材的图片理解改走视觉模型（字节直传），OSS 素材仍走预签名 URL；A33/A34 未执行 |
 | C15 | 桌面、发布与观测 | C11,C12,C14 | IN_REVIEW | creative.submissions-enabled 开关（503 拒绝新任务、旧任务继续）；Micrometer 计数（submitted/succeeded/failed/ingest_failed/uncertain）；/ai/creative/health 就绪与本人任务计数；OSS 凭据缺失回退本地目录；隔离实例实测 503 开关与 /health（A35/A36 部分 PASS）；桌面与备份演练未执行 |
 | C16 | P1 总验收 | C15 | TODO | — |
-| C17 | 自由画布数据与编辑 | C16 | TODO | — |
-| C18 | 画布执行与依赖冻结 | C17 | TODO | — |
+| C17 | 自由画布数据与编辑 | C16 | 已承接 | 2026-10-30 决策：不新建独立创作画布，复用现有工作流引擎承接（运行绑定创作项目 + 创作入口），见 docs/design/2026-10-31-workflow-creative-integration.md |
+| C18 | 画布执行与依赖冻结 | C17 | 已承接 | 同上：工作流画布已有 DAG 校验/拓扑执行/外部等待与 graph_snapshot 冻结，创作侧入口与项目绑定已实现 |
 | C19 | 视频适配与长任务 | C16 | TODO | — |
 | C20 | P2 组合验收 | C18,C19 | TODO | — |
 | C21 | 剧本、角色与分镜 | C20 | TODO | — |

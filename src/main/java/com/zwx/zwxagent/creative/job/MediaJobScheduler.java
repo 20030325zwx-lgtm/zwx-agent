@@ -83,6 +83,8 @@ public class MediaJobScheduler {
     private int quotaQueriesBeforeAttention;
     @Value("${creative.scheduler.recovery-interval-ms:30000}")
     private long recoveryIntervalMs;
+    @Value("${creative.scheduler.sync-observation-seconds:600}")
+    private long syncObservationSeconds;
     @Value("${creative.download.allow-local:false}")
     private boolean downloadAllowLocal;
     @Value("${creative.download.max-bytes:20971520}")
@@ -152,41 +154,42 @@ public class MediaJobScheduler {
 
     /** 认领并处理一批到期任务，返回处理数量。测试直接调用以获得确定性。 */
     public int tick() {
-        List<UUID> claimed = transactionTemplate.execute(status -> {
+        // 认领事务当场冻结 (id, owner, epoch) 令牌：处理与释放一律用令牌 epoch，
+        // 不重新读取记录——否则慢任务租约到期被接管后，旧 worker 会用新 epoch 清租约（R2）。
+        List<MediaJobRepository.ClaimToken> tokens = transactionTemplate.execute(status -> {
             var due = jobRepository.findDueForClaim(Instant.now(), batchSize);
+            var claimed = new java.util.ArrayList<MediaJobRepository.ClaimToken>(due.size());
             for (var job : due) {
-                jobRepository.claim(job.id(), workerId, Instant.now().plusSeconds(leaseSeconds));
+                claimed.add(jobRepository.claim(job.id(), workerId, Instant.now().plusSeconds(leaseSeconds)));
             }
-            return due.stream().map(MediaJobRecord::id).toList();
+            return claimed;
         });
-        if (claimed == null || claimed.isEmpty()) return 0;
+        if (tokens == null || tokens.isEmpty()) return 0;
         int handled = 0;
-        for (UUID id : claimed) {
-            long claimedEpoch = -1;
+        for (var token : tokens) {
             try {
-                var job = jobRepository.findById(id).orElse(null);
+                var job = jobRepository.findById(token.jobId()).orElse(null);
                 if (job == null) continue;
-                claimedEpoch = job.leaseEpoch();
-                handleClaimed(job);
+                handleClaimed(job, token);
                 handled++;
             } finally {
-                // 动作结束即释放租约；带 epoch 围栏，避免清掉新 worker 已接管的租约
-                if (claimedEpoch >= 0) {
-                    jobRepository.releaseLease(id, claimedEpoch);
-                }
+                // 动作结束即释放租约；令牌 epoch 围栏，避免清掉新 worker 已接管的租约
+                jobRepository.releaseLease(token.jobId(), token.leaseEpoch());
             }
         }
         return handled;
     }
 
-    private void handleClaimed(MediaJobRecord job) {
+    private void handleClaimed(MediaJobRecord job, MediaJobRepository.ClaimToken token) {
         try {
             switch (job.status()) {
-                case QUEUED -> handleSubmit(job);
-                case RUNNING, RECONCILING, FETCHING, INGEST_FAILED -> handleQueryOrIngest(job);
-                case CANCEL_REQUESTED -> handleCancelRequested(job);
-                case SUBMITTING -> { /* 提交结果不明：由恢复器转 RECONCILING，不重复提交 */ }
-                default -> { /* 终态不应被认领 */ }
+                case QUEUED -> handleSubmit(job, token.leaseEpoch());
+                case RUNNING, RECONCILING, FETCHING, INGEST_FAILED -> handleQueryOrIngest(job, token.leaseEpoch());
+                case CANCEL_REQUESTED -> handleCancelRequested(job, token.leaseEpoch());
+                default -> {
+                    /* SUBMITTING 不进入普通认领：提交结果不明，只能由恢复器判定去向；
+                     * 终态不应被认领。 */
+                }
             }
         } catch (Exception exception) {
             log.warn("媒体任务处理失败：job={} status={}；{}", job.id(), job.status(),
@@ -197,9 +200,8 @@ public class MediaJobScheduler {
 
     // ---------------------------------------------------------------- 提交
 
-    private void handleSubmit(MediaJobRecord job) {
+    private void handleSubmit(MediaJobRecord job, long epoch) {
         long version = job.version();
-        long epoch = job.leaseEpoch();
         String submissionKey = "sub-" + job.id() + "-" + epoch;
         // 配额与占位必须在同一事务内完成：行锁 → 计数 → 置 SUBMITTING+inflight_reserved，
         // 否则两个 worker 可能同时看到空余名额（A10 并发上限）。
@@ -222,6 +224,12 @@ public class MediaJobScheduler {
         version++;
         var resolved = resolvedFromSnapshot(job);
         var adapter = adapterFor(job.modelSnapshot().adapterKey());
+        if (adapter.syncSubmitTimeoutSeconds() > 0) {
+            // 同步适配器的提交调用会阻塞到出图：先把租约延长到覆盖整个调用窗口，
+            // 避免提交期间租约到期、任务被恢复器转走而丢失提交结果。
+            jobRepository.extendLeaseFenced(job.id(), epoch,
+                    Instant.now().plusSeconds(adapter.syncSubmitTimeoutSeconds() + leaseSeconds));
+        }
         long attemptNo = nextAttempt(job.id());
         startAttempt(job.id(), attemptNo, AttemptAction.SUBMIT);
         MediaProviderAdapter.SubmitResult result;
@@ -265,18 +273,36 @@ public class MediaJobScheduler {
                     return;
                 }
                 meterRegistry.counter("creative.jobs.uncertain").increment();
-                transition(job.id(), version, epoch, MediaJobStatus.RECONCILING,
-                        Instant.now().plusMillis(reconcileDelayMs));
+                if (adapter.syncSubmitTimeoutSeconds() > 0) {
+                    // 同步接口没有上游任务号，永远无法对账：给观察窗口，到期如实收敛为失败，
+                    // 不假称未计费；期间不占死在途判断由窗口后的一次性收敛解决。
+                    jobRepository.reconcileUncertainFenced(job.id(), version, epoch,
+                            Instant.now().plusMillis(reconcileDelayMs),
+                            Instant.now().plusSeconds(syncObservationSeconds));
+                } else {
+                    transition(job.id(), version, epoch, MediaJobStatus.RECONCILING,
+                            Instant.now().plusMillis(reconcileDelayMs));
+                }
             }
         }
     }
 
     // ---------------------------------------------------------------- 查询与入库
 
-    private void handleQueryOrIngest(MediaJobRecord job) {
+    private void handleQueryOrIngest(MediaJobRecord job, long epoch) {
         if (job.providerTaskId() == null) {
+            if (job.observationDeadlineAt() != null && Instant.now().isAfter(job.observationDeadlineAt())) {
+                // 同步适配器观察窗口到期仍无结果：无对账凭证，如实失败并说明费用可能已产生
+                if (jobRepository.finishFenced(job.id(), job.version(), epoch,
+                        MediaJobStatus.FAILED, "SUBMISSION_UNCERTAIN",
+                        "供应商同步接口无对账凭证，结果未知，费用可能已产生；请在中转站核对用量")) {
+                    meterRegistry.counter("creative.jobs.failed").increment();
+                    event(job.id(), job.tenantId(), job.userId(), "FAILED");
+                }
+                return;
+            }
             // 无对账依据：保持现状并提示，绝不重新提交（BR11/总体设计 §8.2）
-            pushNext(job, job.version(), job.leaseEpoch(),
+            pushNext(job, job.version(), epoch,
                     Instant.now().plusMillis(reconcileDelayMs), true, "SUBMISSION_UNCERTAIN");
             return;
         }
@@ -292,7 +318,6 @@ public class MediaJobScheduler {
         }
         finishAttempt(job.id(), attemptNo, outcomeOfQuery(result.state()));
         long version = job.version();
-        long epoch = job.leaseEpoch();
         switch (result.state()) {
             case SUCCEEDED -> completeWithOutputs(job, version, epoch, result.outputs(), resolved);
             case RUNNING -> pushNext(job, version, epoch,
@@ -390,7 +415,7 @@ public class MediaJobScheduler {
 
     // ---------------------------------------------------------------- 取消
 
-    private void handleCancelRequested(MediaJobRecord job) {
+    private void handleCancelRequested(MediaJobRecord job, long epoch) {
         var resolved = resolvedFromSnapshot(job);
         var adapter = adapterFor(job.modelSnapshot().adapterKey());
         long attemptNo = nextAttempt(job.id());
@@ -398,7 +423,6 @@ public class MediaJobScheduler {
         var outcome = adapter.cancel(resolved, job.providerTaskId());
         finishAttempt(job.id(), attemptNo, toOutcome(outcome.name()));
         long version = job.version();
-        long epoch = job.leaseEpoch();
         if (outcome == MediaProviderAdapter.CancelOutcome.CONFIRMED) {
             if (jobRepository.finishFenced(job.id(), version, epoch, MediaJobStatus.CANCELLED, null, null)) {
                 event(job.id(), job.tenantId(), job.userId(), "CANCELLED");
@@ -419,18 +443,32 @@ public class MediaJobScheduler {
 
     // ---------------------------------------------------------------- 恢复
 
-    /** 启动恢复（A12/A13）：有 taskId 的任务恢复查询；提交结果不明的进入 RECONCILING。 */
+    /**
+     * 启动/周期恢复（A12/A13 + R1）：租约已过期或为空的 SUBMITTING 任务必须在此分流——
+     * 已拿到上游任务号的恢复查询，没有任务号的进入 RECONCILING；普通 tick 不认领
+     * SUBMITTING，因此这里不存在"被 tick 空操作清租约后永久漏掉"的路径。
+     */
     public void recover() {
         var uncertain = jdbcTemplate.queryForList(
-                "SELECT id FROM media_job WHERE status = 'SUBMITTING' AND provider_task_id IS NULL " +
-                        "AND lease_until < now()", UUID.class);
+                "SELECT id FROM media_job WHERE status = 'SUBMITTING' " +
+                        "AND (lease_until IS NULL OR lease_until < now())", UUID.class);
         for (var id : uncertain) {
             transactionTemplate.executeWithoutResult(status -> {
                 var job = jobRepository.lockById(id).orElse(null);
                 if (job == null || job.status() != MediaJobStatus.SUBMITTING) return;
-                if (jobRepository.updateStatusFenced(job.id(), job.version(), job.leaseEpoch(),
-                        MediaJobStatus.RECONCILING, Instant.now().plusMillis(reconcileDelayMs), null)) {
-                    event(job.id(), job.tenantId(), job.userId(), "RECONCILING");
+                // 锁内重校验：租约仍有效说明提交方仍在工作，不接管
+                if (job.leaseUntil() != null && job.leaseUntil().isAfter(Instant.now())) return;
+                if (job.providerTaskId() != null) {
+                    // 提交已受理但状态推进中断：恢复查询，不重复提交
+                    if (jobRepository.updateStatusFenced(job.id(), job.version(), job.leaseEpoch(),
+                            MediaJobStatus.RUNNING, Instant.now().plusMillis(queryBackoffMs), null)) {
+                        event(job.id(), job.tenantId(), job.userId(), "STATUS_CHANGED");
+                    }
+                } else {
+                    if (jobRepository.updateStatusFenced(job.id(), job.version(), job.leaseEpoch(),
+                            MediaJobStatus.RECONCILING, Instant.now().plusMillis(reconcileDelayMs), null)) {
+                        event(job.id(), job.tenantId(), job.userId(), "RECONCILING");
+                    }
                 }
             });
         }
@@ -450,9 +488,12 @@ public class MediaJobScheduler {
                 "SELECT secret_ciphertext FROM model_provider WHERE id = ?",
                 String.class, snapshot.providerId());
         String apiKey = cipher == null || cipher.isBlank() ? null : secretCipher.decrypt(cipher);
+        // schema 只作为适配器透传信息：按冻结快照的协议取对应默认 schema
+        ParameterSchema schema = "openai-compatible".equalsIgnoreCase(snapshot.protocol())
+                ? ParameterSchema.openAiImages() : ParameterSchema.dashscopeTextToImage();
         return new ResolvedMediaModel(snapshot.providerId(), snapshot.modelRowId(), snapshot.protocol(),
                 snapshot.baseUrl(), snapshot.modelName(), apiKey, snapshot.adapterKey(),
-                ParameterSchema.dashscopeTextToImage(), true, 0);
+                schema, true, 0);
     }
 
     private boolean inflightAvailable(MediaJobRecord job) {

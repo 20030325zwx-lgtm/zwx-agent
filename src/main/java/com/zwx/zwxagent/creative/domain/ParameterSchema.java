@@ -23,6 +23,16 @@ public record ParameterSchema(String operation, List<ParameterSpec> parameters) 
                 new ParameterSpec("watermark", "boolean", false, List.of(), null, null)));
     }
 
+    /**
+     * OpenAI images 兼容（中转站）参数 schema：size 是自由 WxH 字符串、不限枚举——
+     * 中转站代理的模型（flux/sd/seedream/gpt-image 等）各有尺寸范围，闭集会误拒；
+     * n 固定 1 不开放，watermark 为 DashScope 专有。
+     */
+    public static ParameterSchema openAiImages() {
+        return new ParameterSchema(IMAGE_GENERATION, List.of(
+                new ParameterSpec("size", "string", false, List.of(), 2L, 32L)));
+    }
+
     /** wanx2.1 系列提示词上限（模型契约文档 §3.1）。 */
     public static final int MODEL_PROMPT_MAX = 500;
 

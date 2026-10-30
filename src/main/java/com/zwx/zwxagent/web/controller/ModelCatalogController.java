@@ -84,6 +84,12 @@ public class ModelCatalogController {
         return catalogService.testProvider(actor.userId(), providerId, draft);
     }
 
+    /** 从中转站（OpenAI 兼容）拉取 /v1/models 并增量入库，新模型默认停用。 */
+    @PostMapping("/providers/{providerId}/fetch-models")
+    public ModelCatalogService.FetchModelsResult fetchModels(CurrentActor actor, @PathVariable long providerId) {
+        return catalogService.fetchModels(actor.userId(), providerId);
+    }
+
     @PutMapping("/bindings/{purpose}")
     public CatalogView setBinding(CurrentActor actor, @PathVariable String purpose,
                                   @RequestBody BindingRequest request) {

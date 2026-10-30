@@ -9,6 +9,8 @@
             <p class="cr-sub">输入想法，创作图片、视频、小说与漫画。任务与结果保存在服务端，刷新、离开页面或重启服务后仍能找回。</p>
             <div class="kind-strip" aria-label="创作类型">
               <span class="kind-chip is-open">图片创作 · 已开放</span>
+              <span class="kind-chip is-open kind-chip-action" role="button" tabindex="0"
+                    @click="openWorkflowCreate" @keydown.enter="openWorkflowCreate">工作流创作 · 已开放</span>
               <span class="kind-chip">视频创作 · 规划中</span>
               <span class="kind-chip">小说创作 · 规划中</span>
               <span class="kind-chip">漫画创作 · 规划中</span>
@@ -27,6 +29,23 @@
           </div>
           <router-link to="/settings/model" class="cr-banner-link">去配置</router-link>
         </div>
+
+        <section>
+          <div class="cr-section-head">
+            <h2>工作流创作</h2>
+            <router-link to="/workflows">打开画布</router-link>
+          </div>
+          <div class="wf-entry">
+            <span class="wf-entry-icon"><Workflow :size="18" /></span>
+            <div class="wf-entry-body">
+              <strong>用多步工作流创作</strong>
+              <p>把搜图、理解、文案、生图、合成串成一条流程（如商品海报），运行产物自动归入创作项目的素材库与任务列表。</p>
+            </div>
+            <button type="button" class="cr-secondary" @click="openWorkflowCreate">
+              <Workflow :size="14" /> 发起工作流
+            </button>
+          </div>
+        </section>
 
         <section>
           <div class="cr-section-head">
@@ -125,15 +144,59 @@
       </div>
     </div>
 
+    <div v-if="wfOpen" class="cr-dialog-backdrop" @click.self="wfOpen = false">
+      <div class="cr-dialog" role="dialog" aria-modal="true" aria-labelledby="wf-create-title">
+        <h2 id="wf-create-title">发起工作流创作</h2>
+        <p v-if="wfLoading" class="cr-hint">加载工作流与项目…</p>
+        <template v-else>
+          <label class="cr-field">
+            <span class="cr-field-label"><span>工作流</span></span>
+            <select v-model="wfForm.workflowKey" class="cr-input">
+              <option value="" disabled>选择工作流</option>
+              <option v-for="wf in workflows" :key="wf.key" :value="wf.key">
+                {{ wf.name || wf.key }}（{{ (wf.steps || []).length }} 节点）
+              </option>
+            </select>
+            <span v-if="selectedWorkflow?.description" class="cr-field-help">{{ selectedWorkflow.description }}</span>
+          </label>
+          <label class="cr-field">
+            <span class="cr-field-label"><span>目标创作项目</span><span class="count">产物与任务归入该项目</span></span>
+            <select v-model="wfForm.projectId" class="cr-input">
+              <option :value="null" disabled>选择项目</option>
+              <option v-for="project in activeProjects" :key="project.id" :value="project.id">
+                {{ project.name }}
+              </option>
+            </select>
+          </label>
+          <label class="cr-field">
+            <span class="cr-field-label"><span>运行输入（关键词/主题）</span></span>
+            <input v-model.trim="wfForm.keyword" class="cr-input" maxlength="200"
+                   placeholder="如：不锈钢保温杯" />
+          </label>
+          <p v-if="wfError" class="cr-error">{{ wfError }}</p>
+        </template>
+        <div class="cr-dialog-actions">
+          <button type="button" class="cr-secondary" @click="wfOpen = false">取消</button>
+          <button type="button" class="cr-primary" :disabled="wfStarting || !wfForm.workflowKey || !wfForm.projectId || !wfForm.keyword"
+                  @click="startWorkflowRun">
+            {{ wfStarting ? '发起中…' : '发起运行' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <p v-if="toast.text" class="cr-toast" :class="toast.tone">{{ toast.text }}</p>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertCircle, Palette, Plus } from 'lucide-vue-next'
-import { createCreativeProject, listCreativeJobs, listCreativeProjects, listModelCatalog } from '../../api'
+import { AlertCircle, Palette, Plus, Workflow } from 'lucide-vue-next'
+import {
+  createCreativeProject, listCreativeJobs, listCreativeProjects, listModelCatalog,
+  listWorkflows, startWorkflow
+} from '../../api'
 import { formatTime, kindLabel, statusMeta } from './shared'
 
 const router = useRouter()
@@ -154,6 +217,14 @@ const kindOptions = [
 const imageBinding = ref(null)
 const bindingChecked = ref(false)
 const toast = reactive({ text: '', tone: '' })
+const wfOpen = ref(false)
+const wfLoading = ref(false)
+const wfStarting = ref(false)
+const wfError = ref('')
+const workflows = ref([])
+const wfForm = reactive({ workflowKey: '', projectId: null, keyword: '' })
+const activeProjects = computed(() => projects.value.filter(p => p.status === 'ACTIVE'))
+const selectedWorkflow = computed(() => workflows.value.find(wf => wf.key === wfForm.workflowKey))
 
 function showToast(text, tone = '') {
   toast.text = text
@@ -186,6 +257,42 @@ async function create() {
     createError.value = error.response?.data?.error || '创建失败，请稍后重试'
   } finally {
     creating.value = false
+  }
+}
+
+function openWorkflowCreate() {
+  wfOpen.value = true
+  wfError.value = ''
+  wfForm.workflowKey = ''
+  wfForm.projectId = activeProjects.value[0]?.id || null
+  wfForm.keyword = ''
+  wfLoading.value = true
+  Promise.allSettled([listWorkflows(30), projects.value.length ? Promise.resolve() : listCreativeProjects({ limit: 50 })])
+    .then(([wfResult, projectResult]) => {
+      if (wfResult.status === 'fulfilled') workflows.value = wfResult.value.definitions || []
+      else wfError.value = '工作流列表加载失败，请确认后端服务可用'
+      if (projectResult.status === 'fulfilled' && projectResult.value?.items) {
+        projects.value = projectResult.value.items
+        if (!wfForm.projectId) wfForm.projectId = activeProjects.value[0]?.id || null
+      }
+      if (!workflows.value.length) wfError.value = '还没有可用的工作流。先到「工作流」页创建或使用商品海报模板。'
+    })
+    .finally(() => { wfLoading.value = false })
+}
+
+async function startWorkflowRun() {
+  if (!wfForm.workflowKey || !wfForm.projectId || !wfForm.keyword) return
+  wfStarting.value = true
+  wfError.value = ''
+  try {
+    const run = await startWorkflow(wfForm.workflowKey, wfForm.keyword, wfForm.projectId)
+    wfOpen.value = false
+    showToast('工作流已发起，产物将归入所选项目')
+    router.push({ path: `/creative/projects/${wfForm.projectId}`, query: { tab: 'workflow', runId: run.id } })
+  } catch (error) {
+    wfError.value = error.response?.data?.error || '发起失败，请稍后重试'
+  } finally {
+    wfStarting.value = false
   }
 }
 
@@ -234,6 +341,35 @@ onMounted(load)
   color: var(--wb-brand);
   border-color: color-mix(in srgb, var(--wb-brand) 40%, transparent);
   background: var(--wb-brand-soft);
+}
+.kind-chip-action { cursor: pointer; }
+.wf-entry {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg);
+  background: var(--wb-surface);
+}
+.wf-entry-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--wb-brand-soft);
+  color: var(--wb-brand);
+  flex-shrink: 0;
+}
+.wf-entry-body { flex: 1; min-width: 0; }
+.wf-entry-body strong { font-size: 13px; }
+.wf-entry-body p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--wb-muted);
+  line-height: 1.5;
 }
 .kind-options {
   display: grid;

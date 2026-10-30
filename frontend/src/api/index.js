@@ -268,7 +268,12 @@ export const deleteProjectCodeFile = (conversationId, path, runId = null) =>
 export const listWorkflows = (limit = 20) => request.get('/ai/workflows', { params: { limit } }).then(response => response.data)
 export const createWorkflow = payload => request.post('/ai/workflows', payload).then(response => response.data)
 export const deleteWorkflow = workflowKey => request.delete(`/ai/workflows/${encodeURIComponent(workflowKey)}`).then(response => response.data)
-export const startWorkflow = (workflowKey, keyword) => request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/runs`, { keyword }).then(response => response.data)
+export const startWorkflow = (workflowKey, keyword, projectId = null, input = null) =>
+  request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/runs`,
+    { keyword, input: input || undefined, projectId: projectId || undefined })
+    .then(response => response.data)
+export const listWorkflowRuns = (params = {}) =>
+  request.get('/ai/workflows/runs', { params }).then(response => response.data)
 export const getWorkflowRun = runId => request.get(`/ai/workflows/runs/${encodeURIComponent(runId)}`).then(response => response.data)
 export const getWorkflowDefinition = workflowKey => request.get(`/ai/workflows/${encodeURIComponent(workflowKey)}/definition`).then(response => response.data)
 export const saveWorkflowVersion = (workflowKey, payload) => request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/versions`, payload).then(response => response.data)
@@ -279,6 +284,9 @@ export const addProviderModel = (providerId, payload) => request.post(`/settings
 export const updateProviderModel = (providerId, modelRowId, payload) => request.put(`/settings/providers/${providerId}/models/${modelRowId}`, payload).then(response => response.data)
 export const deleteProviderModel = (providerId, modelRowId) => request.delete(`/settings/providers/${providerId}/models/${modelRowId}`).then(response => response.data)
 export const testModelProvider = (providerId, draft) => request.post(`/settings/providers/${providerId}/test`, draft || {}).then(response => response.data)
+// 从中转站（OpenAI 兼容）拉取 /v1/models 模型列表并增量入库
+export const fetchProviderModels = providerId =>
+  request.post(`/settings/providers/${providerId}/fetch-models`).then(response => response.data)
 export const setModelBinding = (purpose, payload) => request.put(`/settings/bindings/${encodeURIComponent(purpose)}`, payload).then(response => response.data)
 export const clearModelBinding = (purpose, scope = 'USER') => request.delete(`/settings/bindings/${encodeURIComponent(purpose)}`, { params: { scope } }).then(response => response.data)
 

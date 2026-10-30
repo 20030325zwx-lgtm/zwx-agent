@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * A10–A13（C05）、A19–A20（C07）：调度认领与配额互锁、租约 fencing、重启恢复不重发提交、
@@ -70,7 +71,7 @@ class MediaJobSchedulerTest {
     @Resource
     private MediaProviderQuotaRepository quotaRepository;
 
-    @Resource
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private MockMediaProviderAdapter mockAdapter;
 
     @Resource
@@ -156,11 +157,14 @@ class MediaJobSchedulerTest {
         return jobRepository.findByIdempotencyKey("default", TEST_USER, key).orElseThrow();
     }
 
+    /** 用 JVM 时钟写到期时间：认领查询以 JVM Instant 作参数，避免 Docker VM 时钟漂移导致跨时钟比较。 */
+    private java.sql.Timestamp pastMillis(long millis) {
+        return java.sql.Timestamp.from(java.time.Instant.now().minusMillis(millis));
+    }
+
     private void pushNextActionNow(UUID jobId) {
-        jdbcTemplate.update("""
-                UPDATE media_job SET next_action_at = now(), lease_until = now() - interval '1 second'
-                WHERE id = ?
-                """, jobId);
+        jdbcTemplate.update("UPDATE media_job SET next_action_at = ?, lease_until = ? WHERE id = ?",
+                pastMillis(0), pastMillis(1000), jobId);
     }
 
     @Test
@@ -257,7 +261,7 @@ class MediaJobSchedulerTest {
         Assertions.assertNotNull(running.providerTaskId());
         Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + running.id() + "-1"));
         // 模拟进程重启：租约过期
-        jdbcTemplate.update("UPDATE media_job SET lease_until = now() - interval '1 second' WHERE id = ?", job.id());
+        jdbcTemplate.update("UPDATE media_job SET lease_until = ? WHERE id = ?", pastMillis(1000), job.id());
         scheduler.recover();
         pushNextActionNow(job.id());
         scheduler.tick();
@@ -391,6 +395,124 @@ class MediaJobSchedulerTest {
         Assertions.assertNull(jobRepository.findById(job.id()).orElseThrow().leaseOwner());
     }
 
+    /**
+     * R1 复现（2026-10-30 复核报告）：SUBMITTING 任务此前会被普通 tick 认领后空操作、
+     * 租约清成 NULL，而周期恢复只选 lease_until < now()，导致永久漏恢复。
+     * 修复后：tick 不认领 SUBMITTING；恢复器覆盖 NULL/过期租约并锁内重校验。
+     */
+    @Test
+    @Order(11)
+    void submittingJobSurvivesTickAndIsRecovered() {
+        mockAdapter.reset();
+        mockAdapter.setDefaultQueryScript(
+                new MockMediaProviderAdapter.QueryScript(0, MockMediaProviderAdapter.QueryState.SUCCEEDED,
+                        List.of(), null));
+        // 场景一：无 task id 的 SUBMITTING（提交结果不明），租约先未到期、再过期、再清空
+        var uncertain = createQueued("sched-r1-uncertain", "R1 恢复结果不明");
+        jdbcTemplate.update("""
+                UPDATE media_job SET status = 'SUBMITTING', lease_until = now() + interval '1 minute',
+                    next_action_at = now(), version = version + 1
+                WHERE id = ?
+                """, uncertain.id());
+        scheduler.tick();
+        var afterTick = jobRepository.findById(uncertain.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.SUBMITTING, afterTick.status(),
+                "普通 tick 不得认领/空操作 SUBMITTING");
+        Assertions.assertNotNull(afterTick.leaseUntil(), "tick 不得清掉 SUBMITTING 的租约");
+        jdbcTemplate.update("UPDATE media_job SET lease_until = ? WHERE id = ?",
+                pastMillis(1000), uncertain.id());
+        scheduler.tick();
+        afterTick = jobRepository.findById(uncertain.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.SUBMITTING, afterTick.status(),
+                "租约过期后普通 tick 仍不得动 SUBMITTING");
+        jdbcTemplate.update("UPDATE media_job SET lease_until = NULL WHERE id = ?", uncertain.id());
+        scheduler.recover();
+        var reconciling = jobRepository.findById(uncertain.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.RECONCILING, reconciling.status(),
+                "NULL 租约的 SUBMITTING 必须被恢复器选中并转 RECONCILING");
+        Assertions.assertNull(reconciling.providerTaskId());
+        Assertions.assertEquals(0, mockAdapter.submitCount(), "恢复只改状态，绝不重新提交");
+
+        // 场景二：已拿到上游 task id 的 SUBMITTING（attach 后、转 RUNNING 前中断）→ 恢复查询
+        var withTask = createQueued("sched-r1-taskid", "R1 恢复任务号");
+        scheduler.tick();
+        Assertions.assertEquals(MediaJobStatus.RUNNING,
+                jobRepository.findById(withTask.id()).orElseThrow().status());
+        jdbcTemplate.update("""
+                UPDATE media_job SET status = 'SUBMITTING', lease_until = NULL, version = version + 1
+                WHERE id = ?
+                """, withTask.id());
+        scheduler.recover();
+        var resumed = jobRepository.findById(withTask.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.RUNNING, resumed.status(),
+                "已有 task id 的 SUBMITTING 应恢复为 RUNNING 继续查询");
+        Assertions.assertNotNull(resumed.providerTaskId());
+        pushNextActionNow(withTask.id());
+        scheduler.tick();
+        var done = jobRepository.findById(withTask.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.SUCCEEDED, done.status());
+        Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + withTask.id() + "-1"),
+                "恢复后不得重新提交");
+    }
+
+    /**
+     * R2 复现（2026-10-30 复核报告）：worker A 整批认领后逐个处理；批次前面的慢任务
+     * 处理期间，后面任务的租约到期被 worker B 接管。旧实现处理到该任务时重新读取记录、
+     * 拿 B 的新 epoch 做释放，会清掉 B 的租约。修复后认领令牌在认领事务当场冻结。
+     */
+    @Test
+    @Order(12)
+    void staleWorkerUsesFrozenTokenAndKeepsNewWorkersLease() throws Exception {
+        mockAdapter.reset();
+        mockAdapter.setDefaultQueryScript(
+                new MockMediaProviderAdapter.QueryScript(0, MockMediaProviderAdapter.QueryState.SUCCEEDED,
+                        List.of(), null));
+        var slow = createQueued("sched-r2-slow", "慢任务");
+        var victim = createQueued("sched-r2-victim", "被接管任务");
+        // 保证批次顺序：慢任务排前面
+        jdbcTemplate.update("UPDATE media_job SET next_action_at = ? WHERE id = ?",
+                pastMillis(2000), slow.id());
+        jdbcTemplate.update("UPDATE media_job SET next_action_at = ? WHERE id = ?",
+                pastMillis(1000), victim.id());
+        CountDownLatch releaseSubmit = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            releaseSubmit.await(10, java.util.concurrent.TimeUnit.SECONDS);
+            return MediaProviderAdapter.SubmitResult.accepted("mock-task-slow");
+        }).when(mockAdapter).submit(
+                org.mockito.ArgumentMatchers.any(com.zwx.zwxagent.creative.domain.ResolvedMediaModel.class),
+                org.mockito.ArgumentMatchers.any(com.zwx.zwxagent.creative.domain.InputSnapshot.class),
+                org.mockito.ArgumentMatchers.eq("sub-" + slow.id() + "-1"));
+        Thread worker = new Thread(scheduler::tick);
+        worker.start();
+        try {
+            long deadline = System.currentTimeMillis() + 5000;
+            while (System.currentTimeMillis() < deadline) {
+                if (jobRepository.findById(slow.id()).orElseThrow().status() == MediaJobStatus.SUBMITTING) break;
+                Thread.sleep(50);
+            }
+            Assertions.assertEquals(MediaJobStatus.SUBMITTING,
+                    jobRepository.findById(slow.id()).orElseThrow().status(),
+                    "worker 应已认领慢任务并阻塞在提交上");
+            // 慢任务处理期间：victim 被另一个 worker 接管（epoch 前进，模拟租约到期重认领）
+            long epochBefore = jobRepository.findById(victim.id()).orElseThrow().leaseEpoch();
+            var token = jobRepository.claim(victim.id(), "worker-b",
+                    java.time.Instant.now().plusSeconds(60));
+            Assertions.assertTrue(token.leaseEpoch() > epochBefore, "接管必须推进 epoch");
+            releaseSubmit.countDown();
+            worker.join(10_000);
+            Assertions.assertFalse(worker.isAlive(), "worker 应在限期内完成批次");
+            Assertions.assertEquals(MediaJobStatus.RUNNING,
+                    jobRepository.findById(slow.id()).orElseThrow().status());
+            var after = jobRepository.findById(victim.id()).orElseThrow();
+            Assertions.assertEquals("worker-b", after.leaseOwner(),
+                    "旧 worker 释放租约必须用认领时冻结的 epoch，不得清掉新 worker 的租约（R2）");
+            Assertions.assertNotNull(after.leaseUntil());
+        } finally {
+            releaseSubmit.countDown();
+            worker.join(10_000);
+        }
+    }
+
     @Test
     @Order(9)
     void unsupportedCancelKeepsRunningAndExplainsWhy() {
@@ -403,11 +525,9 @@ class MediaJobSchedulerTest {
         Assertions.assertEquals(MediaJobStatus.RUNNING,
                 jobRepository.findById(job.id()).orElseThrow().status());
         // 模拟用户请求取消：调度器调用供应商取消，Mock 返回 UNSUPPORTED
-        jdbcTemplate.update("""
-                UPDATE media_job SET status = 'CANCEL_REQUESTED', next_action_at = now(),
-                    lease_until = now() - interval '1 second', version = version + 1
-                WHERE id = ?
-                """, job.id());
+        jdbcTemplate.update("UPDATE media_job SET status = 'CANCEL_REQUESTED', next_action_at = ?, " +
+                        "lease_until = ?, version = version + 1 WHERE id = ?",
+                pastMillis(0), pastMillis(1000), job.id());
         scheduler.tick();
         var after = jobRepository.findById(job.id()).orElseThrow();
         Assertions.assertEquals(MediaJobStatus.RUNNING, after.status(), "不支持取消时不得假报已取消");

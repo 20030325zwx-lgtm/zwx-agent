@@ -1,0 +1,9 @@
+日期：2026-10-30
+问题现象：打开创作台显示「项目加载失败」，任务列表请求 500；后端日志为
+`ERROR: trailing junk after parameter at or near "$2ORDER"`。
+影响范围：`GET /api/ai/creative/jobs`（含 projectId 筛选）全部失败；创作台任务区、任务记录页不可用。
+原因：`MediaJobRepository.listByOwner` 用字符串拼接 SQL，`projectClause` 为空时
+`... user_id = ?` 与 `ORDER BY` 之间缺少空格，生成 `$2ORDER`。
+解决方式：条件片段与 `ORDER BY` 前补空格；无项目筛选与有筛选两个分支都覆盖。
+验证结果：任务接口恢复 200；创作台与任务记录页正常显示；新增项目筛选分页在浏览器实测通过。
+后续注意事项：用文本块拼 SQL 时不要依赖行尾空格；条件片段应自带前导空格或在拼接处显式补空格。

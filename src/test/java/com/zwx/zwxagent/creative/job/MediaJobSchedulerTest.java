@@ -33,10 +33,16 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * A10–A13（C05）：调度认领与配额互锁、租约 fencing、重启恢复不重发提交、
- * 提交结果不确定进入 RECONCILING。全部使用进程内 Mock adapter，不发起真实调用。
+ * A10–A13（C05）、A19–A20（C07）：调度认领与配额互锁、租约 fencing、重启恢复不重发提交、
+ * 提交结果不确定进入 RECONCILING、入库失败可重试且不重复提交/不重复素材。
+ * 全部使用进程内 Mock adapter + 本地媒体目录，不发起真实模型调用。
  */
-@SpringBootTest
+@SpringBootTest(properties = {
+        "creative.ingest.backend=storage",
+        "creative.storage.backend=local",
+        "creative.storage.local-dir=target/creative-test-media",
+        "creative.download.allow-local=true"
+})
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class MediaJobSchedulerTest {
@@ -68,6 +74,12 @@ class MediaJobSchedulerTest {
 
     @Resource
     private JdbcTemplate jdbcTemplate;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private com.zwx.zwxagent.creative.storage.LocalMediaStorage localStorage;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private com.zwx.zwxagent.creative.repository.CreativeAssetRepository assetRepository;
 
     private CurrentActor actor;
     private UUID projectId;
@@ -275,6 +287,105 @@ class MediaJobSchedulerTest {
         Assertions.assertNull(still.providerTaskId());
         Assertions.assertTrue(still.attentionRequired());
         Assertions.assertEquals(1, mockAdapter.submitCount());
+    }
+
+    // ------------------------------------------------------------ C07 入库
+
+    private MediaJobRecord submitAndRun(String key) {
+        var job = createQueued(key, "入库用例 " + key);
+        scheduler.tick();
+        pushNextActionNow(job.id());
+        return jobRepository.findById(job.id()).orElseThrow();
+    }
+
+    private String objectKeyOf(UUID jobId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT object_key FROM media_job_output WHERE job_id = ? ORDER BY output_index LIMIT 1",
+                String.class, jobId);
+    }
+
+    private int assetCount(UUID jobId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM creative_asset WHERE source_job_id = ?", Integer.class, jobId);
+        return count == null ? 0 : count;
+    }
+
+    @Test
+    @Order(6)
+    void ingestFailureRetriesWithoutSecondSubmit() {
+        mockAdapter.reset();
+        mockAdapter.setDefaultQueryScript(
+                new MockMediaProviderAdapter.QueryScript(0, MockMediaProviderAdapter.QueryState.SUCCEEDED,
+                        List.of(), null));
+        var job = submitAndRun("sched-a19");
+        // 第一次对象写入失败
+        org.mockito.Mockito.doThrow(new IllegalStateException("模拟磁盘写失败"))
+                .doCallRealMethod()
+                .when(localStorage).put(org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(java.io.InputStream.class),
+                        org.mockito.ArgumentMatchers.anyLong());
+        scheduler.tick();
+        var failed = jobRepository.findById(job.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.INGEST_FAILED, failed.status());
+        Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + job.id() + "-1"));
+        Assertions.assertEquals(0, assetCount(job.id()), "入库失败不得留下正式素材");
+
+        // 恢复：INGEST_FAILED → FETCHING → SUCCEEDED，且不重新提交
+        pushNextActionNow(job.id());
+        scheduler.tick();
+        var done = jobRepository.findById(job.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.SUCCEEDED, done.status());
+        Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + job.id() + "-1"),
+                "入库重试只能重新下载，不能重发提交");
+        Assertions.assertEquals(1, assetCount(job.id()));
+        Assertions.assertTrue(localStorage.size(objectKeyOf(job.id())) > 0, "对象应已落盘");
+    }
+
+    @Test
+    @Order(7)
+    void objectWrittenButAssetInsertFailsReusesSameSlot() {
+        mockAdapter.reset();
+        mockAdapter.setDefaultQueryScript(
+                new MockMediaProviderAdapter.QueryScript(0, MockMediaProviderAdapter.QueryState.SUCCEEDED,
+                        List.of(), null));
+        var job = submitAndRun("sched-a20-db");
+        org.mockito.Mockito.doThrow(new org.springframework.dao.DataIntegrityViolationException("模拟数据库失败"))
+                .doCallRealMethod()
+                .when(assetRepository).insert(org.mockito.ArgumentMatchers.any());
+        scheduler.tick();
+        var failed = jobRepository.findById(job.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.INGEST_FAILED, failed.status());
+        // 对象已写成功但数据库失败：恢复后复用同一槽位/对象键
+        String key = objectKeyOf(job.id());
+        Assertions.assertTrue(localStorage.size(key) > 0);
+        pushNextActionNow(job.id());
+        scheduler.tick();
+        var done = jobRepository.findById(job.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.SUCCEEDED, done.status());
+        Assertions.assertEquals(1, assetCount(job.id()), "不得产生重复素材");
+        Assertions.assertEquals(key, objectKeyOf(job.id()), "复用原 objectKey");
+        Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + job.id() + "-1"));
+    }
+
+    @Test
+    @Order(8)
+    void expiredResultUrlStaysIngestFailedWithoutResubmit() {
+        mockAdapter.reset();
+        mockAdapter.setDefaultQueryScript(
+                new MockMediaProviderAdapter.QueryScript(0, MockMediaProviderAdapter.QueryState.SUCCEEDED,
+                        List.of(MediaProviderAdapter.Output.ofUrl("http://127.0.0.1:1/expired.png")), null));
+        var job = submitAndRun("sched-a20-url");
+        scheduler.tick();
+        var failed = jobRepository.findById(job.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.INGEST_FAILED, failed.status(),
+                "结果 URL 过期/不可达时保持可重试的入库失败，不重生图片");
+        Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + job.id() + "-1"));
+        Assertions.assertEquals(0, assetCount(job.id()));
+        // 再次调度仍只是重新查询/下载，不产生第二次提交
+        pushNextActionNow(job.id());
+        scheduler.tick();
+        Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + job.id() + "-1"));
     }
 
 }

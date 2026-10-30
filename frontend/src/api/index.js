@@ -302,3 +302,54 @@ export default {
   deleteMcpServer,
   testMcpServer
 }
+
+// AI 创作（P1）：项目、草稿、任务、素材、提示词优化
+export const listCreativeProjects = (params = {}) =>
+  request.get('/ai/creative/projects', { params }).then(response => response.data)
+export const createCreativeProject = payload =>
+  request.post('/ai/creative/projects', payload).then(response => response.data)
+export const getCreativeProject = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}`).then(response => response.data)
+export const updateCreativeProject = (projectId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}`, payload).then(response => response.data)
+export const listCreativeDrafts = (projectId, limit = 20) =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/drafts`, { params: { limit } }).then(response => response.data)
+export const createCreativeDraft = (projectId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/drafts`, payload).then(response => response.data)
+export const updateCreativeDraft = (draftId, payload) =>
+  request.patch(`/ai/creative/drafts/${encodeURIComponent(draftId)}`, payload).then(response => response.data)
+export const optimizeCreativePrompt = payload =>
+  request.post('/ai/creative/prompts/optimize', payload).then(response => response.data)
+export const listCreativeJobs = (params = {}) =>
+  request.get('/ai/creative/jobs', { params }).then(response => response.data)
+export const getCreativeJob = jobId =>
+  request.get(`/ai/creative/jobs/${encodeURIComponent(jobId)}`).then(response => response.data)
+export const createCreativeJob = (idempotencyKey, payload) =>
+  request.post('/ai/creative/jobs', payload, { headers: { 'Idempotency-Key': idempotencyKey } })
+    .then(response => response.data)
+export const cancelCreativeJob = jobId =>
+  request.post(`/ai/creative/jobs/${encodeURIComponent(jobId)}/cancel`).then(response => response.data)
+export const retryCreativeJob = (jobId, payload = {}) =>
+  request.post(`/ai/creative/jobs/${encodeURIComponent(jobId)}/retry`, payload).then(response => response.data)
+export const resumeCreativeJobIngest = jobId =>
+  request.post(`/ai/creative/jobs/${encodeURIComponent(jobId)}/resume-ingest`).then(response => response.data)
+export const listCreativeJobEvents = (jobId, afterSeq = 0) =>
+  request.get(`/ai/creative/jobs/${encodeURIComponent(jobId)}/events`, { params: { afterSeq } })
+    .then(response => response.data)
+export const listCreativeAssets = (params = {}) =>
+  request.get('/ai/creative/assets', { params }).then(response => response.data)
+export const uploadCreativeAsset = (projectId, file) => {
+  const form = new FormData()
+  form.append('projectId', projectId)
+  form.append('file', file)
+  return request.post('/ai/creative/assets/uploads', form, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }).then(response => response.data)
+}
+export const getCreativeAssetBlob = assetId =>
+  request.get(`/ai/creative/assets/${encodeURIComponent(assetId)}/content`, { responseType: 'blob' })
+    .then(response => response.data)
+export const updateCreativeAsset = (assetId, payload) =>
+  request.patch(`/ai/creative/assets/${encodeURIComponent(assetId)}`, payload).then(response => response.data)
+export const deleteCreativeAsset = assetId =>
+  request.delete(`/ai/creative/assets/${encodeURIComponent(assetId)}`).then(response => response.data)

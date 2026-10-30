@@ -113,8 +113,92 @@
 - 下一任务：C07（DashScope 适配器 + 产物入库，含 HTTP Mock 供应商）。
 - 未提交：全部改动在工作区，等待用户授权提交。
 
+### C07 供应商适配与结果入库（A19/A20/A21 PASS；A18 BLOCKED）
+
+- DashScopeImageAdapter：submit/query 按契约实现；401/403→PROVIDER_AUTH_FAILED、429→throttled(Retry-After)、
+  5xx/超时→Unknown、2xx 无 task_id→Unknown；取消返回 UNSUPPORTED。
+- SafeMediaDownloader：逐跳校验 scheme/host/DNS，拒绝回环/私网/链路本地/169.254 元数据地址（元数据地址任何模式都拒绝），
+  最多 4 跳，流式读取超过 maxBytes 立即中断。
+- StorageAssetIngestService：真实写对象存储 + 素材行 + 产物槽位；槽位预先分配 assetId/objectKey，重试覆盖同一对象。
+- 调度器 completeWithOutputs 支持 URL 产物下载；入库失败 INGEST_FAILED→FETCHING→SUCCEEDED，不重新提交。
+- 测试：DashScopeImageAdapterTest 13 例、SafeMediaDownloaderTest 6 例；
+  MediaJobSchedulerTest 新增 A19/A20 共 3 例，8/8 全绿（PG + LOCAL + MOCK）。
+
+### C08 查询、取消、对账、事件（实现完成，用例未执行）
+
+- MediaJobService：项目筛选分页、allowedActions、cancel（QUEUED 直接取消；RUNNING→CANCEL_REQUESTED；
+  SUBMITTING/已生成拒绝）、retry（FAILED/CANCELLED；RECONCILING 需确认）、resumeIngest、事件游标。
+- CreativeJobController：详情含 outputs/parameters/model；事件 JSON 与 SSE（seq 续传，终态关闭）。
+- ModelCatalogService.deleteProvider：仍有在途媒体任务时拒绝删除（A25）。
+
+### C09 提示词优化（实现完成，用例未执行）
+
+- PromptOptimizationService + /ai/creative/prompts/optimize：只改写文本、不创建任务；容忍代码块/纯文本；
+  畸形 JSON 或超长（>500）返回 422 且原文保留。
+
+### C10/C11 创作界面（构建通过，浏览器验收未执行）
+
+- 新增 frontend/src/views/creative：CreativeHome、CreativeProject、CreativeTasks、CreativeAssets + shared.js/creative.css。
+- 路由 /creative、/creative/projects/:projectId、/creative/tasks[/:jobId]、/creative/assets；全局导航新增「AI 创作」。
+- 创作台：三栏（结果区 + 参数区 + 顶栏 Tab）、草稿 1.2s 自动保存/409 冲突另存、优化建议采用/放弃、
+  幂等键在网络失败重试时复用、按 allowedActions 显示取消/重试/重新保存/继续创作、任务卡状态文案不虚构进度。
+- 素材：鉴权内容走 blob URL（不把 token 放 URL）、收藏/下载/删除/继续创作；工作台新增 AI 创作区块。
+- `npm run build` 通过；A27–A30 未做浏览器交互验收。
+
+### C12 智能体接入（实现完成，用例未执行）
+
+- CreativeImageTool：`generateImage(prompt, size, projectId?)`，无项目时选择/创建「智能体创作」；
+  只返回 jobId，不在工具内轮询；ToolFactory 仅在带 userId 的调用路径注册；`generateImage` 登记为 EXECUTE。
+- 同一 run 的重复工具调用由 IdempotentToolCallback 按账本复用。
+
+### C13/C14 工作流外部等待与兼容（迁移 PASS，端到端未执行）
+
+- V9__workflow_external_wait.sql：workflow_run 新增 WAITING_EXTERNAL 与 graph_snapshot；
+  workflow_node_execution（unique run+node，WAITING_EXTERNAL 索引）。
+- WorkflowService：启动冻结图；media_image_generate 提交后返回等待并让出线程；
+  resumeWaiting 用状态条件更新认领；advanceMediaNode/failMediaNode 推进节点；成功后从冻结图继续。
+- WorkflowMediaResumeScheduler：每 5 秒按 media_job 终态推进；RECONCILING/INGEST_FAILED 保持等待。
+- C14：新节点输出 JSON {jobId,assetId,mediaType}，支持 {{node.output.assetId}}；
+  image_understand/poster_render 增加 imageAssetId（OSS 预签名 URL / 本地读取字节）；旧 image_generate 未改动。
+- 测试：CreativeMigrationTest 新增 V8→V9 保留运行、等待状态约束、节点唯一、恢复认领唯一性，5/5 通过。
+
+### C15 观测与桌面（实现完成，用例未执行）
+
+- creative.submissions-enabled=false → 503 SUBMISSIONS_DISABLED，已有任务继续。
+- Micrometer 计数：creative.jobs.submitted/succeeded/failed/ingest_failed/uncertain。
+- GET /ai/creative/health：开关、存储后端、图片绑定、DB、本人 active/attention/ingestFailed 计数（无敏感字段）。
+- OSS 凭据缺失时媒体存储回退本地目录并告警；运维手册 docs/design/2026-10-30-ai-creative-ops.md。
+
+### 隔离环境浏览器验证（A22–A24、A27–A30、A35–A36 部分 PASS）
+
+- 用途：不触碰用户共享的 8123/3000，也不读取其密钥；使用独立库表数据与测试账号。
+- 后端：`target/aster-agent-0.0.1-SNAPSHOT.jar --server.port=8126 --management.server.port=8136`
+  + `creative.scheduler.enabled=true`、`creative.storage.backend=local`、`creative.storage.local-dir=/tmp/aster-creative-ui`、
+  `app.security.registration-enabled=true`；前端：`VITE_API_BASE_URL=http://127.0.0.1:8126/api npx vite --port 3001`。
+- 模型：测试用户自建 provider/model 绑定，`media_model_profile.adapter_key=mock-text2image`，不发起真实生成。
+- 实测：
+  - 新建项目 → 输入 → 草稿自动保存 → 生成 → 2–5 秒完成 → 结果预览/下载/继续创作；
+  - 刷新不重复提交；再次生成产生独立 job；
+  - 无图片绑定 → 引导条 + 生成禁用；
+  - 未绑定/绑定、任务/素材/详情抽屉、1440/1024/390 宽度、深色主题均检查；
+  - `submissions-enabled=false` → 503 `SUBMISSIONS_DISABLED`；`/ai/creative/health` 返回就绪与计数；
+  - QUEUED 取消幂等、CANCELLED 重试 parent 关联、ingest 恢复均通过 HTTP 实测。
+- 本轮修复（均见 docs/bugs）：
+  1. 作业列表 SQL 少空格导致 `$2ORDER`；
+  2. 调度器不释放租约，查询被拖到 60 秒；
+  3. 配额检查与占位不在同一事务，双 worker 可超限；
+  4. `CreativeProject.vue` 漏导入 `getCreativeProject`；
+  5. 自动保存与生成前保存并发导致 409；
+  6. 入库时图片尺寸解析异常导致 INGEST_FAILED（改为 best-effort）。
+- 布局调整：结果图最大 320px、素材卡片占位高度、任务表显示提示词、详情长 ID 换行、
+  窄屏（<900）自动收起全局导航、移动端隐藏「全部素材」并限制标题宽度；实测 390 宽度无横向溢出。
+
 ## 环境注意事项
 
 - application-local.yml 未读取密钥内容（仅测试解析 datasource 结构，不输出）。
-- 本机 @SpringBootTest 首次上下文加载约 10 分钟，属环境现象；CI 需观察。
-- 保留其他会话副本文件；迁移 V8 已应用，下一个新迁移为 V9。
+- **重要**：`target/classes` 曾残留大量重复 class（7211 个 vs 275 源文件），导致 Spring 启动/测试 10–30 分钟；
+  已 `mvn clean compile` 修复，class 数 452，@SpringBootTest 启动恢复到秒级。见
+  docs/bugs/bug-2026-10-30-stale-duplicated-classes-slow-startup.txt。
+- 迁移 V9 已应用到开发库（仅新增列/表）；保留其他会话副本文件（`WorkflowEditor 2.vue`、`Workflows 2.vue`）。
+- 浏览器验收使用隔离测试账号与 Mock 模型；未读取/输出用户密钥；A18/A37/A38/A40 仍未执行。
+- 隔离实例使用 8126/8136 与 3001；验收结束应停止，避免与共享的 8123/3000 混淆。

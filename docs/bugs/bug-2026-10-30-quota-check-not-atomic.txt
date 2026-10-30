@@ -1,0 +1,9 @@
+日期：2026-10-30
+问题现象：并发调度测试偶发出现 2 个任务同时进入 RUNNING，违反「用户在途上限 1」。
+影响范围：配额上限（A10）与重复计费防护；多实例或高频轮询时更容易触发。
+原因：配额检查 `inflightAvailable` 与 `markSubmittingFenced`（置 inflight_reserved）分属不同自动提交语句，
+`SELECT ... FOR UPDATE` 的锁在语句结束后立即释放，两个 worker 可以同时读到同一个空余名额。
+解决方式：把「加锁 → 计数 → 置 SUBMITTING + inflight_reserved」放进同一个 `TransactionTemplate`，
+锁持有到占位提交为止；名额不足返回 NO_CAPACITY，保持 QUEUED 并退避。
+验证结果：MediaJobSchedulerTest 双实例并发用例稳定通过（8/8）。
+后续注意事项：任何「先查额度再占用」的逻辑都必须同事务持有行锁，不能依赖调用顺序或时间差。

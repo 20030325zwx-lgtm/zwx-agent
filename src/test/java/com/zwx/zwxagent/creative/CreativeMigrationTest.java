@@ -110,6 +110,101 @@ class CreativeMigrationTest {
         Assertions.assertEquals(appliedBefore, historyRowCount(database), "重复迁移不应产生任何变更");
     }
 
+    @Test
+    void workflowExternalWaitSchemaSupportsClaimAndUniqueNode() throws Exception {
+        String database = createScratchDatabase();
+        flyway(database, null).migrate();
+        String runId = UUID.randomUUID().toString();
+        UUID jobId = UUID.randomUUID();
+        try (Connection connection = connect(database)) {
+            try (var insert = connection.prepareStatement("""
+                    INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, definition_version,
+                        status, input, steps, artifacts)
+                    VALUES (?, 'default', 'user-a', 'wf-media', 1, 'WAITING_EXTERNAL', '{}'::jsonb,
+                        '[]'::jsonb, '[]'::jsonb)
+                    """)) {
+                insert.setString(1, runId);
+                insert.execute();
+            }
+            // 非法状态必须被约束拒绝
+            SQLException invalid = Assertions.assertThrows(SQLException.class, () -> {
+                try (var bad = connection.prepareStatement("""
+                        INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, status)
+                        VALUES (?, 'default', 'user-a', 'wf-media', 'PAUSED')
+                        """)) {
+                    bad.setString(1, UUID.randomUUID().toString());
+                    bad.execute();
+                }
+            });
+            Assertions.assertEquals("23514", invalid.getSQLState());
+
+            try (var node = connection.prepareStatement("""
+                    INSERT INTO workflow_node_execution (run_id, node_key, status, media_job_id)
+                    VALUES (?, 'gen', 'WAITING_EXTERNAL', ?)
+                    """)) {
+                node.setString(1, runId);
+                node.setObject(2, jobId);
+                node.execute();
+            }
+            SQLException duplicate = Assertions.assertThrows(SQLException.class, () -> {
+                try (var node = connection.prepareStatement("""
+                        INSERT INTO workflow_node_execution (run_id, node_key, status, media_job_id)
+                        VALUES (?, 'gen', 'WAITING_EXTERNAL', ?)
+                        """)) {
+                    node.setString(1, runId);
+                    node.setObject(2, UUID.randomUUID());
+                    node.execute();
+                }
+            });
+            Assertions.assertEquals("23505", duplicate.getSQLState(), "同一 run/node 只能有一条等待记录");
+
+            // 恢复认领：只有第一次条件更新能成功，避免多实例重复推进
+            int firstClaim = claimWaiting(connection, runId);
+            int secondClaim = claimWaiting(connection, runId);
+            Assertions.assertEquals(1, firstClaim);
+            Assertions.assertEquals(0, secondClaim);
+        }
+    }
+
+    private int claimWaiting(Connection connection, String runId) throws SQLException {
+        try (var claim = connection.prepareStatement("""
+                UPDATE workflow_run SET status = 'RUNNING'
+                WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                """)) {
+            claim.setString(1, runId);
+            return claim.executeUpdate();
+        }
+    }
+
+    @Test
+    void upgradesV8ToV9PreservingExistingRuns() throws Exception {
+        String database = createScratchDatabase();
+        flyway(database, "8").migrate();
+        String runId = UUID.randomUUID().toString();
+        try (Connection connection = connect(database)) {
+            try (var insert = connection.prepareStatement("""
+                    INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, status, input, steps, artifacts)
+                    VALUES (?, 'default', 'user-a', 'legacy-wf', 'SUCCEEDED', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)
+                    """)) {
+                insert.setString(1, runId);
+                insert.execute();
+            }
+        }
+        flyway(database, null).migrate();
+        try (Connection connection = connect(database)) {
+            try (var query = connection.prepareStatement("""
+                    SELECT status, graph_snapshot FROM workflow_run WHERE id = ?
+                    """)) {
+                query.setString(1, runId);
+                ResultSet rs = query.executeQuery();
+                Assertions.assertTrue(rs.next(), "V8→V9 升级不得删除旧运行");
+                Assertions.assertEquals("SUCCEEDED", rs.getString("status"));
+                Assertions.assertNull(rs.getObject("graph_snapshot"), "旧运行没有冻结图，恢复时按定义版本兜底");
+            }
+        }
+        assertTablesExist(database, "workflow_node_execution");
+    }
+
     private int historyRowCount(String database) throws SQLException {
         try (Connection connection = connect(database);
              var statement = connection.prepareStatement("SELECT count(*) FROM flyway_schema_history")) {

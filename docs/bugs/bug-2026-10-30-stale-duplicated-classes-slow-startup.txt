@@ -1,0 +1,16 @@
+日期：2026-10-30
+问题现象：本机每次启动 Spring 上下文（`@SpringBootTest` 或 `java -jar`）都要 10–30 分钟，日志停在 Spring Boot 横幅或 Flyway 之后不再前进；
+线程栈显示主线程在 `ClassPathScanningCandidateComponentProvider` → `JsonMixinModuleEntries.scan` 里反复读 class 文件。
+影响范围：后端启动、所有 @SpringBootTest、开发与验收效率；接口本身逻辑正常。
+原因：`target/classes` 中残留大量重复 class 文件，例如 `AssetLinkRelation 2.class` … `AssetLinkRelation 19.class`，
+主代码仅 275 个源文件却有 7211 个 class。包扫描按 class 文件逐个读取元数据，重复副本把扫描量放大约 16 倍。
+重复产物来自之前“带空格/编号的副本源文件”事故与增量编译叠加，`mvn compile` 不会自动清理。
+解决方式：执行 `mvn -B -ntp clean compile`（只清理 target 构建产物）；清理后 class 数从 7211 降到 452。
+验证结果：清理后重新运行 @SpringBootTest，上下文启动恢复到正常数量级（分钟以内），测试可正常执行。
+环境线索：本仓库位于 macOS 桌面目录，检测到 iCloud Drive（bird/CloudDocs）与百度网盘同步进程在运行；
+带 “ 2/ 3” 后缀的冲突副本与这类同步客户端的行为一致，属于环境问题而非 Maven 逻辑。
+后续注意事项：
+- 出现“启动极慢/扫描卡住”时先执行 `find target/classes -name "*.class" | wc -l` 与源文件数对比，明显偏大即清理重建。
+- 不要用 `mvn clean` 以外的宽泛删除命令；它只移除 target，不触碰 src 下的本地配置。
+- 仓库中不要保留带 ` 2`、`copy` 等后缀的源文件副本，否则会被编译并进一步污染构建产物。
+- 若无法关闭桌面同步，建议每次测试/打包前执行 `mvn clean test` / `mvn clean package`，或把仓库移到不同步的目录。

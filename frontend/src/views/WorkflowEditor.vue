@@ -220,7 +220,8 @@ const NODE_TYPES = [
   { type: 'image_understand', label: '图片理解', color: '#7C5CF0', hint: '理解图片内容；参数 image / question' },
   { type: 'llm_text', label: '模型对话', color: '#0F9D8A', hint: '与对话模型交互；参数 prompt（含引用）' },
   { type: 'web_search', label: '联网搜索', color: '#C77B1E', hint: '搜索网页信息；参数 query' },
-  { type: 'image_generate', label: '图片生成', color: '#A34FA8', hint: '调用生图模型（DashScope 文生图）；参数 prompt / size / model' },
+  { type: 'image_generate', label: '图片生成（旧）', color: '#A34FA8', hint: '同步轮询旧链路；参数 prompt / size / model（保留兼容）' },
+  { type: 'media_image_generate', label: '图片生成（创作）', color: '#8C3FA8', hint: '提交 AI 创作任务并持久等待；参数 prompt / size / projectId' },
   { type: 'http_request', label: 'REST 请求', color: '#3D7A3D', hint: '调用外部 API；参数 method / url / headers / body' },
   { type: 'db_query', label: '数据库查询', color: '#8A6D3B', hint: '只读 SELECT/WITH 查询；参数 sql' },
   { type: 'text_template', label: '文本模板', color: '#5B6B8C', hint: '拼接/封装上游结果；参数 template（含引用）' },
@@ -233,6 +234,7 @@ const PARAM_DEFAULTS = {
   llm_text: { prompt: '根据以下信息生成内容：{{input.keyword}}' },
   web_search: { query: '{{input.keyword}}' },
   image_generate: { prompt: '为「{{input.keyword}}」生成一张简洁的商品宣传图，纯色背景', size: '1024*1024', model: 'wanx2.1-t2i-turbo' },
+  media_image_generate: { prompt: '为「{{input.keyword}}」生成一张简洁的商品宣传图，纯色背景', size: '1024*1024' },
   http_request: { method: 'GET', url: 'https://', headers: '', body: '' },
   db_query: { sql: 'SELECT 1' },
   text_template: { template: '{{start.output}}' },
@@ -246,12 +248,13 @@ const NODE_HELP = {
   image_understand: '图片理解：image 填图片 URL 或引用上游图片节点输出；question 填想问的问题。输出为图片描述文本（服务不可用时降级为提示文本）。',
   llm_text: '模型对话：prompt 写提示词，可嵌入 {{节点.output}} 与 {{input.字段}} 引用上游结果做二次编辑。输出为模型回复。使用“设置→模型”中绑定的对话模型。',
   web_search: '联网搜索：query 填搜索词。输出为搜索结果文本（需要配置搜索 API Key）。',
-  image_generate: '图片生成：prompt 描述画面，size 如 1024*1024，model 默认 wanx2.1-t2i-turbo。输出为生成的图片（可预览下载），按张计费，需要 DashScope 供应商 Key。',
+  image_generate: '图片生成（旧）：prompt 描述画面，size 如 1024*1024，model 默认 wanx2.1-t2i-turbo。同步等待约 120 秒；旧图保持原有行为。',
+  media_image_generate: '图片生成（创作）：提交到 AI 创作队列并持久等待，服务重启后可继续。输出为 JSON：jobId / assetId / mediaType，可用 {{节点.output.assetId}} 引用到图片理解或海报合成。按张计费。',
   http_request: 'REST 请求：method 选 GET/POST 等，url 填地址，headers/body 填 JSON。输出为响应体（截断 4000 字）；非 2xx 视为失败。',
   db_query: '数据库查询：sql 只能写单条 SELECT/WITH（最多 200 行、10 秒超时）。输出为结果 JSON。',
   text_template: '文本模板：template 里可混合文字与引用，如“报告：{{llm_text.output}}”。输出为替换后的文本，不消耗模型。',
   file_export: '文件导出：filename 写文件名（md/txt/json/csv），content 通常引用上游文本。输出为可下载文件。',
-  poster_render: '海报合成：image 引用商品图，copy 引用文案 JSON（标题/副标题/卖点/配色）。输出为海报 PNG。'
+  poster_render: '海报合成：image 引用商品图 URL，或 imageAssetId 引用创作素材；copy 引用文案 JSON（标题/副标题/卖点/配色）。输出为海报 PNG。'
 }
 
 const route = useRoute()

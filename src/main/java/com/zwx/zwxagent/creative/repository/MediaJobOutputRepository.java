@@ -65,7 +65,8 @@ public class MediaJobOutputRepository {
     /** 入库完成：对象已写、校验通过后调用（A19/A20）。 */
     public boolean markDone(UUID id, String sha256, long byteSize) {
         return jdbcTemplate.update("""
-                        UPDATE media_job_output SET ingest_state = ?, sha256 = ?, byte_size = ?, updated_at = now()
+                        UPDATE media_job_output SET ingest_state = ?, sha256 = ?, byte_size = ?,
+                            last_error = NULL, updated_at = now()
                         WHERE id = ?
                         """,
                 IngestState.DONE.name(), sha256, byteSize, id) > 0;

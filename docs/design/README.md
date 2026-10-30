@@ -42,6 +42,10 @@
 - [Jev 意图分流层（批 0/1 已实施）](./2026-10-25-jev-intent-routing.md)
 - [超级智能体 token 计量（A 档 ①）](./2026-10-26-token-usage-accounting.md)
 - [MCP 连接管理与工具授权](./2026-10-21-mcp-connection-management.md)
+- [AI 创作模块总体设计](./2026-10-29-ai-creative-studio.md)
+- [AI 创作 P1 实施手册](./2026-10-29-ai-creative-implementation.md)
+- [AI 创作模型契约](./2026-10-29-ai-creative-model-contract.md)
+- [AI 创作 P1 运维手册](./2026-10-30-ai-creative-ops.md)
 - [改造实施方案索引](./plans/README.md)
 
 本目录保存相对稳定的架构、模块边界、数据流和设计决策。实现细节以源码为准。

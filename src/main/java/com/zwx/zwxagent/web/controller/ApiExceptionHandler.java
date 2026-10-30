@@ -64,12 +64,18 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", exception.getMessage()));
     }
 
-    /** 创作模块领域异常：按 code 区分（模型未配置 400、参数/能力不支持 422）。 */
+    /** 创作模块领域异常：按 code 区分（模型未配置 400、参数/能力/优化失败 422）。 */
     @ExceptionHandler(com.zwx.zwxagent.creative.domain.CreativeException.class)
     public ResponseEntity<Map<String, String>> handleCreativeException(
             com.zwx.zwxagent.creative.domain.CreativeException exception) {
-        HttpStatus status = com.zwx.zwxagent.creative.domain.CreativeException.UNSUPPORTED_PARAMETER
-                .equals(exception.code()) ? HttpStatus.UNPROCESSABLE_ENTITY : HttpStatus.BAD_REQUEST;
-        return ResponseEntity.status(status).body(Map.of("error", exception.getMessage()));
+        String code = exception.code();
+        if (com.zwx.zwxagent.creative.domain.CreativeException.SUBMISSIONS_DISABLED.equals(code)) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", exception.getMessage(), "code", code));
+        }
+        boolean unprocessable = com.zwx.zwxagent.creative.domain.CreativeException.UNSUPPORTED_PARAMETER.equals(code)
+                || com.zwx.zwxagent.creative.domain.CreativeException.OPTIMIZE_FAILED.equals(code);
+        HttpStatus status = unprocessable ? HttpStatus.UNPROCESSABLE_ENTITY : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status).body(Map.of("error", exception.getMessage(), "code", code));
     }
 }

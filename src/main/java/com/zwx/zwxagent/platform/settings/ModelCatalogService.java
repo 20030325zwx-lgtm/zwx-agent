@@ -201,6 +201,16 @@ public class ModelCatalogService {
         if (bindings != null && bindings > 0) {
             throw new IllegalArgumentException("该供应商仍被 " + bindings + " 个用途绑定引用，请先在模型绑定中改选其他模型");
         }
+        // C08/A25：在途创作任务仍依赖该供应商的密钥与地址，删除会让任务不可恢复
+        Integer activeJobs = jdbcTemplate.queryForObject("""
+                SELECT count(*) FROM media_job
+                WHERE provider_id = ?
+                  AND status IN ('QUEUED','SUBMITTING','RUNNING','RECONCILING',
+                                 'CANCEL_REQUESTED','FETCHING','INGEST_FAILED')
+                """, Integer.class, providerId);
+        if (activeJobs != null && activeJobs > 0) {
+            throw new IllegalArgumentException("该供应商仍有 " + activeJobs + " 个在途创作任务，请稍后再删除");
+        }
         jdbcTemplate.update("DELETE FROM model_provider WHERE id = ?", providerId);
         bumpRevision();
     }

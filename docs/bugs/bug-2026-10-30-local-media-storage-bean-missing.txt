@@ -1,0 +1,13 @@
+日期：2026-10-30
+问题现象：`MediaStorageConfig` 引用了 `LocalMediaStorage` 参数，但工程内没有该 Bean 的定义；应用启动会因缺少候选 Bean 失败，
+桌面端即使把 `creative.storage.backend` 设为 local 也无法启动创作模块。
+影响范围：后端启动、桌面端本地媒体存储、所有创作接口。
+原因：C06 落地了 `LocalMediaStorage` 类与路由配置，但遗漏了 `@Bean` 注册；该问题只在真正启动 Spring 上下文时暴露，
+单纯编译和纯 JUnit 测试都发现不了。
+解决方式：
+1. 在 `MediaStorageConfig` 中注册 `LocalMediaStorage` Bean，目录来自 `creative.storage.local-dir`（默认 `~/.aster/creative-media`）。
+2. 同时补上“后端配置为 oss 但缺少 OSS 凭据时回退本地目录并告警”，避免桌面端首次生成直接报错。
+验证结果：`mvn compile` 通过；等待真实 Spring 上下文测试覆盖（本批尚无完整启动验证）。
+后续注意事项：
+- 新增 `@Configuration` 参数依赖时，先确认每个参数都有对应 Bean 或明确的可选来源。
+- 桌面端不应要求用户先配置 OSS 才能用图片创作；本地目录模式是默认兜底。

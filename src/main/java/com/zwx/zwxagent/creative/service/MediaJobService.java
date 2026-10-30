@@ -60,6 +60,9 @@ public class MediaJobService {
     private final MediaModelResolver modelResolver;
     private final TransactionTemplate transactionTemplate;
 
+    @org.springframework.beans.factory.annotation.Value("${creative.submissions-enabled:true}")
+    private boolean submissionsEnabled;
+
     public MediaJobService(MediaJobRepository jobRepository, MediaJobEventRepository eventRepository,
                            CreativeProjectRepository projectRepository,
                            MediaProviderQuotaRepository quotaRepository,
@@ -78,12 +81,141 @@ public class MediaJobService {
                 .orElseThrow(() -> new IllegalArgumentException("任务不存在"));
     }
 
+    /** 归属内按创建时间倒序分页；游标编码为 createdAtEpochMillis:id。 */
+    public List<MediaJobRecord> list(CurrentActor actor, java.util.UUID projectId, String cursor, int limit) {
+        int size = Math.max(1, Math.min(limit, 100));
+        Instant cursorCreatedAt = null;
+        UUID cursorId = null;
+        if (cursor != null && !cursor.isBlank()) {
+            String[] parts = cursor.split(":", 2);
+            if (parts.length != 2) throw new IllegalArgumentException("无效的分页游标");
+            try {
+                cursorCreatedAt = Instant.ofEpochMilli(Long.parseLong(parts[0]));
+                cursorId = UUID.fromString(parts[1]);
+            } catch (RuntimeException exception) {
+                throw new IllegalArgumentException("无效的分页游标");
+            }
+        }
+        return jobRepository.listByOwner(actor.tenantId(), actor.userId(), projectId,
+                cursorCreatedAt, cursorId, size);
+    }
+
+    public static String cursorOf(MediaJobRecord job) {
+        return job.createdAt().toEpochMilli() + ":" + job.id();
+    }
+
+    /** 前端可用动作必须来自后端判定，避免界面出现无效按钮（A29）。 */
+    public static List<String> allowedActions(MediaJobStatus status) {
+        return switch (status) {
+            case QUEUED, RUNNING -> List.of("cancel");
+            case INGEST_FAILED -> List.of("resumeIngest");
+            case FAILED, CANCELLED -> List.of("retry");
+            case RECONCILING -> List.of("retryWithRisk");
+            case SUCCEEDED -> List.of("download", "recreate");
+            default -> List.of();
+        };
+    }
+
+    /**
+     * 取消（A22）：QUEUED 直接取消且不产生任何上游调用；RUNNING 进入 CANCEL_REQUESTED，
+     * 由调度器按供应商能力处理（不支持时继续跟踪结果，不假报 CANCELLED）；
+     * 已生成结果或正在提交的任务拒绝取消。
+     */
+    public MediaJobRecord cancel(CurrentActor actor, UUID jobId) {
+        return transactionTemplate.execute(status -> {
+            var job = jobRepository.lockById(jobId).orElse(null);
+            if (job == null || !job.tenantId().equals(actor.tenantId())
+                    || !job.userId().equals(actor.userId())) {
+                throw new IllegalArgumentException("任务不存在");
+            }
+            switch (job.status()) {
+                case QUEUED -> {
+                    if (jobRepository.updateStatusFenced(job.id(), job.version(), job.leaseEpoch(),
+                            MediaJobStatus.CANCELLED, null, Instant.now())) {
+                        eventRepository.append(job.id(), job.tenantId(), job.userId(), "CANCELLED",
+                                CreativeJson.toJson(Map.of("reason", "user_requested")));
+                    }
+                }
+                case RUNNING -> {
+                    if (jobRepository.updateStatusFenced(job.id(), job.version(), job.leaseEpoch(),
+                            MediaJobStatus.CANCEL_REQUESTED, Instant.now(), null)) {
+                        eventRepository.append(job.id(), job.tenantId(), job.userId(), "CANCEL_REQUESTED",
+                                CreativeJson.toJson(Map.of("operation", job.operation())));
+                    }
+                }
+                case SUBMITTING -> throw new CreativeConflictException("任务正在提交，暂不能取消，请稍后重试");
+                case FETCHING, INGEST_FAILED -> throw new CreativeConflictException(
+                        "图片已生成，正在入库，不能取消");
+                default -> { /* 终态幂等返回 */ }
+            }
+            return jobRepository.findById(job.id()).orElse(job);
+        });
+    }
+
+    /** 入库恢复（A19/A20）：只重新下载与入库，不重新提交生成。 */
+    public MediaJobRecord resumeIngest(CurrentActor actor, UUID jobId) {
+        return transactionTemplate.execute(status -> {
+            var job = jobRepository.lockById(jobId).orElse(null);
+            if (job == null || !job.tenantId().equals(actor.tenantId())
+                    || !job.userId().equals(actor.userId())) {
+                throw new IllegalArgumentException("任务不存在");
+            }
+            if (job.status() != MediaJobStatus.INGEST_FAILED) {
+                throw new CreativeConflictException("只有入库失败的任务可以恢复入库");
+            }
+            if (!jobRepository.updateStatusFenced(job.id(), job.version(), job.leaseEpoch(),
+                    MediaJobStatus.FETCHING, Instant.now(), null)) {
+                throw new CreativeConflictException("任务状态已变化，请刷新后重试");
+            }
+            eventRepository.append(job.id(), job.tenantId(), job.userId(), "FETCHING",
+                    CreativeJson.toJson(Map.of("reason", "manual_ingest_retry")));
+            return jobRepository.findById(job.id()).orElse(job);
+        });
+    }
+
+    /**
+     * 普通重试（A23）：仅 FAILED/CANCELLED 可建新 job 并关联 parent；
+     * RECONCILING 结果不确定，必须显式确认可能重复计费；INGEST_FAILED 应走恢复入库。
+     */
+    public CreateJobResult retry(CurrentActor actor, UUID jobId, String idempotencyKey,
+                                 boolean acknowledgePossibleDuplicateCharge) {
+        var parent = getForOwner(actor, jobId);
+        if (parent.status() == MediaJobStatus.INGEST_FAILED) {
+            throw new CreativeConflictException("请使用恢复入库，不要重新生成");
+        }
+        if (parent.status() == MediaJobStatus.RECONCILING
+                && !acknowledgePossibleDuplicateCharge) {
+            throw new CreativeConflictException("原任务结果尚未确定，重试可能重复计费，请确认后再试");
+        }
+        if (parent.status() != MediaJobStatus.FAILED && parent.status() != MediaJobStatus.CANCELLED
+                && parent.status() != MediaJobStatus.RECONCILING) {
+            throw new CreativeConflictException("当前任务状态不支持重试");
+        }
+        String key = idempotencyKey == null || idempotencyKey.isBlank()
+                ? "retry-" + jobId + "-" + UUID.randomUUID() : idempotencyKey;
+        var input = parent.inputSnapshot();
+        return create(actor, key, parent.projectId(), new CreateJobRequest(
+                parent.projectId(), input.operation(), parent.modelSnapshot().modelRowId(),
+                input.prompt(), input.prompt(), input.parameters(), List.of(),
+                null, parent.id(), acknowledgePossibleDuplicateCharge));
+    }
+
+    /** 事件游标读取（A24）：只返回 seq 之后已提交的事件，调用方按 seq 去重。 */
+    public List<com.zwx.zwxagent.creative.domain.MediaJobEventRecord> events(
+            CurrentActor actor, UUID jobId, long afterSeq, int limit) {
+        getForOwner(actor, jobId);
+        return eventRepository.listAfter(jobId, afterSeq, Math.max(1, Math.min(limit, 500)));
+    }
+
     /**
      * 受理入口：结构校验 → 幂等预检（锁项目行）→ 解析模型与参数校验 → 受理事务（配额+插入+事件）。
      * 返回 new=202、reused=200，由控制器决定状态码。
      */
     public CreateJobResult create(CurrentActor actor, String idempotencyKey, UUID projectId,
                                   CreateJobRequest request) {
+        if (!submissionsEnabled) {
+            throw CreativeException.submissionsDisabled();
+        }
         if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
             throw new IllegalArgumentException("Idempotency-Key 必填（1–128 字符）");
         }

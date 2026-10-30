@@ -116,6 +116,33 @@
               </router-link>
             </div>
           </section>
+
+          <section class="home-section">
+            <div class="section-head">
+              <h2>AI 创作</h2>
+              <router-link to="/creative" class="section-more">
+                进入创作 <ChevronRight :size="14" />
+              </router-link>
+            </div>
+            <p v-if="!creativeJobs.length" class="section-hint">
+              输入想法生成图片；任务与素材保存在服务端，可随时找回。
+            </p>
+            <div v-else class="creative-list">
+              <router-link
+                v-for="job in creativeJobs"
+                :key="job.jobId"
+                :to="`/creative/tasks/${job.jobId}`"
+                class="creative-item"
+              >
+                <span class="creative-status" :class="creativeTone(job.status)">{{ creativeLabel(job.status) }}</span>
+                <span class="creative-time">{{ formatTime(job.createdAt) }}</span>
+              </router-link>
+            </div>
+            <div class="creative-actions">
+              <router-link to="/creative" class="creative-action">创作台</router-link>
+              <router-link to="/creative/assets" class="creative-action">素材库</router-link>
+            </div>
+          </section>
         </div>
 
         <div class="home-side">
@@ -219,7 +246,8 @@ import {
   listManusConversations,
   listModelSettings,
   listProjects,
-  listWorkflows
+  listWorkflows,
+  listCreativeJobs
 } from '../api'
 import { KNOWLEDGE_AGENTS } from '../config/agents'
 
@@ -230,6 +258,7 @@ const workflows = ref([])
 const workflowRuns = ref([])
 const knowledgeDocs = ref([])
 const modelLabel = ref('')
+const creativeJobs = ref([])
 const loading = ref(true)
 
 // 知识库列表含历史版本，概览只统计未归档的文档
@@ -308,6 +337,19 @@ function runDotClass(status) {
   if (status === 'FAILED' || status === 'INTERRUPTED') return 'is-fail'
   return 'is-done'
 }
+function creativeLabel(status) {
+  return {
+    QUEUED: '排队中', SUBMITTING: '提交中', RUNNING: '生成中', CANCEL_REQUESTED: '取消中',
+    RECONCILING: '待确认', FETCHING: '保存中', INGEST_FAILED: '保存失败',
+    SUCCEEDED: '已完成', FAILED: '失败', CANCELLED: '已取消'
+  }[status] || status
+}
+function creativeTone(status) {
+  if (status === 'SUCCEEDED') return 'is-done'
+  if (status === 'FAILED' || status === 'INGEST_FAILED') return 'is-fail'
+  if (['QUEUED', 'SUBMITTING', 'RUNNING', 'FETCHING', 'CANCEL_REQUESTED', 'RECONCILING'].includes(status)) return 'is-running'
+  return 'is-idle'
+}
 function knowledgeStatusLabel(document) {
   if (!document) return ''
   if (['PENDING', 'INDEXING'].includes(document.status)) return '处理中'
@@ -319,13 +361,15 @@ function knowledgeStatusLabel(document) {
 }
 
 onMounted(async () => {
-  const [runResult, conversationResult, projectResult, modelResult, workflowResult, ...knowledgeResults] =
+  const [runResult, conversationResult, projectResult, modelResult, workflowResult, creativeResult,
+    ...knowledgeResults] =
     await Promise.allSettled([
       listManusRunOverviews(30),
       listManusConversations(),
       listProjects(),
       listModelSettings(),
       listWorkflows(20),
+      listCreativeJobs({ limit: 3 }),
       ...KNOWLEDGE_AGENTS.map(agent => listAgentKnowledgeDocuments(agent.key))
     ])
   runs.value = runResult.status === 'fulfilled' ? runResult.value || [] : []
@@ -333,6 +377,7 @@ onMounted(async () => {
   projects.value = projectResult.status === 'fulfilled' ? projectResult.value || [] : []
   workflows.value = workflowResult.status === 'fulfilled' ? workflowResult.value?.definitions || [] : []
   workflowRuns.value = workflowResult.status === 'fulfilled' ? workflowResult.value?.runs || [] : []
+  creativeJobs.value = creativeResult.status === 'fulfilled' ? creativeResult.value?.items || [] : []
   knowledgeDocs.value = knowledgeResults.flatMap(result =>
     result.status === 'fulfilled' ? result.value || [] : [])
   if (modelResult.status === 'fulfilled') {
@@ -809,4 +854,24 @@ a.stat-card:hover {
     padding: 20px 16px 40px;
   }
 }
+
+.creative-list { display: flex; flex-direction: column; gap: 6px; }
+.creative-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; border: 1px solid var(--wb-border); border-radius: 8px;
+  text-decoration: none; color: inherit; font-size: 12.5px;
+}
+.creative-item:hover { border-color: var(--wb-brand); }
+.creative-status { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--wb-border); color: var(--wb-text-2); }
+.creative-status.is-done { color: var(--wb-success); }
+.creative-status.is-fail { color: var(--wb-danger); }
+.creative-status.is-running { color: var(--wb-info); }
+.creative-status.is-idle { color: var(--wb-muted); }
+.creative-time { color: var(--wb-muted); font-size: 11.5px; }
+.creative-actions { display: flex; gap: 8px; margin-top: 10px; }
+.creative-action {
+  flex: 1; text-align: center; padding: 8px; border: 1px solid var(--wb-border);
+  border-radius: 8px; text-decoration: none; color: var(--wb-text-2); font-size: 12.5px;
+}
+.creative-action:hover { border-color: var(--wb-brand); color: var(--wb-text); }
 </style>

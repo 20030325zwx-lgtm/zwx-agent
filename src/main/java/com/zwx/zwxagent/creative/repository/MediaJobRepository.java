@@ -216,6 +216,11 @@ public class MediaJobRepository {
                 MAPPER, Timestamp.from(now), Timestamp.from(now), limit);
     }
 
+    /** 释放租约：动作完成后让 next_action_at 决定下一次认领，避免被 60 秒租约拖慢查询。 */
+    public void releaseLease(UUID id) {
+        jdbcTemplate.update("UPDATE media_job SET lease_owner = NULL, lease_until = NULL WHERE id = ?", id);
+    }
+
     /** 认领：写租约持有者与 epoch（在同一事务内执行）。 */
     public void claim(UUID id, String workerId, Instant leaseUntil) {
         jdbcTemplate.update("""
@@ -258,18 +263,26 @@ public class MediaJobRepository {
 
     public List<MediaJobRecord> listByOwner(String tenantId, String userId,
                                             Instant cursorCreatedAt, UUID cursorId, int limit) {
+        return listByOwner(tenantId, userId, null, cursorCreatedAt, cursorId, limit);
+    }
+
+    public List<MediaJobRecord> listByOwner(String tenantId, String userId, UUID projectId,
+                                            Instant cursorCreatedAt, UUID cursorId, int limit) {
+        String projectClause = projectId == null ? "" : " AND project_id = ?";
         if (cursorCreatedAt == null || cursorId == null) {
-            return jdbcTemplate.query(SELECT + """
-                            WHERE tenant_id = ? AND user_id = ?
-                            ORDER BY created_at DESC, id DESC LIMIT ?
-                            """,
-                    MAPPER, tenantId, userId, limit);
+            String sql = SELECT + "WHERE tenant_id = ? AND user_id = ?" + projectClause
+                    + " ORDER BY created_at DESC, id DESC LIMIT ?";
+            return projectId == null
+                    ? jdbcTemplate.query(sql, MAPPER, tenantId, userId, limit)
+                    : jdbcTemplate.query(sql, MAPPER, tenantId, userId, projectId, limit);
         }
-        return jdbcTemplate.query(SELECT + """
-                        WHERE tenant_id = ? AND user_id = ? AND (created_at, id) < (?, ?)
-                        ORDER BY created_at DESC, id DESC LIMIT ?
-                        """,
-                MAPPER, tenantId, userId, Timestamp.from(cursorCreatedAt), cursorId, limit);
+        String sql = SELECT + "WHERE tenant_id = ? AND user_id = ?" + projectClause
+                + " AND (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?";
+        return projectId == null
+                ? jdbcTemplate.query(sql, MAPPER, tenantId, userId,
+                Timestamp.from(cursorCreatedAt), cursorId, limit)
+                : jdbcTemplate.query(sql, MAPPER, tenantId, userId, projectId,
+                Timestamp.from(cursorCreatedAt), cursorId, limit);
     }
 
     private static MediaJobRecord map(ResultSet rs, int rowNum) throws SQLException {

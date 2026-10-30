@@ -61,6 +61,7 @@ public class MediaJobScheduler {
     private final TransactionTemplate transactionTemplate;
     private final Map<String, MediaProviderAdapter> adapters;
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @Value("${creative.scheduler.enabled:false}")
     private boolean enabled;
@@ -80,6 +81,10 @@ public class MediaJobScheduler {
     private int userMaxInflight;
     @Value("${creative.scheduler.quota-queries-before-attention:40}")
     private int quotaQueriesBeforeAttention;
+    @Value("${creative.download.allow-local:false}")
+    private boolean downloadAllowLocal;
+    @Value("${creative.download.max-bytes:20971520}")
+    private long downloadMaxBytes;
 
     private ScheduledExecutorService loop;
     private final String workerId = "worker-" + UUID.randomUUID().toString().substring(0, 8);
@@ -89,7 +94,8 @@ public class MediaJobScheduler {
                              MediaProviderQuotaRepository quotaRepository,
                              AssetIngestService ingestService, ConfigSecretCipher secretCipher,
                              TransactionTemplate transactionTemplate, List<MediaProviderAdapter> adapters,
-                             org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+                             org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+                             io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         this.jobRepository = jobRepository;
         this.eventRepository = eventRepository;
         this.outputRepository = outputRepository;
@@ -100,11 +106,18 @@ public class MediaJobScheduler {
         this.adapters = adapters.stream().collect(Collectors.toMap(
                 MediaProviderAdapter::key, Function.identity(), (a, b) -> a));
         this.jdbcTemplate = jdbcTemplate;
+        this.meterRegistry = meterRegistry;
     }
 
     @PostConstruct
     void start() {
         if (!enabled) return;
+        // 启动恢复：有 taskId 的任务继续查询；提交结果不明的进入 RECONCILING，绝不重发
+        try {
+            recover();
+        } catch (Exception exception) {
+            log.warn("媒体任务启动恢复失败：{}", exception.getMessage(), exception);
+        }
         loop = Executors.newSingleThreadScheduledExecutor(runnable -> {
             var thread = new Thread(runnable, "media-job-scheduler");
             thread.setDaemon(true);
@@ -122,7 +135,8 @@ public class MediaJobScheduler {
         try {
             tick();
         } catch (Exception exception) {
-            // 单轮失败不影响下一轮；完整记录在日志/指标（C15）
+            // 单轮失败不影响下一轮，但必须留下可定位日志
+            log.warn("媒体调度轮次失败：{}", exception.getMessage(), exception);
         }
     }
 
@@ -138,10 +152,15 @@ public class MediaJobScheduler {
         if (claimed == null || claimed.isEmpty()) return 0;
         int handled = 0;
         for (UUID id : claimed) {
-            var job = jobRepository.findById(id).orElse(null);
-            if (job == null) continue;
-            handleClaimed(job);
-            handled++;
+            try {
+                var job = jobRepository.findById(id).orElse(null);
+                if (job == null) continue;
+                handleClaimed(job);
+                handled++;
+            } finally {
+                // 动作结束即释放租约；下一次由 next_action_at 控制，崩溃时租约仍会自然过期
+                jobRepository.releaseLease(id);
+            }
         }
         return handled;
     }
@@ -156,7 +175,8 @@ public class MediaJobScheduler {
                 default -> { /* 终态不应被认领 */ }
             }
         } catch (Exception exception) {
-            exception.printStackTrace();
+            log.warn("媒体任务处理失败：job={} status={}；{}", job.id(), job.status(),
+                    exception.getMessage(), exception);
             throw exception;
         }
     }
@@ -167,14 +187,22 @@ public class MediaJobScheduler {
         long version = job.version();
         long epoch = job.leaseEpoch();
         String submissionKey = "sub-" + job.id() + "-" + epoch;
-        // 配额互锁：GLOBAL→PROVIDER→USER 顺序加锁检查
-        if (!inflightAvailable(job)) {
+        // 配额与占位必须在同一事务内完成：行锁 → 计数 → 置 SUBMITTING+inflight_reserved，
+        // 否则两个 worker 可能同时看到空余名额（A10 并发上限）。
+        long reserveVersion = version;
+        long reserveEpoch = epoch;
+        String reservation = transactionTemplate.execute(status -> {
+            if (!inflightAvailable(job)) return "NO_CAPACITY";
+            boolean marked = jobRepository.markSubmittingFenced(job.id(), reserveVersion, reserveEpoch,
+                    submissionKey, Instant.now().plusSeconds(leaseSeconds));
+            return marked ? "RESERVED" : "FENCED";
+        });
+        if ("NO_CAPACITY".equals(reservation)) {
             // 配额不足：保持 QUEUED，退避后重试（不创建半成品）
             pushNext(job, version, epoch, Instant.now().plusSeconds(5), false, null);
             return;
         }
-        if (!jobRepository.markSubmittingFenced(job.id(), version, epoch, submissionKey,
-                Instant.now().plusSeconds(leaseSeconds))) {
+        if (!"RESERVED".equals(reservation)) {
             return;
         }
         version++;
@@ -191,6 +219,7 @@ public class MediaJobScheduler {
         finishAttempt(job.id(), attemptNo, outcomeOf(result.outcome()));
         switch (result.outcome()) {
             case ACCEPTED -> {
+                meterRegistry.counter("creative.jobs.submitted").increment();
                 if (!jobRepository.attachProviderTask(job.id(), version, epoch,
                         modelSnapshot(job).providerId(), result.providerTaskId(), submissionKey)) return;
                 transition(job.id(), version + 1, epoch, MediaJobStatus.RUNNING,
@@ -200,6 +229,7 @@ public class MediaJobScheduler {
             case REJECTED -> {
                 if (jobRepository.finishFenced(job.id(), version, epoch,
                         MediaJobStatus.FAILED, result.errorCode(), result.message())) {
+                    meterRegistry.counter("creative.jobs.failed").increment();
                     event(job.id(), job.tenantId(), job.userId(), "FAILED");
                 }
             }
@@ -220,6 +250,7 @@ public class MediaJobScheduler {
                     });
                     return;
                 }
+                meterRegistry.counter("creative.jobs.uncertain").increment();
                 transition(job.id(), version, epoch, MediaJobStatus.RECONCILING,
                         Instant.now().plusMillis(reconcileDelayMs));
             }
@@ -255,6 +286,7 @@ public class MediaJobScheduler {
             case FAILED -> {
                 if (jobRepository.finishFenced(job.id(), version, epoch,
                         MediaJobStatus.FAILED, result.errorCode(), result.message())) {
+                    meterRegistry.counter("creative.jobs.failed").increment();
                     event(job.id(), job.tenantId(), job.userId(), "FAILED");
                 }
             }
@@ -280,6 +312,13 @@ public class MediaJobScheduler {
             return;
         }
         long v = version;
+        if (job.status() == MediaJobStatus.INGEST_FAILED) {
+            // 入库失败重试必须先回到 FETCHING（状态机只允许 INGEST_FAILED → FETCHING）
+            if (!jobRepository.updateStatusFenced(job.id(), v, epoch,
+                    MediaJobStatus.FETCHING, Instant.now(), null)) return;
+            v++;
+            event(job.id(), job.tenantId(), job.userId(), "FETCHING");
+        }
         var slots = outputRepository.findByJob(job.id());
         if (slots.isEmpty()) {
             long versionForFetch = v;
@@ -302,17 +341,20 @@ public class MediaJobScheduler {
             slots = outputRepository.findByJob(job.id());
         }
         boolean allDone = true;
+        var downloader = new com.zwx.zwxagent.creative.provider.SafeMediaDownloader(
+                downloadAllowLocal, downloadMaxBytes);
         for (int i = 0; i < slots.size(); i++) {
             var slot = slots.get(i);
             var output = i < outputs.size() ? outputs.get(i) : null;
-            if (output == null || output.bytes() == null) {
-                // 真实下载在 C07 实现（逐跳 URL 校验 + 流式限额）；Mock 始终自带字节
-                outputRepository.markFailed(slot.id(), "产物字节缺失（等待 C07 下载实现）");
+            if (output == null) {
+                outputRepository.markFailed(slot.id(), "供应商产物数量与槽位不一致");
                 allDone = false;
                 continue;
             }
             try {
-                ingestService.ingest(job, slot, output.mimeType(), output.bytes());
+                // 上游返回 URL 时逐跳校验并流式下载（C07）；Mock 直接给字节
+                byte[] bytes = payloadOf(output, downloader);
+                ingestService.ingest(job, slot, output.mimeType(), bytes);
             } catch (Exception exception) {
                 outputRepository.markFailed(slot.id(), exception.getMessage());
                 allDone = false;
@@ -321,11 +363,13 @@ public class MediaJobScheduler {
         if (allDone) {
             if (jobRepository.updateStatusFenced(job.id(), v, epoch,
                     MediaJobStatus.SUCCEEDED, null, Instant.now())) {
+                meterRegistry.counter("creative.jobs.succeeded").increment();
                 jobRepository.releaseInflightFenced(job.id(), v + 1, epoch);
                 event(job.id(), job.tenantId(), job.userId(), "SUCCEEDED");
             }
         } else if (jobRepository.updateStatusFenced(job.id(), v, epoch,
                 MediaJobStatus.INGEST_FAILED, Instant.now().plusSeconds(30), null)) {
+            meterRegistry.counter("creative.jobs.ingest_failed").increment();
             event(job.id(), job.tenantId(), job.userId(), "INGEST_FAILED");
         }
     }
@@ -459,6 +503,15 @@ public class MediaJobScheduler {
                           boolean attentionRequired, String blockedReason) {
         jobRepository.pushNextActionFenced(job.id(), version, epoch, nextActionAt,
                 attentionRequired, blockedReason);
+    }
+
+    private static byte[] payloadOf(MediaProviderAdapter.Output output,
+                                    com.zwx.zwxagent.creative.provider.SafeMediaDownloader downloader) {
+        if (output.bytes() != null && output.bytes().length > 0) return output.bytes();
+        if (output.url() == null || output.url().isBlank()) {
+            throw new IllegalStateException("供应商产物缺少 URL 与字节");
+        }
+        return downloader.download(output.url());
     }
 
     private void markAttention(MediaJobRecord job, String reason) {

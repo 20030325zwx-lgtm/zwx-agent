@@ -53,7 +53,7 @@ public class WorkflowService {
 
     public static final Set<String> NODE_TYPES = Set.of(
             "start", "search_image", "image_understand", "llm_text", "web_search", "poster_render",
-            "image_generate", "http_request", "db_query", "text_template", "file_export");
+            "image_generate", "media_image_generate", "http_request", "db_query", "text_template", "file_export");
 
     public record StepDef(String key, String name, String description) {
     }
@@ -106,7 +106,8 @@ public class WorkflowService {
 
     private record WorkflowRunRow(String id, String tenantId, String userId, String workflowKey, int definitionVersion,
                                   String status, String currentStep, JsonNode input, JsonNode steps,
-                                  JsonNode artifacts, String error, Instant createdAt, Instant updatedAt) {
+                                  JsonNode artifacts, String error, Instant createdAt, Instant updatedAt,
+                                  JsonNode graphSnapshot) {
     }
 
     private record RunContext(String id, String tenantId, String userId, String workflowKey,
@@ -115,6 +116,20 @@ public class WorkflowService {
     }
 
     private record NodeResult(String output, String message) {
+        static NodeResult waiting(String message) {
+            return new NodeResult(null, message);
+        }
+
+        boolean isWaiting() {
+            return output == null;
+        }
+    }
+
+    /** 外部等待：节点提交了媒体任务，运行进入 WAITING_EXTERNAL，由恢复器继续。 */
+    static class WorkflowWaitException extends RuntimeException {
+        WorkflowWaitException(String message) {
+            super(message);
+        }
     }
 
     private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -134,6 +149,10 @@ public class WorkflowService {
     private final String searchProvider;
     private final String searchApiKey;
     private final boolean allowLocalEndpoints;
+    private final com.zwx.zwxagent.creative.service.MediaJobService mediaJobService;
+    private final com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService;
+    private final com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository;
+    private final com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage;
     private final ExecutorService executor = Executors.newFixedThreadPool(2, task -> {
         Thread thread = new Thread(task, "workflow-runner");
         thread.setDaemon(true);
@@ -154,7 +173,11 @@ public class WorkflowService {
                            @Value("${app.oss.bucket}") String ossBucket,
                            @Value("${search-api.provider:baidu}") String searchProvider,
                            @Value("${search-api.api-key:}") String searchApiKey,
-                           @Value("${app.config.allow-local-model-endpoints:false}") boolean allowLocalEndpoints) {
+                           @Value("${app.config.allow-local-model-endpoints:false}") boolean allowLocalEndpoints,
+                           com.zwx.zwxagent.creative.service.MediaJobService mediaJobService,
+                           com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService,
+                           com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository,
+                           com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage) {
         this.jdbcTemplate = jdbcTemplate;
         this.mcpServerConfigurationService = mcpServerConfigurationService;
         this.imageAnalysisService = imageAnalysisService;
@@ -166,6 +189,10 @@ public class WorkflowService {
         this.searchProvider = searchProvider;
         this.searchApiKey = searchApiKey;
         this.allowLocalEndpoints = allowLocalEndpoints;
+        this.mediaJobService = mediaJobService;
+        this.creativeProjectService = creativeProjectService;
+        this.creativeAssetRepository = creativeAssetRepository;
+        this.mediaStorage = mediaStorage;
     }
 
     // ---------------------------------------------------------------- 定义版本
@@ -371,12 +398,12 @@ public class WorkflowService {
                 .toList());
         jdbcTemplate.update("""
                         INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, definition_version,
-                                                  status, current_step, input, steps, artifacts)
-                        VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?::jsonb, ?::jsonb, '[]'::jsonb)
+                                                  status, current_step, input, steps, artifacts, graph_snapshot)
+                        VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?::jsonb, ?::jsonb, '[]'::jsonb, ?::jsonb)
                         """,
                 id, tenantId, userId, workflowKey, definition.version(),
                 definition.graph().nodes().getFirst().key(),
-                toJson(input), toJson(steps));
+                toJson(input), toJson(steps), toJson(definition.graph()));
         RunContext context = new RunContext(id, tenantId, userId, workflowKey, definition.version(),
                 definition.name(), definition.description(), definition.graph(), input, steps, new ArrayList<>());
         executor.submit(() -> execute(context));
@@ -385,13 +412,33 @@ public class WorkflowService {
 
     private void execute(RunContext context) {
         try {
+            // 续跑：已完成节点的输出直接复用，不重复执行有副作用的节点
             Map<String, String> outputs = new LinkedHashMap<>();
+            for (StepState step : context.steps()) {
+                if ("SUCCEEDED".equals(step.status()) && step.output() != null && !step.output().isBlank()) {
+                    outputs.put(step.key(), step.output());
+                }
+            }
             for (GraphNodeDef node : topologicalOrder(context.graph())) {
-                StepState running = new StepState(node.key(), node.name(), "RUNNING", "", "", Instant.now(), null);
+                StepState existing = context.steps().stream()
+                        .filter(step -> step.key().equals(node.key())).findFirst().orElse(null);
+                if (existing != null && ("SUCCEEDED".equals(existing.status())
+                        || "SKIPPED".equals(existing.status()))) {
+                    continue;
+                }
+                StepState running = new StepState(node.key(), node.name(), "RUNNING", "", "",
+                        Instant.now(), null);
                 updateStep(context, running);
                 try {
                     Map<String, Object> params = resolveParams(node.params(), context.input(), outputs);
-                    NodeResult result = executeNode(context, node.type(), params);
+                    NodeResult result = executeNode(context, node, params);
+                    if (result.isWaiting()) {
+                        // 外部等待：让出执行线程，由恢复器按媒体任务结果继续
+                        updateStep(context, new StepState(node.key(), node.name(), "RUNNING",
+                                result.message(), "", running.startedAt(), null));
+                        markWaiting(context.id(), node.key());
+                        return;
+                    }
                     outputs.put(node.key(), result.output());
                     updateStep(context, new StepState(node.key(), node.name(), "SUCCEEDED",
                             result.message() == null ? "" : result.message(),
@@ -411,10 +458,22 @@ public class WorkflowService {
         }
     }
 
-    private NodeResult executeNode(RunContext context, String type, Map<String, Object> params) throws Exception {
+    /** 运行进入外部等待；只有 RUNNING 能写入，避免与恢复器竞争。 */
+    private void markWaiting(String runId, String nodeKey) {
+        jdbcTemplate.update("""
+                UPDATE workflow_run SET status = 'WAITING_EXTERNAL', current_step = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'RUNNING'
+                """, nodeKey, runId);
+    }
+
+    private NodeResult executeNode(RunContext context, GraphNodeDef node, Map<String, Object> params)
+            throws Exception {
+        String type = node.type();
         return switch (type) {
             case "search_image" -> searchProductImage(context.tenantId(), text(params.get("keyword")));
-            case "image_understand" -> understandImage(context.tenantId(), text(params.get("image")),
+            case "image_understand" -> understandImage(context.tenantId(),
+                    resolveImageUrl(context, text(params.get("image")), text(params.get("imageAssetId"))),
                     text(params.get("question")));
             case "llm_text" -> {
                 var selection = modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT);
@@ -423,10 +482,12 @@ public class WorkflowService {
                 yield new NodeResult(answer == null ? "" : answer, "文本已生成");
             }
             case "web_search" -> webSearch(text(params.get("query")));
-            case "poster_render" -> renderPoster(context, text(params.get("image")), text(params.get("copy")));
+            case "poster_render" -> renderPoster(context, text(params.get("image")),
+                    text(params.get("imageAssetId")), text(params.get("copy")));
             case "start" -> new NodeResult(toJson(context.input()), "开始");
             case "http_request" -> httpRequest(context, params);
             case "db_query" -> dbQuery(text(params.get("sql")));
+            case "media_image_generate" -> startMediaImageTask(context, node, params);
             case "image_generate" -> imageGenerate(context, text(params.get("prompt")),
                     textOrDefault(text(params.get("size")), "1024*1024"),
                     textOrDefault(text(params.get("model")), "wanx2.1-t2i-turbo"));
@@ -484,8 +545,11 @@ public class WorkflowService {
         return new NodeResult(result, "联网搜索完成");
     }
 
-    private NodeResult renderPoster(RunContext context, String imageUrl, String copyJson) throws Exception {
-        if (imageUrl == null || imageUrl.isBlank()) throw new IllegalArgumentException("海报缺少商品图输入");
+    private NodeResult renderPoster(RunContext context, String imageUrl, String imageAssetId,
+                                    String copyJson) throws Exception {
+        if ((imageUrl == null || imageUrl.isBlank()) && (imageAssetId == null || imageAssetId.isBlank())) {
+            throw new IllegalArgumentException("海报缺少商品图输入");
+        }
         JsonNode node = parseLooseJson(copyJson);
         PosterComposer.PosterCopy copy = new PosterComposer.PosterCopy(
                 textOrDefault(node.path("title").asText(), "精选好物"),
@@ -495,7 +559,8 @@ public class WorkflowService {
                 textOrDefault(node.path("palette").path("bgTo").asText(), "#D6E6FF"),
                 textOrDefault(node.path("palette").path("accent").asText(), "#2E6BE6"),
                 textOrDefault(node.path("palette").path("text").asText(), "#16224A"));
-        byte[] productImage = downloadImage(imageUrl);
+        byte[] productImage = imageAssetId == null || imageAssetId.isBlank()
+                ? downloadImage(imageUrl) : readAssetBytes(context, imageAssetId);
         byte[] poster = PosterComposer.compose(productImage, copy);
         Artifact artifact = storeArtifact(context, poster);
         return new NodeResult(artifact.objectKey(), "海报已生成");
@@ -617,6 +682,147 @@ public class WorkflowService {
         return new NodeResult(artifact.objectKey(), "图片已生成");
     }
 
+    // ---------------------------------------------------------------- C13 媒体节点等待与恢复
+
+    /** 媒体节点：受理创作任务后立即让出线程；结果由 WorkflowMediaResumeScheduler 推进。 */
+    private NodeResult startMediaImageTask(RunContext context, GraphNodeDef node,
+                                           Map<String, Object> params) {
+        String prompt = text(params.get("prompt"));
+        if (prompt == null || prompt.isBlank()) {
+            throw new IllegalArgumentException("图片生成提示词为空");
+        }
+        if (prompt.length() > 500) {
+            throw new IllegalArgumentException("提示词超过模型上限 500 个字符");
+        }
+        String size = textOrDefault(text(params.get("size")), "1024*1024");
+        var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
+                context.userId(), context.tenantId(), context.userId(),
+                com.zwx.zwxagent.platform.security.Role.USER);
+        UUID projectId = workflowProject(actor, text(params.get("projectId")));
+        com.zwx.zwxagent.creative.service.MediaJobService.CreateJobResult created = mediaJobService.create(actor,
+                "workflow-" + context.id() + "-" + node.key(), projectId,
+                new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, "text_to_image", null,
+                        prompt, prompt, Map.of("size", size), List.of(), null, null, false));
+        jdbcTemplate.update("""
+                        INSERT INTO workflow_node_execution (run_id, node_key, status, media_job_id, attempt)
+                        VALUES (?, ?, 'WAITING_EXTERNAL', ?, 1)
+                        ON CONFLICT (run_id, node_key) DO UPDATE
+                        SET status = 'WAITING_EXTERNAL',
+                            media_job_id = COALESCE(workflow_node_execution.media_job_id, EXCLUDED.media_job_id),
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                context.id(), node.key(), created.jobId());
+        return NodeResult.waiting("图片生成中（任务 " + created.jobId() + "）");
+    }
+
+    private UUID workflowProject(com.zwx.zwxagent.platform.security.CurrentActor actor, String requested) {
+        if (requested != null && !requested.isBlank()) {
+            try {
+                return UUID.fromString(requested.trim());
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException("projectId 格式不正确");
+            }
+        }
+        var items = creativeProjectService.list(actor, null, 50).items();
+        return items.stream().filter(project -> "ACTIVE".equals(project.status()))
+                .findFirst().map(com.zwx.zwxagent.creative.service.CreativeProjectService.ProjectView::id)
+                .orElseGet(() -> creativeProjectService.create(actor,
+                        new com.zwx.zwxagent.creative.service.CreativeProjectService.CreateProjectRequest(
+                                "工作流创作", "工作流图片节点自动创建")).id());
+    }
+
+    /** 媒体任务成功：节点写入结构化输出并尝试一次性推进后续节点。 */
+    public void advanceMediaNode(String runId, String nodeKey, String outputJson, String message) {
+        jdbcTemplate.update("""
+                UPDATE workflow_node_execution SET status = 'SUCCEEDED', output_json = ?::jsonb,
+                    error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE run_id = ? AND node_key = ? AND status = 'WAITING_EXTERNAL'
+                """, outputJson, runId, nodeKey);
+        updateWaitingStep(runId, nodeKey, "SUCCEEDED", message, outputJson);
+        resumeWaiting(runId);
+    }
+
+    /** 媒体任务失败：节点与运行都标记失败，未执行步骤置为跳过。 */
+    public void failMediaNode(String runId, String nodeKey, String error) {
+        jdbcTemplate.update("""
+                UPDATE workflow_node_execution SET status = 'FAILED', error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE run_id = ? AND node_key = ? AND status = 'WAITING_EXTERNAL'
+                """, truncate(error, 400), runId, nodeKey);
+        WorkflowRunRow row = findAny(runId);
+        if (row == null) return;
+        List<StepState> steps = parseSteps(row.steps());
+        List<StepState> updated = steps.stream().map(step -> {
+            if (step.key().equals(nodeKey)) {
+                return new StepState(step.key(), step.name(), "FAILED", truncate(error, 300),
+                        step.output(), step.startedAt(), Instant.now());
+            }
+            if ("PENDING".equals(step.status()) || "RUNNING".equals(step.status())) {
+                return new StepState(step.key(), step.name(), "SKIPPED", "前序步骤失败",
+                        step.output(), step.startedAt(), Instant.now());
+            }
+            return step;
+        }).toList();
+        jdbcTemplate.update("""
+                UPDATE workflow_run SET steps = ?::jsonb, status = 'FAILED', error = ?,
+                    current_step = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                """, toJson(updated), truncate(error, 400), runId);
+    }
+
+    private void updateWaitingStep(String runId, String nodeKey, String status, String message, String output) {
+        WorkflowRunRow row = findAny(runId);
+        if (row == null) return;
+        List<StepState> updated = parseSteps(row.steps()).stream().map(step -> step.key().equals(nodeKey)
+                ? new StepState(step.key(), step.name(), status, message == null ? "" : message,
+                truncate(output, MAX_OUTPUT_CHARS), step.startedAt(), Instant.now())
+                : step).toList();
+        jdbcTemplate.update("""
+                UPDATE workflow_run SET steps = ?::jsonb, current_step = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                """, toJson(updated), runId);
+    }
+
+    /** 认领并继续等待中的运行；仅一个恢复者能把 WAITING_EXTERNAL 切到 RUNNING。 */
+    public boolean resumeWaiting(String runId) {
+        int claimed = jdbcTemplate.update("""
+                UPDATE workflow_run SET status = 'RUNNING', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                """, runId);
+        if (claimed == 0) return false;
+        WorkflowRunRow row = findAny(runId);
+        if (row == null) return false;
+        WorkflowGraph graph = row.graphSnapshot() == null
+                ? latestVersion(row.tenantId(), row.workflowKey()).graph()
+                : parseGraph(row.graphSnapshot().toString());
+        Map<String, Object> input = objectMapper.convertValue(row.input(), new TypeReference<>() {
+        });
+        List<Artifact> artifacts = new ArrayList<>();
+        row.artifacts().forEach(node -> artifacts.add(new Artifact(
+                node.path("type").asText(), node.path("name").asText(), node.path("objectKey").asText())));
+        RunContext context = new RunContext(row.id(), row.tenantId(), row.userId(), row.workflowKey(),
+                row.definitionVersion(), row.workflowKey(), "", graph, input, parseSteps(row.steps()), artifacts);
+        executor.submit(() -> execute(context));
+        return true;
+    }
+
+    private List<StepState> parseSteps(JsonNode stepsNode) {
+        List<StepState> steps = new ArrayList<>();
+        if (stepsNode != null) {
+            stepsNode.forEach(node -> steps.add(new StepState(
+                    node.path("key").asText(), node.path("name").asText(), node.path("status").asText(),
+                    node.path("message").asText(), node.path("output").asText(""),
+                    instantOrNull(node, "startedAt"), instantOrNull(node, "finishedAt"))));
+        }
+        return steps;
+    }
+
+    private WorkflowRunRow findAny(String runId) {
+        List<WorkflowRunRow> rows = jdbcTemplate.query("SELECT * FROM workflow_run WHERE id = ?",
+                (rs, rowNum) -> mapRow(rs), runId);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
     /** 文件导出：把上游文本保存为可下载文件产物。 */
     private NodeResult fileExport(RunContext context, String filename, String content) {
         if (filename == null || filename.isBlank()) throw new IllegalArgumentException("文件导出缺少文件名");
@@ -668,6 +874,48 @@ public class WorkflowService {
         return host.contains(":") || host.matches("\\d{1,3}(\\.\\d{1,3}){3}");
     }
 
+    /** 素材引用 → 可供 MCP 理解的短期 URL（仅 OSS 存储；本地存储明确拒绝）。 */
+    private String resolveImageUrl(RunContext context, String image, String imageAssetId) {
+        String assetId = resolveAssetId(image, imageAssetId);
+        if (assetId == null) return image;
+        var asset = requireAsset(context, assetId);
+        if (asset.storageBackend() != com.zwx.zwxagent.creative.domain.StorageBackend.OSS) {
+            throw new IllegalArgumentException("本地存储的素材不能作为图片理解输入，请改用 OSS 或联网图片");
+        }
+        return ossClientProvider.getClient().generatePresignedUrl(ossBucket, asset.objectKey(),
+                java.util.Date.from(Instant.now().plusSeconds(600))).toString();
+    }
+
+    private byte[] readAssetBytes(RunContext context, String imageAssetId) throws Exception {
+        String assetId = resolveAssetId(null, imageAssetId);
+        if (assetId == null) throw new IllegalArgumentException("素材 ID 为空");
+        var asset = requireAsset(context, assetId);
+        try (var in = mediaStorage.open(asset.objectKey())) {
+            return in.readAllBytes();
+        }
+    }
+
+    private static String resolveAssetId(String image, String imageAssetId) {
+        if (imageAssetId != null && !imageAssetId.isBlank()) return imageAssetId.trim();
+        if (image != null && image.startsWith("asset:")) return image.substring("asset:".length()).trim();
+        return null;
+    }
+
+    private com.zwx.zwxagent.creative.domain.CreativeAssetRecord requireAsset(RunContext context, String assetId) {
+        UUID id;
+        try {
+            id = UUID.fromString(assetId);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("素材 ID 格式不正确");
+        }
+        var asset = creativeAssetRepository.findByIdForOwner(context.tenantId(), context.userId(), id)
+                .orElseThrow(() -> new IllegalArgumentException("素材不存在或无权访问"));
+        if (asset.status() != com.zwx.zwxagent.creative.domain.AssetStatus.READY) {
+            throw new IllegalArgumentException("素材尚未就绪，不能引用");
+        }
+        return asset;
+    }
+
     // ---------------------------------------------------------------- 参数引用与工具
 
     /** 替换 params 中的 "{{input.字段}}" 与 "{{节点key.output}}" 引用；整体引用还原原值，嵌套结构递归处理。 */
@@ -703,9 +951,26 @@ public class WorkflowService {
             Object value = input.get(ref.substring("input.".length()));
             return value == null ? "" : String.valueOf(value);
         }
-        int dot = ref.lastIndexOf('.');
-        if (dot > 0 && ref.substring(dot + 1).equals("output")) {
-            return outputs.getOrDefault(ref.substring(0, dot), "");
+        int first = ref.indexOf('.');
+        if (first > 0) {
+            String nodeKey = ref.substring(0, first);
+            String field = ref.substring(first + 1);
+            String raw = outputs.getOrDefault(nodeKey, "");
+            if ("output".equals(field)) return raw;
+            // 媒体节点输出为 JSON：支持 {{node.assetId}} 与 {{node.output.assetId}}
+            String path = field.startsWith("output.") ? field.substring("output.".length()) : field;
+            try {
+                JsonNode parsed = objectMapper.readTree(raw);
+                for (String part : path.split("\\.")) {
+                    if (parsed == null) break;
+                    parsed = parsed.path(part);
+                }
+                if (parsed != null && !parsed.isMissingNode() && !parsed.isNull()) {
+                    return parsed.isTextual() ? parsed.asText() : parsed.toString();
+                }
+            } catch (Exception ignored) {
+                // 非 JSON 输出按空值处理
+            }
         }
         return "";
     }
@@ -925,7 +1190,8 @@ public class WorkflowService {
                 parseNode(rs.getString("steps")),
                 parseNode(rs.getString("artifacts")),
                 rs.getString("error"),
-                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
+                rs.getString("graph_snapshot") == null ? null : parseNode(rs.getString("graph_snapshot")));
     }
 
     private WorkflowRunView toView(WorkflowRunRow row, boolean withArtifactUrl) {

@@ -1,0 +1,12 @@
+日期：2026-10-30
+问题现象：`mvn compile` 突然在大量无关类上报“找不到符号 log”，例如 PlannerNode、ToolCallAgent、BaseAgent；真实首条错误是
+`src/main/java/com/zwx/zwxagent/creative/job/MediaJobScheduler 2.java: 类 MediaJobScheduler 是公共的，应在名为 MediaJobScheduler.java 的文件中声明`。
+影响范围：整个后端无法编译；与业务代码无关的 Lombok 生成代码也一起失败，容易误判为依赖或 IDE 问题。
+原因：工作目录中残留了一份带空格和 `2` 后缀的重复源文件，Maven 把它当普通源文件编译，产生“类重复/文件名不匹配”，
+导致注解处理器整体中止，Lombok 的 `log` 字段没有生成，于是后续出现大量假错误。
+解决方式：删除重复文件 `src/main/java/com/zwx/zwxagent/creative/job/MediaJobScheduler 2.java`，重新编译通过。
+验证结果：删除后 `mvn -B -ntp compile` 成功；相关快速测试 33 个全部通过。
+后续注意事项：
+- 不要用带 ` 2`、`copy` 等后缀的副本文件放在 `src/main/java` 下；需要备份请放仓库外或临时目录。
+- 看到大量“找不到 log/找不到符号”时，先查看第一条编译错误，通常是单一文件命名/重复类问题。
+- 编译前可用 `find src -name "* 2.java"` 快速排查。

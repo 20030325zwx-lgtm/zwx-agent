@@ -59,6 +59,42 @@ const routes = [
         }
       },
       {
+        path: 'creative',
+        name: 'CreativeHome',
+        component: () => import('../views/creative/CreativeHome.vue'),
+        meta: {
+          title: 'AI 创作 - Aster',
+          description: '输入想法生成图片：任务与素材保存在服务端，可随时找回。'
+        }
+      },
+      {
+        path: 'creative/projects/:projectId',
+        name: 'CreativeProject',
+        component: () => import('../views/creative/CreativeProject.vue'),
+        meta: {
+          title: '创作台 - Aster',
+          description: '项目内创作：提示词、参数、任务状态与素材。'
+        }
+      },
+      {
+        path: 'creative/tasks',
+        name: 'CreativeTasks',
+        component: () => import('../views/creative/CreativeTasks.vue'),
+        meta: { title: '创作任务 - Aster', description: '查看全部图片生成任务与状态。' }
+      },
+      {
+        path: 'creative/tasks/:jobId',
+        name: 'CreativeTaskDetail',
+        component: () => import('../views/creative/CreativeTasks.vue'),
+        meta: { title: '任务详情 - Aster', description: '图片生成任务详情与可用操作。' }
+      },
+      {
+        path: 'creative/assets',
+        name: 'CreativeAssets',
+        component: () => import('../views/creative/CreativeAssets.vue'),
+        meta: { title: '创作素材 - Aster', description: '跨项目的个人图片素材库。' }
+      },
+      {
         path: 'knowledge-admin',
         name: 'KnowledgeAdmin',
         component: () => import('../views/KnowledgeAdmin.vue'),

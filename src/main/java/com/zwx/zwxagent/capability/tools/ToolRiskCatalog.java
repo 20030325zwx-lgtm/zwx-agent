@@ -28,6 +28,8 @@ public final class ToolRiskCatalog {
             Map.entry("applyProjectPatch", ToolRisk.EXECUTE),
             Map.entry("runProjectTask", ToolRisk.EXECUTE),
             Map.entry("downloadResource", ToolRisk.EXECUTE),
+            // 图片创作会真实产生供应商费用：默认询问，不允许静默执行
+            Map.entry("generateImage", ToolRisk.EXECUTE),
             Map.entry("executeDatabaseQuery", ToolRisk.EXECUTE),
             // 高危
             Map.entry("executeTerminalCommand", ToolRisk.DESTRUCTIVE),

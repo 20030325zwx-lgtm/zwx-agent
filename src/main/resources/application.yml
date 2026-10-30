@@ -272,6 +272,16 @@ logging:
 # AI 创作模块（P1）：调度器默认关闭，测试直接调用 tick()；生产经由配置打开
 creative:
   enabled: true
+  # 入库实现：storage=真实对象存储（默认）；mock=仅测试，不落对象
+  ingest:
+    backend: ${CREATIVE_INGEST_BACKEND:storage}
+  storage:
+    backend: ${CREATIVE_STORAGE_BACKEND:oss}
+    local-dir: ${CREATIVE_LOCAL_DIR:${user.home}/.aster/creative-media}
+  download:
+    # 仅桌面/测试允许回环与私网产物地址；云端保持 false 以阻断 SSRF
+    allow-local: ${CREATIVE_DOWNLOAD_ALLOW_LOCAL:false}
+    max-bytes: ${CREATIVE_DOWNLOAD_MAX_BYTES:20971520}
   scheduler:
     enabled: false
     interval-ms: 1000

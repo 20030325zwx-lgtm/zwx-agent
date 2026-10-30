@@ -1,0 +1,10 @@
+日期：2026-10-30
+问题现象：Mock/测试字节入库后任务进入 INGEST_FAILED，产物错误为
+`Index 16 out of bounds for length 16`；真实浏览器里重试生成后同样卡在「保存失败」。
+影响范围：任何图片字节不完整或格式识别失败时，图片已生成却无法保存；恢复入库也一直失败。
+原因：`StorageAssetIngestService` 为补充宽高调用 `ImageInspector.inspect`，解析截断 PNG 时抛数组越界；
+该异常未被区分「增强信息失败」与「入库失败」，直接中断入库。
+解决方式：尺寸解析改为 best-effort（try/catch，失败保留 null 宽高），对象写入与素材记录仍正常完成。
+验证结果：重建后对 INGEST_FAILED 任务调用 resume-ingest，状态 SUCCEEDED，槽位 DONE，素材可读；
+MediaJobSchedulerTest A19/A20 用例 8/8 通过。
+后续注意事项：入库主链路只依赖字节与对象键；非关键元数据（宽高、EXIF）失败不得导致结果丢失。

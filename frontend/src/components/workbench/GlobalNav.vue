@@ -49,11 +49,11 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
-  PanelLeftClose, PanelLeftOpen, Workflow
+  PanelLeftClose, PanelLeftOpen, Workflow, Palette
 } from 'lucide-vue-next'
 import AsterMark from '../AsterMark.vue'
 import { resolvedTheme, themeMode, setThemeMode } from '../../design/apply-tokens'
@@ -62,17 +62,27 @@ import { getCurrentUser } from '../../api/auth'
 const route = useRoute()
 
 const COLLAPSE_KEY = 'aster.nav.collapsed'
-const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === 'true')
+const NARROW_BREAKPOINT = 900
+const storedCollapsed = localStorage.getItem(COLLAPSE_KEY) === 'true'
+const collapsed = ref(window.innerWidth < NARROW_BREAKPOINT ? true : storedCollapsed)
 watch(collapsed, value => {
   try { localStorage.setItem(COLLAPSE_KEY, String(value)) } catch (error) { /* ignore */ }
 })
 function toggle() { collapsed.value = !collapsed.value }
+// 窄屏自动收起导航，避免内容区被固定侧栏挤压；回到宽屏恢复用户偏好
+function handleViewportChange() {
+  if (window.innerWidth < NARROW_BREAKPOINT) collapsed.value = true
+  else collapsed.value = storedCollapsed
+}
+onMounted(() => window.addEventListener('resize', handleViewportChange))
+onBeforeUnmount(() => window.removeEventListener('resize', handleViewportChange))
 
 // 只挂已上线能力，不做空占位入口
 const items = [
   { to: '/workbench', label: '工作台', icon: Compass, match: ['/workbench'] },
   { to: '/super-agent', label: '任务', icon: MessagesSquare, match: ['/super-agent'] },
   { to: '/workflows', label: '工作流', icon: Workflow, match: ['/workflows'] },
+  { to: '/creative', label: 'AI 创作', icon: Palette, match: ['/creative'] },
   { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] }
 ]
 

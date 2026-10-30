@@ -9,6 +9,8 @@ public class CreativeException extends RuntimeException {
     public static final String MODEL_NOT_CONFIGURED = "MODEL_NOT_CONFIGURED";
     public static final String UNSUPPORTED_PARAMETER = "UNSUPPORTED_PARAMETER";
     public static final String ASSET_ACCESS_DENIED = "ASSET_ACCESS_DENIED";
+    public static final String OPTIMIZE_FAILED = "OPTIMIZE_FAILED";
+    public static final String SUBMISSIONS_DISABLED = "SUBMISSIONS_DISABLED";
 
     private final String code;
     private final boolean retryable;
@@ -33,5 +35,14 @@ public class CreativeException extends RuntimeException {
 
     public static CreativeException unsupportedParameter(String message) {
         return new CreativeException(UNSUPPORTED_PARAMETER, message, false);
+    }
+
+    public static CreativeException optimizeFailed(String message) {
+        return new CreativeException(OPTIMIZE_FAILED, message, true);
+    }
+
+    public static CreativeException submissionsDisabled() {
+        return new CreativeException(SUBMISSIONS_DISABLED,
+                "创作模块已暂停新任务提交，已有任务会继续完成", true);
     }
 }

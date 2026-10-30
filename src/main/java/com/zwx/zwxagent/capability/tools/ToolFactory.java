@@ -31,6 +31,8 @@ public class ToolFactory {
     private final int dbQueryTimeoutSeconds;
     private final boolean dbQueryExternalEnabled;
     private final int projectTaskTimeoutSeconds;
+    private final com.zwx.zwxagent.creative.service.MediaJobService mediaJobService;
+    private final com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService;
 
     public ToolFactory(ToolSandbox sandbox,
                        com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService,
@@ -50,7 +52,9 @@ public class ToolFactory {
                        @Value("${app.tools.db-query-max-rows:20}") int dbQueryMaxRows,
                        @Value("${app.tools.db-query-timeout-seconds:5}") int dbQueryTimeoutSeconds,
                        @Value("${app.tools.db-query-external-enabled:false}") boolean dbQueryExternalEnabled,
-                       @Value("${app.project-workspace.task-timeout-seconds:900}") int projectTaskTimeoutSeconds) {
+                       @Value("${app.project-workspace.task-timeout-seconds:900}") int projectTaskTimeoutSeconds,
+                       com.zwx.zwxagent.creative.service.MediaJobService mediaJobService,
+                       com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService) {
         this.sandbox = sandbox;
         this.workspaceService = workspaceService;
         this.projectWorkspaceService = projectWorkspaceService;
@@ -71,6 +75,8 @@ public class ToolFactory {
         this.dbQueryTimeoutSeconds = dbQueryTimeoutSeconds;
         this.dbQueryExternalEnabled = dbQueryExternalEnabled;
         this.projectTaskTimeoutSeconds = Math.max(10, projectTaskTimeoutSeconds);
+        this.mediaJobService = mediaJobService;
+        this.creativeProjectService = creativeProjectService;
     }
 
     /** 工作区签名（design/plans/09 批次 A）：工具 workDir 来自统一工作区目录模型。 */
@@ -82,7 +88,7 @@ public class ToolFactory {
     public ToolCallback[] createTools(String tenantId, String agentKey, String conversationId,
                                       boolean webSearchEnabled) {
         Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
-        return buildTools(workDir, webSearchEnabled, null, null, null);
+        return buildTools(workDir, tenantId, null, webSearchEnabled, null, null, null);
     }
 
     public ToolCallback[] createTools(String tenantId, String userId, String agentKey, String conversationId,
@@ -96,7 +102,7 @@ public class ToolFactory {
         var project = projectWorkspaceService.resolveForConversation(tenantId, userId, conversationId).orElse(null);
         var runWorkspace = runId == null || runId.isBlank() ? null
                 : runWorkspaceService.resolve(tenantId, userId, conversationId, runId).orElse(null);
-        return buildTools(workDir, webSearchEnabled, project, runId, runWorkspace);
+        return buildTools(workDir, tenantId, userId, webSearchEnabled, project, runId, runWorkspace);
     }
 
     /** 旧签名（scope 目录）：保留给测试与 legacy 调用。 */
@@ -106,10 +112,10 @@ public class ToolFactory {
 
     public ToolCallback[] createTools(String scope, boolean webSearchEnabled) {
         Path workDir = sandbox.scopeDir(scope);
-        return buildTools(workDir, webSearchEnabled, null, null, null);
+        return buildTools(workDir, null, null, webSearchEnabled, null, null, null);
     }
 
-    private ToolCallback[] buildTools(Path workDir, boolean webSearchEnabled,
+    private ToolCallback[] buildTools(Path workDir, String tenantId, String userId, boolean webSearchEnabled,
                                       com.zwx.zwxagent.platform.workspace.ResolvedProjectWorkspace project,
                                       String runId,
                                       com.zwx.zwxagent.platform.workspace.RunWorkspaceContext runWorkspace) {
@@ -122,6 +128,9 @@ public class ToolFactory {
         }
         tools.add(new PDFGenerationTool(sandbox, workDir));
         tools.add(new CurrentTimeTool());
+        if (userId != null && !userId.isBlank()) {
+            tools.add(new CreativeImageTool(tenantId, userId, mediaJobService, creativeProjectService));
+        }
         if (project != null) {
             Path projectRoot = runWorkspace == null ? project.root() : runWorkspace.checkoutRoot();
             boolean directMode = runWorkspace == null || runWorkspace.direct();

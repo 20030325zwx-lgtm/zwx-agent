@@ -17,10 +17,13 @@ import java.util.HexFormat;
 import java.util.Optional;
 
 /**
- * Mock 入库（C05）：只写素材记录与产物槽位，不落对象存储；C06 换成真实 OSS/本地实现。
+ * Mock 入库（C05）：只写素材记录与产物槽位，不落对象存储。
+ * 默认入库实现是 {@link StorageAssetIngestService}；仅 creative.ingest.backend=mock 时启用本实现。
  * 幂等：素材已存在时校验后直接完成（A20 复用同一 assetId/objectKey）。
  */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "creative.ingest.backend", havingValue = "mock")
 public class MockAssetIngestService implements AssetIngestService {
 
     private final CreativeAssetRepository assetRepository;

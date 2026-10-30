@@ -28,7 +28,7 @@ public class CreativeAssetService {
     public static final int MAX_BYTES = 20 * 1024 * 1024;
     public static final long MAX_PIXELS = 40_000_000L;
 
-    public record AssetView(UUID id, UUID projectId, String mediaType, String displayName,
+    public record AssetView(UUID id, UUID projectId, UUID jobId, String mediaType, String displayName,
                             boolean starred, String status, long byteSize,
                             Integer width, Integer height, Instant createdAt) {
     }
@@ -194,7 +194,7 @@ public class CreativeAssetService {
     }
 
     private static AssetView toView(CreativeAssetRecord record) {
-        return new AssetView(record.id(), record.projectId(), record.mediaType(), record.displayName(),
+        return new AssetView(record.id(), record.projectId(), record.sourceJobId(), record.mediaType(), record.displayName(),
                 record.starred(), record.status().name(), record.byteSize(),
                 record.width(), record.height(), record.createdAt());
     }

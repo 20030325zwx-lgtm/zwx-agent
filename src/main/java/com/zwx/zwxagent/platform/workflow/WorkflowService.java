@@ -563,8 +563,8 @@ public class WorkflowService {
     /** 文生图：DashScope 异步任务（创建 → 轮询 → 下载），产物登记为图片。 */
     private NodeResult imageGenerate(RunContext context, String prompt, String size, String model) throws Exception {
         if (prompt == null || prompt.isBlank()) throw new IllegalArgumentException("生图提示词为空");
-        var imageBinding = modelCatalogService.resolveImage(context.userId());
-        var config = imageBinding.map(ModelCatalogService.ResolvedSelection::config)
+        var imageBinding = modelCatalogService.resolveImageBinding(context.userId());
+        var config = imageBinding.map(ModelCatalogService.ImageBinding::config)
                 .orElseGet(() -> modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT).config());
         if (!"dashscope".equalsIgnoreCase(config.provider()) || !config.hasApiKey()) {
             throw new IllegalStateException("图片生成需要 DashScope 供应商（请在模型设置中绑定带 Key 的 DashScope）");

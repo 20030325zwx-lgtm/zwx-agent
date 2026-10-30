@@ -268,3 +268,17 @@ search-api:
 logging:
   level:
     org.springframework.ai: INFO
+
+# AI 创作模块（P1）：调度器默认关闭，测试直接调用 tick()；生产经由配置打开
+creative:
+  enabled: true
+  scheduler:
+    enabled: false
+    interval-ms: 1000
+    batch-size: 10
+    lease-seconds: 60
+    query-backoff-ms: 3000
+    query-backoff-max-ms: 15000
+    reconcile-delay-ms: 60000
+    user-max-inflight: 2
+    quota-queries-before-attention: 40

@@ -1,5 +1,10 @@
 # 设计文档
 
+- [AI 创作模块：业务实施细则与执行台账](./2026-10-29-ai-creative-implementation.md)
+- [AI 创作模块：首个图片模型契约（C00）](./2026-10-29-ai-creative-model-contract.md)
+
+- [AI 创作模块：产品与技术详细设计](./2026-10-29-ai-creative-studio.md)
+
 - [AI 工作台设计归档入口（接手必读）](./2026-10-28-ai-workbench-archive.md)
 - [品牌标记与应用图标](./2026-10-28-brand-mark.md)
 - [对话输入框：权限等级与模型选择](./2026-10-28-composer-permissions-models.md)

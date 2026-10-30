@@ -29,7 +29,7 @@ public class ModelCatalogService {
     public static final String PURPOSE_VISION = "vision";
     public static final String PURPOSE_IMAGE = "image_generation";
     private static final Set<String> PURPOSES = Set.of(PURPOSE_CHAT, PURPOSE_VISION, PURPOSE_IMAGE, "embedding");
-    private static final Set<String> CAPABILITIES = Set.of("tools", "vision", "embedding");
+    private static final Set<String> CAPABILITIES = Set.of("tools", "vision", "embedding", "image_generation");
     private static final long CACHE_TTL_MILLIS = Duration.ofSeconds(30).toMillis();
 
     public record ModelEntryView(long id, String modelId, String displayName, List<String> capabilities, boolean enabled) {
@@ -362,16 +362,31 @@ public class ModelCatalogService {
                 model.modelId(), decrypt(provider), source), revision());
     }
 
+    /** 图片生成专用绑定的解析结果：配置 + 目录行标识（媒体档案挂在 modelRowId 上）。 */
+    public record ImageBinding(ResolvedModelConfig config, long providerId, long modelRowId) {
+    }
+
     /**
      * 图片生成用途：只认专用绑定（用户优先、系统其次）。
-     * 未绑定时返回 empty，由调用方回退到对话绑定 + 节点自带模型参数，保持旧行为。
+     * 未绑定时返回 empty，由调用方决定回退策略（旧工作流回退 chat + 节点 model，新模块直接阻断）。
      */
-    public Optional<ResolvedSelection> resolveImage(String userId) {
-        Optional<ResolvedModelConfig> user = bindingConfig(
-                findBinding(ConfigurationScope.USER, owner(userId), PURPOSE_IMAGE), PURPOSE_IMAGE, "USER");
-        Optional<ResolvedModelConfig> system = user.isPresent() ? Optional.empty()
-                : bindingConfig(findBinding(ConfigurationScope.SYSTEM, "", PURPOSE_IMAGE), PURPOSE_IMAGE, "SYSTEM");
-        return user.or(() -> system).map(config -> new ResolvedSelection(config, revision()));
+    public Optional<ImageBinding> resolveImageBinding(String userId) {
+        return imageBinding(ConfigurationScope.USER, owner(userId))
+                .or(() -> imageBinding(ConfigurationScope.SYSTEM, ""));
+    }
+
+    private Optional<ImageBinding> imageBinding(ConfigurationScope scope, String ownerId) {
+        return findBinding(scope, ownerId, PURPOSE_IMAGE).flatMap(binding -> {
+            ProviderRow provider = findProvider(binding.providerId()).orElse(null);
+            if (provider == null || !provider.enabled()) return Optional.empty();
+            ModelRow model = findModelRow(provider.id(), binding.modelRowId()).orElse(null);
+            if (model == null || !model.enabled()) return Optional.empty();
+            String baseUrl = "dashscope".equals(provider.protocol()) && isBlank(provider.baseUrl())
+                    ? null : provider.baseUrl();
+            String source = scope == ConfigurationScope.SYSTEM ? "SYSTEM" : "USER";
+            return Optional.of(new ImageBinding(new ResolvedModelConfig(PURPOSE_IMAGE, provider.protocol(),
+                    baseUrl, model.modelId(), decrypt(provider), source), provider.id(), model.id()));
+        });
     }
 
     private ResolvedModelConfig computeResolve(String userId, String purpose) {

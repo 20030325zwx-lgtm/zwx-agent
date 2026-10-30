@@ -4,6 +4,8 @@
 
 ## 目录
 
+- [AI 创作模块验收标准](2026-10-29-ai-creative-acceptance.md)：P1/P2/P3 门禁、稳定用例 ID、证据与签收要求。
+
 - [用例清单](cases.md)：稳定、跨版本复用的功能与质量用例。
 - [测试结果](results/README.md)：按日期记录执行范围、结果和未覆盖风险。
 - 评测集与基线：`evaluation/eval-sets/`（意图 12 例 + RAG 15 例，`run_baseline.py` 可重跑，作为意图批 2 门禁与检索策略对比基线）。

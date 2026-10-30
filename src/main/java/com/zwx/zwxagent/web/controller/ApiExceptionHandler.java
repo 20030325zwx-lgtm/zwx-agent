@@ -49,4 +49,27 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(Map.of("error", "索引任务排队已满，请稍后重试"));
     }
+
+    /** 创作模块：乐观锁/状态冲突 → 409（BR18，不自动覆盖服务器值）。 */
+    @ExceptionHandler(com.zwx.zwxagent.creative.domain.CreativeConflictException.class)
+    public ResponseEntity<Map<String, String>> handleCreativeConflict(
+            com.zwx.zwxagent.creative.domain.CreativeConflictException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", exception.getMessage()));
+    }
+
+    /** 创作模块：本地配额超限 → 429（不创建半成品任务）。 */
+    @ExceptionHandler(com.zwx.zwxagent.creative.domain.CreativeQuotaException.class)
+    public ResponseEntity<Map<String, String>> handleCreativeQuota(
+            com.zwx.zwxagent.creative.domain.CreativeQuotaException exception) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", exception.getMessage()));
+    }
+
+    /** 创作模块领域异常：按 code 区分（模型未配置 400、参数/能力不支持 422）。 */
+    @ExceptionHandler(com.zwx.zwxagent.creative.domain.CreativeException.class)
+    public ResponseEntity<Map<String, String>> handleCreativeException(
+            com.zwx.zwxagent.creative.domain.CreativeException exception) {
+        HttpStatus status = com.zwx.zwxagent.creative.domain.CreativeException.UNSUPPORTED_PARAMETER
+                .equals(exception.code()) ? HttpStatus.UNPROCESSABLE_ENTITY : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status).body(Map.of("error", exception.getMessage()));
+    }
 }

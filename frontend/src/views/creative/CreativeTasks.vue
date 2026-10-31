@@ -69,11 +69,15 @@
           <div v-if="detail.error"><dt>错误</dt><dd class="cr-error">{{ detail.error }}</dd></div>
         </dl>
         <div class="detail-actions">
-          <button v-if="['QUEUED','RUNNING'].includes(detail.status)" type="button" class="cr-secondary"
-                  :disabled="busy" @click="cancel">取消任务</button>
+          <HoldToConfirm v-if="['QUEUED','RUNNING'].includes(detail.status)" label="取消任务"
+                         :disabled="busy" @confirm="cancel" />
           <button v-if="detail.status === 'INGEST_FAILED'" type="button" class="cr-primary"
-                  :disabled="busy" @click="resume">重新保存</button>
-          <button v-if="['FAILED','CANCELLED','RECONCILING'].includes(detail.status)" type="button"
+                  :disabled="busy" @click="resume">
+            <Spinner v-if="busy" /> 重新保存
+          </button>
+          <HoldToConfirm v-if="detail.status === 'RECONCILING'" label="确认后重试（可能二次计费）"
+                         :disabled="busy" @confirm="retry" />
+          <button v-else-if="['FAILED','CANCELLED'].includes(detail.status)" type="button"
                   class="cr-secondary" :disabled="busy" @click="retry">重试</button>
           <button type="button" class="cr-ghost" @click="goProject">进入项目</button>
         </div>
@@ -91,6 +95,8 @@ import {
   cancelCreativeJob, getCreativeJob, listCreativeJobs, resumeCreativeJobIngest, retryCreativeJob
 } from '../../api'
 import { formatTime, statusMeta } from './shared'
+import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
+import Spinner from '../../components/ui/Spinner.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -144,8 +150,7 @@ function closeDetail() {
 }
 
 async function cancel() {
-  if (detail.value.status === 'RUNNING'
-      && !window.confirm('取消后供应商可能仍完成生成并产生费用，确定请求取消吗？')) return
+  // 长按确认已在前端按钮上完成（取消后供应商可能仍完成生成并产生费用）
   busy.value = true
   try {
     detail.value = await cancelCreativeJob(detail.value.jobId)
@@ -172,8 +177,7 @@ async function resume() {
 }
 
 async function retry() {
-  if (detail.value.status === 'RECONCILING'
-      && !window.confirm('原任务结果未确认，重试可能产生第二次费用。确认继续吗？')) return
+  // RECONCILING 的长按确认已在前端按钮上完成（结果未确认，重试可能二次计费）
   busy.value = true
   try {
     await retryCreativeJob(detail.value.jobId,

@@ -17,7 +17,7 @@
           @keydown.enter="openRunDialog()"
         />
         <button type="button" class="wf-run" :disabled="starting" @click="openRunDialog()">
-          {{ starting ? '运行中…' : '运行' }}
+          <Spinner v-if="starting" /> {{ starting ? '发起中…' : '运行' }}
         </button>
         <button type="button" class="ghost-btn" :disabled="!canUndo" title="撤销 (Ctrl+Z)" @click="undo">
           <Undo2 :size="14" /> 撤销
@@ -27,7 +27,7 @@
         </button>
         <button type="button" class="ghost-btn" @click="autoLayout">自动布局</button>
         <button type="button" class="ghost-btn" :disabled="savingVersion" @click="saveVersion()">
-          {{ savingVersion ? '保存中…' : '保存新版本' }}
+          <Spinner v-if="savingVersion" /> {{ savingVersion ? '保存中…' : '保存新版本' }}
         </button>
         <button
           type="button"
@@ -333,7 +333,7 @@
         <div class="run-dialog-actions">
           <button type="button" class="ghost-btn" @click="runDialog.open = false">取消</button>
           <button type="button" class="wf-run" :disabled="starting || !canStartRun" @click="submitRunDialog()">
-            {{ starting ? '发起中…' : '发起运行' }}
+            <Spinner v-if="starting" /> {{ starting ? '发起中…' : '发起运行' }}
           </button>
         </div>
       </div>
@@ -353,6 +353,7 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import AssetParamField from '../components/workflow/AssetParamField.vue'
 import { buildRunForm } from './creative/workflowInputs'
+import Spinner from '../components/ui/Spinner.vue'
 import {
   LONG_PARAM_KEYS, NODE_CATALOG, NODE_GROUPS, bindingExpression, inferEdgeLabel,
   matchBinding, nodeColor, nodeTypeLabel, validateGraphForRun

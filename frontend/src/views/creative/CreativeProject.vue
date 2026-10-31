@@ -82,19 +82,21 @@
           <p v-else-if="job.blockedReason" class="cr-hint job-card-error">{{ blockedText(job.blockedReason) }}</p>
 
           <div class="job-card-actions">
-            <button v-if="job.status === 'QUEUED'" type="button" class="cr-secondary"
-                    :disabled="busyJob === job.jobId" @click="cancel(job)">取消排队</button>
-            <button v-else-if="job.status === 'RUNNING'" type="button" class="cr-secondary"
-                    :disabled="busyJob === job.jobId" @click="cancel(job)">请求取消</button>
+            <HoldToConfirm v-if="job.status === 'QUEUED'" label="取消排队" :disabled="busyJob === job.jobId"
+                           @confirm="cancel(job)" />
+            <HoldToConfirm v-else-if="job.status === 'RUNNING'" label="请求取消" :disabled="busyJob === job.jobId"
+                           @confirm="cancel(job)" />
             <button v-else-if="job.status === 'INGEST_FAILED'" type="button" class="cr-primary"
-                    :disabled="busyJob === job.jobId" @click="resumeIngest(job)">重新保存</button>
+                    :disabled="busyJob === job.jobId" @click="resumeIngest(job)">
+              <Spinner v-if="busyJob === job.jobId" /> 重新保存
+            </button>
             <button v-else-if="job.status === 'FAILED' || job.status === 'CANCELLED'" type="button"
                     class="cr-secondary" :disabled="busyJob === job.jobId" @click="retry(job)">重新生成</button>
-            <button v-else-if="job.status === 'RECONCILING'" type="button" class="cr-secondary"
-                    :disabled="busyJob === job.jobId" @click="retry(job)">确认后重试</button>
-            <button v-if="job.status === 'SUCCEEDED' && job.operation === 'image_edit'" type="button"
-                    class="cr-secondary" :disabled="busyJob === job.jobId"
-                    @click="redoEdit(job)">再做一版（同参考）</button>
+            <HoldToConfirm v-else-if="job.status === 'RECONCILING'" label="确认后重试（可能二次计费）"
+                           :disabled="busyJob === job.jobId" @confirm="retry(job)" />
+            <HoldToConfirm v-if="job.status === 'SUCCEEDED' && job.operation === 'image_edit'"
+                           label="再做一版（同参考）" :disabled="busyJob === job.jobId"
+                           @confirm="redoEdit(job)" />
             <button v-else-if="job.status === 'SUCCEEDED'" type="button" class="cr-secondary"
                     @click="continueFrom(job)">继续创作</button>
             <button type="button" class="cr-ghost" @click="openJob(job.jobId)">任务详情</button>
@@ -166,7 +168,7 @@
             </select>
           </label>
           <label v-if="imageProtocol === 'dashscope'" class="panel-switch">
-            <input v-model="watermark" type="checkbox" @change="markDirty" />
+            <ToggleSwitch v-model="watermark" @update:model-value="markDirty" />
             <span>添加 AI 生成水印</span>
           </label>
           <p class="cr-field-help">输出 1 张；供应商计费，当前无法估算金额。</p>
@@ -184,7 +186,8 @@
           <p v-if="submitError" class="cr-error">{{ submitError }}</p>
           <button type="button" class="cr-primary generate-btn"
                   :disabled="!canGenerate || generating" @click="generate">
-            <ImagePlus :size="16" /> {{ generating ? '提交中…' : '生成图片' }}
+            <Spinner v-if="generating" />
+            <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : '生成图片' }}
           </button>
           <p v-if="project && project.status !== 'ACTIVE'" class="cr-field-help">项目已归档，不能发起新任务。</p>
         </div>
@@ -274,9 +277,12 @@
                         placeholder="确认后这段概要会进入后续章节的生成上下文" />
             </label>
             <div class="novel-ch-actions">
-              <button type="button" class="cr-secondary" :disabled="novelBusy" @click="saveChapter(chapter)">保存修改</button>
-              <button v-if="chapter.status !== 'CONFIRMED'" type="button" class="cr-primary"
-                      :disabled="novelBusy || !novelEditing.content.trim()" @click="confirmChapter(chapter)">确认入库</button>
+              <button type="button" class="cr-secondary" :disabled="novelBusy" @click="saveChapter(chapter)">
+                <Spinner v-if="novelBusy" /> 保存修改
+              </button>
+              <HoldToConfirm v-if="chapter.status !== 'CONFIRMED'" tone="primary" label="按住确认入库"
+                             aria-label="确认入库（概要进入后续章节上下文，且不可再删除）"
+                             :disabled="novelBusy || !novelEditing.content.trim()" @confirm="confirmChapter(chapter)" />
               <button v-if="chapter.status !== 'CONFIRMED'" type="button" class="cr-ghost danger"
                       :disabled="novelBusy" @click="removeChapter(chapter)">删除草稿</button>
             </div>
@@ -397,12 +403,12 @@
               <span class="asset-meta">{{ formatBytes(asset.byteSize) }} · {{ formatTime(asset.createdAt) }}</span>
               <span class="asset-actions">
                 <button type="button" class="cr-ghost" :aria-pressed="asset.starred"
-                        @click="toggleStar(asset)">{{ asset.starred ? '已收藏' : '收藏' }}</button>
+                        @click="toggleStar(asset, $event)">{{ asset.starred ? '已收藏' : '收藏' }}</button>
                 <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
                 <button type="button" class="cr-ghost" :class="{ active: compareIds.includes(asset.id) }"
                         @click="toggleCompare(asset)">{{ compareIds.includes(asset.id) ? '已选对比' : '对比' }}</button>
                 <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFromAsset(asset)">继续创作</button>
-                <button type="button" class="cr-ghost danger" @click="removeAsset(asset)">删除</button>
+                <HoldToConfirm label="删除" :disabled="novelBusy" @confirm="removeAsset(asset)" />
               </span>
             </figcaption>
           </figure>
@@ -456,7 +462,7 @@
                   :disabled="wfCreate.starting || !wfCreate.workflowKey
                     || wfCreate.fields.some(field => field.required && !(wfCreate.input[field.key] || '').trim())"
                   @click="startProjectWorkflow">
-            {{ wfCreate.starting ? '发起中…' : '发起运行' }}
+            <Spinner v-if="wfCreate.starting" /> {{ wfCreate.starting ? '发起中…' : '发起运行' }}
           </button>
         </div>
       </div>
@@ -477,7 +483,8 @@
         </label>
         <div class="novel-suggest-row">
           <button type="button" class="cr-secondary" :disabled="suggesting" @click="suggestPlot">
-            <Sparkles :size="14" /> {{ suggesting ? '思考中…' : 'AI 建议剧情走向' }}
+            <Spinner v-if="suggesting" />
+            <Sparkles v-else :size="14" /> {{ suggesting ? '思考中…' : 'AI 建议剧情走向' }}
           </button>
           <span class="cr-field-help">基于作品设定、章节目录与近几章概要生成 3 组候选</span>
         </div>
@@ -502,7 +509,7 @@
           <button type="button" class="cr-primary"
                   :disabled="novelCreate.starting || !novelCreate.plotDirection.trim() || !novelCreate.workflowKey"
                   @click="startNovelChapter">
-            {{ novelCreate.starting ? '发起中…' : '发起生成' }}
+            <Spinner v-if="novelCreate.starting" /> {{ novelCreate.starting ? '发起中…' : '发起生成' }}
           </button>
         </div>
       </div>
@@ -531,7 +538,7 @@
         <div class="cr-dialog-actions">
           <button type="button" class="cr-secondary" @click="posterForm.open = false">取消</button>
           <button type="button" class="cr-primary" :disabled="posterForm.starting" @click="startSelectedPoster">
-            {{ posterForm.starting ? '发起中…' : '发起合成' }}
+            <Spinner v-if="posterForm.starting" /> {{ posterForm.starting ? '发起中…' : '发起合成' }}
           </button>
         </div>
       </div>
@@ -540,11 +547,11 @@
     <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
       <template #actions>
         <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred"
-                @click="toggleStar(previewAsset); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
+                @click="toggleStar(previewAsset, $event); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
           {{ previewAsset.starred ? '已收藏' : '收藏' }}
         </button>
         <button v-if="previewAsset.jobId" type="button" class="cr-ghost" @click="continueFromAsset(previewAsset)">继续创作</button>
-        <button type="button" class="cr-ghost danger" @click="removeAsset(previewAsset); previewAsset = null">删除</button>
+        <HoldToConfirm label="删除" @confirm="removeAsset(previewAsset); previewAsset = null" />
       </template>
     </AssetPreview>
 
@@ -583,11 +590,15 @@
           </div>
         </div>
         <div class="detail-actions">
-          <button v-if="['QUEUED','RUNNING'].includes(detailJob.status)" type="button" class="cr-secondary"
-                  :disabled="busyJob === detailJob.jobId" @click="cancel(detailJob)">取消任务</button>
+          <HoldToConfirm v-if="['QUEUED','RUNNING'].includes(detailJob.status)" label="取消任务"
+                         :disabled="busyJob === detailJob.jobId" @confirm="cancel(detailJob)" />
           <button v-if="detailJob.status === 'INGEST_FAILED'" type="button" class="cr-primary"
-                  :disabled="busyJob === detailJob.jobId" @click="resumeIngest(detailJob)">重新保存</button>
-          <button v-if="['FAILED','CANCELLED','RECONCILING'].includes(detailJob.status)" type="button"
+                  :disabled="busyJob === detailJob.jobId" @click="resumeIngest(detailJob)">
+            <Spinner v-if="busyJob === detailJob.jobId" /> 重新保存
+          </button>
+          <HoldToConfirm v-if="detailJob.status === 'RECONCILING'" label="确认后重试（可能二次计费）"
+                         :disabled="busyJob === detailJob.jobId" @confirm="retry(detailJob)" />
+          <button v-else-if="['FAILED','CANCELLED'].includes(detailJob.status)" type="button"
                   class="cr-secondary" :disabled="busyJob === detailJob.jobId" @click="retry(detailJob)">重试</button>
         </div>
       </aside>
@@ -609,9 +620,12 @@ import {
   retryCreativeJob, startWorkflow, suggestNovelPlot, updateCreativeAsset, updateCreativeDraft,
   updateNovelChapter, updateNovelSettings, uploadCreativeAsset
 } from '../../api'
-import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta } from './shared'
+import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta, starBurst } from './shared'
 import AssetPreview from './AssetPreview.vue'
 import AssetCompare from '../../components/creative/AssetCompare.vue'
+import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
+import Spinner from '../../components/ui/Spinner.vue'
+import ToggleSwitch from '../../components/ui/ToggleSwitch.vue'
 import { getCreativeAssetBlob } from '../../api'
 import AssetParamField from '../../components/workflow/AssetParamField.vue'
 import { buildRunForm } from './workflowInputs'
@@ -829,7 +843,7 @@ const previewSrc = ref('')
 // R04（评审 2026-10-31）：image_edit 结果的"继续创作"必须保留操作语义与参考图，
 // 不得静默降级为文生图（会花一次费用得到完全不同的人/商品）。
 async function redoEdit(job) {
-  if (!window.confirm('将用相同的参考图与提示词再生成一版（会再次计费），继续吗？')) return
+  // 长按确认已在前端按钮上完成（再生成一版会再次计费）
   busyJob.value = job.jobId
   try {
     await createCreativeJob('redo-' + job.jobId + '-' + Date.now(), {
@@ -1077,7 +1091,7 @@ async function saveChapter(chapter) {
 }
 
 async function confirmChapter(chapter) {
-  if (!window.confirm('确认后概要会进入后续章节的生成上下文，且章节不可再删除。确认入库？')) return
+  // 长按确认已在前端按钮上完成（概要进入后续章节上下文且不可删）
   novelBusy.value = true
   try {
     const updated = await confirmNovelChapter(projectId.value, chapter.id)
@@ -1294,7 +1308,7 @@ async function generate() {
 }
 
 async function cancel(job) {
-  if (job.status === 'RUNNING' && !window.confirm('取消后供应商可能仍完成生成并产生费用，确定请求取消吗？')) return
+  // 长按确认已在前端按钮上完成（取消后供应商可能仍完成生成并产生费用）
   busyJob.value = job.jobId
   try {
     await cancelCreativeJob(job.jobId)
@@ -1324,7 +1338,7 @@ async function retryJob(job, acknowledge = false) {
 
 function retry(job) {
   if (job.status === 'RECONCILING') {
-    if (!window.confirm('原任务结果未确认，重试可能产生第二次费用。确认要继续吗？')) return
+    // 长按确认已在前端按钮上完成（结果未确认，重试可能二次计费）
     return retryJob(job, true)
   }
   return retryJob(job, false)
@@ -1391,11 +1405,14 @@ async function upload(event) {
   }
 }
 
-async function toggleStar(asset) {
+async function toggleStar(asset, event) {
+  // 事件对象的 currentTarget 在 await 之后会被置空，必须在同步阶段先捕获
+  const burstTarget = event?.currentTarget
   try {
     const updated = await updateCreativeAsset(asset.id, { starred: !asset.starred })
     const index = assets.value.findIndex(item => item.id === asset.id)
     if (index >= 0) assets.value[index] = updated
+    if (updated.starred) starBurst(burstTarget) // 收藏正反馈：炸开一圈小粒子
   } catch (error) {
     showToast('收藏失败', 'error')
   }
@@ -1406,7 +1423,7 @@ function downloadAsset(asset) {
 }
 
 async function removeAsset(asset) {
-  if (!window.confirm('删除后不可恢复（历史任务记录保留），确定删除这个素材吗？')) return
+  // 长按确认已在前端按钮上完成
   try {
     await deleteCreativeAsset(asset.id)
     assets.value = assets.value.filter(item => item.id !== asset.id)

@@ -190,7 +190,7 @@
                   :disabled="wfStarting || !wfForm.workflowKey || !wfForm.projectId
                     || wfForm.fields.some(field => field.required && !(wfForm.input[field.key] || '').trim())"
                   @click="startWorkflowRun">
-            {{ wfStarting ? '发起中…' : '发起运行' }}
+            <Spinner v-if="wfStarting" /> {{ wfStarting ? '发起中…' : '发起运行' }}
           </button>
         </div>
       </div>
@@ -209,6 +209,7 @@ import {
   listModelCatalog, listWorkflows, startWorkflow
 } from '../../api'
 import { formatTime, kindLabel, statusMeta } from './shared'
+import Spinner from '../../components/ui/Spinner.vue'
 import AssetParamField from '../../components/workflow/AssetParamField.vue'
 import { buildRunForm } from './workflowInputs'
 

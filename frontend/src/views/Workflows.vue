@@ -97,7 +97,7 @@
             @keydown.enter="startRun"
           />
           <button type="button" class="primary-btn" :disabled="runDialog.running || !runDialog.keyword" @click="startRun">
-            {{ runDialog.running ? '运行中…' : '运行' }}
+            <Spinner v-if="runDialog.running" /> {{ runDialog.running ? '运行中…' : '运行' }}
           </button>
         </div>
         <div v-if="runDialog.run" class="run-state">
@@ -179,9 +179,8 @@
         <p v-if="deleteDialog.error" class="dialog-error">{{ deleteDialog.error }}</p>
         <div class="dialog-actions">
           <button type="button" class="ghost-btn" @click="deleteDialog.open = false">取消</button>
-          <button type="button" class="primary-btn danger" :disabled="deleteDialog.busy" @click="confirmDelete">
-            {{ deleteDialog.busy ? '删除中…' : '确认删除' }}
-          </button>
+          <HoldToConfirm label="按住确认删除（连带全部运行记录）" :disabled="deleteDialog.busy"
+                         @confirm="confirmDelete" />
         </div>
       </div>
     </div>
@@ -197,6 +196,8 @@ import {
   createWorkflow, deleteWorkflow, exportWorkflow, getWorkflowRun, importWorkflow,
   listWorkflows, startWorkflow
 } from '../api'
+import HoldToConfirm from '../components/ui/HoldToConfirm.vue'
+import Spinner from '../components/ui/Spinner.vue'
 
 const router = useRouter()
 const definitions = ref([])

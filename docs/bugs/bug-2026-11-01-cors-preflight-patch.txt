@@ -1,0 +1,20 @@
+日期：2026-11-01
+
+问题现象：开发环境（前端 :3000 跨域直连后端 :8123）下，所有 PATCH 请求静默失败——
+素材收藏、章节「保存修改」、创作草稿自动保存更新、模型目录部分操作等全部收到 CORS preflight 403，
+界面表现为操作无效或「收藏失败」类 toast。POST/PUT/DELETE/GET 正常。
+
+影响范围：仅跨域直连（dev 与任何分体部署）。同源部署（/api 反代）不受影响——这就是长期未暴露的原因。
+
+原因：CorsConfig.allowedMethods 白名单为 GET/POST/PUT/DELETE/OPTIONS，缺 PATCH。
+PATCH + JSON 必触发 preflight OPTIONS，被 403 拒绝且无 CORS 头，浏览器判定失败（Failed to fetch）。
+发现契机：给收藏加粒子动效时，starBurst 未触发 → 追查发现 toggleStar 的 PATCH 全部失败。
+
+解决方式：CorsConfig 补 "PATCH"。前端 starBurst 调用链顺带修复两个小问题：
+async 处理器里 event.currentTarget 在 await 后被置空（改为同步先捕获元素）、
+starBurst 入参兼容元素与事件对象。
+
+验证结果：curl 模拟 preflight（Origin + Access-Control-Request-Method: PATCH）由 403 变 200；
+浏览器实测收藏 PATCH 成功、粒子出现。
+
+后续注意：新增 HTTP 方法或自定义头时同步检查 CorsConfig；同源反代部署也建议保留正确 CORS 以便联调。

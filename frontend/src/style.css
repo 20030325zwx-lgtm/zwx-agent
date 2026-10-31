@@ -80,3 +80,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 ::selection { background: rgba(37, 99, 235, 0.22); }
 
 #app { width: 100%; min-height: 100vh; }
+
+/* 收藏粒子爆点（微交互批次）：starBurst() 动态创建，必须是非 scoped 全局样式 */
+.star-burst-particle {
+  position: fixed;
+  z-index: 999;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: #f5a623;
+  box-shadow: 0 0 6px rgba(245, 166, 35, 0.8);
+  animation: star-burst 0.6s ease-out forwards;
+}
+@keyframes star-burst {
+  from { transform: translate(0, 0) scale(1); opacity: 1; }
+  to { transform: translate(var(--dx), var(--dy)) scale(0.3); opacity: 0; }
+}

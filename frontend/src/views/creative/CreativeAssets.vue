@@ -62,12 +62,12 @@
                 · {{ formatTime(asset.createdAt) }}
               </span>
               <span class="asset-actions">
-                <button type="button" class="cr-ghost" :aria-pressed="asset.starred" @click="toggleStar(asset)">
+                <button type="button" class="cr-ghost" :aria-pressed="asset.starred" @click="toggleStar(asset, $event)">
                   {{ asset.starred ? '已收藏' : '收藏' }}
                 </button>
                 <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
                 <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFrom(asset)">继续创作</button>
-                <button type="button" class="cr-ghost danger" @click="remove(asset)">删除</button>
+                <HoldToConfirm label="删除" @confirm="remove(asset)" />
               </span>
             </figcaption>
           </figure>
@@ -80,11 +80,11 @@
     </div>
     <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
       <template #actions>
-        <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred" @click="toggleStar(previewAsset); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
+        <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred" @click="toggleStar(previewAsset, $event); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
           {{ previewAsset.starred ? '已收藏' : '收藏' }}
         </button>
         <button v-if="previewAsset.jobId" type="button" class="cr-ghost" @click="continueFrom(previewAsset)">继续创作</button>
-        <button type="button" class="cr-ghost danger" @click="remove(previewAsset); previewAsset = null">删除</button>
+        <HoldToConfirm label="删除" @confirm="remove(previewAsset); previewAsset = null" />
       </template>
     </AssetPreview>
     <p v-if="toast.text" class="cr-toast" :class="toast.tone">{{ toast.text }}</p>
@@ -97,8 +97,9 @@ import { useRouter } from 'vue-router'
 import {
   deleteCreativeAsset, getCreativeJob, listCreativeAssets, listCreativeProjects, updateCreativeAsset
 } from '../../api'
-import { useAssetUrls, downloadBlob, formatBytes, formatTime } from './shared'
+import { useAssetUrls, downloadBlob, formatBytes, formatTime, starBurst } from './shared'
 import AssetPreview from './AssetPreview.vue'
+import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
 
 const router = useRouter()
 const { urls, thumbs, urlFor, thumbFor } = useAssetUrls()
@@ -152,11 +153,14 @@ async function load(cursor = null, append = false) {
 function reload() { load(null, false) }
 function loadMore() { if (nextCursor.value) load(nextCursor.value, true) }
 
-async function toggleStar(asset) {
+async function toggleStar(asset, event) {
+  // 事件对象的 currentTarget 在 await 之后会被置空，必须在同步阶段先捕获
+  const burstTarget = event?.currentTarget
   try {
     const updated = await updateCreativeAsset(asset.id, { starred: !asset.starred })
     const index = assets.value.findIndex(item => item.id === asset.id)
     if (index >= 0) assets.value[index] = updated
+    if (updated.starred) starBurst(burstTarget) // 收藏正反馈：炸开一圈小粒子
     if (starred.value) assets.value = assets.value.filter(item => item.starred)
   } catch (exception) {
     showToast('收藏失败', 'error')
@@ -183,7 +187,7 @@ async function continueFrom(asset) {
 }
 
 async function remove(asset) {
-  if (!window.confirm('删除后不可恢复（历史任务记录保留），确定删除这个素材吗？')) return
+  // 长按确认已在前端按钮上完成
   try {
     await deleteCreativeAsset(asset.id)
     assets.value = assets.value.filter(item => item.id !== asset.id)

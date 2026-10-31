@@ -14,7 +14,6 @@
       </section>
 
       <div v-for="(msg, index) in messages" :key="index" class="message-wrapper" :class="{ user: msg.isUser }">
-        <div v-if="!msg.isUser" class="avatar ai-avatar"><AiAvatarFallback :type="aiType" /></div>
         <article class="message" :class="msg.isUser ? 'user-message' : 'ai-message'">
           <div v-if="msg.imageUrls?.length" class="message-images">
             <img v-for="url in msg.imageUrls" :key="url" :src="url" alt="用户上传的图片" />
@@ -119,7 +118,6 @@
             <button type="button" title="重新发送" aria-label="重新发送" @click="emit('resend-message', { content: msg.content, id: msg.id, index, imageKeys: msg.imageKeys || [] })">↻</button>
           </div>
         </article>
-        <div v-if="msg.isUser" class="avatar user-avatar">我</div>
       </div>
     </div>
 
@@ -157,7 +155,6 @@
 import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
-import AiAvatarFallback from './AiAvatarFallback.vue'
 import AgentTrace from './AgentTrace.vue'
 import CitationPreview from './CitationPreview.vue'
 import AsterAvatar from './AsterAvatar.vue'
@@ -439,31 +436,11 @@ onBeforeUnmount(() => {
   color: var(--wb-brand);
 }
 
-/* ── 消息布局（iMessage 风格） ─────────────────────── */
-.message-wrapper { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 26px; }
+/* ── 消息布局（iMessage 风格；参考 ZCode：消息不展示头像） ─────────────────────── */
+.message-wrapper { display: flex; align-items: flex-start; margin-bottom: 26px; }
 .message-wrapper.user { justify-content: flex-end; margin-bottom: 46px; }
 
-.avatar {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  place-items: center;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-}
-
-.ai-avatar { background: var(--wb-surface); }
-
-.user-avatar {
-  background: linear-gradient(160deg, #aeb6c2, #7d8794);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.message { min-width: 0; max-width: min(690px, calc(100% - 50px)); color: var(--wb-text); }
+.message { min-width: 0; max-width: min(690px, 100%); color: var(--wb-text); }
 .ai-message { padding: 3px 2px; }
 
 /* 用户气泡：主题色渐变（iMessage 蓝，随主题联动） */

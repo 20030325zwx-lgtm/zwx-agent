@@ -326,3 +326,6 @@
   .cr-inner { padding: 20px 16px 40px; }
   .cr-head { flex-direction: column; align-items: flex-start; }
 }
+
+/* 声明式运行表单：必填星号 */
+.cr-field-label .req-star { color: var(--wb-danger, #d64545); font-style: normal; margin-left: 2px; }

@@ -165,6 +165,21 @@
 - **验证**：契约单测 5 项绿；E2E——旧图兼容、撤销重做、连线自动绑定（toast+边 label+参数写入）、类型拒绝、未保存拦截、双候选运行(2 张计费)→对比选定→合成 SUCCEEDED→海报 DERIVED/READY/1200x1600 归档。临时工作流 contract-e2e-temp 已删。
 - **取舍**：撤销用快照栈（命令化随 C 批）；预检只查引用存在（上游关系二期）；双候选用两节点（单节点多张留 C 批）。未做：C（局部重跑/输入快照）、D（Agent 画布工具/模板导入导出）、WAITING_USER、role 化引用、性能基线。
 
+## 追加 11（2026-10-31 深夜）：运行输入业务化 + C/D 批（用户指出 {{input.keyword}} 暴露不合理）
+
+- **输入声明 schema**（R03 完整版落地，方案详见 `docs/design/2026-10-31-run-form-schema-cd-batch.md`）：
+  V15 `inputs_json` + 种子模板补声明；`buildRunForm(definition)`（声明优先/扫描兜底）统一三入口表单——
+  运行者只见中文 label/必填星号/占位提示，asset 字段渲染 AssetParamField；编辑器 inspector 可增删改输入字段、
+  「插入引用」chips 把语法降级为点击插入；start() 用 missingDeclaredInputs 报业务化缺失错误。
+- **C 批 · 从节点重跑**：computeRerunSteps 纯函数（祖先继承复用产物不重复计费/未成功祖先回退重跑/下游重执行/
+  平行分支 SKIPPED）+ rerunFrom（复用父 input/定义快照/项目绑定，artifacts 全新）+ 运行面板「从此步重跑」。
+- **D 批 · 模板导出导入**：export（脱敏 bundle）/import（冲突自动改名 {key}-import-xxxx，响应带最终 key）；
+  Workflows 列表页导出/导入入口。
+- 单测 11 项全绿（抓出祖先继承 SKIPPED 误标、key 正则拒驼峰两个真 bug）；E2E：业务化运行对话框
+  「商品关键词*」、inspector 编辑器、chip 插入、从「文案策划」重跑 SUCCEEDED（近 10 分钟 media_job=0 零生图）、
+  两次导入分别得 -import-0ab8/-import-3a89。
+- 未做：D-2 Agent 结构化画布工具（单独一批）、输入默认值/枚举、role 化引用、项目页重跑入口。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

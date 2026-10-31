@@ -75,4 +75,30 @@ public class WorkflowController {
     public WorkflowService.WorkflowRunView detail(CurrentActor actor, @PathVariable String runId) {
         return workflowService.view(runId, actor.tenantId(), actor.userId());
     }
+
+    /** C 批：从指定节点重跑（祖先产物复用，不重复计费；平行分支跳过）。 */
+    public record RerunRequest(String fromNode) {
+    }
+
+    @PostMapping("/runs/{runId}/rerun")
+    public WorkflowService.WorkflowRunView rerun(CurrentActor actor, @PathVariable String runId,
+                                                 @RequestBody RerunRequest request) {
+        return workflowService.rerunFrom(actor.tenantId(), actor.userId(), runId,
+                request == null ? "" : request.fromNode());
+    }
+
+    /** D 批：导出最新版本为脱敏 bundle（仅定义与输入声明）。 */
+    @GetMapping("/{workflowKey}/export")
+    public Map<String, Object> export(CurrentActor actor, @PathVariable String workflowKey) {
+        return workflowService.exportWorkflow(actor.tenantId(), workflowKey);
+    }
+
+    /** D 批：导入 bundle；key 冲突自动改名（响应带最终 key，前端提示用）。 */
+    @PostMapping("/import")
+    public Map<String, Object> importWorkflow(CurrentActor actor,
+                                              @RequestBody Map<String, Object> bundle) {
+        WorkflowService.ImportResult result =
+                workflowService.importWorkflow(actor.tenantId(), actor.userId(), bundle);
+        return Map.of("key", result.key(), "definition", result.definition());
+    }
 }

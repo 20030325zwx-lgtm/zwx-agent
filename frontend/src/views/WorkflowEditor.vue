@@ -160,10 +160,39 @@
             <button type="button" class="panel-close" aria-label="关闭节点设置" @click="clearSelection">×</button>
           </div>
         </div>
+        <div class="inspector-section">
+          <div class="inspector-section-head">
+            <strong>运行输入字段</strong>
+            <button type="button" class="ghost-btn mini" @click="addRunInput">添加字段</button>
+          </div>
+          <p class="inspector-hint">
+            运行者只会看到这些业务字段，不会接触模板语法；在参数里点下方引用 chips 即可取值。
+          </p>
+          <div v-for="(field, index) in editingInputs" :key="index" class="run-input-row">
+            <input v-model.trim="field.key" class="wf-input compact ri-key" placeholder="key" maxlength="32" />
+            <input v-model.trim="field.label" class="wf-input compact ri-label" placeholder="显示名称" maxlength="20" />
+            <select v-model="field.type" class="wf-input compact ri-type">
+              <option value="text">文本</option>
+              <option value="asset">单张素材</option>
+              <option value="assets">多张素材</option>
+            </select>
+            <label class="ri-required"><input v-model="field.required" type="checkbox" /> 必填</label>
+            <input v-model.trim="field.placeholder" class="wf-input compact" placeholder="占位提示（可选）" maxlength="60" />
+            <button type="button" class="ghost-btn mini" @click="editingInputs.splice(index, 1)">删除</button>
+          </div>
+        </div>
+
         <label class="inspector-row">
           <span>名称</span>
           <input v-model.trim="selectedNode.data.label" class="wf-input compact" maxlength="24" @input="scheduleCommit" />
         </label>
+        <div v-if="runFormFields.length" class="ref-chips" aria-label="插入运行输入引用">
+          <button v-for="field in runFormFields" :key="'chip-' + field.key" type="button" class="ref-chip"
+                  :title="`把 {{input.${field.key}}} 插入到最近编辑的参数`"
+                  @click="insertInputRef(field.key)">
+            + {{ field.label }}
+          </button>
+        </div>
         <div v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row align-top">
           <span class="param-key">{{ key }}</span>
           <AssetParamField
@@ -178,10 +207,11 @@
             class="wf-input compact textarea"
             rows="3"
             :placeholder="paramPlaceholder(key)"
+            @focus="lastFocusParam = key"
             @input="scheduleCommit"
           />
           <input v-else v-model="selectedNode.data.params[key]" class="wf-input compact"
-                 :placeholder="paramPlaceholder(key)" @input="scheduleCommit" />
+                 :placeholder="paramPlaceholder(key)" @focus="lastFocusParam = key" @input="scheduleCommit" />
         </div>
         <p class="inspector-help">{{ nodeHelp(selectedNode.data.nodeType) }}</p>
         <p class="inspector-hint">
@@ -238,6 +268,8 @@
                 </span>
                 <span class="step-status">{{ stepStatusText(step.status) }}</span>
               </button>
+              <button v-if="canRerun" type="button" class="rerun-btn" title="以此步为起点重跑：祖先产物复用，不重复计费"
+                      @click="rerunFromStep(step.key)">从此步重跑</button>
               <div v-if="expandedOutput === step.key && step.output" class="step-output">
                 <pre>{{ step.output }}</pre>
                 <div class="output-actions">
@@ -273,23 +305,20 @@
           </button>
         </div>
         <template v-else>
-          <label class="run-dialog-field">
-            <span>关键词（运行时作为 input.keyword 引用）</span>
-            <input v-model.trim="runDialog.keyword" class="wf-input compact" maxlength="200"
-                   placeholder="如：加绒保暖 不起球 显瘦百搭" />
-          </label>
-          <div v-for="key in runDialog.assetKeys" :key="key" class="run-dialog-field">
-            <span class="run-dialog-key">{{ key }}</span>
+          <div v-for="field in runFormFields" :key="field.key" class="run-dialog-field">
+            <span class="run-dialog-key">{{ field.label }}<em v-if="field.required" class="req-star">*</em></span>
             <AssetParamField
-              :model-value="runDialog.values[key] || ''"
-              :multiple="key === 'imageAssetIds'"
-              @update:model-value="value => runDialog.values[key] = value"
+              v-if="field.kind === 'asset' || field.kind === 'assets'"
+              :model-value="runDialog.values[field.key] || ''"
+              :multiple="field.kind === 'assets'"
+              @update:model-value="value => runDialog.values[field.key] = value"
             />
+            <input v-else v-model.trim="runDialog.values[field.key]" class="wf-input compact" maxlength="4000"
+                   :placeholder="field.placeholder || field.label" />
           </div>
-          <div v-for="key in runDialog.textKeys" :key="key" class="run-dialog-field">
-            <span class="run-dialog-key">{{ key }}</span>
-            <input v-model.trim="runDialog.values[key]" class="wf-input compact" :placeholder="`运行输入 ${key}`" />
-          </div>
+          <p v-if="missingRequiredFields.length" class="run-dialog-error">
+            请填写：{{ missingRequiredFields.map(field => field.label).join('、') }}
+          </p>
           <label class="run-dialog-field">
             <span>目标创作项目（产物归入该项目）</span>
             <select v-model="runDialog.projectId" class="wf-input compact">
@@ -323,7 +352,7 @@ import { History, Redo2, Undo2 } from 'lucide-vue-next'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import AssetParamField from '../components/workflow/AssetParamField.vue'
-import { deriveRunInputs } from './creative/workflowInputs'
+import { buildRunForm } from './creative/workflowInputs'
 import {
   LONG_PARAM_KEYS, NODE_CATALOG, NODE_GROUPS, bindingExpression, inferEdgeLabel,
   matchBinding, nodeColor, nodeTypeLabel, validateGraphForRun
@@ -334,6 +363,7 @@ import {
   getWorkflowRun,
   listCreativeProjects,
   listWorkflows,
+  rerunWorkflowFrom,
   saveWorkflowVersion,
   startWorkflow
 } from '../api'
@@ -342,6 +372,9 @@ const route = useRoute()
 const { screenToFlowCoordinate } = useVueFlow()
 const workflowKey = computed(() => String(route.params.workflowKey || ''))
 const definition = ref(null)
+// 运行输入声明（R03 完整版）：运行者只见业务字段；编辑器负责声明与「插入引用」
+const editingInputs = ref([])
+const lastFocusParam = ref('')
 const loadError = ref('')
 const runs = ref([])
 const detail = ref(null)
@@ -575,6 +608,7 @@ async function loadDefinition() {
     const view = await getWorkflowDefinition(workflowKey.value)
     definition.value = view
     applyGraph(view)
+    editingInputs.value = (view.inputs || []).map(field => ({ ...field }))
     loadError.value = ''
   } catch (error) {
     loadError.value = error?.response?.data?.error || '画布加载失败'
@@ -822,7 +856,7 @@ async function saveVersion() {
       })),
       edges: flowEdges.value.map(edge => ({ from: edge.source, to: edge.target }))
     }
-    await saveWorkflowVersion(workflowKey.value, { graph })
+    await saveWorkflowVersion(workflowKey.value, { graph, inputs: editingInputs.value })
     graphDirty.value = false
     message.success('已保存为新版本')
     await refresh()
@@ -893,22 +927,37 @@ async function selectRun(runId) {
 
 // ---------------------------------------------------------------- 运行对话框
 
-const runDialog = reactive({ open: false, keyword: '', projectId: '', values: {}, assetKeys: [], textKeys: [], error: '' })
+const runDialog = reactive({ open: false, projectId: '', values: {}, error: '' })
 const runDialogProjects = ref([])
 const runErrors = ref([])
 const isAssetKey = key => /AssetIds?$/.test(key)
 
-/** 从图参数里扫描运行输入键（与创作首页/项目页共用同一推导）。 */
-const runInputKeys = computed(() => {
-  const { assetKeys, textKeys } = deriveRunInputs({ nodes: graphNodes.value.map(node => ({ params: node.data?.params })) })
-  return [...assetKeys, ...textKeys]
+/**
+ * 运行表单字段：声明式 inputs 优先（与创作首页/项目页共用 buildRunForm 渲染约定），
+ * 未声明时回退扫描推导；编辑器内未保存的输入声明编辑也即时生效。
+ */
+const runFormFields = computed(() => {
+  if (editingInputs.value.length) {
+    return editingInputs.value.map(field => ({
+      key: field.key,
+      label: field.label || field.key,
+      kind: field.type === 'asset' ? 'asset' : field.type === 'assets' ? 'assets' : 'text',
+      required: !!field.required,
+      placeholder: field.placeholder || ''
+    }))
+  }
+  return buildRunForm({ graph: { nodes: flowNodes.value.map(node => ({ params: node.data?.params })) } })
 })
+
+const missingRequiredFields = computed(() => runFormFields.value.filter(field => {
+  if (!field.required) return false
+  return !String(runDialog.values[field.key] || '').trim()
+}))
 
 const canStartRun = computed(() => {
   if (runErrors.value.length) return false
-  if (!runDialog.keyword.trim()) return false
-  if (runDialog.assetKeys.some(key => !(runDialog.values[key] || '').trim())) return false
-  return true
+  if (!runFormFields.value.length) return false
+  return missingRequiredFields.value.length === 0
 })
 
 /** 运行前预检（评审 A1）：缺失输入/未知引用在提交前定位到具体节点；后端保存/运行时独立拒绝。 */
@@ -918,15 +967,6 @@ function openRunDialog() {
     return
   }
   runErrors.value = validateGraphForRun(flowNodes.value)
-  const assetKeys = []
-  const textKeys = []
-  for (const key of runInputKeys.value) {
-    ;(isAssetKey(key) ? assetKeys : textKeys).push(key)
-  }
-  if (!assetKeys.includes('keyword')) textKeys.unshift('keyword')
-  runDialog.keyword = keyword.value || ''
-  runDialog.assetKeys = assetKeys
-  runDialog.textKeys = textKeys.filter(key => key !== 'keyword')
   runDialog.values = {}
   runDialog.error = ''
   runDialog.open = true
@@ -951,13 +991,13 @@ async function submitRunDialog() {
   runDialog.error = ''
   try {
     const input = {}
-    for (const key of [...runDialog.assetKeys, ...runDialog.textKeys]) {
-      const value = key === 'keyword' ? runDialog.keyword : (runDialog.values[key] || '').trim()
-      if (value) input[key] = value
+    for (const field of runFormFields.value) {
+      const value = String(runDialog.values[field.key] || '').trim()
+      if (value) input[field.key] = value
     }
-    const run = await startWorkflow(workflowKey.value, runDialog.keyword, runDialog.projectId || null, input)
+    const run = await startWorkflow(workflowKey.value, input.keyword || '', runDialog.projectId || null, input)
     runDialog.open = false
-    keyword.value = runDialog.keyword
+    keyword.value = input.keyword || ''
     selectedId.value = run.id
     detail.value = run
     runPanelOpen.value = true
@@ -968,6 +1008,53 @@ async function submitRunDialog() {
     runDialog.error = error?.response?.data?.error || '发起运行失败'
   } finally {
     starting.value = false
+  }
+}
+
+// ---------------------------------------------------------------- 输入字段编辑与引用插入
+
+function addRunInput() {
+  const base = `input_${Date.now().toString(36).slice(-4)}`
+  const key = editingInputs.value.some(field => field.key === base) ? `${base}_2` : base
+  editingInputs.value.push({ key, label: '新字段', type: 'text', required: false, placeholder: '' })
+}
+
+/** 点击 chip 把 {{input.key}} 追加到最近聚焦的参数框（语法由此降级为高级路径）。 */
+function insertInputRef(key) {
+  if (!selectedNode.value) {
+    message.info('先在画布选中一个节点，再插入引用')
+    return
+  }
+  const params = selectedNode.value.data.params
+  const keys = Object.keys(params)
+  const fallback = keys.find(name => LONG_PARAM_KEYS.has(name)) || keys[0]
+  const target = (lastFocusParam.value && keys.includes(lastFocusParam.value))
+    ? lastFocusParam.value : fallback
+  if (!target) {
+    message.info('该节点没有可插入的文本参数')
+    return
+  }
+  params[target] = String(params[target] ?? '') + `{{input.${key}}}`
+  scheduleCommit()
+  message.success(`已插入到参数 ${target}`)
+}
+
+// ---------------------------------------------------------------- 从节点重跑（C 批）
+
+const canRerun = computed(() => !!detail.value && ['SUCCEEDED', 'FAILED'].includes(detail.value.status))
+
+async function rerunFromStep(nodeKey) {
+  if (!detail.value) return
+  try {
+    const run = await rerunWorkflowFrom(detail.value.id, nodeKey)
+    selectedId.value = run.id
+    detail.value = await resolveArtifactUrls(run)
+    applyRunStatus(detail.value)
+    runPanelOpen.value = true
+    await refresh()
+    message.success('已发起重跑：上游产物复用，不重复调用已成功节点')
+  } catch (error) {
+    message.error(error?.response?.data?.error || '重跑发起失败')
   }
 }
 
@@ -1146,6 +1233,25 @@ onBeforeUnmount(() => {
 .inspector-help { padding: 8px 10px; border-radius: 8px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12px; line-height: 1.6; }
 .inspector-hint { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
 .inspector-hint code { padding: 1px 6px; border-radius: 5px; background: var(--wb-fill); font-size: 11.5px; }
+
+/* 运行输入字段编辑 + 引用插入 chips */
+.inspector-section { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--wb-border); border-radius: 10px; background: var(--wb-fill); }
+.inspector-section-head { display: flex; align-items: center; justify-content: space-between; }
+.inspector-section-head strong { color: var(--wb-text); font-size: 12.5px; }
+.run-input-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.run-input-row .ri-key { width: 92px; flex: 0 0 92px; font-family: var(--wb-font-mono, monospace); }
+.run-input-row .ri-label { width: 88px; flex: 0 0 88px; }
+.run-input-row .ri-type { width: 92px; flex: 0 0 92px; padding: 5px 7px; }
+.run-input-row .ri-required { display: inline-flex; align-items: center; gap: 4px; color: var(--wb-text-2); font-size: 11.5px; white-space: nowrap; }
+.run-input-row input:not(.ri-key):not(.ri-label):not([type="checkbox"]) { flex: 1; min-width: 90px; }
+.run-input-row .wf-input.compact { padding: 5px 8px; font-size: 11.5px; }
+.ref-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ref-chip { padding: 3px 10px; border: 1px dashed var(--wb-border-strong); border-radius: 999px; background: var(--wb-surface); color: var(--wb-text-2); font-size: 11.5px; }
+.ref-chip:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
+.req-star { color: var(--wb-danger); font-style: normal; margin-left: 2px; }
+.detail-step-wrap { position: relative; }
+.rerun-btn { position: absolute; right: 6px; bottom: 6px; padding: 2px 8px; border: 1px solid var(--wb-border); border-radius: 7px; background: var(--wb-surface); color: var(--wb-text-2); font-size: 10.5px; }
+.rerun-btn:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
 
 /* 底部运行与结果区：可收起，横向布局（左运行列表 + 右详情） */
 .run-panel { flex: 0 0 300px; display: flex; flex-direction: column; border-top: 1px solid var(--wb-border); background: var(--wb-raise); overflow: hidden; }

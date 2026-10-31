@@ -26,8 +26,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -78,7 +80,7 @@ public class WorkflowService {
     }
 
     public record DefinitionVersionView(int version, String name, String description, WorkflowGraph graph,
-                                        Instant createdAt) {
+                                        List<Map<String, Object>> inputs, Instant createdAt) {
     }
 
     public record StepState(String key, String name, String status, String message, String output,
@@ -100,7 +102,8 @@ public class WorkflowService {
     public record ArtifactView(String type, String name, String url, String assetId) {
     }
 
-    public record SaveVersionRequest(String name, String description, WorkflowGraph graph) {
+    public record SaveVersionRequest(String name, String description, WorkflowGraph graph,
+                                     List<Map<String, Object>> inputs) {
     }
 
     public record StartRequest(String keyword, Map<String, Object> input, UUID projectId) {
@@ -110,7 +113,8 @@ public class WorkflowService {
         }
     }
 
-    private record DefVersionRow(int version, String name, String description, WorkflowGraph graph, Instant createdAt) {
+    private record DefVersionRow(int version, String name, String description, WorkflowGraph graph,
+                                 List<Map<String, Object>> inputs, Instant createdAt) {
     }
 
     private record WorkflowRunRow(String id, String tenantId, String userId, String workflowKey, int definitionVersion,
@@ -240,17 +244,31 @@ public class WorkflowService {
 
     public DefVersionRow latestVersion(String tenantId, String workflowKey) {
         List<DefVersionRow> rows = jdbcTemplate.query("""
-                        SELECT version, name, description, graph, created_at
+                        SELECT version, name, description, graph, inputs_json, created_at
                         FROM workflow_definition_version
                         WHERE tenant_id = ? AND workflow_key = ?
                         ORDER BY version DESC LIMIT 1
                         """,
                 (rs, rowNum) -> new DefVersionRow(rs.getInt("version"), rs.getString("name"),
                         rs.getString("description"), parseGraph(rs.getString("graph")),
+                        parseInputs(rs.getString("inputs_json")),
                         rs.getTimestamp("created_at").toInstant()),
                 tenantId, workflowKey);
         if (rows.isEmpty()) throw new IllegalArgumentException("未知的工作流：" + workflowKey);
         return rows.getFirst();
+    }
+
+    /** 运行输入声明（V15）：[{key,label,type,required,placeholder}]，驱动业务化运行表单。 */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> parseInputs(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json == null || json.isBlank() ? "[]" : json);
+            List<Map<String, Object>> inputs = new ArrayList<>();
+            node.forEach(item -> inputs.add(objectMapper.convertValue(item, Map.class)));
+            return inputs;
+        } catch (Exception exception) {
+            return new ArrayList<>();
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -298,7 +316,7 @@ public class WorkflowService {
                         VALUES (?, ?, 1, ?, ?, ?::jsonb, ?)
                         """,
                 tenantId, key, name, description, toJson(graph), userId);
-        return new DefinitionVersionView(1, name, description, graph, Instant.now());
+        return new DefinitionVersionView(1, name, description, graph, List.of(), Instant.now());
     }
 
     /** 删除工作流：连带删除其定义版本与全部运行记录（前端需二次确认）。 */
@@ -315,13 +333,15 @@ public class WorkflowService {
 
     public DefinitionVersionView latestVersionView(String tenantId, String workflowKey) {
         DefVersionRow row = latestVersion(tenantId, workflowKey);
-        return new DefinitionVersionView(row.version(), row.name(), row.description(), row.graph(), row.createdAt());
+        return new DefinitionVersionView(row.version(), row.name(), row.description(), row.graph(),
+                row.inputs(), row.createdAt());
     }
 
     public DefinitionVersionView saveVersion(String tenantId, String userId, String workflowKey,
                                              SaveVersionRequest request) {
         WorkflowGraph graph = request.graph();
         validateGraph(graph);
+        List<Map<String, Object>> inputs = validateInputs(request.inputs());
         int nextVersion;
         String lastName;
         String lastDescription;
@@ -338,11 +358,11 @@ public class WorkflowService {
         String name = request.name() == null || request.name().isBlank() ? lastName : request.name().trim();
         String description = request.description() == null ? lastDescription : request.description().trim();
         jdbcTemplate.update("""
-                        INSERT INTO workflow_definition_version (tenant_id, workflow_key, version, name, description, graph, created_by)
-                        VALUES (?, ?, ?, ?, ?, ?::jsonb, ?)
+                        INSERT INTO workflow_definition_version (tenant_id, workflow_key, version, name, description, graph, inputs_json, created_by)
+                        VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
                         """,
-                tenantId, workflowKey, nextVersion, name, description, toJson(graph), userId);
-        return new DefinitionVersionView(nextVersion, name, description, graph, Instant.now());
+                tenantId, workflowKey, nextVersion, name, description, toJson(graph), toJson(inputs), userId);
+        return new DefinitionVersionView(nextVersion, name, description, graph, inputs, Instant.now());
     }
 
     /**
@@ -385,6 +405,193 @@ public class WorkflowService {
             }
         }
         return null;
+    }
+
+    // ---------------------------------------------------------------- 运行输入声明（R03 完整版）
+
+    private static final Set<String> INPUT_TYPES = Set.of("text", "asset", "assets");
+
+    /** 纯函数：校验输入声明（key 正则唯一、label 1-20 字、type 合法），返回规范化后的列表；空声明合法。 */
+    static List<Map<String, Object>> validateInputs(List<Map<String, Object>> inputs) {
+        if (inputs == null || inputs.isEmpty()) return List.of();
+        Set<String> keys = new HashSet<>();
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        for (Map<String, Object> raw : inputs) {
+            if (raw == null) continue;
+            String key = String.valueOf(raw.getOrDefault("key", "")).trim();
+            if (!key.matches("[a-zA-Z0-9_]{1,32}")) {
+                throw new IllegalArgumentException("输入字段 key 只能使用字母、数字与下划线（1-32 位）：" + key);
+            }
+            if (!keys.add(key)) throw new IllegalArgumentException("输入字段 key 重复：" + key);
+            String label = String.valueOf(raw.getOrDefault("label", "")).trim();
+            if (label.isEmpty() || label.length() > 20) {
+                throw new IllegalArgumentException("输入字段「" + key + "」的名称需为 1-20 字");
+            }
+            String type = String.valueOf(raw.getOrDefault("type", "text")).trim();
+            if (!INPUT_TYPES.contains(type)) {
+                throw new IllegalArgumentException("输入字段「" + key + "」的类型不支持：" + type);
+            }
+            boolean required = Boolean.TRUE.equals(raw.get("required"))
+                    || "true".equalsIgnoreCase(String.valueOf(raw.get("required")));
+            String placeholder = String.valueOf(raw.getOrDefault("placeholder", "")).trim();
+            normalized.add(new LinkedHashMap<>(Map.of(
+                    "key", key, "label", label, "type", type, "required", required,
+                    "placeholder", placeholder.length() > 60 ? placeholder.substring(0, 60) : placeholder)));
+        }
+        return normalized;
+    }
+
+    /** 纯函数：required 声明缺失时返回「labelA、labelB」，全部满足返回 null。 */
+    static String missingDeclaredInputs(List<Map<String, Object>> inputs, Map<String, Object> input) {
+        if (inputs == null || inputs.isEmpty()) return null;
+        List<String> missing = new ArrayList<>();
+        for (Map<String, Object> field : inputs) {
+            if (!Boolean.TRUE.equals(field.get("required"))) continue;
+            String key = String.valueOf(field.get("key"));
+            Object value = input == null ? null : input.get(key);
+            if (value == null || (value instanceof String text && text.isBlank())) {
+                missing.add(String.valueOf(field.getOrDefault("label", key)));
+            }
+        }
+        return missing.isEmpty() ? null : String.join("、", missing);
+    }
+
+    // ---------------------------------------------------------------- 从节点重跑（C 批）
+
+    /**
+     * 纯函数（便于单测）：生成重跑运行的 steps。
+     * fromNode 的祖先闭包继承父运行 SUCCEEDED 与原 output（媒体产物复用，不重复计费）；
+     * fromNode 及其下游闭包置 PENDING 重新执行；其余平行分支 SKIPPED（不重复计费兄弟分支）。
+     */
+    static List<StepState> computeRerunSteps(List<StepState> parentSteps, WorkflowGraph graph, String fromNode) {
+        boolean exists = graph.nodes().stream().anyMatch(node -> node.key().equals(fromNode));
+        if (!exists) throw new IllegalArgumentException("节点不存在：" + fromNode);
+        Map<String, List<String>> outgoing = new HashMap<>();
+        Map<String, List<String>> incoming = new HashMap<>();
+        for (GraphEdgeDef edge : graph.edges()) {
+            outgoing.computeIfAbsent(edge.from(), ignored -> new ArrayList<>()).add(edge.to());
+            incoming.computeIfAbsent(edge.to(), ignored -> new ArrayList<>()).add(edge.from());
+        }
+        Set<String> ancestors = closure(Set.of(fromNode), incoming);
+        Set<String> descendants = closure(Set.of(fromNode), outgoing);
+        Map<String, StepState> parentByKey = parentSteps.stream()
+                .collect(java.util.stream.Collectors.toMap(StepState::key, step -> step, (a, b) -> a));
+        List<StepState> result = new ArrayList<>();
+        for (GraphNodeDef node : graph.nodes()) {
+            StepState parent = parentByKey.get(node.key());
+            boolean isAncestor = ancestors.contains(node.key()) && !node.key().equals(fromNode);
+            if (isAncestor && parent != null && "SUCCEEDED".equals(parent.status())) {
+                result.add(new StepState(node.key(), node.name(), "SUCCEEDED",
+                        parent.message() == null || parent.message().isBlank()
+                                ? "沿用上一次运行结果" : parent.message(),
+                        parent.output(), parent.startedAt(), parent.finishedAt()));
+            } else if (descendants.contains(node.key()) || isAncestor || node.key().equals(fromNode)) {
+                // 祖先未成功（FAILED/SKIPPED/无记录）时不能继承，需重新执行
+                result.add(new StepState(node.key(), node.name(), "PENDING", "", "", null, null));
+            } else {
+                result.add(new StepState(node.key(), node.name(), "SKIPPED", "本次重跑未涉及", "", null, null));
+            }
+        }
+        return result;
+    }
+
+    private static Set<String> closure(Set<String> seeds, Map<String, List<String>> adjacency) {
+        Set<String> visited = new HashSet<>(seeds);
+        Deque<String> queue = new ArrayDeque<>(seeds);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (String next : adjacency.getOrDefault(current, List.of())) {
+                if (visited.add(next)) queue.add(next);
+            }
+        }
+        return visited;
+    }
+
+    /** 从指定节点重跑（仅终态运行）：新运行复用父输入与定义快照，祖先输出继承、下游重新执行。 */
+    public WorkflowRunView rerunFrom(String tenantId, String userId, String runId, String fromNode) {
+        WorkflowRunRow parent = find(runId, tenantId, userId);
+        if (!"SUCCEEDED".equals(parent.status()) && !"FAILED".equals(parent.status())) {
+            throw new IllegalStateException("只有已成功或已失败的运行才能从节点重跑");
+        }
+        WorkflowGraph graph = parseGraph(toJson(parent.graphSnapshot()));
+        if (graph.nodes().isEmpty()) throw new IllegalStateException("运行缺少定义快照，无法重跑");
+        List<StepState> parentSteps = parseSteps(parent.steps());
+        List<StepState> steps = computeRerunSteps(parentSteps, graph, fromNode);
+        String currentStep = steps.stream()
+                .filter(step -> "PENDING".equals(step.status())).findFirst()
+                .map(StepState::key).orElseThrow(() -> new IllegalStateException("重跑没有可执行的节点"));
+        Map<String, Object> input = objectMapper.convertValue(parent.input(), Map.class);
+        String id = UUID.randomUUID().toString();
+        jdbcTemplate.update("""
+                        INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, definition_version,
+                                                  status, current_step, input, steps, artifacts, graph_snapshot,
+                                                  creative_project_id)
+                        VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?::jsonb, ?::jsonb, '[]'::jsonb, ?::jsonb, ?)
+                        """,
+                id, tenantId, userId, parent.workflowKey(), parent.definitionVersion(),
+                currentStep, toJson(input), toJson(steps), toJson(graph), parent.creativeProjectId());
+        RunContext context = new RunContext(id, tenantId, userId, parent.workflowKey(), parent.definitionVersion(),
+                parent.workflowKey(), "", graph, input, steps,
+                new ArrayList<>(), parent.creativeProjectId());
+        executor.submit(() -> execute(context));
+        return view(id, tenantId, userId);
+    }
+
+    // ---------------------------------------------------------------- 模板导出导入（D 批）
+
+    /** 导出最新版本为脱敏 bundle：仅定义与输入声明，不含租户/用户/密钥/素材。 */
+    public Map<String, Object> exportWorkflow(String tenantId, String workflowKey) {
+        DefVersionRow row = latestVersion(tenantId, workflowKey);
+        Map<String, Object> bundle = new LinkedHashMap<>();
+        bundle.put("format", 1);
+        bundle.put("key", workflowKey);
+        bundle.put("name", row.name());
+        bundle.put("description", row.description());
+        bundle.put("graph", row.graph());
+        bundle.put("inputs", row.inputs());
+        bundle.put("exportedAt", Instant.now().toString());
+        return bundle;
+    }
+
+    /** 导入结果：definition + 最终 key（冲突改名后）。 */
+    public record ImportResult(DefinitionVersionView definition, String key) {
+    }
+
+    /** 导入 bundle：校验结构与图；key 冲突自动改名 {key}-import-xxxx。 */
+    public ImportResult importWorkflow(String tenantId, String userId, Map<String, Object> bundle) {
+        if (bundle == null || !"1".equals(String.valueOf(bundle.get("format")))) {
+            throw new IllegalArgumentException("不支持的工作流导出格式（format 必须为 1）");
+        }
+        String key = String.valueOf(bundle.getOrDefault("key", "")).trim().toLowerCase(Locale.ROOT);
+        if (!key.matches("[a-z0-9][a-z0-9-]{1,48}")) {
+            throw new IllegalArgumentException("导出文件的工作流标识不合法：" + key);
+        }
+        String name = String.valueOf(bundle.getOrDefault("name", "")).trim();
+        if (name.isEmpty() || name.length() > 64) {
+            throw new IllegalArgumentException("导出文件的工作流名称不合法");
+        }
+        WorkflowGraph graph = objectMapper.convertValue(bundle.get("graph"), WorkflowGraph.class);
+        if (graph == null || graph.nodes() == null || graph.nodes().isEmpty()) {
+            throw new IllegalArgumentException("导出文件缺少可执行节点");
+        }
+        List<Map<String, Object>> inputs = validateInputs(objectMapper.convertValue(
+                bundle.getOrDefault("inputs", List.of()), List.class));
+        String finalKey = key;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            Integer existing = jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM workflow_definition_version WHERE tenant_id = ? AND workflow_key = ?",
+                    Integer.class, tenantId, finalKey);
+            if (existing == null || existing == 0) break;
+            finalKey = key + "-import-" + UUID.randomUUID().toString().substring(0, 4);
+        }
+        String description = String.valueOf(bundle.getOrDefault("description", "")).trim();
+        jdbcTemplate.update("""
+                        INSERT INTO workflow_definition_version (tenant_id, workflow_key, version, name, description, graph, inputs_json, created_by)
+                        VALUES (?, ?, 1, ?, ?, ?::jsonb, ?::jsonb, ?)
+                        """,
+                tenantId, finalKey, name, description, toJson(graph), toJson(inputs), userId);
+        return new ImportResult(
+                new DefinitionVersionView(1, name, description, graph, inputs, Instant.now()), finalKey);
     }
 
     private void validateGraph(WorkflowGraph graph) {
@@ -462,6 +669,9 @@ public class WorkflowService {
         if (!keyword.isEmpty()) input.put("keyword", keyword);
         if (input.isEmpty()) throw new IllegalArgumentException("请填写运行输入");
         if (definition.graph().nodes().isEmpty()) throw new IllegalArgumentException("该工作流没有可执行的节点");
+        // 声明式输入校验（R03 完整版）：required 字段缺失时报业务化错误（label 优先于 key）
+        String missingInputs = missingDeclaredInputs(definition.inputs(), input);
+        if (missingInputs != null) throw new IllegalArgumentException("请填写：" + missingInputs);
         validateGraph(definition.graph()); // 运行提交前独立拒绝非法图（含必填参数预检）
         // 运行可绑定创作项目（工作流作为 AI 创作的一部分）：校验归属后落库，
         // 媒体节点产物归入该项目素材库，项目详情页可按项目筛选运行

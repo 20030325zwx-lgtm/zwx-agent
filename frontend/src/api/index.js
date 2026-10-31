@@ -275,6 +275,14 @@ export const startWorkflow = (workflowKey, keyword, projectId = null, input = nu
 export const listWorkflowRuns = (params = {}) =>
   request.get('/ai/workflows/runs', { params }).then(response => response.data)
 export const getWorkflowRun = runId => request.get(`/ai/workflows/runs/${encodeURIComponent(runId)}`).then(response => response.data)
+// C 批：从指定节点重跑（祖先产物复用，不重复计费）
+export const rerunWorkflowFrom = (runId, fromNode) =>
+  request.post(`/ai/workflows/runs/${encodeURIComponent(runId)}/rerun`, { fromNode }).then(response => response.data)
+// D 批：模板导出 / 导入（脱敏 bundle）
+export const exportWorkflow = workflowKey =>
+  request.get(`/ai/workflows/${encodeURIComponent(workflowKey)}/export`).then(response => response.data)
+export const importWorkflow = bundle =>
+  request.post('/ai/workflows/import', bundle).then(response => response.data)
 export const getWorkflowDefinition = workflowKey => request.get(`/ai/workflows/${encodeURIComponent(workflowKey)}/definition`).then(response => response.data)
 export const saveWorkflowVersion = (workflowKey, payload) => request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/versions`, payload).then(response => response.data)
 // AI 小说：章节库与作品设定（创作项目的有状态内容层）

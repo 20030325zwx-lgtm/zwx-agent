@@ -6,9 +6,15 @@
           <h1>工作流</h1>
           <p>已制定的工作流：运行、查看记录或进入画布编辑</p>
         </div>
-        <button type="button" class="new-btn" @click="openCreate">
-          <Plus :size="15" /> 新建工作流
-        </button>
+        <div class="head-actions">
+          <label class="new-btn ghost">
+            <Upload :size="15" /> 导入工作流
+            <input type="file" accept="application/json,.json" hidden @change="importBundle" />
+          </label>
+          <button type="button" class="new-btn" @click="openCreate">
+            <Plus :size="15" /> 新建工作流
+          </button>
+        </div>
       </header>
 
       <p v-if="loading" class="section-hint">加载中…</p>
@@ -24,6 +30,7 @@
               <div v-if="menuOpenKey === definition.key" class="card-menu" @click.stop>
                 <button type="button" @click="openRun(definition)"><Play :size="14" /> 运行</button>
                 <button type="button" @click="openHistory(definition)"><History :size="14" /> 运行记录</button>
+                <button type="button" @click="exportTemplate(definition)"><Download :size="14" /> 导出模板</button>
                 <button type="button" class="danger" @click="openDelete(definition)"><Trash2 :size="14" /> 删除</button>
               </div>
             </div>
@@ -185,8 +192,11 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { History, MoreHorizontal, Play, Plus, Trash2 } from 'lucide-vue-next'
-import { createWorkflow, deleteWorkflow, getWorkflowRun, listWorkflows, startWorkflow } from '../api'
+import { Download, History, MoreHorizontal, Play, Plus, Trash2, Upload } from 'lucide-vue-next'
+import {
+  createWorkflow, deleteWorkflow, exportWorkflow, getWorkflowRun, importWorkflow,
+  listWorkflows, startWorkflow
+} from '../api'
 
 const router = useRouter()
 const definitions = ref([])
@@ -234,6 +244,41 @@ function toggleMenu(workflowKey) {
       if (!event.target.closest('.card-tools')) menuOpenKey.value = ''
     }
     document.addEventListener('click', menuCloser)
+  }
+}
+
+/** D 批：导出模板为脱敏 JSON bundle 下载。 */
+async function exportTemplate(definition) {
+  try {
+    const bundle = await exportWorkflow(definition.key)
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${definition.key}-template.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    message.success('模板已导出（不含素材与密钥）')
+  } catch (error) {
+    message.error(error?.response?.data?.error || '导出失败')
+  }
+}
+
+/** D 批：导入模板 bundle；key 冲突后端自动改名。 */
+async function importBundle(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  try {
+    const text = await file.text()
+    const bundle = JSON.parse(text)
+    const created = await importWorkflow(bundle)
+    message.success(`已导入为「${created.name}」（标识 ${created.key}）`)
+    await refresh()
+  } catch (error) {
+    message.error(error?.response?.data?.error || (error instanceof SyntaxError ? '文件不是合法 JSON' : '导入失败'))
   }
 }
 
@@ -387,6 +432,9 @@ onBeforeUnmount(() => {
 .wf-head p { margin-top: 4px; font-size: 13px; color: var(--wb-text-2); }
 .new-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: 0; border-radius: 10px; background: var(--wb-brand); color: var(--wb-brand-contrast); font-size: 13px; font-weight: 500; }
 .new-btn:hover { background: var(--wb-brand-hover); }
+.head-actions { display: flex; align-items: center; gap: 10px; }
+.new-btn.ghost { border: 1px solid var(--wb-border); background: transparent; color: var(--wb-text-2); cursor: pointer; }
+.new-btn.ghost:hover { border-color: var(--wb-brand); color: var(--wb-brand); background: transparent; }
 .section-hint { padding: 14px 4px; color: var(--wb-muted); font-size: 13px; }
 .wf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .wf-card { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg); background: var(--wb-surface); text-align: left; transition: border-color 0.15s, box-shadow 0.15s; }

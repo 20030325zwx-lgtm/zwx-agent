@@ -434,32 +434,27 @@
             </select>
             <span v-if="wfFormHint" class="cr-field-help">{{ wfFormHint }}</span>
           </label>
-          <label class="cr-field">
-            <span class="cr-field-label"><span>关键词 / 卖点</span></span>
-            <input v-model.trim="wfCreate.keyword" class="cr-input" maxlength="200"
-                   placeholder="如：加绒保暖 不起球 显瘦百搭" />
-          </label>
-          <div v-for="key in wfCreate.assetKeys" :key="key" class="cr-field">
-            <span class="cr-field-label"><span class="wf-input-key">{{ key }}</span></span>
+          <div v-for="field in wfCreate.fields" :key="field.key" class="cr-field">
+            <span class="cr-field-label">
+              <span>{{ field.label }}<em v-if="field.required" class="req-star">*</em></span>
+            </span>
             <AssetParamField
-              :model-value="wfCreate.input[key] || ''"
-              :multiple="key === 'imageAssetIds'"
+              v-if="field.kind === 'asset' || field.kind === 'assets'"
+              :model-value="wfCreate.input[field.key] || ''"
+              :multiple="field.kind === 'assets'"
               :default-project-id="projectId"
-              @update:model-value="value => wfCreate.input[key] = value"
+              @update:model-value="value => wfCreate.input[field.key] = value"
             />
+            <input v-else v-model.trim="wfCreate.input[field.key]" class="cr-input" maxlength="4000"
+                   :placeholder="field.placeholder || field.label" />
           </div>
-          <label v-for="key in wfCreate.textKeys" :key="key" class="cr-field">
-            <span class="cr-field-label"><span class="wf-input-key">{{ key }}</span></span>
-            <input v-model.trim="wfCreate.input[key]" class="cr-input" maxlength="200"
-                   :placeholder="`运行输入 ${key}`" />
-          </label>
           <p v-if="wfCreate.error" class="cr-error">{{ wfCreate.error }}</p>
         </template>
         <div class="cr-dialog-actions">
           <button type="button" class="cr-secondary" @click="wfCreateOpen = false">取消</button>
           <button type="button" class="cr-primary"
-                  :disabled="wfCreate.starting || !wfCreate.workflowKey || !wfCreate.keyword
-                    || wfCreate.assetKeys.some(key => !(wfCreate.input[key] || '').trim())"
+                  :disabled="wfCreate.starting || !wfCreate.workflowKey
+                    || wfCreate.fields.some(field => field.required && !(wfCreate.input[field.key] || '').trim())"
                   @click="startProjectWorkflow">
             {{ wfCreate.starting ? '发起中…' : '发起运行' }}
           </button>
@@ -619,7 +614,7 @@ import AssetPreview from './AssetPreview.vue'
 import AssetCompare from '../../components/creative/AssetCompare.vue'
 import { getCreativeAssetBlob } from '../../api'
 import AssetParamField from '../../components/workflow/AssetParamField.vue'
-import { deriveRunInputs } from './workflowInputs'
+import { buildRunForm } from './workflowInputs'
 
 const PROMPT_MAX = 500
 const route = useRoute()
@@ -861,7 +856,7 @@ const wfCreateOpen = ref(false)
 const workflows = ref([])
 const wfCreate = reactive({
   loading: false, starting: false, error: '',
-  workflowKey: '', keyword: '', assetKeys: [], textKeys: [], input: {}
+  workflowKey: '', fields: [], input: {}
 })
 const wfFormHint = computed(() => {
   const wf = workflows.value.find(item => item.key === wfCreate.workflowKey)
@@ -872,9 +867,7 @@ async function openWorkflowCreate() {
   wfCreateOpen.value = true
   wfCreate.error = ''
   wfCreate.workflowKey = ''
-  wfCreate.keyword = ''
-  wfCreate.assetKeys = []
-  wfCreate.textKeys = []
+  wfCreate.fields = []
   wfCreate.input = {}
   if (!workflows.value.length) {
     wfCreate.loading = true
@@ -890,32 +883,29 @@ async function openWorkflowCreate() {
 }
 
 async function loadWorkflowInputs() {
-  wfCreate.assetKeys = []
-  wfCreate.textKeys = []
+  wfCreate.fields = []
   wfCreate.input = {}
   if (!wfCreate.workflowKey) return
   try {
     const definition = await getWorkflowDefinition(wfCreate.workflowKey)
-    const { assetKeys, textKeys } = deriveRunInputs(definition.graph)
-    wfCreate.assetKeys = assetKeys
-    wfCreate.textKeys = textKeys.filter(key => key !== 'keyword')
+    wfCreate.fields = buildRunForm(definition)
   } catch (error) {
     wfCreate.error = '工作流定义加载失败，无法校验运行输入'
   }
 }
 
 async function startProjectWorkflow() {
-  if (wfCreate.starting || !wfCreate.workflowKey || !wfCreate.keyword) return
-  if (wfCreate.assetKeys.some(key => !(wfCreate.input[key] || '').trim())) return
+  const missingRequired = wfCreate.fields.some(field => field.required && !(wfCreate.input[field.key] || '').trim())
+  if (wfCreate.starting || !wfCreate.workflowKey || missingRequired) return
   wfCreate.starting = true
   wfCreate.error = ''
   try {
     const input = {}
-    for (const key of [...wfCreate.assetKeys, ...wfCreate.textKeys]) {
-      const value = (wfCreate.input[key] || '').trim()
-      if (value) input[key] = value
+    for (const field of wfCreate.fields) {
+      const value = (wfCreate.input[field.key] || '').trim()
+      if (value) input[field.key] = value
     }
-    const run = await startWorkflow(wfCreate.workflowKey, wfCreate.keyword, projectId.value, input)
+    const run = await startWorkflow(wfCreate.workflowKey, input.keyword || '', projectId.value, input)
     wfCreateOpen.value = false
     showToast('工作流已发起，产物将归入本项目', 'success')
     await router.push({ path: `/creative/projects/${projectId.value}`, query: { tab: 'workflow', runId: run.id } })

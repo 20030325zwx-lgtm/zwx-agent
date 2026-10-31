@@ -20,3 +20,30 @@ export function deriveRunInputs(graph) {
 }
 
 export const isAssetInputKey = key => /AssetIds?$/.test(key)
+
+/**
+ * 运行表单字段（R03 完整版 / Infinite Canvas 批次二）：
+ * 优先用工作流声明的 inputs（中文 label/类型/必填/占位），运行者不接触模板语法；
+ * 未声明时回退扫描推导（label 显示 key）。返回统一结构 [{key,label,kind,required,placeholder}]。
+ */
+export function buildRunForm(definition) {
+  const declared = Array.isArray(definition?.inputs) ? definition.inputs : []
+  if (declared.length) {
+    return declared.map(field => ({
+      key: field.key,
+      label: field.label || field.key,
+      kind: field.type === 'asset' ? 'asset' : field.type === 'assets' ? 'assets' : 'text',
+      required: !!field.required,
+      placeholder: field.placeholder || ''
+    }))
+  }
+  const { assetKeys, textKeys } = deriveRunInputs(definition?.graph || { nodes: [] })
+  const fields = []
+  for (const key of textKeys) {
+    fields.push({ key, label: key, kind: 'text', required: false, placeholder: '' })
+  }
+  for (const key of assetKeys) {
+    fields.push({ key, label: key, kind: 'assets', required: false, placeholder: '' })
+  }
+  return fields
+}

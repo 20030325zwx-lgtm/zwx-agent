@@ -127,6 +127,15 @@
   计费：成功 2 张 + 失败 1 次（费用未知已如实标注）。
 - 待办（下一批）：侧面机位这类瞬时故障的自动重试策略（当前诚实失败，用户可整跑重试）；三机位可配置化。
 
+## 追加 7（2026-10-31 晚）：桌面端版本对齐
+
+- `desktop/` 全量重打包：dist:mac 产出 Aster-0.1.2-arm64.dmg/zip（release/，已 gitignore）。
+  已验证包内 jar 含 OpenAiImagesMediaProviderAdapter 与 V12 迁移，前端 asar 为最新构建（含多姿势模板/素材分组/徽标）。
+- 桌面端数据与网页端隔离（自带 pgserver，userData/pgdata，库 aster）：中转站供应商需在桌面端
+  「模型设置」重新配置一次（拉取模型 → 勾选图片生成 → 绑定用途）；desktop profile 已有
+  allow-local-model-endpoints=true，VPN fake-IP 放行在桌面端同样生效。
+- 安装：退出正在运行的旧版 Aster → 打开 DMG 拖入 Applications 覆盖 → 启动（自有库会增量跑 V1–V12 迁移）。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

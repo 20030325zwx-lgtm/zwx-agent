@@ -70,8 +70,8 @@ const CATALOG = {
   },
   llm_text: {
     type: 'llm_text', label: '模型对话', color: '#0F9D8A', group: '理解与文本',
-    hint: '与对话模型交互；参数 prompt（含引用）/ system（可选）',
-    help: '模型对话：prompt 写提示词，可嵌入 {{节点.output}} 与 {{input.字段}} 引用上游结果做二次编辑；system 可选，设定角色。输出为模型回复。使用“设置→模型”中绑定的对话模型。',
+    hint: '与对话模型交互；参数 prompt（含引用）/ system（可选）/ scene（可选）',
+    help: '模型对话：prompt 写提示词，可嵌入 {{节点.output}} 与 {{input.字段}} 引用上游结果做二次编辑；system 可选，设定角色；scene 可选，填 novel 时使用「设置→模型」中「小说创作」的场景绑定（未绑定回退通用对话模型）。输出为模型回复。',
     defaults: { prompt: '根据以下信息生成内容：{{input.keyword}}' },
     outputs: [{ kind: 'text', label: '回复文本' }],
     inputs: [], // prompt 是自由文本：连线只表达执行依赖，不自动覆盖手写提示词

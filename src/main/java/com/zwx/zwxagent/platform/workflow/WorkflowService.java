@@ -768,7 +768,12 @@ public class WorkflowService {
             case "image_understand" -> understandImage(context, text(params.get("image")),
                     text(params.get("imageAssetId")), text(params.get("question")));
             case "llm_text" -> {
-                var selection = modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT);
+                // 场景级绑定（专用覆盖通用）：节点可声明 scene=novel 走「小说创作」绑定，缺省走通用对话
+                String scene = textOrDefault(text(params.get("scene")), "");
+                var selection = "novel".equals(scene)
+                        ? modelCatalogService.resolveWithFallback(context.userId(),
+                                ModelCatalogService.PURPOSE_NOVEL, ModelCatalogService.PURPOSE_CHAT)
+                        : modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT);
                 ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
                 String system = textOrDefault(text(params.get("system")), "");
                 String answer = system.isEmpty()

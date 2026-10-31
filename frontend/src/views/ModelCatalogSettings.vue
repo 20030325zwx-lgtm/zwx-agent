@@ -152,12 +152,17 @@
             <div v-if="!isNew" class="detail-card">
               <div class="card-head">
                 <h2>用途绑定</h2>
-                <span class="card-hint">未绑定时回退到旧配置或环境变量</span>
+                <span class="card-hint">场景绑定优先于「对话模型」；未绑定的场景自动回退到通用对话模型</span>
               </div>
               <div v-for="purpose in purposeRows" :key="purpose.key" class="binding-row">
-                <span class="binding-label">{{ purpose.label }}</span>
+                <span class="binding-label">
+                  {{ purpose.label }}
+                  <em v-if="purpose.desc" class="binding-desc">{{ purpose.desc }}</em>
+                </span>
                 <span class="binding-current" :class="{ unset: !purpose.current }">
-                  {{ purpose.current ? `${purpose.current.providerName} / ${purpose.current.modelName}` : '未绑定（回退旧配置）' }}
+                  {{ purpose.current
+                    ? `${purpose.current.providerName} / ${purpose.current.modelName}`
+                    : (purpose.fallback ? '未绑定 · 使用通用对话模型' : '未绑定（回退旧配置）') }}
                 </span>
                 <ASelect
                   :value="purpose.current?.modelRowId ?? undefined"
@@ -166,7 +171,9 @@
                   :options="bindingOptions"
                   @change="value => bind(purpose.key, value)"
                 />
-                <AButton size="small" :disabled="!purpose.current" @click="unbind(purpose.key)">清除</AButton>
+                <AButton size="small" :disabled="!purpose.current" @click="unbind(purpose.key)">
+                  {{ purpose.fallback ? '恢复通用' : '清除' }}
+                </AButton>
               </div>
               <p v-if="!bindingOptions.length" class="card-hint binding-empty">还没有可绑定的模型：先在供应商下添加并启用模型</p>
             </div>
@@ -232,14 +239,19 @@ const capabilityOptions = [
   { value: 'image_generation', label: '图片生成' }
 ]
 const PURPOSES = [
-  { key: 'chat', label: '对话模型' },
-  { key: 'vision', label: '视觉模型' },
-  { key: 'image_generation', label: '图片生成' }
+  { key: 'chat', label: '对话模型', desc: '所有文本场景的通用默认', fallback: false },
+  { key: 'novel', label: '小说创作（文本）', desc: '章节正文/概要/剧情走向建议', fallback: true },
+  { key: 'agent', label: '智能体对话', desc: '工作台对话的默认模型', fallback: true },
+  { key: 'optimize', label: '提示词优化', desc: '创作台提示词改写', fallback: true },
+  { key: 'vision', label: '视觉模型', desc: '图片理解（本地素材）', fallback: false },
+  { key: 'image_generation', label: '图片生成', desc: '创作生成与工作流生图', fallback: false }
 ]
 
-const purposeRows = computed(() => PURPOSES.map(({ key, label }) => ({
+const purposeRows = computed(() => PURPOSES.map(({ key, label, desc, fallback }) => ({
   key,
   label,
+  desc,
+  fallback,
   current: catalog.userBindings[key] || null
 })))
 
@@ -780,10 +792,12 @@ onMounted(() => refresh(false))
 }
 
 .binding-label {
-  flex: 0 0 72px;
+  flex: 0 0 150px;
   color: var(--wb-text);
   font-size: 13px;
 }
+
+.binding-desc { display: block; color: var(--wb-muted); font-size: 11px; font-style: normal; font-weight: 400; margin-top: 2px; }
 
 .binding-current {
   flex: 1;

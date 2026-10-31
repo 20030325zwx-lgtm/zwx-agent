@@ -180,6 +180,13 @@
   两次导入分别得 -import-0ab8/-import-3a89。
 - 未做：D-2 Agent 结构化画布工具（单独一批）、输入默认值/枚举、role 化引用、项目页重跑入口。
 
+## 追加 12（2026-11-01 凌晨）：场景级模型绑定（专用覆盖通用）+ 弹窗撑破修复
+
+- **场景绑定**（方案 `docs/design/2026-11-01-scene-model-bindings.md`）：新增 purpose `novel/agent/optimize`（数据层零迁移，复用 model_binding 唯一键）；`resolveWithFallback`（专用绑定存在且可用则用之，否则回退通用 chat）。调用点：小说建议链、llm_text 节点新可选 `scene=novel` 参数（V16 novel-chapter v2）、提示词优化、Agent 默认模型。设置页 6 行绑定（场景行带说明/回退文案/「恢复通用」按钮）。
+- **验证**：绑定 novel→KKAI 图片模型后 AI 建议报供应商 400「model not supported on Chat Completions」（专用生效未回退，日志证据）；清除绑定后建议成功出候选（回退通用 qwen-plus）。V16 v2 scene 生效核对。
+- **弹窗修复**（bug-2026-10-31-novel-suggestion-dialog-overflow.txt）：写新章节弹窗被 3 张候选卡撑破视口——cr-dialog 通用限高+内部滚动、候选列表 38vh 局部滚动。
+- 另：误提交的 macOS 复制副本「session-…relay 2.md」已移除（898a2aa）。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

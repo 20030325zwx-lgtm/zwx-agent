@@ -46,7 +46,8 @@ public class PromptOptimizationService {
         if (trimmed.length() > PROMPT_MAX) {
             throw CreativeException.unsupportedParameter("提示词超过 " + PROMPT_MAX + " 个字符");
         }
-        var selection = catalogService.resolve(userId, ModelCatalogService.PURPOSE_CHAT);
+        var selection = catalogService.resolveWithFallback(
+                userId, ModelCatalogService.PURPOSE_OPTIMIZE, ModelCatalogService.PURPOSE_CHAT);
         String raw;
         try {
             ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();

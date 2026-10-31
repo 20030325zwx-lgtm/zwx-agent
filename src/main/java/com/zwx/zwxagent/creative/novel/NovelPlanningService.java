@@ -61,7 +61,8 @@ public class NovelPlanningService {
             throw new IllegalArgumentException("剧情意向超过 " + DIRECTION_MAX + " 字符");
         }
         String prompt = buildPrompt(settings, chapters, intent);
-        var selection = catalogService.resolve(actor.userId(), ModelCatalogService.PURPOSE_CHAT);
+        var selection = catalogService.resolveWithFallback(
+                actor.userId(), ModelCatalogService.PURPOSE_NOVEL, ModelCatalogService.PURPOSE_CHAT);
         String raw;
         try {
             ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();

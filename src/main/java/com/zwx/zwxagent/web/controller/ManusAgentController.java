@@ -586,7 +586,10 @@ public class ManusAgentController {
 
     private com.zwx.zwxagent.platform.settings.ModelCatalogService.ResolvedSelection chatSelection(String userId, Long modelRowId) {
         return modelRowId == null
-                ? modelCatalogService.resolve(userId, com.zwx.zwxagent.platform.settings.ModelCatalogService.PURPOSE_CHAT)
+                // 场景级绑定（专用覆盖通用）：默认模型走「智能体对话」绑定，未绑定回退通用对话
+                ? modelCatalogService.resolveWithFallback(userId,
+                        com.zwx.zwxagent.platform.settings.ModelCatalogService.PURPOSE_AGENT,
+                        com.zwx.zwxagent.platform.settings.ModelCatalogService.PURPOSE_CHAT)
                 : modelCatalogService.resolveModelRow(userId, modelRowId);
     }
 

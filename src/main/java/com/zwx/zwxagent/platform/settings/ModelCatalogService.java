@@ -30,7 +30,12 @@ public class ModelCatalogService {
     public static final String PURPOSE_CHAT = "chat";
     public static final String PURPOSE_VISION = "vision";
     public static final String PURPOSE_IMAGE = "image_generation";
-    private static final Set<String> PURPOSES = Set.of(PURPOSE_CHAT, PURPOSE_VISION, PURPOSE_IMAGE, "embedding");
+    // 场景级绑定（专用覆盖通用）：未绑定时由 resolveWithFallback 回退到通用对话
+    public static final String PURPOSE_NOVEL = "novel";
+    public static final String PURPOSE_AGENT = "agent";
+    public static final String PURPOSE_OPTIMIZE = "optimize";
+    private static final Set<String> PURPOSES = Set.of(PURPOSE_CHAT, PURPOSE_VISION, PURPOSE_IMAGE,
+            "embedding", PURPOSE_NOVEL, PURPOSE_AGENT, PURPOSE_OPTIMIZE);
     private static final Set<String> CAPABILITIES = Set.of("tools", "vision", "embedding", "image_generation");
     private static final long CACHE_TTL_MILLIS = Duration.ofSeconds(30).toMillis();
 
@@ -438,6 +443,18 @@ public class ModelCatalogService {
         ResolvedSelection resolved = new ResolvedSelection(computeResolve(userId, purpose), revision());
         resolveCache.put(cacheKey, new CachedResolve(resolved, now + CACHE_TTL_MILLIS));
         return resolved;
+    }
+
+    /**
+     * 场景级解析（专用覆盖通用）：场景绑定存在且可用则用之，否则回退到 fallbackPurpose（如通用 chat）。
+     * 绑定变更会清缓存（bumpRevision），无需额外失效逻辑。
+     */
+    public ResolvedSelection resolveWithFallback(String userId, String purpose, String fallbackPurpose) {
+        try {
+            return resolve(userId, purpose);
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            return resolve(userId, fallbackPurpose);
+        }
     }
 
     /**

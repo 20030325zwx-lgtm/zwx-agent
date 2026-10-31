@@ -309,6 +309,8 @@
 
 .cr-dialog {
   width: min(440px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   background: var(--wb-surface);
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius-lg);

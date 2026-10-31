@@ -1,0 +1,18 @@
+日期：2026-10-31（用户反馈）
+
+问题现象：小说项目「写新章节」弹窗点击「AI 建议剧情走向」后，3 张候选卡全量展开把弹窗撑到
+超出视口（标题与底部「取消/发起生成」按钮均被挤出屏幕），整页被撑开出现外层滚动。
+
+影响范围：CreativeProject.vue 写新章节弹窗；样式问题，不影响数据与运行链路。
+
+原因：.cr-dialog（creative.css 共享弹窗样式）没有 max-height/overflow 约束；候选卡列表
+（.novel-suggestion-list）也无高度限制，内容多时弹窗高度无上界。
+
+解决方式：
+1. creative.css：.cr-dialog 增加 max-height: calc(100vh - 48px) 与 overflow-y:auto（对所有 cr-dialog 弹窗通用兜底）；
+2. CreativeProject.vue：.novel-suggestion-list 增加 max-height: 38vh + 内部滚动——
+   标题/表单/模板选择/按钮区固定可见，候选卡在中间区域滚动。
+
+验证结果：浏览器实测——AI 建议返回 3 张候选后弹窗整体在视口内，候选列表内部滚动，按钮始终可见。
+
+后续注意：以后新增弹窗内容较多时，优先给长列表区域单独限高滚动，而不是依赖整弹窗溢出。

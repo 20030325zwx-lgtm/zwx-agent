@@ -1978,7 +1978,7 @@ onBeforeUnmount(() => {
 .novel-content { font-family: var(--wb-font-body, inherit); line-height: 1.8; }
 .novel-ch-actions { display: flex; gap: 8px; }
 .novel-suggest-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
-.novel-suggestion-list { display: grid; gap: 8px; margin-bottom: 10px; }
+.novel-suggestion-list { display: grid; gap: 8px; margin-bottom: 10px; max-height: 38vh; overflow-y: auto; padding-right: 2px; }
 .novel-suggestion-card {
   text-align: left;
   border: 1px solid var(--wb-border);

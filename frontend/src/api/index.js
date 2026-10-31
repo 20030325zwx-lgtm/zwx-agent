@@ -277,6 +277,22 @@ export const listWorkflowRuns = (params = {}) =>
 export const getWorkflowRun = runId => request.get(`/ai/workflows/runs/${encodeURIComponent(runId)}`).then(response => response.data)
 export const getWorkflowDefinition = workflowKey => request.get(`/ai/workflows/${encodeURIComponent(workflowKey)}/definition`).then(response => response.data)
 export const saveWorkflowVersion = (workflowKey, payload) => request.post(`/ai/workflows/${encodeURIComponent(workflowKey)}/versions`, payload).then(response => response.data)
+// AI 小说：章节库与作品设定（创作项目的有状态内容层）
+export const listNovelChapters = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/novel/chapters`).then(response => response.data)
+export const updateNovelChapter = (projectId, chapterId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/novel/chapters/${encodeURIComponent(chapterId)}`, payload).then(response => response.data)
+export const confirmNovelChapter = (projectId, chapterId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/novel/chapters/${encodeURIComponent(chapterId)}/confirm`).then(response => response.data)
+export const deleteNovelChapter = (projectId, chapterId) =>
+  request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/novel/chapters/${encodeURIComponent(chapterId)}`).then(response => response.data)
+export const getNovelSettings = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/novel/settings`).then(response => response.data)
+export const updateNovelSettings = (projectId, payload) =>
+  request.put(`/ai/creative/projects/${encodeURIComponent(projectId)}/novel/settings`, payload).then(response => response.data)
+export const suggestNovelPlot = (projectId, direction) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/novel/plot-suggestions`,
+    { direction: direction || undefined }).then(response => response.data)
 export const createModelProvider = payload => request.post('/settings/providers', payload).then(response => response.data)
 export const updateModelProvider = (providerId, payload) => request.put(`/settings/providers/${providerId}`, payload).then(response => response.data)
 export const deleteModelProvider = providerId => request.delete(`/settings/providers/${providerId}`).then(response => response.data)

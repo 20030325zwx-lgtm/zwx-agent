@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -105,6 +106,38 @@ public class CreativeProjectService {
         }
         return get(actor, projectId);
     }
+
+    /** 项目设定（V13）：长篇创作共用的自由文本块；小说约定 {characters, worldview, style}。 */
+    public static final int SETTINGS_VALUE_MAX = 6000;
+
+    public Map<String, Object> settingsOf(CurrentActor actor, UUID projectId) {
+        get(actor, projectId); // 归属校验
+        String json = repository.settingsJsonOf(actor.tenantId(), actor.userId(), projectId).orElse("{}");
+        Map<String, Object> settings = new java.util.LinkedHashMap<>();
+        com.zwx.zwxagent.creative.support.CreativeJson.parse(json).properties()
+                .forEach(entry -> settings.put(entry.getKey(), entry.getValue().isTextual()
+                        ? entry.getValue().asText() : entry.getValue()));
+        return settings;
+    }
+
+    /** 浅合并更新设定：只接受已知文本键，值裁剪到长度上限。 */
+    public Map<String, Object> updateSettings(CurrentActor actor, UUID projectId, Map<String, Object> patch) {
+        get(actor, projectId);
+        Map<String, Object> merged = settingsOf(actor, projectId);
+        if (patch != null) {
+            for (String key : SETTINGS_KEYS) {
+                if (!patch.containsKey(key)) continue;
+                Object value = patch.get(key);
+                String text = value == null ? "" : String.valueOf(value).trim();
+                if (text.length() > SETTINGS_VALUE_MAX) text = text.substring(0, SETTINGS_VALUE_MAX);
+                merged.put(key, text);
+            }
+        }
+        repository.updateSettings(projectId, com.zwx.zwxagent.creative.support.CreativeJson.toJson(merged));
+        return merged;
+    }
+
+    public static final List<String> SETTINGS_KEYS = List.of("characters", "worldview", "style");
 
     public static String normalizeName(String name) {
         String value = name == null ? "" : name.trim();

@@ -14,7 +14,8 @@
         </div>
       </div>
       <nav class="studio-tabs" aria-label="创作台视图">
-        <button type="button" :class="{ active: tab === 'studio' }" @click="tab = 'studio'">创作</button>
+        <button v-if="project?.kind !== 'NOVEL'" type="button" :class="{ active: tab === 'studio' }" @click="tab = 'studio'">创作</button>
+        <button v-if="project?.kind === 'NOVEL'" type="button" :class="{ active: tab === 'chapters' }" @click="tab = 'chapters'">章节</button>
         <button type="button" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
         <button type="button" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">
           任务记录<span v-if="activeCount" class="tab-badge">{{ activeCount }}</span>
@@ -199,6 +200,91 @@
       </aside>
     </div>
 
+    <!-- 章节（AI 小说）：创作项目的有状态内容层，每写一章 = 一次工作流运行读状态生成写回 -->
+    <div v-else-if="tab === 'chapters'" class="cr-scroll studio-sub">
+      <div class="cr-inner novel-pane">
+        <div class="cr-section-head">
+          <h2>章节</h2>
+          <div class="novel-head-actions">
+            <button type="button" class="cr-ghost" :disabled="chaptersLoading" @click="loadChapters">刷新</button>
+            <button type="button" class="cr-secondary" @click="toggleNovelSettings">作品设定</button>
+            <button type="button" class="cr-primary" :disabled="project?.status !== 'ACTIVE'"
+                    @click="openNovelCreate">写新章节</button>
+          </div>
+        </div>
+
+        <section v-if="novelSettingsOpen" class="novel-settings">
+          <div class="novel-settings-head">
+            <strong>作品设定</strong>
+            <span class="cr-field-help">人物 / 世界观 / 文风会注入每一章的生成上下文</span>
+          </div>
+          <label class="cr-field">
+            <span class="cr-field-label"><span>人物设定</span></span>
+            <textarea v-model="novelSettings.characters" class="cr-textarea" rows="3"
+                      placeholder="主角与主要角色的身份、性格、目标、关系" />
+          </label>
+          <label class="cr-field">
+            <span class="cr-field-label"><span>世界观</span></span>
+            <textarea v-model="novelSettings.worldview" class="cr-textarea" rows="3"
+                      placeholder="时代背景、力量体系、重要地点与规则" />
+          </label>
+          <label class="cr-field">
+            <span class="cr-field-label"><span>文风</span></span>
+            <textarea v-model="novelSettings.style" class="cr-textarea" rows="2"
+                      placeholder="如：第三人称，紧凑节奏，画面感强，少用对话" />
+          </label>
+          <div class="novel-settings-actions">
+            <button type="button" class="cr-primary" :disabled="novelSettingsSaving" @click="saveNovelSettings">
+              {{ novelSettingsSaving ? '保存中…' : '保存设定' }}
+            </button>
+          </div>
+        </section>
+
+        <p v-if="chaptersLoading" class="cr-hint">加载中…</p>
+        <p v-else-if="chaptersError" class="cr-error">{{ chaptersError }}</p>
+        <p v-else-if="!chapters.length" class="cr-empty">
+          还没有章节。点击「写新章节」：填一句剧情走向（或让 AI 建议），工作流会读取作品设定与既往章节生成正文。
+        </p>
+
+        <article v-for="chapter in chapters" :key="chapter.id" class="novel-chapter-card">
+          <header class="novel-chapter-head" @click="toggleChapter(chapter)">
+            <span class="novel-ch-no">第{{ chapter.chapterNumber }}章</span>
+            <strong class="novel-ch-title">{{ chapter.title }}</strong>
+            <span class="cr-status" :class="chapter.status === 'CONFIRMED' ? 'success' : 'muted'">
+              {{ chapter.status === 'CONFIRMED' ? '已确认' : '草稿' }}
+            </span>
+            <span class="novel-ch-meta">{{ chapter.wordCount }} 字 · {{ formatTime(chapter.updatedAt) }}</span>
+            <button type="button" class="cr-ghost" @click.stop="toggleChapter(chapter)">
+              {{ expandedChapterId === chapter.id ? '收起' : '展开' }}
+            </button>
+          </header>
+          <p v-if="chapter.plotDirection" class="novel-ch-direction">剧情走向：{{ chapter.plotDirection }}</p>
+          <div v-if="expandedChapterId === chapter.id" class="novel-ch-editor">
+            <label class="cr-field">
+              <span class="cr-field-label"><span>章节标题</span></span>
+              <input v-model="novelEditing.title" class="cr-input" maxlength="200" />
+            </label>
+            <label class="cr-field">
+              <span class="cr-field-label"><span>正文</span><span class="count">{{ novelEditing.content.length }} 字</span></span>
+              <textarea v-model="novelEditing.content" class="cr-textarea novel-content" rows="16" />
+            </label>
+            <label class="cr-field">
+              <span class="cr-field-label"><span>剧情概要</span></span>
+              <textarea v-model="novelEditing.summary" class="cr-textarea" rows="3"
+                        placeholder="确认后这段概要会进入后续章节的生成上下文" />
+            </label>
+            <div class="novel-ch-actions">
+              <button type="button" class="cr-secondary" :disabled="novelBusy" @click="saveChapter(chapter)">保存修改</button>
+              <button v-if="chapter.status !== 'CONFIRMED'" type="button" class="cr-primary"
+                      :disabled="novelBusy || !novelEditing.content.trim()" @click="confirmChapter(chapter)">确认入库</button>
+              <button v-if="chapter.status !== 'CONFIRMED'" type="button" class="cr-ghost danger"
+                      :disabled="novelBusy" @click="removeChapter(chapter)">删除草稿</button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+
     <!-- 工作流 -->
     <div v-else-if="tab === 'workflow'" class="cr-scroll studio-sub">
       <div class="cr-inner">
@@ -370,6 +456,52 @@
       </div>
     </div>
 
+    <!-- 写新章节：剧情走向可手输，也可让 AI 基于设定与近几章概要建议 -->
+    <div v-if="novelCreateOpen" class="cr-dialog-backdrop" @click.self="novelCreateOpen = false">
+      <div class="cr-dialog" role="dialog" aria-modal="true" aria-labelledby="novel-create-title">
+        <h2 id="novel-create-title">写新章节 · {{ project?.name }}</h2>
+        <label class="cr-field">
+          <span class="cr-field-label"><span>章节标题（可留空，自动按序号命名）</span></span>
+          <input v-model.trim="novelCreate.title" class="cr-input" maxlength="200" placeholder="如：夜探藏经阁" />
+        </label>
+        <label class="cr-field">
+          <span class="cr-field-label"><span>本章剧情走向</span></span>
+          <textarea v-model="novelCreate.plotDirection" class="cr-textarea" rows="4" maxlength="4000"
+                    placeholder="用一两句话描述本章要发生什么：冲突、人物行动、结尾钩子" />
+        </label>
+        <div class="novel-suggest-row">
+          <button type="button" class="cr-secondary" :disabled="suggesting" @click="suggestPlot">
+            <Sparkles :size="14" /> {{ suggesting ? '思考中…' : 'AI 建议剧情走向' }}
+          </button>
+          <span class="cr-field-help">基于作品设定、章节目录与近几章概要生成 3 组候选</span>
+        </div>
+        <div v-if="suggestions.length" class="novel-suggestion-list">
+          <button v-for="(item, index) in suggestions" :key="index" type="button"
+                  class="novel-suggestion-card" @click="adoptPlotSuggestion(item)">
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.direction }}</p>
+            <span class="novel-suggestion-adopt">点击采纳</span>
+          </button>
+        </div>
+        <label class="cr-field">
+          <span class="cr-field-label"><span>工作流模板</span></span>
+          <select v-model="novelCreate.workflowKey" class="cr-input">
+            <option v-for="wf in workflows" :key="wf.key" :value="wf.key">{{ wf.name || wf.key }}</option>
+          </select>
+          <span class="cr-field-help">运行会读取作品设定与既往章节，生成正文与概要后存为草稿</span>
+        </label>
+        <p v-if="novelCreate.error" class="cr-error">{{ novelCreate.error }}</p>
+        <div class="cr-dialog-actions">
+          <button type="button" class="cr-secondary" @click="novelCreateOpen = false">取消</button>
+          <button type="button" class="cr-primary"
+                  :disabled="novelCreate.starting || !novelCreate.plotDirection.trim() || !novelCreate.workflowKey"
+                  @click="startNovelChapter">
+            {{ novelCreate.starting ? '发起中…' : '发起生成' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
       <template #actions>
         <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred"
@@ -435,11 +567,12 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AlertCircle, ArrowLeft, ImagePlus, Sparkles, Upload, Workflow } from 'lucide-vue-next'
 import {
-  cancelCreativeJob, createCreativeDraft, createCreativeJob, deleteCreativeAsset,
-  getCreativeJob, getCreativeProject, getWorkflowDefinition, getWorkflowRun, listCreativeAssets,
-  listCreativeDrafts, listCreativeJobs, listModelCatalog, listWorkflowRuns, listWorkflows,
-  optimizeCreativePrompt, resumeCreativeJobIngest, retryCreativeJob, startWorkflow,
-  updateCreativeAsset, updateCreativeDraft, uploadCreativeAsset
+  cancelCreativeJob, confirmNovelChapter, createCreativeDraft, createCreativeJob, deleteCreativeAsset,
+  deleteNovelChapter, getCreativeJob, getCreativeProject, getNovelSettings, getWorkflowDefinition,
+  getWorkflowRun, listCreativeAssets, listCreativeDrafts, listCreativeJobs, listModelCatalog,
+  listNovelChapters, listWorkflowRuns, listWorkflows, optimizeCreativePrompt, resumeCreativeJobIngest,
+  retryCreativeJob, startWorkflow, suggestNovelPlot, updateCreativeAsset, updateCreativeDraft,
+  updateNovelChapter, updateNovelSettings, uploadCreativeAsset
 } from '../../api'
 import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta } from './shared'
 import AssetPreview from './AssetPreview.vue'
@@ -457,7 +590,7 @@ const project = ref(null)
 const imageBinding = ref(null)
 const imageProtocol = computed(() => imageBinding.value?.protocol || 'dashscope')
 const pageError = ref('')
-const tab = ref(route.query.tab === 'workflow' ? 'workflow' : 'studio')
+const tab = ref(['workflow', 'chapters'].includes(route.query.tab) ? route.query.tab : 'studio')
 
 const idea = ref('')
 const effective = ref('')
@@ -550,6 +683,8 @@ async function loadProject() {
     return
   }
   await Promise.all([loadCatalog(), loadDrafts(), loadJobs(), loadAssets()])
+  // 小说项目默认落在章节 tab（创作层的有状态内容视图）
+  if (project.value?.kind === 'NOVEL' && !route.query.tab) tab.value = 'chapters'
 }
 
 async function loadCatalog() {
@@ -758,6 +893,176 @@ async function openAssetPreview(asset) {
   previewSrc.value = ''
   previewSrc.value = await urlFor(asset.id)
 }
+
+// ---------------------------------------------------------------- AI 小说（章节库 + 作品设定）
+
+const chapters = ref([])
+const chaptersLoading = ref(false)
+const chaptersError = ref('')
+const expandedChapterId = ref('')
+const novelBusy = ref(false)
+const novelSettingsOpen = ref(false)
+const novelSettingsSaving = ref(false)
+const novelSettings = reactive({ characters: '', worldview: '', style: '' })
+// 展开编辑器复用一份本地副本，保存时整体提交
+const novelEditing = reactive({ title: '', content: '', summary: '' })
+
+const novelCreateOpen = ref(false)
+const suggesting = ref(false)
+const suggestions = ref([])
+const novelCreate = reactive({ starting: false, error: '', workflowKey: 'novel-chapter', title: '', plotDirection: '' })
+
+async function loadChapters() {
+  chaptersLoading.value = true
+  chaptersError.value = ''
+  try {
+    chapters.value = await listNovelChapters(projectId.value)
+  } catch (error) {
+    chaptersError.value = error.response?.data?.error || '章节加载失败'
+  } finally {
+    chaptersLoading.value = false
+  }
+}
+
+async function loadNovelSettings() {
+  try {
+    const data = await getNovelSettings(projectId.value)
+    novelSettings.characters = data.characters || ''
+    novelSettings.worldview = data.worldview || ''
+    novelSettings.style = data.style || ''
+  } catch (error) { /* 设定加载失败不阻塞章节 */ }
+}
+
+function toggleNovelSettings() {
+  novelSettingsOpen.value = !novelSettingsOpen.value
+  if (novelSettingsOpen.value) loadNovelSettings()
+}
+
+async function saveNovelSettings() {
+  novelSettingsSaving.value = true
+  try {
+    await updateNovelSettings(projectId.value, { ...novelSettings })
+    showToast('作品设定已保存，后续章节生成将注入', 'success')
+  } catch (error) {
+    showToast(error.response?.data?.error || '设定保存失败', 'error')
+  } finally {
+    novelSettingsSaving.value = false
+  }
+}
+
+function toggleChapter(chapter) {
+  if (expandedChapterId.value === chapter.id) {
+    expandedChapterId.value = ''
+    return
+  }
+  expandedChapterId.value = chapter.id
+  novelEditing.title = chapter.title
+  novelEditing.content = chapter.content || ''
+  novelEditing.summary = chapter.summary || ''
+}
+
+async function saveChapter(chapter) {
+  novelBusy.value = true
+  try {
+    const updated = await updateNovelChapter(projectId.value, chapter.id, {
+      title: novelEditing.title,
+      content: novelEditing.content,
+      summary: novelEditing.summary
+    })
+    Object.assign(chapter, updated)
+    showToast('章节已保存', 'success')
+  } catch (error) {
+    showToast(error.response?.data?.error || '章节保存失败', 'error')
+  } finally {
+    novelBusy.value = false
+  }
+}
+
+async function confirmChapter(chapter) {
+  if (!window.confirm('确认后概要会进入后续章节的生成上下文，且章节不可再删除。确认入库？')) return
+  novelBusy.value = true
+  try {
+    const updated = await confirmNovelChapter(projectId.value, chapter.id)
+    Object.assign(chapter, updated)
+    showToast(`第${chapter.chapterNumber}章已确认入库`, 'success')
+  } catch (error) {
+    showToast(error.response?.data?.error || '确认失败', 'error')
+  } finally {
+    novelBusy.value = false
+  }
+}
+
+async function removeChapter(chapter) {
+  if (!window.confirm(`删除第${chapter.chapterNumber}章草稿「${chapter.title}」？`)) return
+  novelBusy.value = true
+  try {
+    await deleteNovelChapter(projectId.value, chapter.id)
+    if (expandedChapterId.value === chapter.id) expandedChapterId.value = ''
+    await loadChapters()
+    showToast('草稿已删除', 'success')
+  } catch (error) {
+    showToast(error.response?.data?.error || '删除失败', 'error')
+  } finally {
+    novelBusy.value = false
+  }
+}
+
+function openNovelCreate() {
+  novelCreateOpen.value = true
+  novelCreate.error = ''
+  novelCreate.title = ''
+  novelCreate.plotDirection = ''
+  novelCreate.workflowKey = 'novel-chapter'
+  suggestions.value = []
+  if (!workflows.value.length) {
+    listWorkflows(30).then(data => {
+      workflows.value = data.definitions || []
+      if (!workflows.value.some(wf => wf.key === 'novel-chapter')) {
+        novelCreate.workflowKey = workflows.value[0]?.key || ''
+      }
+    }).catch(() => { /* 列表加载失败时仍可手输走向，发起时报错 */ })
+  }
+}
+
+async function suggestPlot() {
+  suggesting.value = true
+  suggestions.value = []
+  try {
+    const data = await suggestNovelPlot(projectId.value, novelCreate.plotDirection.trim())
+    suggestions.value = data.items || []
+    if (!suggestions.value.length) novelCreate.error = 'AI 未返回有效建议，请重试'
+  } catch (error) {
+    novelCreate.error = error.response?.data?.error || '剧情建议生成失败，请稍后重试'
+  } finally {
+    suggesting.value = false
+  }
+}
+
+function adoptPlotSuggestion(item) {
+  novelCreate.title = item.title || ''
+  novelCreate.plotDirection = item.direction || ''
+}
+
+async function startNovelChapter() {
+  if (novelCreate.starting || !novelCreate.plotDirection.trim() || !novelCreate.workflowKey) return
+  novelCreate.starting = true
+  novelCreate.error = ''
+  try {
+    const input = { plotDirection: novelCreate.plotDirection.trim() }
+    if (novelCreate.title) input.title = novelCreate.title
+    const run = await startWorkflow(novelCreate.workflowKey, '', projectId.value, input)
+    novelCreateOpen.value = false
+    showToast('章节生成已发起，运行完成后回到「章节」查看草稿', 'success')
+    await router.push({ path: `/creative/projects/${projectId.value}`, query: { tab: 'workflow', runId: run.id } })
+    tab.value = 'workflow'
+    await loadWorkflowRuns()
+  } catch (error) {
+    novelCreate.error = error.response?.data?.error || '发起失败，请稍后重试'
+  } finally {
+    novelCreate.starting = false
+  }
+}
+
 
 function markDirty() {
   if (finalSynced.value) effective.value = idea.value
@@ -1016,6 +1321,7 @@ async function removeAsset(asset) {
 watch(tab, value => {
   if (value === 'assets') loadAssets()
   if (value === 'workflow') loadWorkflowRuns()
+  if (value === 'chapters') { loadChapters(); loadNovelSettings() }
 })
 
 // ---------------------------------------------------------------- 工作流运行
@@ -1529,4 +1835,64 @@ onBeforeUnmount(() => {
   display: block;
 }
 .wf-artifact a { color: var(--wb-brand); font-size: 12px; }
+
+/* ---- AI 小说：章节库 ---- */
+.novel-pane { max-width: 860px; }
+.novel-head-actions { display: flex; gap: 8px; align-items: center; }
+.novel-settings {
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  display: grid;
+  gap: 10px;
+  background: var(--wb-panel, rgba(127, 127, 127, 0.04));
+}
+.novel-settings-head { display: flex; align-items: baseline; gap: 10px; }
+.novel-settings-actions { display: flex; justify-content: flex-end; }
+.novel-chapter-card {
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  padding: 12px 16px;
+  margin-bottom: 10px;
+}
+.novel-chapter-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+.novel-ch-no { color: var(--wb-brand); font-weight: 600; font-size: 13px; white-space: nowrap; }
+.novel-ch-title { font-size: 14px; }
+.novel-ch-meta { color: var(--wb-muted); font-size: 12px; margin-left: auto; }
+.novel-ch-direction {
+  color: var(--wb-muted);
+  font-size: 12px;
+  margin: 8px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.novel-ch-editor { margin-top: 12px; display: grid; gap: 10px; }
+.novel-content { font-family: var(--wb-font-body, inherit); line-height: 1.8; }
+.novel-ch-actions { display: flex; gap: 8px; }
+.novel-suggest-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.novel-suggestion-list { display: grid; gap: 8px; margin-bottom: 10px; }
+.novel-suggestion-card {
+  text-align: left;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  padding: 10px 12px;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  display: grid;
+  gap: 4px;
+}
+.novel-suggestion-card:hover { border-color: var(--wb-brand); }
+.novel-suggestion-card p { margin: 0; font-size: 12px; color: var(--wb-muted); line-height: 1.6; }
+.novel-suggestion-adopt { font-size: 11px; color: var(--wb-brand); }
 </style>

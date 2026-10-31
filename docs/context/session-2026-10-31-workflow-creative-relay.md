@@ -144,6 +144,16 @@
 - AssetParamField 增加 defaultProjectId 属性；修复 CreativeProject 缺 reactive 导入导致的白屏。
 - 验证：弹窗模板选择 → 3 个素材字段自动出现（默认项目=当前项目），构建通过。
 
+## 追加 9（2026-10-31 深夜）：AI 小说创作 v1（有状态的长篇创作层）
+
+- **概念定位**（回应用户"工作流运行 vs 用工作流创作有何区别"）：底层同一引擎同一接口，入口差异只有项目绑定+表单；纯图片画布直跑即可。真正的分界 = 创作层持有跨运行状态（设定/章节/素材），工作流是读状态→生成→写回的单次管线。详见 `docs/design/2026-10-31-ai-novel-creation.md`。
+- **V13**：`novel_chapter`（组合外键归属、章号唯一、source_run_id 幂等）+ `creative_project.settings_json`（{characters, worldview, style}）+ 种子模板 novel-chapter v1（context→正文(system)→概要→save）。
+- **引擎**：新节点 `novel_context`（设定+目录+近N章概要→文本块）/`novel_chapter_save`（按 run 幂等入库）；`MAX_OUTPUT_CHARS` 4000→100_000（跨等待/续跑时长文本不再截断，R06 输出截断部分修复）；llm_text 增可选 system 参数。
+- **后端**：`creative/novel`（NovelChapterService/NovelPlanningService）+ NovelController（chapters CRUD+confirm、settings、plot-suggestions 走 PURPOSE_CHAT）；CreativeKind.enabled() 放行 NOVEL；CreativeProjectService.settingsOf/updateSettings。
+- **前端**：小说项目页「章节」tab（默认，替代图片创作 tab）：章节列表/展开编辑/确认入库/删草稿 + 作品设定折叠区 + 「写新章节」弹窗（AI 建议 3 组候选点击采纳→发起运行）；创作首页开放小说 chip。
+- **验证**：NovelRulesTest 4 项全绿；浏览器 E2E 双章——第1章「星坠前夜」1753 字（上下文报"既往 0 章"）→ 确认入库 → 第2章 AI 建议明显承接第1章概要、运行报"**既往 1 章，本章为第 2 章**"、草稿 1999 字正文衔接所采走向。V13 迁移核对、前后端构建通过。
+- 未做（需用户启动）：漫剧、连写多章、结构化角色卡、章节版本历史；桌面端随下次打包携带（迁移自动增量跑）。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

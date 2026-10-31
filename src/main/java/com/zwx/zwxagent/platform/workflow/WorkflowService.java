@@ -54,7 +54,8 @@ public class WorkflowService {
     public static final Set<String> NODE_TYPES = Set.of(
             "start", "search_image", "image_understand", "llm_text", "web_search", "poster_render",
             "image_generate", "media_image_generate", "media_image_edit",
-            "http_request", "db_query", "text_template", "file_export");
+            "http_request", "db_query", "text_template", "file_export",
+            "novel_context", "novel_chapter_save");
 
     public record StepDef(String key, String name, String description) {
     }
@@ -142,7 +143,10 @@ public class WorkflowService {
     }
 
     private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-    private static final int MAX_OUTPUT_CHARS = 4000;
+    // steps JSONB 持久化上限：放宽到 100k 以承载长文本节点（小说章节正文约 2000-8000 字），
+    // 续跑时输出从 steps 重载，截断过小会让下游引用拿到残缺文本（评审 R06 的输出截断项）。
+    // 运行时间线 UI 只展示 message，不渲染全文。
+    private static final int MAX_OUTPUT_CHARS = 100_000;
     private static final Pattern REF_PATTERN = Pattern.compile("\\{\\{([a-zA-Z0-9_.]+)}}");
 
     private final JdbcTemplate jdbcTemplate;
@@ -164,6 +168,8 @@ public class WorkflowService {
     private final com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository;
     private final com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage;
     private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+    private final com.zwx.zwxagent.creative.novel.NovelChapterService novelChapterService;
+    private final com.zwx.zwxagent.creative.repository.NovelChapterRepository novelChapterRepository;
     private final ExecutorService executor = Executors.newFixedThreadPool(2, task -> {
         Thread thread = new Thread(task, "workflow-runner");
         thread.setDaemon(true);
@@ -190,7 +196,9 @@ public class WorkflowService {
                            com.zwx.zwxagent.creative.asset.CreativeAssetService creativeAssetService,
                            com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository,
                            com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage,
-                           org.springframework.transaction.support.TransactionTemplate transactionTemplate) {
+                           org.springframework.transaction.support.TransactionTemplate transactionTemplate,
+                           com.zwx.zwxagent.creative.novel.NovelChapterService novelChapterService,
+                           com.zwx.zwxagent.creative.repository.NovelChapterRepository novelChapterRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.mcpServerConfigurationService = mcpServerConfigurationService;
         this.imageAnalysisService = imageAnalysisService;
@@ -208,6 +216,8 @@ public class WorkflowService {
         this.creativeAssetRepository = creativeAssetRepository;
         this.mediaStorage = mediaStorage;
         this.transactionTemplate = transactionTemplate;
+        this.novelChapterService = novelChapterService;
+        this.novelChapterRepository = novelChapterRepository;
     }
 
     // ---------------------------------------------------------------- 定义版本
@@ -503,7 +513,10 @@ public class WorkflowService {
             case "llm_text" -> {
                 var selection = modelCatalogService.resolve(context.userId(), ModelCatalogService.PURPOSE_CHAT);
                 ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
-                String answer = client.prompt().user(text(params.get("prompt"))).call().content();
+                String system = textOrDefault(text(params.get("system")), "");
+                String answer = system.isEmpty()
+                        ? client.prompt().user(text(params.get("prompt"))).call().content()
+                        : client.prompt().system(system).user(text(params.get("prompt"))).call().content();
                 yield new NodeResult(answer == null ? "" : answer, "文本已生成");
             }
             case "web_search" -> webSearch(text(params.get("query")));
@@ -514,6 +527,8 @@ public class WorkflowService {
             case "db_query" -> dbQuery(text(params.get("sql")));
             case "media_image_generate" -> startMediaImageTask(context, node, params);
             case "media_image_edit" -> startMediaImageTask(context, node, params);
+            case "novel_context" -> novelContext(context, params);
+            case "novel_chapter_save" -> novelChapterSave(context, params);
             case "image_generate" -> imageGenerate(context, text(params.get("prompt")),
                     textOrDefault(text(params.get("size")), "1024*1024"),
                     textOrDefault(text(params.get("model")), "wanx2.1-t2i-turbo"));
@@ -1085,6 +1100,87 @@ public class WorkflowService {
     // ---------------------------------------------------------------- 参数引用与工具
 
     /** 替换 params 中的 "{{input.字段}}" 与 "{{节点key.output}}" 引用；整体引用还原原值，嵌套结构递归处理。 */
+    // ---------------------------------------------------------------- 小说节点（AI 创作 v1）
+
+    /**
+     * 章节上下文（novel_context）：读绑定项目的作品设定 + 章节目录 + 近 N 章概要，
+     * 输出纯文本块供 llm_text 组装 prompt（{{节点key.output}} 整体引用）。
+     * 这是「创作层持有跨运行状态」的读入口：状态随章节确认累积。
+     */
+    private NodeResult novelContext(RunContext context, Map<String, Object> params) {
+        if (context.creativeProjectId() == null) {
+            throw new IllegalArgumentException("章节上下文节点需要运行绑定创作项目（请从创作台发起运行）");
+        }
+        int summaryCount;
+        try {
+            summaryCount = Integer.parseInt(textOrDefault(text(params.get("summaryCount")), "3").trim());
+        } catch (NumberFormatException exception) {
+            summaryCount = 3;
+        }
+        summaryCount = Math.max(1, Math.min(10, summaryCount));
+        var actor = workflowActor(context);
+        Map<String, Object> settings = creativeProjectService.settingsOf(actor, context.creativeProjectId());
+        List<com.zwx.zwxagent.creative.domain.NovelChapterRecord> chapters = novelChapterRepository
+                .listByProject(context.tenantId(), context.userId(), context.creativeProjectId());
+        StringBuilder output = new StringBuilder();
+        output.append("【作品设定】\n").append(novelSettingsBlock(settings)).append("\n\n");
+        output.append("【章节目录】\n");
+        if (chapters.isEmpty()) {
+            output.append("（尚无章节，本章为第 1 章）\n");
+        } else {
+            for (var chapter : chapters) {
+                output.append("第").append(chapter.chapterNumber()).append("章 ").append(chapter.title())
+                        .append(chapter.status() == com.zwx.zwxagent.creative.domain.ChapterStatus.CONFIRMED
+                                ? "（已确认）" : "（草稿）")
+                        .append("\n");
+            }
+            int recent = Math.min(summaryCount, chapters.size());
+            output.append("\n【近").append(recent).append("章概要】\n");
+            chapters.stream().skip(chapters.size() - recent).forEach(chapter ->
+                    output.append("第").append(chapter.chapterNumber()).append("章：")
+                            .append(chapter.summary() == null || chapter.summary().isBlank()
+                                    ? "（无概要）" : chapter.summary())
+                            .append("\n"));
+        }
+        int nextNumber = chapters.isEmpty() ? 1 : chapters.getLast().chapterNumber() + 1;
+        output.append("\n【本章序号】第").append(nextNumber).append("章");
+        return new NodeResult(output.toString(),
+                "章节上下文已就绪（既往 " + chapters.size() + " 章，本章为第 " + nextNumber + " 章）");
+    }
+
+    /**
+     * 章节入库（novel_chapter_save）：把上游正文/概要写回绑定项目的章节库（DRAFT）。
+     * 同一运行幂等（崩溃重跑更新既有草稿，不产生重复章节）；章节号在入库时分配。
+     */
+    private NodeResult novelChapterSave(RunContext context, Map<String, Object> params) {
+        if (context.creativeProjectId() == null) {
+            throw new IllegalArgumentException("章节入库节点需要运行绑定创作项目（请从创作台发起运行）");
+        }
+        String content = text(params.get("content"));
+        if (content.isBlank()) {
+            throw new IllegalArgumentException("章节正文为空，请检查上游正文节点输出");
+        }
+        var view = novelChapterService.saveFromRun(workflowActor(context), context.creativeProjectId(),
+                UUID.fromString(context.id()), textOrDefault(text(params.get("title")), ""),
+                content, text(params.get("summary")), text(params.get("plotDirection")));
+        return new NodeResult(toJson(Map.of(
+                        "chapterId", String.valueOf(view.id()),
+                        "chapterNumber", view.chapterNumber(),
+                        "wordCount", view.wordCount())),
+                "章节草稿已入库：第" + view.chapterNumber() + "章「" + view.title() + "」（" + view.wordCount() + " 字）");
+    }
+
+    private com.zwx.zwxagent.platform.security.CurrentActor workflowActor(RunContext context) {
+        return new com.zwx.zwxagent.platform.security.CurrentActor(
+                context.userId(), context.tenantId(), context.userId(),
+                com.zwx.zwxagent.platform.security.Role.USER);
+    }
+
+    /** 项目设定文本块（novel_context 与剧情建议共用格式）。 */
+    private static String novelSettingsBlock(Map<String, Object> settings) {
+        return com.zwx.zwxagent.creative.novel.NovelPlanningService.settingsBlock(settings);
+    }
+
     private Map<String, Object> resolveParams(Map<String, Object> params, Map<String, Object> input,
                                               Map<String, String> outputs) {
         Map<String, Object> resolved = new LinkedHashMap<>();

@@ -286,7 +286,9 @@ const NODE_TYPES = [
   { type: 'db_query', label: '数据库查询', color: '#8A6D3B', hint: '只读 SELECT/WITH 查询；参数 sql' },
   { type: 'text_template', label: '文本模板', color: '#5B6B8C', hint: '拼接/封装上游结果；参数 template（含引用）' },
   { type: 'file_export', label: '文件导出', color: '#B0562A', hint: '把文本保存为可下载文件；参数 filename / content' },
-  { type: 'poster_render', label: '海报合成', color: '#C2455E', hint: '合成海报 PNG；参数 image / copy' }
+  { type: 'poster_render', label: '海报合成', color: '#C2455E', hint: '合成海报 PNG；参数 image / copy' },
+  { type: 'novel_context', label: '章节上下文（小说）', color: '#9A5B2E', hint: '读取作品设定 + 章节目录 + 近 N 章概要；参数 summaryCount' },
+  { type: 'novel_chapter_save', label: '章节入库（小说）', color: '#7A4E2E', hint: '把正文/概要存为章节草稿；参数 title / content / summary / plotDirection' }
 ]
 const PARAM_DEFAULTS = {
   search_image: { keyword: '{{input.keyword}}' },
@@ -300,7 +302,9 @@ const PARAM_DEFAULTS = {
   db_query: { sql: 'SELECT 1' },
   text_template: { template: '{{start.output}}' },
   file_export: { filename: 'output.md', content: '{{llm_text.output}}' },
-  poster_render: { image: '{{search_image.output}}', copy: '{{llm_text.output}}' }
+  poster_render: { image: '{{search_image.output}}', copy: '{{llm_text.output}}' },
+  novel_context: { summaryCount: 3 },
+  novel_chapter_save: { title: '{{input.title}}', content: '{{llm_text.output}}', summary: '{{summarize.output}}', plotDirection: '{{input.plotDirection}}' }
 }
 const LONG_PARAMS = new Set(['prompt', 'body', 'sql', 'template', 'content', 'question'])
 const NODE_HELP = {
@@ -316,7 +320,9 @@ const NODE_HELP = {
   db_query: '数据库查询：sql 只能写单条 SELECT/WITH（最多 200 行、10 秒超时）。输出为结果 JSON。',
   text_template: '文本模板：template 里可混合文字与引用，如“报告：{{llm_text.output}}”。输出为替换后的文本，不消耗模型。',
   file_export: '文件导出：filename 写文件名（md/txt/json/csv），content 通常引用上游文本。输出为可下载文件。',
-  poster_render: '海报合成：image 引用商品图 URL，或 imageAssetId 引用创作素材；copy 引用文案 JSON（标题/副标题/卖点/配色）。输出为海报 PNG。'
+  poster_render: '海报合成：image 引用商品图 URL，或 imageAssetId 引用创作素材；copy 引用文案 JSON（标题/副标题/卖点/配色）。输出为海报 PNG。',
+  novel_context: '章节上下文（小说）：读取运行绑定项目的作品设定（人物/世界观/文风）、章节目录与近 N 章概要（参数 summaryCount，默认 3）。输出纯文本上下文块，供模型对话节点整体引用 {{节点.output}}；概要随章节确认不断累积——这是创作层与单次画布运行的区别。必须从创作台绑定项目发起运行。',
+  novel_chapter_save: '章节入库（小说）：把上游正文与概要写回绑定项目的章节库（草稿，创作台可编辑/确认）。参数 content（正文，必填）、title（可空，自动按「第N章」命名）、summary、plotDirection。同一运行幂等，崩溃重跑不会产生重复章节。必须从创作台绑定项目发起运行。'
 }
 
 const route = useRoute()

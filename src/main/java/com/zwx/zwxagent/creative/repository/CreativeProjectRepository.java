@@ -126,6 +126,19 @@ public class CreativeProjectRepository {
                 (rs, rowNum) -> ProjectStatus.valueOf(rs.getString("status")), id).stream().findFirst();
     }
 
+    /** 项目设定 JSON（V13，长篇创作共用；小说约定 {characters, worldview, style}）。 */
+    public Optional<String> settingsJsonOf(String tenantId, String userId, UUID id) {
+        return jdbcTemplate.query(
+                "SELECT settings_json::text FROM creative_project WHERE id = ? AND tenant_id = ? AND user_id = ?",
+                (rs, rowNum) -> rs.getString(1), id, tenantId, userId).stream().findFirst();
+    }
+
+    /** 整体覆盖项目设定（服务层负责合并与校验）。 */
+    public void updateSettings(UUID id, String settingsJson) {
+        jdbcTemplate.update("UPDATE creative_project SET settings_json = ?::jsonb, updated_at = now() WHERE id = ?",
+                settingsJson, id);
+    }
+
     private static CreativeProjectRecord map(ResultSet rs, int rowNum) throws SQLException {
         return new CreativeProjectRecord(
                 UUID.fromString(rs.getString("id")),

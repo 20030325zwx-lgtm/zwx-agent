@@ -345,6 +345,48 @@ public class WorkflowService {
         return new DefinitionVersionView(nextVersion, name, description, graph, Instant.now());
     }
 
+    /**
+     * 节点必填参数契约（Infinite Canvas 评审第一批 A2）：
+     * 外层列表各约束须同时满足（AND）；内层列表为备选参数（OR，任一非空白即满足）。
+     * {{引用}} 表达式算已填——解析正确性交给运行时；这里拦截"缺参数的图跑到一半才失败"。
+     */
+    private static final Map<String, List<List<String>>> REQUIRED_PARAMS = Map.ofEntries(
+            Map.entry("search_image", List.of(List.of("keyword"))),
+            Map.entry("image_understand", List.of(List.of("image", "imageAssetId"))),
+            Map.entry("llm_text", List.of(List.of("prompt"))),
+            Map.entry("web_search", List.of(List.of("query"))),
+            Map.entry("image_generate", List.of(List.of("prompt"))),
+            Map.entry("media_image_generate", List.of(List.of("prompt"))),
+            Map.entry("media_image_edit", List.of(List.of("prompt"), List.of("imageAssetIds"))),
+            Map.entry("http_request", List.of(List.of("url"))),
+            Map.entry("db_query", List.of(List.of("sql"))),
+            Map.entry("text_template", List.of(List.of("template"))),
+            Map.entry("file_export", List.of(List.of("content"))),
+            Map.entry("poster_render", List.of(List.of("image", "imageAssetId"))),
+            Map.entry("novel_chapter_save", List.of(List.of("content"))));
+
+    /** 纯函数（便于单测）：返回缺失说明，null = 满足契约。 */
+    static String missingRequired(String type, Map<String, Object> params) {
+        List<List<String>> constraints = REQUIRED_PARAMS.get(type);
+        if (constraints == null) return null;
+        for (List<String> alternatives : constraints) {
+            boolean satisfied = false;
+            for (String key : alternatives) {
+                Object value = params == null ? null : params.get(key);
+                if (value != null && !(value instanceof String text && text.isBlank())) {
+                    satisfied = true;
+                    break;
+                }
+            }
+            if (!satisfied) {
+                return String.join("；", constraints.stream()
+                        .map(group -> String.join(" 或 ", group)).toList())
+                        + "（缺 " + String.join(" 或 ", alternatives) + "）";
+            }
+        }
+        return null;
+    }
+
     private void validateGraph(WorkflowGraph graph) {
         if (graph == null || graph.nodes() == null || graph.nodes().isEmpty()) {
             throw new IllegalArgumentException("画布至少需要一个节点");
@@ -355,6 +397,11 @@ public class WorkflowService {
             if (!keys.add(node.key())) throw new IllegalArgumentException("节点 key 重复：" + node.key());
             if (!NODE_TYPES.contains(node.type())) throw new IllegalArgumentException("未知节点类型：" + node.type());
             if (node.name() == null || node.name().isBlank()) throw new IllegalArgumentException("节点名称不能为空");
+            String missing = missingRequired(node.type(), node.params());
+            if (missing != null) {
+                throw new IllegalArgumentException(
+                        "节点「" + node.name() + "(" + node.key() + ")」缺少必填参数：" + missing);
+            }
         }
         if (graph.edges() != null) {
             for (GraphEdgeDef edge : graph.edges()) {
@@ -415,7 +462,7 @@ public class WorkflowService {
         if (!keyword.isEmpty()) input.put("keyword", keyword);
         if (input.isEmpty()) throw new IllegalArgumentException("请填写运行输入");
         if (definition.graph().nodes().isEmpty()) throw new IllegalArgumentException("该工作流没有可执行的节点");
-        topologicalOrder(definition.graph());
+        validateGraph(definition.graph()); // 运行提交前独立拒绝非法图（含必填参数预检）
         // 运行可绑定创作项目（工作流作为 AI 创作的一部分）：校验归属后落库，
         // 媒体节点产物归入该项目素材库，项目详情页可按项目筛选运行
         UUID creativeProjectId = request == null ? null : request.projectId();

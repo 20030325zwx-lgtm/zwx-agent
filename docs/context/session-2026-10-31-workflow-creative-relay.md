@@ -154,6 +154,17 @@
 - **验证**：NovelRulesTest 4 项全绿；浏览器 E2E 双章——第1章「星坠前夜」1753 字（上下文报"既往 0 章"）→ 确认入库 → 第2章 AI 建议明显承接第1章概要、运行报"**既往 1 章，本章为第 2 章**"、草稿 1999 字正文衔接所采走向。V13 迁移核对、前后端构建通过。
 - 未做（需用户启动）：漫剧、连写多章、结构化角色卡、章节版本历史；桌面端随下次打包携带（迁移自动增量跑）。
 
+## 追加 10（2026-10-31 深夜）：画布契约与创作闭环第一批（Infinite Canvas 评审）
+
+- 评审文档：`docs/design/2026-10-31-infinite-canvas-comparison-and-refactoring.md`；本批记录：`docs/design/2026-10-31-canvas-contract-loop-batch1.md`。
+- **节点契约**：新 `frontend/src/views/workflow/nodeCatalog.js` 单一注册表（14 类型：label/分组/默认参数/输入输出 kind/必填/帮助），节点库、表单、连线绑定、预检全由它驱动。**连线即绑定**：kind 兼容自动写绑定表达式（text→`{{源.output}}`、asset→`{{源.output.assetId}}`、imageAssetIds 追加上限 3），边显示参数名 label；旧图零迁移（applyGraph 从 params 反推 label）；不兼容拒绝连线。
+- **运行前预检**：前端 validateGraphForRun（运行对话框错误列表+定位）；后端 REQUIRED_PARAMS+missingRequired 纯函数（保存/发起共用，5 项单测 WorkflowGraphValidationTest）——语义：外层约束 AND、组内备选 OR。
+- **状态边界**：撤销/重做（快照栈 50、600ms 合并、Ctrl+Z/Shift+Z）；顶栏「未保存」徽标；运行面板明示「运行使用发起时的定义快照」+详情显示快照版本。
+- **闭环 B1**：V14 种子 `dual-candidate-poster`（双分支候选）与 `selected-poster`（理解→文案→海报）；素材库「对比」选择模式 + AssetCompare 并排选定 + 「用此图合成海报」发起（keyword 可空）。
+- **布局**：编辑器重排为 左节点库(可收起)/中大画布/右参数(按需)/底运行(可收起)。
+- **验证**：契约单测 5 项绿；E2E——旧图兼容、撤销重做、连线自动绑定（toast+边 label+参数写入）、类型拒绝、未保存拦截、双候选运行(2 张计费)→对比选定→合成 SUCCEEDED→海报 DERIVED/READY/1200x1600 归档。临时工作流 contract-e2e-temp 已删。
+- **取舍**：撤销用快照栈（命令化随 C 批）；预检只查引用存在（上游关系二期）；双候选用两节点（单节点多张留 C 批）。未做：C（局部重跑/输入快照）、D（Agent 画布工具/模板导入导出）、WAITING_USER、role 化引用、性能基线。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

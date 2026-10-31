@@ -399,11 +399,22 @@
                 <button type="button" class="cr-ghost" :aria-pressed="asset.starred"
                         @click="toggleStar(asset)">{{ asset.starred ? '已收藏' : '收藏' }}</button>
                 <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
+                <button type="button" class="cr-ghost" :class="{ active: compareIds.includes(asset.id) }"
+                        @click="toggleCompare(asset)">{{ compareIds.includes(asset.id) ? '已选对比' : '对比' }}</button>
                 <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFromAsset(asset)">继续创作</button>
                 <button type="button" class="cr-ghost danger" @click="removeAsset(asset)">删除</button>
               </span>
             </figcaption>
           </figure>
+        </div>
+
+        <!-- 对比选定浮条（创作闭环：候选对比 → 人工选定 → 合成） -->
+        <div v-if="compareIds.length" class="compare-bar">
+          <span class="compare-count">已选 {{ compareIds.length }}/2 张</span>
+          <button type="button" class="cr-primary" :disabled="compareIds.length < 2" @click="openCompare">
+            对比选定
+          </button>
+          <button type="button" class="cr-ghost" @click="compareIds = []">清空</button>
         </div>
       </div>
     </div>
@@ -502,6 +513,35 @@
       </div>
     </div>
 
+    <!-- 候选对比（选定后可发起海报合成） -->
+    <AssetCompare v-if="compareOpen" :items="compareItems" @close="compareOpen = false">
+      <template #actions="{ asset }">
+        <button type="button" class="cr-primary" :disabled="!asset" @click="openPosterForm(asset)">
+          用此图合成海报
+        </button>
+      </template>
+    </AssetCompare>
+
+    <!-- 用选定图合成海报 -->
+    <div v-if="posterForm.open" class="cr-dialog-backdrop" @click.self="posterForm.open = false">
+      <div class="cr-dialog" role="dialog" aria-modal="true" aria-labelledby="poster-form-title">
+        <h2 id="poster-form-title">用选定图合成海报 · {{ posterForm.asset?.displayName }}</h2>
+        <p class="cr-hint">视觉理解提炼卖点 → 生成文案 → 确定性合成海报（零生图计费），产物归入本项目素材库。</p>
+        <label class="cr-field">
+          <span class="cr-field-label"><span>卖点方向 / 关键词</span></span>
+          <input v-model.trim="posterForm.keyword" class="cr-input" maxlength="200"
+                 placeholder="如：加绒保暖 不起球（可留空，由商品理解自动提炼）" />
+        </label>
+        <p v-if="posterForm.error" class="cr-error">{{ posterForm.error }}</p>
+        <div class="cr-dialog-actions">
+          <button type="button" class="cr-secondary" @click="posterForm.open = false">取消</button>
+          <button type="button" class="cr-primary" :disabled="posterForm.starting" @click="startSelectedPoster">
+            {{ posterForm.starting ? '发起中…' : '发起合成' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
       <template #actions>
         <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred"
@@ -576,6 +616,7 @@ import {
 } from '../../api'
 import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta } from './shared'
 import AssetPreview from './AssetPreview.vue'
+import AssetCompare from '../../components/creative/AssetCompare.vue'
 import { getCreativeAssetBlob } from '../../api'
 import AssetParamField from '../../components/workflow/AssetParamField.vue'
 import { deriveRunInputs } from './workflowInputs'
@@ -892,6 +933,73 @@ async function openAssetPreview(asset) {
   previewAsset.value = asset
   previewSrc.value = ''
   previewSrc.value = await urlFor(asset.id)
+}
+
+// ---------------------------------------------------------------- 候选对比与选定（创作闭环 B1）
+
+const compareIds = ref([])
+const compareOpen = ref(false)
+const compareItems = ref([])
+const posterForm = reactive({ open: false, starting: false, error: '', keyword: '', asset: null })
+
+function toggleCompare(asset) {
+  const index = compareIds.value.indexOf(asset.id)
+  if (index >= 0) {
+    compareIds.value.splice(index, 1)
+    return
+  }
+  if (compareIds.value.length >= 2) {
+    showToast('最多选择 2 张对比', 'error')
+    return
+  }
+  compareIds.value.push(asset.id)
+}
+
+async function openCompare() {
+  if (compareIds.value.length < 2) return
+  const items = []
+  for (const id of compareIds.value) {
+    const asset = assets.value.find(item => item.id === id)
+    if (!asset) continue
+    items.push({ asset, src: await urlFor(asset.id) })
+  }
+  if (items.length < 2) {
+    showToast('所选素材已变化，请重新选择', 'error')
+    compareIds.value = []
+    return
+  }
+  compareItems.value = items
+  compareOpen.value = true
+}
+
+function openPosterForm(asset) {
+  if (!asset) return
+  posterForm.asset = asset
+  posterForm.keyword = ''
+  posterForm.error = ''
+  posterForm.open = true
+}
+
+async function startSelectedPoster() {
+  if (posterForm.starting || !posterForm.asset) return
+  posterForm.starting = true
+  posterForm.error = ''
+  try {
+    const input = { imageAssetId: posterForm.asset.id }
+    if (posterForm.keyword) input.keyword = posterForm.keyword
+    const run = await startWorkflow('selected-poster', posterForm.keyword, projectId.value, input)
+    posterForm.open = false
+    compareOpen.value = false
+    compareIds.value = []
+    showToast('海报合成已发起，产物将归入本项目', 'success')
+    await router.push({ path: `/creative/projects/${projectId.value}`, query: { tab: 'workflow', runId: run.id } })
+    tab.value = 'workflow'
+    await loadWorkflowRuns()
+  } catch (error) {
+    posterForm.error = error.response?.data?.error || '发起失败，请稍后重试'
+  } finally {
+    posterForm.starting = false
+  }
 }
 
 // ---------------------------------------------------------------- AI 小说（章节库 + 作品设定）
@@ -1895,4 +2003,21 @@ onBeforeUnmount(() => {
 .novel-suggestion-card:hover { border-color: var(--wb-brand); }
 .novel-suggestion-card p { margin: 0; font-size: 12px; color: var(--wb-muted); line-height: 1.6; }
 .novel-suggestion-adopt { font-size: 11px; color: var(--wb-brand); }
+
+/* ---- 候选对比与选定 ---- */
+.compare-bar {
+  position: sticky;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-top: 12px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  background: var(--wb-raise, #fff);
+  box-shadow: var(--wb-shadow-md);
+}
+.compare-count { color: var(--wb-text-2, #5b6472); font-size: 12.5px; }
+.asset-actions .cr-ghost.active { border-color: var(--wb-brand); color: var(--wb-brand); }
 </style>

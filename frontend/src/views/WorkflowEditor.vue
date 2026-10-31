@@ -5,6 +5,7 @@
         <router-link to="/workflows" class="back-link">← 工作流</router-link>
         <h1>{{ definition?.name || '工作流编辑' }}</h1>
         <span class="wf-version">v{{ definition?.version }} · {{ graphNodes.length }} 个节点</span>
+        <span v-if="graphDirty" class="dirty-badge" title="画布有未保存的修改；运行使用已保存版本的快照">未保存</span>
         <p v-if="definition?.description" class="topbar-desc">{{ definition.description }}</p>
       </div>
       <div class="topbar-actions">
@@ -18,9 +19,23 @@
         <button type="button" class="wf-run" :disabled="starting" @click="openRunDialog()">
           {{ starting ? '运行中…' : '运行' }}
         </button>
+        <button type="button" class="ghost-btn" :disabled="!canUndo" title="撤销 (Ctrl+Z)" @click="undo">
+          <Undo2 :size="14" /> 撤销
+        </button>
+        <button type="button" class="ghost-btn" :disabled="!canRedo" title="重做 (Ctrl+Shift+Z)" @click="redo">
+          <Redo2 :size="14" /> 重做
+        </button>
         <button type="button" class="ghost-btn" @click="autoLayout">自动布局</button>
         <button type="button" class="ghost-btn" :disabled="savingVersion" @click="saveVersion()">
           {{ savingVersion ? '保存中…' : '保存新版本' }}
+        </button>
+        <button
+          type="button"
+          class="ghost-btn"
+          :class="{ active: libraryOpen }"
+          @click="libraryOpen = !libraryOpen"
+        >
+          节点库
         </button>
         <button
           type="button"
@@ -37,79 +52,106 @@
 
     <div v-if="loadError" class="wf-empty">{{ loadError }}</div>
 
-    <div v-else class="canvas-area">
-      <div v-if="connectDrag.dragging" class="drag-hint">
-        拖到空白处松手添加节点 · 拖到节点端口直接连线
-      </div>
-      <VueFlow
-        :nodes="flowNodes"
-        :edges="flowEdges"
-        :nodes-draggable="true"
-        :nodes-connectable="true"
-        :elements-selectable="true"
-        :edges-updatable="true"
-        :delete-key-code="null"
-        :min-zoom="0.4"
-        :max-zoom="1.6"
-        :default-viewport="{ x: 20, y: 20, zoom: 0.95 }"
-        fit-view-on-init
-        @connect="onConnect"
-        @connect-start="onConnectStart"
-        @connect-end="onConnectEnd"
-        @edge-update="onEdgeUpdate"
-        @node-click="onNodeClick"
-        @pane-click="clearSelection"
-        @nodes-change="markDirtyOnChange"
-        @edges-change="markDirtyOnChange"
-      >
-        <Background pattern-color="#c7ccdb" :gap="18" :size="1.4" />
-        <Controls />
-        <template #node-default="nodeProps">
-          <div
-            class="wf-node"
-            :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass, { 'is-start': nodeProps.data.nodeType === 'start' }]"
-            :style="{ '--node-color': nodeColor(nodeProps.data.nodeType) }"
+    <div v-else class="wf-body">
+      <!-- 左侧：节点库（可收起），点击添加到画布；也可从端口拖到空白处就地添加 -->
+      <aside v-show="libraryOpen" class="wf-library" aria-label="节点库">
+        <div class="library-head">
+          <strong>节点库</strong>
+          <input v-model.trim="librarySearch" class="wf-input compact library-search" placeholder="搜索节点" />
+        </div>
+        <div v-for="group in filteredLibrary" :key="group.name" class="library-group">
+          <p class="library-group-name">{{ group.name }}</p>
+          <button
+            v-for="nodeType in group.items"
+            :key="nodeType.type"
+            type="button"
+            class="library-item"
+            :title="nodeType.hint"
+            @click="addNode(nodeType.type, null)"
           >
-            <Handle v-if="nodeProps.data.nodeType !== 'start'" type="target" :position="Position.Left" class="wf-handle target" />
-            <div class="node-main">
-              <span class="node-type">{{ nodeTypeLabel(nodeProps.data.nodeType) }}</span>
-              <span class="node-name">{{ nodeProps.data.label }}</span>
-            </div>
-            <span v-if="nodeProps.data.statusText" class="node-status">{{ nodeProps.data.statusText }}</span>
-            <span
-              v-else-if="isTerminalProducer(nodeProps.id)"
-              class="node-status node-output-tag"
-              title="该节点的产物会自动归入创作项目素材库，不需要下游连线"
-            >产物入库</span>
-            <Handle type="source" :position="Position.Right" class="wf-handle source" />
-          </div>
-        </template>
-      </VueFlow>
+            <span class="palette-dot" :style="{ background: nodeType.color }" />
+            <span class="library-item-label">{{ nodeType.label }}</span>
+          </button>
+        </div>
+        <p v-if="!filteredLibrary.some(group => group.items.length)" class="library-hint">没有匹配的节点</p>
+        <p class="library-hint">从节点端口拖到空白处可就地添加并自动连线。</p>
+      </aside>
 
-      <div
-        v-if="addMenu.open"
-        class="add-menu"
-        :style="{ left: addMenu.x + 'px', top: addMenu.y + 'px' }"
-        @click.stop
-      >
-        <p class="add-menu-title">
-          {{ addMenuSourceName ? `在「${addMenuSourceName}」之后添加` : '添加节点' }}
-          <span class="add-menu-sub">· 选择节点类型</span>
-        </p>
-        <button
-          v-for="nodeType in nodeTypes"
-          :key="nodeType.type"
-          type="button"
-          class="add-menu-item"
-          @click="addNode(nodeType.type, addMenu.sourceId, { x: addMenu.flowX, y: addMenu.flowY })"
+      <div class="canvas-area">
+        <div v-if="connectDrag.dragging" class="drag-hint">
+          拖到空白处松手添加节点 · 拖到节点端口直接连线（类型匹配时自动完成参数绑定）
+        </div>
+        <VueFlow
+          :nodes="flowNodes"
+          :edges="flowEdges"
+          :nodes-draggable="true"
+          :nodes-connectable="true"
+          :elements-selectable="true"
+          :edges-updatable="true"
+          :delete-key-code="null"
+          :min-zoom="0.4"
+          :max-zoom="1.6"
+          :default-viewport="{ x: 20, y: 20, zoom: 0.95 }"
+          fit-view-on-init
+          @connect="onConnect"
+          @connect-start="onConnectStart"
+          @connect-end="onConnectEnd"
+          @edge-update="onEdgeUpdate"
+          @node-click="onNodeClick"
+          @pane-click="clearSelection"
+          @nodes-change="markDirtyOnChange"
+          @edges-change="markDirtyOnChange"
         >
-          <span class="palette-dot" :style="{ background: nodeType.color }" />
-          <span class="add-menu-label">{{ nodeType.label }}</span>
-          <span class="add-menu-hint">{{ nodeType.hint }}</span>
-        </button>
+          <Background pattern-color="#c7ccdb" :gap="18" :size="1.4" />
+          <Controls />
+          <template #node-default="nodeProps">
+            <div
+              class="wf-node"
+              :class="[`t-${nodeProps.data.nodeType}`, nodeProps.data.statusClass, { 'is-start': nodeProps.data.nodeType === 'start' }]"
+              :style="{ '--node-color': nodeColor(nodeProps.data.nodeType) }"
+            >
+              <Handle v-if="nodeProps.data.nodeType !== 'start'" type="target" :position="Position.Left" class="wf-handle target" />
+              <div class="node-main">
+                <span class="node-type">{{ nodeTypeLabel(nodeProps.data.nodeType) }}</span>
+                <span class="node-name">{{ nodeProps.data.label }}</span>
+              </div>
+              <span v-if="nodeProps.data.statusText" class="node-status">{{ nodeProps.data.statusText }}</span>
+              <span
+                v-else-if="isTerminalProducer(nodeProps.id)"
+                class="node-status node-output-tag"
+                title="该节点的产物会自动归入创作项目素材库，不需要下游连线"
+              >产物入库</span>
+              <Handle type="source" :position="Position.Right" class="wf-handle source" />
+            </div>
+          </template>
+        </VueFlow>
+
+        <div
+          v-if="addMenu.open"
+          class="add-menu"
+          :style="{ left: addMenu.x + 'px', top: addMenu.y + 'px' }"
+          @click.stop
+        >
+          <p class="add-menu-title">
+            {{ addMenuSourceName ? `在「${addMenuSourceName}」之后添加` : '添加节点' }}
+            <span class="add-menu-sub">· 选择节点类型</span>
+          </p>
+          <button
+            v-for="nodeType in addMenuTypes"
+            :key="nodeType.type"
+            type="button"
+            class="add-menu-item"
+            @click="addNode(nodeType.type, addMenu.sourceId, { x: addMenu.flowX, y: addMenu.flowY })"
+          >
+            <span class="palette-dot" :style="{ background: nodeType.color }" />
+            <span class="add-menu-label">{{ nodeType.label }}</span>
+            <span class="add-menu-hint">{{ nodeType.hint }}</span>
+          </button>
+        </div>
       </div>
 
-      <div v-if="selectedNode" class="node-inspector">
+      <!-- 右侧：所选节点的参数面板（按需出现） -->
+      <aside v-if="selectedNode" class="node-inspector" aria-label="节点设置">
         <div class="inspector-head">
           <strong>节点设置：{{ selectedNode.data.label }}</strong>
           <div class="inspector-actions">
@@ -120,7 +162,7 @@
         </div>
         <label class="inspector-row">
           <span>名称</span>
-          <input v-model.trim="selectedNode.data.label" class="wf-input compact" maxlength="24" />
+          <input v-model.trim="selectedNode.data.label" class="wf-input compact" maxlength="24" @input="scheduleCommit" />
         </label>
         <div v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row align-top">
           <span class="param-key">{{ key }}</span>
@@ -128,31 +170,38 @@
             v-if="isAssetParam(key)"
             :model-value="String(selectedNode.data.params[key] || '')"
             :multiple="key === 'imageAssetIds'"
-            @update:model-value="value => selectedNode.data.params[key] = value"
+            @update:model-value="value => { selectedNode.data.params[key] = value; scheduleCommit() }"
           />
           <textarea
-            v-else-if="LONG_PARAMS.has(key)"
+            v-else-if="LONG_PARAM_KEYS.has(key)"
             v-model="selectedNode.data.params[key]"
             class="wf-input compact textarea"
             rows="3"
             :placeholder="paramPlaceholder(key)"
+            @input="scheduleCommit"
           />
-          <input v-else v-model="selectedNode.data.params[key]" class="wf-input compact" :placeholder="paramPlaceholder(key)" />
+          <input v-else v-model="selectedNode.data.params[key]" class="wf-input compact"
+                 :placeholder="paramPlaceholder(key)" @input="scheduleCommit" />
         </div>
-        <p class="inspector-help">{{ NODE_HELP[selectedNode.data.nodeType] || '' }}</p>
+        <p class="inspector-help">{{ nodeHelp(selectedNode.data.nodeType) }}</p>
         <p class="inspector-hint">
           参数支持引用：<code v-text="'{{input.keyword}}'"></code> 引用运行输入，
           <code v-text="'{{节点key.output}}'"></code> 引用上游输出。
+          撤销只作用于画布编辑，不影响已发起的运行与已产生的素材。
         </p>
-      </div>
+      </aside>
+    </div>
 
-      <aside v-if="runPanelOpen" class="run-panel" aria-label="运行记录">
-        <div class="run-panel-head">
-          <strong>运行记录</strong>
-          <button v-if="filteredRuns.length" type="button" class="refresh" @click="refresh">{{ pollLabel }}</button>
-          <button type="button" class="panel-close" aria-label="关闭运行记录" @click="runPanelOpen = false">×</button>
-        </div>
-        <div class="run-panel-body">
+    <!-- 底部：运行与结果区（可收起） -->
+    <aside v-if="runPanelOpen" class="run-panel" aria-label="运行记录">
+      <div class="run-panel-head">
+        <strong>运行记录</strong>
+        <span class="run-panel-note">运行使用发起时的定义快照，此后编辑不影响进行中的运行</span>
+        <button v-if="filteredRuns.length" type="button" class="refresh" @click="refresh">{{ pollLabel }}</button>
+        <button type="button" class="panel-close" aria-label="关闭运行记录" @click="runPanelOpen = false">×</button>
+      </div>
+      <div class="run-panel-body">
+        <div class="run-list-col">
           <p v-if="loading" class="section-hint">加载中…</p>
           <p v-else-if="!filteredRuns.length" class="section-hint">该工作流还没有运行记录，从右上角发起第一次运行</p>
           <div v-else class="run-list">
@@ -172,47 +221,58 @@
               <span class="run-status" :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span>
             </button>
           </div>
+        </div>
 
-          <div v-if="detail" class="run-detail">
-            <div class="run-detail-head">
-              <strong>运行详情</strong>
-              <span class="run-status big" :class="statusClass(detail.status)">{{ statusLabel(detail.status) }}</span>
-            </div>
-            <div class="detail-steps">
-              <div v-for="step in detail.steps" :key="step.key" class="detail-step-wrap">
-                <button type="button" class="detail-step" @click="toggleOutput(step.key)">
-                  <span class="status-dot" :class="stepClass(step.status)" />
-                  <span class="step-main">
-                    <span class="step-name">{{ step.name }}</span>
-                    <span class="step-message">{{ step.message || statusLabel(step.status) }}</span>
-                  </span>
-                  <span class="step-status">{{ stepStatusText(step.status) }}</span>
-                </button>
-                <div v-if="expandedOutput === step.key && step.output" class="step-output">
-                  <pre>{{ step.output }}</pre>
-                  <div class="output-actions">
-                    <button type="button" class="ghost-btn mini" @click="copyOutput(step.output)">复制</button>
-                  </div>
+        <div v-if="detail" class="run-detail">
+          <div class="run-detail-head">
+            <strong>运行详情 <span class="run-meta">定义快照 v{{ detail.definitionVersion }}</span></strong>
+            <span class="run-status big" :class="statusClass(detail.status)">{{ statusLabel(detail.status) }}</span>
+          </div>
+          <div class="detail-steps">
+            <div v-for="step in detail.steps" :key="step.key" class="detail-step-wrap">
+              <button type="button" class="detail-step" @click="toggleOutput(step.key)">
+                <span class="status-dot" :class="stepClass(step.status)" />
+                <span class="step-main">
+                  <span class="step-name">{{ step.name }}</span>
+                  <span class="step-message">{{ step.message || statusLabel(step.status) }}</span>
+                </span>
+                <span class="step-status">{{ stepStatusText(step.status) }}</span>
+              </button>
+              <div v-if="expandedOutput === step.key && step.output" class="step-output">
+                <pre>{{ step.output }}</pre>
+                <div class="output-actions">
+                  <button type="button" class="ghost-btn mini" @click="copyOutput(step.output)">复制</button>
                 </div>
               </div>
             </div>
-            <p v-if="detail.error" class="detail-error">{{ detail.error }}</p>
-            <div v-for="artifact in detail.artifacts" :key="artifact.name" class="artifact">
-              <img v-if="artifact.url && artifact.type !== 'file'" :src="artifact.url" alt="工作流产物" class="artifact-image" />
-              <a v-if="artifact.url" class="download-btn" :href="artifact.url" :download="artifact.name" target="_blank" rel="noopener">
-                下载 {{ artifact.name }}
-              </a>
-            </div>
+          </div>
+          <p v-if="detail.error" class="detail-error">{{ detail.error }}</p>
+          <div v-for="artifact in detail.artifacts" :key="artifact.name" class="artifact">
+            <img v-if="artifact.url && artifact.type !== 'file'" :src="artifact.url" alt="工作流产物" class="artifact-image" />
+            <a v-if="artifact.url" class="download-btn" :href="artifact.url" :download="artifact.name" target="_blank" rel="noopener">
+              下载 {{ artifact.name }}
+            </a>
           </div>
         </div>
-      </aside>
+      </div>
+    </aside>
 
-      <div v-if="runDialog.open" class="run-dialog-backdrop" @click.self="runDialog.open = false">
-        <div class="run-dialog" role="dialog" aria-modal="true" aria-labelledby="run-dialog-title">
-          <div class="run-dialog-head">
-            <h2 id="run-dialog-title">发起运行：{{ definition?.name }}</h2>
-            <button type="button" class="panel-close" aria-label="关闭运行对话框" @click="runDialog.open = false">×</button>
-          </div>
+    <div v-if="runDialog.open" class="run-dialog-backdrop" @click.self="runDialog.open = false">
+      <div class="run-dialog" role="dialog" aria-modal="true" aria-labelledby="run-dialog-title">
+        <div class="run-dialog-head">
+          <h2 id="run-dialog-title">发起运行：{{ definition?.name }}</h2>
+          <button type="button" class="panel-close" aria-label="关闭运行对话框" @click="runDialog.open = false">×</button>
+        </div>
+        <div v-if="runErrors.length" class="run-errors">
+          <p class="run-errors-title">运行前检查未通过（{{ runErrors.length }}）：</p>
+          <button v-for="err in runErrors" :key="err.key + err.message" type="button" class="run-error-item"
+                  @click="locateNode(err.key)">
+            <strong>{{ err.name }}</strong>
+            <span>{{ err.message }}</span>
+            <em>定位</em>
+          </button>
+        </div>
+        <template v-else>
           <label class="run-dialog-field">
             <span>关键词（运行时作为 input.keyword 引用）</span>
             <input v-model.trim="runDialog.keyword" class="wf-input compact" maxlength="200"
@@ -239,13 +299,13 @@
               </option>
             </select>
           </label>
-          <p v-if="runDialog.error" class="run-dialog-error">{{ runDialog.error }}</p>
-          <div class="run-dialog-actions">
-            <button type="button" class="ghost-btn" @click="runDialog.open = false">取消</button>
-            <button type="button" class="wf-run" :disabled="starting || !canStartRun" @click="submitRunDialog()">
-              {{ starting ? '发起中…' : '发起运行' }}
-            </button>
-          </div>
+        </template>
+        <p v-if="runDialog.error" class="run-dialog-error">{{ runDialog.error }}</p>
+        <div class="run-dialog-actions">
+          <button type="button" class="ghost-btn" @click="runDialog.open = false">取消</button>
+          <button type="button" class="wf-run" :disabled="starting || !canStartRun" @click="submitRunDialog()">
+            {{ starting ? '发起中…' : '发起运行' }}
+          </button>
         </div>
       </div>
     </div>
@@ -259,11 +319,15 @@ import { message } from 'ant-design-vue'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { Handle, MarkerType, Position, VueFlow, useVueFlow } from '@vue-flow/core'
-import { History } from 'lucide-vue-next'
+import { History, Redo2, Undo2 } from 'lucide-vue-next'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import AssetParamField from '../components/workflow/AssetParamField.vue'
 import { deriveRunInputs } from './creative/workflowInputs'
+import {
+  LONG_PARAM_KEYS, NODE_CATALOG, NODE_GROUPS, bindingExpression, inferEdgeLabel,
+  matchBinding, nodeColor, nodeTypeLabel, validateGraphForRun
+} from './workflow/nodeCatalog'
 import {
   getCreativeAssetBlob,
   getWorkflowDefinition,
@@ -274,57 +338,6 @@ import {
   startWorkflow
 } from '../api'
 
-const NODE_TYPES = [
-  { type: 'search_image', label: '图片搜索', color: '#2E6BE6', hint: '通过图片搜索获取参考图；参数 keyword' },
-  { type: 'image_understand', label: '图片理解', color: '#7C5CF0', hint: '理解图片内容；参数 image / question' },
-  { type: 'llm_text', label: '模型对话', color: '#0F9D8A', hint: '与对话模型交互；参数 prompt（含引用）' },
-  { type: 'web_search', label: '联网搜索', color: '#C77B1E', hint: '搜索网页信息；参数 query' },
-  { type: 'image_generate', label: '图片生成（旧）', color: '#A34FA8', hint: '同步轮询旧链路；参数 prompt / size / model（保留兼容）' },
-  { type: 'media_image_generate', label: '图片生成（创作）', color: '#8C3FA8', hint: '提交 AI 创作任务并持久等待；参数 prompt / size / projectId' },
-  { type: 'media_image_edit', label: '图片编辑（参考图）', color: '#B03FA8', hint: '带 1–3 张参考素材生成（如模特试穿）；参数 prompt / imageAssetIds / size' },
-  { type: 'http_request', label: 'REST 请求', color: '#3D7A3D', hint: '调用外部 API；参数 method / url / headers / body' },
-  { type: 'db_query', label: '数据库查询', color: '#8A6D3B', hint: '只读 SELECT/WITH 查询；参数 sql' },
-  { type: 'text_template', label: '文本模板', color: '#5B6B8C', hint: '拼接/封装上游结果；参数 template（含引用）' },
-  { type: 'file_export', label: '文件导出', color: '#B0562A', hint: '把文本保存为可下载文件；参数 filename / content' },
-  { type: 'poster_render', label: '海报合成', color: '#C2455E', hint: '合成海报 PNG；参数 image / copy' },
-  { type: 'novel_context', label: '章节上下文（小说）', color: '#9A5B2E', hint: '读取作品设定 + 章节目录 + 近 N 章概要；参数 summaryCount' },
-  { type: 'novel_chapter_save', label: '章节入库（小说）', color: '#7A4E2E', hint: '把正文/概要存为章节草稿；参数 title / content / summary / plotDirection' }
-]
-const PARAM_DEFAULTS = {
-  search_image: { keyword: '{{input.keyword}}' },
-  image_understand: { image: '{{search_image.output}}', question: '描述这张图片的内容与卖点' },
-  llm_text: { prompt: '根据以下信息生成内容：{{input.keyword}}' },
-  web_search: { query: '{{input.keyword}}' },
-  image_generate: { prompt: '为「{{input.keyword}}」生成一张简洁的商品宣传图，纯色背景', size: '1024*1024', model: 'wanx2.1-t2i-turbo' },
-  media_image_generate: { prompt: '为「{{input.keyword}}」生成一张简洁的商品宣传图，纯色背景', size: '1024*1024' },
-  media_image_edit: { prompt: '让参考图中的模特穿上参考图中的上衣和裤子，保持模特脸型与姿态不变，白底商品图', imageAssetIds: '{{start.output.modelAssetId}},{{start.output.topAssetId}},{{start.output.pantsAssetId}}', size: '1024*1024' },
-  http_request: { method: 'GET', url: 'https://', headers: '', body: '' },
-  db_query: { sql: 'SELECT 1' },
-  text_template: { template: '{{start.output}}' },
-  file_export: { filename: 'output.md', content: '{{llm_text.output}}' },
-  poster_render: { image: '{{search_image.output}}', copy: '{{llm_text.output}}' },
-  novel_context: { summaryCount: 3 },
-  novel_chapter_save: { title: '{{input.title}}', content: '{{llm_text.output}}', summary: '{{summarize.output}}', plotDirection: '{{input.plotDirection}}' }
-}
-const LONG_PARAMS = new Set(['prompt', 'body', 'sql', 'template', 'content', 'question'])
-const NODE_HELP = {
-  start: '开始节点：代表一次运行的输入。运行输入（如关键词）用 {{input.keyword}} 引用；{{start.output}} 是全部输入。',
-  search_image: '图片搜索：keyword 填搜索词（可直接写关键词或引用上游）。输出是图片 URL，可被图片理解/海报合成等节点引用。',
-  image_understand: '图片理解：image 填图片 URL 或引用上游图片节点输出；question 填想问的问题。输出为图片描述文本（服务不可用时降级为提示文本）。',
-  llm_text: '模型对话：prompt 写提示词，可嵌入 {{节点.output}} 与 {{input.字段}} 引用上游结果做二次编辑。输出为模型回复。使用“设置→模型”中绑定的对话模型。',
-  web_search: '联网搜索：query 填搜索词。输出为搜索结果文本（需要配置搜索 API Key）。',
-  image_generate: '图片生成（旧）：仅支持 DashScope 协议绑定，同步轮询约 120 秒；新流程建议改用「图片生成（创作）」——它走 AI 创作任务队列、可持久等待恢复，且能用模型设置里通过中转站接入的生图模型。',
-  media_image_generate: '图片生成（创作）：提交到 AI 创作队列并持久等待，服务重启后可继续。输出为 JSON：jobId / assetId / mediaType，可用 {{节点.output.assetId}} 引用到图片理解或海报合成。支持 DashScope 与中转站（OpenAI 兼容）生图模型。按张计费。',
-  media_image_edit: '图片编辑（参考图）：带 1–3 张本人素材作参考生成新图（中转站 OpenAI images/edits 协议）。imageAssetIds 填素材 ID 列表（逗号分隔或数组，支持 {{节点.output.assetId}} 引用），第一个通常是模特图。输出 JSON：jobId / assetId / mediaType。按张计费。作为末级节点时（如多机位中的侧面/背面）产物会自动归入素材库，无需下游连线。',
-  http_request: 'REST 请求：method 选 GET/POST 等，url 填地址，headers/body 填 JSON。输出为响应体（截断 4000 字）；非 2xx 视为失败。',
-  db_query: '数据库查询：sql 只能写单条 SELECT/WITH（最多 200 行、10 秒超时）。输出为结果 JSON。',
-  text_template: '文本模板：template 里可混合文字与引用，如“报告：{{llm_text.output}}”。输出为替换后的文本，不消耗模型。',
-  file_export: '文件导出：filename 写文件名（md/txt/json/csv），content 通常引用上游文本。输出为可下载文件。',
-  poster_render: '海报合成：image 引用商品图 URL，或 imageAssetId 引用创作素材；copy 引用文案 JSON（标题/副标题/卖点/配色）。输出为海报 PNG。',
-  novel_context: '章节上下文（小说）：读取运行绑定项目的作品设定（人物/世界观/文风）、章节目录与近 N 章概要（参数 summaryCount，默认 3）。输出纯文本上下文块，供模型对话节点整体引用 {{节点.output}}；概要随章节确认不断累积——这是创作层与单次画布运行的区别。必须从创作台绑定项目发起运行。',
-  novel_chapter_save: '章节入库（小说）：把上游正文与概要写回绑定项目的章节库（草稿，创作台可编辑/确认）。参数 content（正文，必填）、title（可空，自动按「第N章」命名）、summary、plotDirection。同一运行幂等，崩溃重跑不会产生重复章节。必须从创作台绑定项目发起运行。'
-}
-
 const route = useRoute()
 const { screenToFlowCoordinate } = useVueFlow()
 const workflowKey = computed(() => String(route.params.workflowKey || ''))
@@ -334,6 +347,8 @@ const runs = ref([])
 const detail = ref(null)
 const selectedId = ref(null)
 const runPanelOpen = ref(false)
+const libraryOpen = ref(true)
+const librarySearch = ref('')
 const keyword = ref('')
 const loading = ref(true)
 const starting = ref(false)
@@ -359,25 +374,27 @@ const addMenuSourceName = computed(() => {
   const node = flowNodes.value.find(item => item.id === addMenu.sourceId)
   return node?.data?.label || ''
 })
-
+const addMenuTypes = computed(() => NODE_GROUPS.flatMap(group => group.items))
+const filteredLibrary = computed(() => {
+  const q = librarySearch.value.toLowerCase()
+  if (!q) return NODE_GROUPS
+  return NODE_GROUPS
+    .map(group => ({ name: group.name, items: group.items.filter(item => item.label.toLowerCase().includes(q)) }))
+    .filter(group => group.items.length)
+})
 
 let pollTimer = null
-let graphDirty = false
 let suppressMenuCloseUntil = 0
 let nodeCounter = 0
 
-const nodeTypes = NODE_TYPES
+const graphDirty = ref(false)
 
 const graphNodes = computed(() => flowNodes.value)
-const loadedGraphs = ref(false)
 const filteredRuns = computed(() => runs.value.filter(run => run.workflowKey === workflowKey.value))
 const pollLabel = computed(() => (filteredRuns.value.some(run => run.status === 'RUNNING') ? '自动刷新中' : '刷新'))
 
-function nodeTypeLabel(type) {
-  return NODE_TYPES.find(item => item.type === type)?.label || type
-}
-function nodeColor(type) {
-  return NODE_TYPES.find(item => item.type === type)?.color || '#8A90A6'
+function nodeHelp(type) {
+  return NODE_CATALOG[type]?.help || ''
 }
 function paramPlaceholder(key) {
   return {
@@ -420,6 +437,63 @@ function formatTime(value) {
   return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
+// ---------------------------------------------------------------- 编辑历史（撤销/重做）
+
+// 快照栈：每次提交编辑后的完整图状态（上限 50）。
+// 撤销/重做只作用于画布与定义——运行记录、素材与已产生的费用是既成事实，不受影响。
+const historyStack = ref([])
+const futureStack = ref([])
+let commitTimer = null
+const canUndo = computed(() => historyStack.value.length > 1)
+const canRedo = computed(() => futureStack.value.length > 0)
+
+function snapshotGraph() {
+  return JSON.stringify({ nodes: flowNodes.value, edges: flowEdges.value })
+}
+
+/** 提交一次编辑（带去重）；连续变更（拖动/输入）经 scheduleCommit 合并。 */
+function commitHistory() {
+  if (commitTimer) { clearTimeout(commitTimer); commitTimer = null }
+  const snap = snapshotGraph()
+  if (historyStack.value[historyStack.value.length - 1] === snap) return
+  historyStack.value.push(snap)
+  if (historyStack.value.length > 50) historyStack.value.shift()
+  futureStack.value = []
+}
+
+function scheduleCommit() {
+  if (commitTimer) clearTimeout(commitTimer)
+  commitTimer = setTimeout(commitHistory, 600)
+}
+
+function restoreSnapshot(json) {
+  try {
+    const parsed = JSON.parse(json)
+    flowNodes.value = parsed.nodes || []
+    flowEdges.value = parsed.edges || []
+    graphDirty.value = true
+    if (selectedNode.value && !flowNodes.value.some(node => node.id === selectedNode.value.id)) {
+      selectedNode.value = null
+    } else if (selectedNode.value) {
+      selectedNode.value = flowNodes.value.find(node => node.id === selectedNode.value.id) || null
+    }
+  } catch (error) { /* 快照损坏时忽略 */ }
+}
+
+function undo() {
+  commitHistory()
+  if (historyStack.value.length <= 1) return
+  futureStack.value.push(historyStack.value.pop())
+  restoreSnapshot(historyStack.value[historyStack.value.length - 1])
+}
+
+function redo() {
+  commitHistory()
+  if (!futureStack.value.length) return
+  historyStack.value.push(futureStack.value.pop())
+  restoreSnapshot(historyStack.value[historyStack.value.length - 1])
+}
+
 // ---------------------------------------------------------------- 画布数据
 
 function layeredPositions(graph) {
@@ -454,6 +528,10 @@ const EDGE_DEFAULTS = {
   type: 'smoothstep',
   animated: false,
   updatable: true,
+  labelShowBg: true,
+  labelBgPadding: [4, 2],
+  labelBgStyle: { fill: '#F7F8FA', fillOpacity: 0.92 },
+  labelStyle: { fill: '#5B6472', fontSize: 10 },
   style: { stroke: '#94A3B8', strokeWidth: 1.8 },
   markerEnd: { type: MarkerType.ArrowClosed, color: '#94A3B8', width: 17, height: 17 }
 }
@@ -477,14 +555,19 @@ function applyGraph(versionView) {
       statusClass: ''
     }
   }))
+  // 旧图兼容：绑定 label 从目标节点 params 的 {{source.output...}} 引用反推（手写表达式同样识别）
+  const paramsByKey = new Map(graph.nodes.map(node => [node.key, node.params || {}]))
   flowEdges.value = graph.edges.map((edge, index) => ({
     id: `e-${edge.from}-${edge.to}-${index}`,
     source: edge.from,
     target: edge.to,
+    label: inferEdgeLabel(paramsByKey.get(edge.to), edge.from) || undefined,
     ...EDGE_DEFAULTS
   }))
   selectedNode.value = null
-  graphDirty = false
+  graphDirty.value = false
+  historyStack.value = [snapshotGraph()]
+  futureStack.value = []
 }
 
 async function loadDefinition() {
@@ -500,6 +583,7 @@ async function loadDefinition() {
 }
 
 function addNode(type, sourceId, position) {
+  commitHistory()
   const source = sourceId ? flowNodes.value.find(node => node.id === sourceId) : null
   const origin = position || {
     x: source ? source.position.x + 260 : 120,
@@ -523,7 +607,7 @@ function addNode(type, sourceId, position) {
       data: {
         label: nodeTypeLabel(type),
         nodeType: type,
-        params: { ...(PARAM_DEFAULTS[type] || {}) },
+        params: { ...(NODE_CATALOG[type]?.defaults || {}) },
         statusText: '',
         statusClass: ''
       }
@@ -542,10 +626,12 @@ function addNode(type, sourceId, position) {
     ]
   }
   addMenu.open = false
-  graphDirty = true
+  graphDirty.value = true
+  commitHistory()
 }
 
 function autoLayout() {
+  commitHistory()
   const edges = flowEdges.value.map(edge => ({ from: edge.source, to: edge.target }))
   const positioned = layeredPositions({ nodes: flowNodes.value.map(node => ({ key: node.id })), edges })
   const positionByKey = new Map(positioned.map(item => [item.node.key, { x: item.x, y: item.y }]))
@@ -553,7 +639,8 @@ function autoLayout() {
     ...node,
     position: positionByKey.get(node.id) || node.position
   }))
-  graphDirty = true
+  graphDirty.value = true
+  commitHistory()
 }
 
 /**
@@ -565,22 +652,68 @@ function clientToFlowPoint(clientX, clientY) {
   return screenToFlowCoordinate({ x: clientX, y: clientY })
 }
 
+/**
+ * 连线即绑定（评审 A1）：类型兼容时自动把引用表达式写入目标节点参数，
+ * 边显示绑定参数名；目标只有自由文本输入时仅作为执行依赖并提示；类型不兼容拒绝连线。
+ */
 function onConnect(connection) {
   if (!connection?.source || !connection?.target || connection.source === connection.target) return
   const exists = flowEdges.value.some(edge => edge.source === connection.source && edge.target === connection.target)
   if (exists) return
+  const sourceNode = flowNodes.value.find(node => node.id === connection.source)
+  const targetNode = flowNodes.value.find(node => node.id === connection.target)
+  if (!sourceNode || !targetNode) return
+  const match = matchBinding(sourceNode.data.nodeType, targetNode.data.nodeType)
+  let label = ''
+  if (match?.candidates) {
+    const bound = bindConnection(match, connection.source, targetNode.data.params)
+    if (bound) {
+      label = bound.param
+      message.success(`已绑定 ${targetNode.data.label}.${bound.param}`)
+    } else {
+      message.info(`已连接为执行依赖；${targetNode.data.label} 的同类输入已有绑定，未覆盖`)
+    }
+  } else if (match?.dependentOnly) {
+    message.info(`已连接为执行依赖；可在 ${targetNode.data.label} 的参数中引用 {{${connection.source}.output}}`)
+  } else {
+    message.warning(`不能连接：${nodeTypeLabel(sourceNode.data.nodeType)} 的输出与 ${nodeTypeLabel(targetNode.data.nodeType)} 的输入类型不匹配`)
+    return
+  }
   flowEdges.value = [
     ...flowEdges.value,
     {
       id: `e-${connection.source}-${connection.target}-${Date.now().toString(36)}`,
       source: connection.source,
       target: connection.target,
+      label: label || undefined,
       ...EDGE_DEFAULTS
     }
   ]
   connectDrag.justConnected = true
   setTimeout(() => { connectDrag.justConnected = false }, 50)
-  graphDirty = true
+  graphDirty.value = true
+  commitHistory()
+}
+
+/** 在第一个可用的兼容输入上写绑定：单值取空位；多值（imageAssetIds）追加去重并受上限约束。 */
+function bindConnection(match, sourceKey, params) {
+  const expression = bindingExpression(sourceKey, match.src)
+  for (const input of match.candidates) {
+    const current = String(params[input.param] ?? '')
+    if (input.multiple) {
+      const parts = current.split(',').map(part => part.trim()).filter(Boolean)
+      if (parts.includes(expression)) return { param: input.param, expression }
+      if (parts.length >= (input.max || 3)) continue
+      parts.push(expression)
+      params[input.param] = parts.join(',')
+      return { param: input.param, expression }
+    }
+    if (!current.trim()) {
+      params[input.param] = expression
+      return { param: input.param, expression }
+    }
+  }
+  return null
 }
 
 function onConnectStart(params) {
@@ -612,17 +745,24 @@ function onConnectEnd(event) {
 function onEdgeUpdate({ edge, connection }) {
   if (!edge || !connection?.source || !connection?.target) return
   if (connection.source === connection.target) return
+  const targetNode = flowNodes.value.find(node => node.id === connection.target)
   flowEdges.value = flowEdges.value.map(item => item.id === edge.id
-    ? { ...item, source: connection.source, target: connection.target }
+    ? { ...item, source: connection.source, target: connection.target,
+        label: inferEdgeLabel(targetNode?.data?.params, connection.source) || undefined }
     : item)
-  graphDirty = true
+  graphDirty.value = true
+  commitHistory()
 }
 
 function markDirtyOnChange(changes) {
   // dimensions/select 是初始化与选中事件，不代表用户编辑；否则刚加载的画布就会被当成"未保存"
   const userEdited = (changes || []).some(change =>
     change.type !== 'dimensions' && change.type !== 'select');
-  if (userEdited) graphDirty = true
+  if (!userEdited) return
+  graphDirty.value = true
+  const structural = (changes || []).some(change => change.type === 'add' || change.type === 'remove')
+  if (structural) commitHistory()
+  else scheduleCommit() // 拖动等连续变更：停顿后合并为一次历史
 }
 
 
@@ -649,11 +789,13 @@ function removeSelectedNode() {
     message.warning('开始节点不能删除')
     return
   }
+  commitHistory()
   const id = selectedNode.value.id
   flowNodes.value = flowNodes.value.filter(node => node.id !== id)
   flowEdges.value = flowEdges.value.filter(edge => edge.source !== id && edge.target !== id)
   selectedNode.value = null
-  graphDirty = true
+  graphDirty.value = true
+  commitHistory()
 }
 
 function handleDeleteKey(event) {
@@ -681,7 +823,7 @@ async function saveVersion() {
       edges: flowEdges.value.map(edge => ({ from: edge.source, to: edge.target }))
     }
     await saveWorkflowVersion(workflowKey.value, { graph })
-    graphDirty = false
+    graphDirty.value = false
     message.success('已保存为新版本')
     await refresh()
     await loadDefinition()
@@ -749,32 +891,11 @@ async function selectRun(runId) {
   await loadDetail(runId)
 }
 
-async function start() {
-  if (!keyword.value || starting.value) return
-  starting.value = true
-  try {
-    if (graphDirty) {
-      message.warning('画布有未保存的修改，先保存为版本再运行')
-      return
-    }
-    const run = await startWorkflow(workflowKey.value, keyword.value)
-    selectedId.value = run.id
-    detail.value = run
-    runPanelOpen.value = true
-    applyRunStatus(run)
-    await refresh()
-    message.success('工作流已开始运行')
-  } catch (error) {
-    message.error(error?.response?.data?.error || '发起运行失败')
-  } finally {
-    starting.value = false
-  }
-}
-
 // ---------------------------------------------------------------- 运行对话框
 
 const runDialog = reactive({ open: false, keyword: '', projectId: '', values: {}, assetKeys: [], textKeys: [], error: '' })
 const runDialogProjects = ref([])
+const runErrors = ref([])
 const isAssetKey = key => /AssetIds?$/.test(key)
 
 /** 从图参数里扫描运行输入键（与创作首页/项目页共用同一推导）。 */
@@ -784,16 +905,19 @@ const runInputKeys = computed(() => {
 })
 
 const canStartRun = computed(() => {
+  if (runErrors.value.length) return false
   if (!runDialog.keyword.trim()) return false
   if (runDialog.assetKeys.some(key => !(runDialog.values[key] || '').trim())) return false
   return true
 })
 
+/** 运行前预检（评审 A1）：缺失输入/未知引用在提交前定位到具体节点；后端保存/运行时独立拒绝。 */
 function openRunDialog() {
-  if (graphDirty) {
+  if (graphDirty.value) {
     message.warning('画布有未保存的修改，先保存为版本再运行')
     return
   }
+  runErrors.value = validateGraphForRun(flowNodes.value)
   const assetKeys = []
   const textKeys = []
   for (const key of runInputKeys.value) {
@@ -814,6 +938,11 @@ function openRunDialog() {
       })
       .catch(() => { /* 打开时保持空，提交时会报错提示 */ })
   }
+}
+
+function locateNode(key) {
+  const node = flowNodes.value.find(item => item.id === key)
+  if (node) selectedNode.value = node
 }
 
 async function submitRunDialog() {
@@ -884,17 +1013,31 @@ function closeAddMenu() {
   addMenu.open = false
 }
 
+function handleHistoryKeys(event) {
+  if (!(event.ctrlKey || event.metaKey)) return
+  const key = event.key.toLowerCase()
+  if (key !== 'z' && key !== 'y') return
+  const target = event.target
+  if (target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+  event.preventDefault()
+  if (key === 'y' || (key === 'z' && event.shiftKey)) redo()
+  else undo()
+}
+
 onMounted(async () => {
   document.addEventListener('click', closeAddMenu)
   document.addEventListener('keydown', handleDeleteKey)
+  document.addEventListener('keydown', handleHistoryKeys)
   document.addEventListener('keydown', event => { if (event.key === 'Escape') addMenu.open = false })
   await refresh()
   await loadDefinition()
 })
 onBeforeUnmount(() => {
   if (pollTimer) clearTimeout(pollTimer)
+  if (commitTimer) clearTimeout(commitTimer)
   document.removeEventListener('click', closeAddMenu)
   document.removeEventListener('keydown', handleDeleteKey)
+  document.removeEventListener('keydown', handleHistoryKeys)
 })
 </script>
 
@@ -908,18 +1051,33 @@ onBeforeUnmount(() => {
 .wf-empty { flex: 1; padding: 40px 24px; color: var(--wb-muted); font-size: 13px; }
 .section-hint { padding: 14px 4px; color: var(--wb-muted); font-size: 13px; }
 .wf-version { padding: 2px 10px; border-radius: 999px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 12px; white-space: nowrap; }
+.dirty-badge { padding: 2px 10px; border-radius: 999px; background: rgba(199, 123, 30, 0.14); color: #C77B1E; font-size: 12px; white-space: nowrap; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .keyword-input { width: 180px; flex: 0 0 auto; }
 .runs-toggle { display: inline-flex; align-items: center; gap: 6px; }
-.runs-toggle.active { border-color: var(--wb-brand); color: var(--wb-brand); }
+.runs-toggle.active, .ghost-btn.active { border-color: var(--wb-brand); color: var(--wb-brand); }
 .run-badge { padding: 0 6px; border-radius: 999px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 11px; }
+
+/* 主体三栏：左节点库 / 中画布 / 右参数面板 */
+.wf-body { flex: 1; min-height: 0; display: flex; }
+.wf-library { width: 224px; flex: 0 0 224px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 12px; border-right: 1px solid var(--wb-border); background: var(--wb-surface); }
+.library-head { display: flex; flex-direction: column; gap: 8px; }
+.library-head strong { color: var(--wb-text); font-size: 13px; font-weight: 600; }
+.library-search { flex: 1; }
+.library-group { display: flex; flex-direction: column; gap: 2px; }
+.library-group-name { padding: 4px 6px; color: var(--wb-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; }
+.library-item { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; color: var(--wb-text); font-size: 12.5px; text-align: left; }
+.library-item:hover { background: var(--wb-fill); }
+.library-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-hint { padding: 4px 6px; color: var(--wb-muted); font-size: 11.5px; line-height: 1.6; }
 .canvas-area { position: relative; flex: 1; min-height: 0; background: var(--wb-surface-2); }
-.canvas-area :deep(.vue-flow) { width: 100%; height: 100%; }
-.palette { display: flex; gap: 6px; flex-wrap: wrap; }
-.palette-item { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--wb-border); border-radius: 999px; background: var(--wb-surface); color: var(--wb-text-2); font-size: 12px; transition: border-color 0.15s; }
-.palette-item:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
-.palette-dot { width: 8px; height: 8px; border-radius: 50%; }
-.ghost-btn { padding: 7px 14px; border: 1px solid var(--wb-border); border-radius: 9px; background: transparent; color: var(--wb-text-2); font-size: 12.5px; }
+.canvas-area :deep(.vue-flow) { width: 100%; height: 100%; background: var(--wb-surface-2); }
+.canvas-area :deep(.vue-flow__node) { z-index: 6; }
+.canvas-area :deep(.vue-flow__edge) { z-index: 1; }
+.canvas-area :deep(.vue-flow__node-default) { padding: 0; border: 0; background: transparent; width: auto; box-shadow: none; }
+.palette-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+
+.ghost-btn { display: inline-flex; align-items: center; gap: 5px; padding: 7px 14px; border: 1px solid var(--wb-border); border-radius: 9px; background: transparent; color: var(--wb-text-2); font-size: 12.5px; }
 .ghost-btn:hover { border-color: var(--wb-brand); color: var(--wb-brand); }
 .ghost-btn.danger:hover { border-color: var(--wb-danger); color: var(--wb-danger); }
 .wf-input { flex: 1; padding: 9px 13px; border: 1px solid var(--wb-border); border-radius: 10px; background: var(--wb-surface-2); color: var(--wb-text); font-size: 13px; outline: none; }
@@ -927,20 +1085,7 @@ onBeforeUnmount(() => {
 .wf-input:focus { border-color: var(--wb-brand); box-shadow: 0 0 0 3px var(--wb-brand-soft); }
 .wf-run { padding: 9px 20px; border: 0; border-radius: 10px; background: var(--wb-brand); color: var(--wb-brand-contrast); font-size: 13px; font-weight: 500; }
 .wf-run:disabled { background: var(--wb-fill); color: var(--wb-muted); }
-.canvas-area :deep(.vue-flow) { background: var(--wb-surface-2); }
-.canvas-area :deep(.vue-flow__node) {
-  z-index: 6;
-}
-.canvas-area :deep(.vue-flow__edge) {
-  z-index: 1;
-}
-.canvas-area :deep(.vue-flow__node-default) {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  width: auto;
-  box-shadow: none;
-}
+
 .wf-handle {
   width: 12px;
   height: 12px;
@@ -973,16 +1118,12 @@ onBeforeUnmount(() => {
 }
 .wf-node.is-start { border-color: var(--wb-brand); background: var(--wb-brand-soft); }
 .wf-node.is-start .node-name { color: var(--wb-brand); }
+.wf-node.is-running { border-color: var(--wb-info); box-shadow: 0 0 0 2px rgba(37, 144, 255, 0.18); }
+.wf-node.is-done { border-color: var(--wb-success); }
+.wf-node.is-failed { border-color: var(--wb-danger); box-shadow: 0 0 0 2px rgba(220, 47, 76, 0.18); }
+
 .inspector-row.align-top { align-items: flex-start; }
 .textarea { resize: vertical; min-height: 64px; font-family: var(--wb-font-mono, monospace); font-size: 12px; line-height: 1.5; }
-.detail-step-wrap { border-bottom: 1px solid var(--wb-border); }
-.detail-step-wrap:last-child { border-bottom: 0; }
-.detail-step { width: 100%; border: 0; background: transparent; text-align: left; }
-.step-output { padding: 4px 14px 12px 30px; }
-.step-output pre { max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: 9px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
-.output-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
-.ghost-btn.mini { padding: 4px 10px; font-size: 11.5px; }
-.download-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 9px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12.5px; }
 .drag-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 8; padding: 6px 14px; border-radius: 999px; background: var(--wb-brand); color: var(--wb-brand-contrast); font-size: 12px; box-shadow: var(--wb-shadow-md); pointer-events: none; }
 .canvas-area :deep(.vue-flow__connection-path) { stroke: var(--wb-brand); stroke-width: 2; stroke-dasharray: 6 4; }
 .canvas-area :deep(.vue-flow__edge-path) { stroke: #94A3B8; stroke-width: 1.8; }
@@ -995,10 +1136,9 @@ onBeforeUnmount(() => {
 .add-menu-item:hover { background: var(--wb-fill); }
 .add-menu-label { flex: 0 0 auto; }
 .add-menu-hint { flex: 1; min-width: 0; overflow: hidden; color: var(--wb-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.wf-node.is-running { border-color: var(--wb-info); box-shadow: 0 0 0 2px rgba(37, 144, 255, 0.18); }
-.wf-node.is-done { border-color: var(--wb-success); }
-.wf-node.is-failed { border-color: var(--wb-danger); box-shadow: 0 0 0 2px rgba(220, 47, 76, 0.18); }
-.node-inspector { position: absolute; left: 16px; bottom: 16px; z-index: 20; width: 360px; max-height: 62%; overflow-y: auto; padding: 14px 16px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg); background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); display: flex; flex-direction: column; gap: 10px; }
+
+/* 右侧参数面板：常规文档流内的一栏，选中节点时出现 */
+.node-inspector { width: 360px; flex: 0 0 360px; overflow-y: auto; padding: 14px 16px; border-left: 1px solid var(--wb-border); background: var(--wb-raise); display: flex; flex-direction: column; gap: 10px; }
 .inspector-head { display: flex; flex-direction: column; align-items: stretch; gap: 8px; color: var(--wb-text); font-size: 13px; }
 .inspector-actions { display: flex; gap: 6px; }
 .inspector-row { display: flex; align-items: center; gap: 12px; }
@@ -1006,14 +1146,19 @@ onBeforeUnmount(() => {
 .inspector-help { padding: 8px 10px; border-radius: 8px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12px; line-height: 1.6; }
 .inspector-hint { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
 .inspector-hint code { padding: 1px 6px; border-radius: 5px; background: var(--wb-fill); font-size: 11.5px; }
-.run-panel { position: absolute; top: 12px; right: 16px; bottom: 16px; z-index: 25; width: 360px; display: flex; flex-direction: column; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg); background: var(--wb-raise); box-shadow: var(--wb-shadow-lg); overflow: hidden; }
-.run-panel-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--wb-border); }
+
+/* 底部运行与结果区：可收起，横向布局（左运行列表 + 右详情） */
+.run-panel { flex: 0 0 300px; display: flex; flex-direction: column; border-top: 1px solid var(--wb-border); background: var(--wb-raise); overflow: hidden; }
+.run-panel-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--wb-border); }
 .run-panel-head strong { color: var(--wb-text); font-size: 13.5px; font-weight: 600; }
+.run-panel-note { color: var(--wb-muted); font-size: 11.5px; }
 .run-panel-head .refresh { margin-left: auto; }
 .panel-close { padding: 0 2px; border: 0; background: transparent; color: var(--wb-muted); font-size: 20px; line-height: 1; }
 .panel-close:hover { color: var(--wb-text); }
-.run-panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 14px; }
-.run-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--wb-border); }
+.run-panel-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.run-list-col { width: 280px; flex: 0 0 280px; overflow-y: auto; padding: 8px 10px 14px; border-right: 1px solid var(--wb-border); }
+.run-detail { flex: 1; min-width: 0; overflow-y: auto; padding: 10px 14px 14px; }
+.run-detail { border-top: 0; }
 .run-detail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .run-detail-head strong { color: var(--wb-text); font-size: 13px; font-weight: 600; }
 .refresh { border: 0; background: transparent; color: var(--wb-muted); font-size: 12px; }
@@ -1035,15 +1180,23 @@ onBeforeUnmount(() => {
 .run-status.is-failed { color: var(--wb-danger); }
 .run-status.big { padding: 3px 12px; border-radius: 999px; background: var(--wb-fill); font-weight: 550; }
 .detail-steps { display: flex; flex-direction: column; }
+.detail-step-wrap { border-bottom: 1px solid var(--wb-border); }
+.detail-step-wrap:last-child { border-bottom: 0; }
+.detail-step { width: 100%; border: 0; background: transparent; text-align: left; }
 .detail-step { display: flex; align-items: center; gap: 11px; padding: 10px 4px; }
 .detail-step + .detail-step { border-top: 1px solid var(--wb-border); }
 .step-main { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
 .step-name { color: var(--wb-text); font-size: 13px; font-weight: 500; }
 .step-message { color: var(--wb-muted); font-size: 12px; }
 .step-status { color: var(--wb-muted); font-size: 12px; }
+.step-output { padding: 4px 14px 12px 30px; }
+.step-output pre { max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: 9px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+.output-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
+.ghost-btn.mini { padding: 4px 10px; font-size: 11.5px; }
 .detail-error { margin-top: 10px; padding: 10px 12px; border-radius: var(--wb-radius); background: rgba(220, 47, 76, 0.08); color: var(--wb-danger); font-size: 12.5px; }
 .artifact { margin-top: 14px; text-align: center; }
 .artifact-image { max-width: 380px; width: 100%; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-md); }
+.download-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 9px; background: var(--wb-brand-soft); color: var(--wb-brand); font-size: 12.5px; }
 
 /* 运行对话框 */
 .run-dialog-backdrop {
@@ -1072,6 +1225,13 @@ onBeforeUnmount(() => {
 .run-dialog-field { display: flex; flex-direction: column; gap: 6px; }
 .run-dialog-field > span { color: var(--wb-text-2); font-size: 12.5px; }
 .run-dialog-key { font-family: var(--wb-font-mono, monospace); font-size: 12px; color: var(--wb-text-2); }
+.run-errors { display: flex; flex-direction: column; gap: 6px; }
+.run-errors-title { color: var(--wb-danger); font-size: 12.5px; font-weight: 550; }
+.run-error-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid rgba(220, 47, 76, 0.35); border-radius: 9px; background: rgba(220, 47, 76, 0.05); text-align: left; }
+.run-error-item strong { color: var(--wb-text); font-size: 12.5px; flex: 0 0 auto; }
+.run-error-item span { flex: 1; min-width: 0; color: var(--wb-danger); font-size: 12px; }
+.run-error-item em { flex: 0 0 auto; color: var(--wb-brand); font-size: 12px; font-style: normal; }
+.run-error-item:hover { border-color: var(--wb-danger); }
 .run-dialog-error { color: var(--wb-danger); font-size: 12.5px; }
 .run-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 </style>

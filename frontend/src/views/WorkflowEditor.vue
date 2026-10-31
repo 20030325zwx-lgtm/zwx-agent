@@ -13,9 +13,9 @@
           class="wf-input compact keyword-input"
           placeholder="运行输入（关键词）"
           maxlength="64"
-          @keydown.enter="start()"
+          @keydown.enter="openRunDialog()"
         />
-        <button type="button" class="wf-run" :disabled="starting || !keyword" @click="start()">
+        <button type="button" class="wf-run" :disabled="starting" @click="openRunDialog()">
           {{ starting ? '运行中…' : '运行' }}
         </button>
         <button type="button" class="ghost-btn" @click="autoLayout">自动布局</button>
@@ -58,6 +58,7 @@
         @connect-end="onConnectEnd"
         @edge-update="onEdgeUpdate"
         @node-click="onNodeClick"
+        @pane-click="clearSelection"
         @nodes-change="markDirtyOnChange"
         @edges-change="markDirtyOnChange"
       >
@@ -109,23 +110,30 @@
           <div class="inspector-actions">
             <button type="button" class="ghost-btn" @click="openAddMenuForNode(selectedNode.id)">添加下游节点</button>
             <button type="button" class="ghost-btn danger" @click="removeSelectedNode">删除节点</button>
+            <button type="button" class="panel-close" aria-label="关闭节点设置" @click="clearSelection">×</button>
           </div>
         </div>
         <label class="inspector-row">
           <span>名称</span>
           <input v-model.trim="selectedNode.data.label" class="wf-input compact" maxlength="24" />
         </label>
-        <label v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row align-top">
+        <div v-for="(value, key) in selectedNode.data.params" :key="key" class="inspector-row align-top">
           <span class="param-key">{{ key }}</span>
+          <AssetParamField
+            v-if="isAssetParam(key)"
+            :model-value="String(selectedNode.data.params[key] || '')"
+            :multiple="key === 'imageAssetIds'"
+            @update:model-value="value => selectedNode.data.params[key] = value"
+          />
           <textarea
-            v-if="LONG_PARAMS.has(key)"
+            v-else-if="LONG_PARAMS.has(key)"
             v-model="selectedNode.data.params[key]"
             class="wf-input compact textarea"
             rows="3"
             :placeholder="paramPlaceholder(key)"
           />
           <input v-else v-model="selectedNode.data.params[key]" class="wf-input compact" :placeholder="paramPlaceholder(key)" />
-        </label>
+        </div>
         <p class="inspector-help">{{ NODE_HELP[selectedNode.data.nodeType] || '' }}</p>
         <p class="inspector-hint">
           参数支持引用：<code v-text="'{{input.keyword}}'"></code> 引用运行输入，
@@ -193,6 +201,48 @@
           </div>
         </div>
       </aside>
+
+      <div v-if="runDialog.open" class="run-dialog-backdrop" @click.self="runDialog.open = false">
+        <div class="run-dialog" role="dialog" aria-modal="true" aria-labelledby="run-dialog-title">
+          <div class="run-dialog-head">
+            <h2 id="run-dialog-title">发起运行：{{ definition?.name }}</h2>
+            <button type="button" class="panel-close" aria-label="关闭运行对话框" @click="runDialog.open = false">×</button>
+          </div>
+          <label class="run-dialog-field">
+            <span>关键词（运行时作为 input.keyword 引用）</span>
+            <input v-model.trim="runDialog.keyword" class="wf-input compact" maxlength="200"
+                   placeholder="如：加绒保暖 不起球 显瘦百搭" />
+          </label>
+          <div v-for="key in runDialog.assetKeys" :key="key" class="run-dialog-field">
+            <span class="run-dialog-key">{{ key }}</span>
+            <AssetParamField
+              :model-value="runDialog.values[key] || ''"
+              :multiple="key === 'imageAssetIds'"
+              @update:model-value="value => runDialog.values[key] = value"
+            />
+          </div>
+          <div v-for="key in runDialog.textKeys" :key="key" class="run-dialog-field">
+            <span class="run-dialog-key">{{ key }}</span>
+            <input v-model.trim="runDialog.values[key]" class="wf-input compact" :placeholder="`运行输入 ${key}`" />
+          </div>
+          <label class="run-dialog-field">
+            <span>目标创作项目（产物归入该项目）</span>
+            <select v-model="runDialog.projectId" class="wf-input compact">
+              <option value="" disabled>选择项目</option>
+              <option v-for="project in runDialogProjects" :key="project.id" :value="project.id">
+                {{ project.name }}
+              </option>
+            </select>
+          </label>
+          <p v-if="runDialog.error" class="run-dialog-error">{{ runDialog.error }}</p>
+          <div class="run-dialog-actions">
+            <button type="button" class="ghost-btn" @click="runDialog.open = false">取消</button>
+            <button type="button" class="wf-run" :disabled="starting || !canStartRun" @click="submitRunDialog()">
+              {{ starting ? '发起中…' : '发起运行' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -207,9 +257,11 @@ import { Handle, MarkerType, Position, VueFlow, useVueFlow } from '@vue-flow/cor
 import { History } from 'lucide-vue-next'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
+import AssetParamField from '../components/workflow/AssetParamField.vue'
 import {
   getWorkflowDefinition,
   getWorkflowRun,
+  listCreativeProjects,
   listWorkflows,
   saveWorkflowVersion,
   startWorkflow
@@ -222,6 +274,7 @@ const NODE_TYPES = [
   { type: 'web_search', label: '联网搜索', color: '#C77B1E', hint: '搜索网页信息；参数 query' },
   { type: 'image_generate', label: '图片生成（旧）', color: '#A34FA8', hint: '同步轮询旧链路；参数 prompt / size / model（保留兼容）' },
   { type: 'media_image_generate', label: '图片生成（创作）', color: '#8C3FA8', hint: '提交 AI 创作任务并持久等待；参数 prompt / size / projectId' },
+  { type: 'media_image_edit', label: '图片编辑（参考图）', color: '#B03FA8', hint: '带 1–3 张参考素材生成（如模特试穿）；参数 prompt / imageAssetIds / size' },
   { type: 'http_request', label: 'REST 请求', color: '#3D7A3D', hint: '调用外部 API；参数 method / url / headers / body' },
   { type: 'db_query', label: '数据库查询', color: '#8A6D3B', hint: '只读 SELECT/WITH 查询；参数 sql' },
   { type: 'text_template', label: '文本模板', color: '#5B6B8C', hint: '拼接/封装上游结果；参数 template（含引用）' },
@@ -235,6 +288,7 @@ const PARAM_DEFAULTS = {
   web_search: { query: '{{input.keyword}}' },
   image_generate: { prompt: '为「{{input.keyword}}」生成一张简洁的商品宣传图，纯色背景', size: '1024*1024', model: 'wanx2.1-t2i-turbo' },
   media_image_generate: { prompt: '为「{{input.keyword}}」生成一张简洁的商品宣传图，纯色背景', size: '1024*1024' },
+  media_image_edit: { prompt: '让参考图中的模特穿上参考图中的上衣和裤子，保持模特脸型与姿态不变，白底商品图', imageAssetIds: '{{start.output.modelAssetId}},{{start.output.topAssetId}},{{start.output.pantsAssetId}}', size: '1024*1024' },
   http_request: { method: 'GET', url: 'https://', headers: '', body: '' },
   db_query: { sql: 'SELECT 1' },
   text_template: { template: '{{start.output}}' },
@@ -250,6 +304,7 @@ const NODE_HELP = {
   web_search: '联网搜索：query 填搜索词。输出为搜索结果文本（需要配置搜索 API Key）。',
   image_generate: '图片生成（旧）：仅支持 DashScope 协议绑定，同步轮询约 120 秒；新流程建议改用「图片生成（创作）」——它走 AI 创作任务队列、可持久等待恢复，且能用模型设置里通过中转站接入的生图模型。',
   media_image_generate: '图片生成（创作）：提交到 AI 创作队列并持久等待，服务重启后可继续。输出为 JSON：jobId / assetId / mediaType，可用 {{节点.output.assetId}} 引用到图片理解或海报合成。支持 DashScope 与中转站（OpenAI 兼容）生图模型。按张计费。',
+  media_image_edit: '图片编辑（参考图）：带 1–3 张本人素材作参考生成新图（中转站 OpenAI images/edits 协议）。imageAssetIds 填素材 ID 列表（逗号分隔或数组，支持 {{节点.output.assetId}} 引用），第一个通常是模特图。输出 JSON：jobId / assetId / mediaType。按张计费。',
   http_request: 'REST 请求：method 选 GET/POST 等，url 填地址，headers/body 填 JSON。输出为响应体（截断 4000 字）；非 2xx 视为失败。',
   db_query: '数据库查询：sql 只能写单条 SELECT/WITH（最多 200 行、10 秒超时）。输出为结果 JSON。',
   text_template: '文本模板：template 里可混合文字与引用，如“报告：{{llm_text.output}}”。输出为替换后的文本，不消耗模型。',
@@ -540,7 +595,10 @@ function onEdgeUpdate({ edge, connection }) {
 }
 
 function markDirtyOnChange(changes) {
-  if (changes?.length) graphDirty = true
+  // dimensions/select 是初始化与选中事件，不代表用户编辑；否则刚加载的画布就会被当成"未保存"
+  const userEdited = (changes || []).some(change =>
+    change.type !== 'dimensions' && change.type !== 'select');
+  if (userEdited) graphDirty = true
 }
 
 
@@ -687,6 +745,94 @@ async function start() {
   } finally {
     starting.value = false
   }
+}
+
+// ---------------------------------------------------------------- 运行对话框
+
+const runDialog = reactive({ open: false, keyword: '', projectId: '', values: {}, assetKeys: [], textKeys: [], error: '' })
+const runDialogProjects = ref([])
+const isAssetKey = key => /AssetIds?$/.test(key)
+
+/** 从图参数里扫描运行输入键：{{input.KEY}} 与 {{start.output.KEY}} 都算运行输入。 */
+const runInputKeys = computed(() => {
+  const keys = new Set()
+  const scan = value => {
+    const text = String(value ?? '')
+    for (const match of text.matchAll(/\{\{(?:input|start\.output)\.([A-Za-z0-9_]+)\}\}/g)) {
+      keys.add(match[1])
+    }
+  }
+  for (const node of graphNodes.value) {
+    Object.values(node.data?.params || {}).forEach(scan)
+  }
+  return [...keys]
+})
+
+const canStartRun = computed(() => {
+  if (!runDialog.keyword.trim()) return false
+  if (runDialog.assetKeys.some(key => !(runDialog.values[key] || '').trim())) return false
+  return true
+})
+
+function openRunDialog() {
+  if (graphDirty) {
+    message.warning('画布有未保存的修改，先保存为版本再运行')
+    return
+  }
+  const assetKeys = []
+  const textKeys = []
+  for (const key of runInputKeys.value) {
+    ;(isAssetKey(key) ? assetKeys : textKeys).push(key)
+  }
+  if (!assetKeys.includes('keyword')) textKeys.unshift('keyword')
+  runDialog.keyword = keyword.value || ''
+  runDialog.assetKeys = assetKeys
+  runDialog.textKeys = textKeys.filter(key => key !== 'keyword')
+  runDialog.values = {}
+  runDialog.error = ''
+  runDialog.open = true
+  if (!runDialogProjects.value.length) {
+    listCreativeProjects({ limit: 20 })
+      .then(data => {
+        runDialogProjects.value = (data.items || []).filter(project => project.status === 'ACTIVE')
+        if (!runDialog.projectId) runDialog.projectId = runDialogProjects.value[0]?.id || ''
+      })
+      .catch(() => { /* 打开时保持空，提交时会报错提示 */ })
+  }
+}
+
+async function submitRunDialog() {
+  if (!canStartRun.value || starting.value) return
+  starting.value = true
+  runDialog.error = ''
+  try {
+    const input = {}
+    for (const key of [...runDialog.assetKeys, ...runDialog.textKeys]) {
+      const value = key === 'keyword' ? runDialog.keyword : (runDialog.values[key] || '').trim()
+      if (value) input[key] = value
+    }
+    const run = await startWorkflow(workflowKey.value, runDialog.keyword, runDialog.projectId || null, input)
+    runDialog.open = false
+    keyword.value = runDialog.keyword
+    selectedId.value = run.id
+    detail.value = run
+    runPanelOpen.value = true
+    applyRunStatus(run)
+    await refresh()
+    message.success('工作流已开始运行')
+  } catch (error) {
+    runDialog.error = error?.response?.data?.error || '发起运行失败'
+  } finally {
+    starting.value = false
+  }
+}
+
+function clearSelection() {
+  selectedNode.value = null
+}
+
+function isAssetParam(key) {
+  return isAssetKey(key)
 }
 
 function openAddMenuForNode(nodeId) {
@@ -863,4 +1009,34 @@ onBeforeUnmount(() => {
 .detail-error { margin-top: 10px; padding: 10px 12px; border-radius: var(--wb-radius); background: rgba(220, 47, 76, 0.08); color: var(--wb-danger); font-size: 12.5px; }
 .artifact { margin-top: 14px; text-align: center; }
 .artifact-image { max-width: 380px; width: 100%; border: 1px solid var(--wb-border); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-md); }
+
+/* 运行对话框 */
+.run-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(24, 28, 40, 0.42);
+}
+.run-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(480px, calc(100% - 48px));
+  max-height: calc(100% - 64px);
+  overflow-y: auto;
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: var(--wb-surface);
+  box-shadow: var(--wb-shadow-lg);
+}
+.run-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.run-dialog-head h2 { font-size: 15px; font-weight: 600; color: var(--wb-text); }
+.run-dialog-field { display: flex; flex-direction: column; gap: 6px; }
+.run-dialog-field > span { color: var(--wb-text-2); font-size: 12.5px; }
+.run-dialog-key { font-family: var(--wb-font-mono, monospace); font-size: 12px; color: var(--wb-text-2); }
+.run-dialog-error { color: var(--wb-danger); font-size: 12.5px; }
+.run-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 </style>

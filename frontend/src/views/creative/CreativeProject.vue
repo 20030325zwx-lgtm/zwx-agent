@@ -161,7 +161,7 @@
               <option value="768*1152">768 × 1152（竖版）</option>
             </select>
           </label>
-          <label class="panel-switch">
+          <label v-if="imageProtocol === 'dashscope'" class="panel-switch">
             <input v-model="watermark" type="checkbox" @change="markDirty" />
             <span>添加 AI 生成水印</span>
           </label>
@@ -366,6 +366,7 @@ const { urls, thumbs, urlFor, thumbFor } = useAssetUrls()
 const projectId = computed(() => route.params.projectId)
 const project = ref(null)
 const imageBinding = ref(null)
+const imageProtocol = computed(() => imageBinding.value?.protocol || 'dashscope')
 const pageError = ref('')
 const tab = ref(route.query.tab === 'workflow' ? 'workflow' : 'studio')
 
@@ -662,7 +663,10 @@ async function generate() {
       operation: 'text_to_image',
       originalPrompt: idea.value.trim(),
       effectivePrompt: prompt,
-      parameters: { size: size.value, watermark: watermark.value }
+      // 参数按模型协议声明：watermark 是 DashScope 专有；中转站（openai-images）schema 只收 size
+      parameters: imageProtocol.value === 'dashscope'
+        ? { size: size.value, watermark: watermark.value }
+        : { size: size.value }
     })
     pendingKey = null
     showToast(result.reused ? '已复用原任务，未重复提交' : '任务已受理，正在生成', 'success')

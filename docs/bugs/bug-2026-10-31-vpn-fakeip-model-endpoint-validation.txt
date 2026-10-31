@@ -1,0 +1,38 @@
+日期：2026-10-31
+主题：VPN fake-IP 环境下模型服务地址校验误拦中转站域名
+
+问题现象：
+本机运行（spring.profiles.active=local）在模型设置新增 openai-compatible 中转站
+供应商（https://api.kkrich.ltd/v1）时报错"模型服务地址必须是可解析的公网 HTTP(S) URL"，
+创建失败。同域名 curl 可正常访问（走 VPN 隧道）。
+
+影响范围：
+所有通过系统 VPN/代理上网的本机部署环境：域名被解析成 fake-IP 后无法新增
+第三方模型供应商（中转站、自建网关等）。不影响公网直连环境与网页部署。
+
+原因：
+用户 VPN 对被代理域名返回 fake-IP（实测 28.0.0.125 与 fdfe:dcba:9876::fb），
+后者落在 IPv6 ULA（fd00::/8）。UrlAccessPolicy.requirePublic 把该解析结果判为
+内网地址，AppConfigurationService 的公网校验因此拒绝。
+
+解决方式（2026-10-30 用户确认"本机模式放行"方案）：
+1. ModelCatalogService.normalizeBaseUrl：本机部署模式
+   （app.config.allow-local-model-endpoints=true）下，主机名形式（非 IP 字面量）
+   的服务地址跳过 DNS 公网校验，仅保留 HTTP(S)/无凭据校验；IP 字面量仍走原有
+   本地/公网校验，不放宽 SSRF 边界。与工作流 http_request 节点已有的
+   "VPN fake-IP 域名放行"策略一致。
+2. application-local.yml 新增 app.config.allow-local-model-endpoints: true
+   （经用户同意的增量配置）。
+
+验证结果：
+- ModelCatalogFetchModelsTest 新增 localModeAllowsHostnameButKeepsIpLiteralChecks
+  通过（主机名放行、198.18.0.0/15 IP 字面量仍被拒、IPv6 字面量非主机名）。
+- 真实链路：创建 KKAI 中转站供应商 → 拉取 3 个模型 → 启用 gpt-image-2.5-sunburst
+  并勾选 image_generation → 绑定"图片生成"用途 → 创作台真实出图 SUCCEEDED。
+
+后续注意事项：
+- 网页部署（非本机模式）行为不变，公网出站校验仍然生效。
+- 本机模式下不要对主机名地址做解析级校验的回归假设；相关判定为
+  ModelCatalogService.isHostnameEndpoint（含 IPv4/IPv6 字面量识别）。
+- 中转站若返回 URL 型图片结果，SafeMediaDownloader 的逐跳校验同样可能被
+  fake-IP 影响；当前 gpt-image 系返回 b64_json 不受影响，留待观察。

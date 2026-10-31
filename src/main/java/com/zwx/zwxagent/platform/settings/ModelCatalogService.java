@@ -43,7 +43,8 @@ public class ModelCatalogService {
     }
 
     public record BindingView(Long providerId, Long modelRowId, String providerName,
-                              String modelName, boolean providerEnabled, boolean modelEnabled) {
+                              String modelName, boolean providerEnabled, boolean modelEnabled,
+                              String protocol) {
     }
 
     public record CatalogView(long revision, List<ProviderView> providers,
@@ -610,7 +611,7 @@ public class ModelCatalogService {
         Map<String, BindingView> result = new LinkedHashMap<>();
         jdbcTemplate.query("""
                         SELECT b.purpose, b.provider_id, b.model_row_id, p.name AS provider_name, p.enabled AS provider_enabled,
-                               m.model_id, m.enabled AS model_enabled
+                               m.model_id, m.enabled AS model_enabled, p.protocol
                         FROM model_binding b
                         JOIN model_provider p ON p.id = b.provider_id
                         JOIN model_provider_model m ON m.id = b.model_row_id
@@ -620,7 +621,8 @@ public class ModelCatalogService {
                     String purpose = rs.getString("purpose");
                     result.put(purpose, new BindingView(rs.getLong("provider_id"), rs.getLong("model_row_id"),
                             rs.getString("provider_name"), rs.getString("model_id"),
-                            rs.getBoolean("provider_enabled"), rs.getBoolean("model_enabled")));
+                            rs.getBoolean("provider_enabled"), rs.getBoolean("model_enabled"),
+                            rs.getString("protocol")));
                 }, scopeType, ownerId);
         return result;
     }
@@ -668,15 +670,38 @@ public class ModelCatalogService {
             if ("openai-compatible".equals(protocol)) throw new IllegalArgumentException("OpenAI 兼容接口需要配置服务地址");
             return null;
         }
-        // 桌面等本机部署场景允许显式配置回环/内网模型地址；网页部署保持公网出站限制
-        if (allowLocalEndpoints && isLocalEndpoint(value)) {
-            String normalized = value.replaceAll("/+$", "");
-            if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
-                throw new IllegalArgumentException("模型服务地址必须是 HTTP(S) URL");
+        // 桌面等本机部署场景允许显式配置回环/内网模型地址；网页部署保持公网出站限制。
+        // 本机模式下主机名形式的服务地址同样放行：用户 VPN/系统代理会把域名解析成
+        // fake-IP（如 fdfe:dcba::/48，落在本网段检查里被误拦），实际流量走本机隧道；
+        // IP 字面量仍保持原有本地/公网校验，不放宽 SSRF 边界。
+        if (allowLocalEndpoints && (isLocalEndpoint(value) || isHostnameEndpoint(value))) {
+            java.net.URI parsed;
+            try {
+                parsed = java.net.URI.create(value);
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException("模型服务地址格式不正确");
             }
-            return normalized;
+            if (!("http".equalsIgnoreCase(parsed.getScheme()) || "https".equalsIgnoreCase(parsed.getScheme()))
+                    || parsed.getUserInfo() != null) {
+                throw new IllegalArgumentException("模型服务地址必须是无凭据的 HTTP(S) URL");
+            }
+            return value.replaceAll("/+$", "");
         }
         return legacyConfiguration.validateAndNormalizeBaseUrl(value);
+    }
+
+    /** 主机名（非 IP 字面量）判定：本机部署模式下这类地址跳过 DNS 公网校验。 */
+    static boolean isHostnameEndpoint(String url) {
+        try {
+            String host = java.net.URI.create(url).getHost();
+            if (host == null || host.isBlank()) return false;
+            String literal = host.startsWith("[") && host.endsWith("]")
+                    ? host.substring(1, host.length() - 1) : host;
+            if (literal.contains(":")) return false; // IPv6 字面量
+            return !literal.chars().allMatch(c -> c == '.' || Character.isDigit(c));
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     private boolean isLocalEndpoint(String url) {

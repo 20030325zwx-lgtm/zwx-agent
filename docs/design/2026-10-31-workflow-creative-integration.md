@@ -55,7 +55,7 @@
 
 - 旧 `image_generate` 工作流节点保持 DashScope 硬编码（仅改帮助文案引导）；生图连通性测试按钮未做（用户确认范围外）。
 - `fetch-models` 不区分模型类型，模型分类交给用户勾选能力；后续可按名称启发式预选。
-- 真实中转站出图验证（同 A18 约束）需要用户提供中转站 base_url + key 后做一次计费调用确认；当前 `openai-images` 适配器与 profile 标记 UNVERIFIED 是诚实的。
+- 真实中转站出图验证：**2026-10-31 已通过**（KKAI 中转站 / gpt-image-2.5-sunburst，真实计费一张，SUCCEEDED，b64 直接入库）。过程修复两处：VPN fake-IP 被模型地址公网校验误拦（见 docs/bugs/bug-2026-10-31-vpn-fakeip-model-endpoint-validation.txt）、创作台 watermark 参数按协议感知发送（BindingView 增加 protocol）。openai-images profile 默认仍标 UNVERIFIED（不同中转站/模型差异大，逐模型真实验证后再人工升级）。
 - 创作台 size 选择器仍是 DashScope 固定枚举；中转站模型的自由尺寸可在后续把选择器改为读 profile schema。
 
 ## 验证记录

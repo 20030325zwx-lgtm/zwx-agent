@@ -108,4 +108,27 @@ class ModelCatalogFetchModelsTest {
             jdbcTemplate.update("DELETE FROM model_provider WHERE id = ?", dashscopeId);
         }
     }
+
+    /** 本机部署模式（allow-local-model-endpoints=true）：主机名放行（兼容 VPN fake-IP），IP 字面量仍校验。 */
+    @Test
+    void localModeAllowsHostnameButKeepsIpLiteralChecks() {
+        ModelCatalogService.ProviderView hostnameProvider = catalogService.createProvider(TEST_USER,
+                new ModelCatalogService.ProviderRequest("本机模式主机名", "openai-compatible",
+                        "https://relay.unresolvable-test.invalid/v1", "sk-test", true, false));
+        long hostnameId = hostnameProvider.id();
+        try {
+            Assertions.assertEquals("https://relay.unresolvable-test.invalid/v1", hostnameProvider.baseUrl(),
+                    "本机模式下主机名形式地址应放行（不要求公网可解析）");
+        } finally {
+            jdbcTemplate.update("DELETE FROM model_provider WHERE id = ?", hostnameId);
+        }
+        // 198.18.0.0/15 是保留的基准测试段（常见 fake-IP 段），IP 字面量不能借本机模式绕过校验
+        Assertions.assertThrows(IllegalArgumentException.class,
+                () -> catalogService.createProvider(TEST_USER,
+                        new ModelCatalogService.ProviderRequest("本机模式IP字面量", "openai-compatible",
+                                "https://198.18.0.1/v1", "sk-test", true, false)));
+        Assertions.assertTrue(ModelCatalogService.isHostnameEndpoint("https://api.kkrich.ltd/v1"));
+        Assertions.assertFalse(ModelCatalogService.isHostnameEndpoint("https://198.18.0.1/v1"));
+        Assertions.assertFalse(ModelCatalogService.isHostnameEndpoint("https://[fdfe:dcba:9876::fb]/v1"));
+    }
 }

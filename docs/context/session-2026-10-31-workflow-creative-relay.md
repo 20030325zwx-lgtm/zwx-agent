@@ -34,6 +34,23 @@
 - fetch-models 不做模型类型启发式分类，能力由用户勾选。
 - 测试环境注意：调度相关测试 SQL 禁用 DB `now() ± interval`，必须绑定 JVM 时间戳（Docker VM 时钟漂移会造成跨时钟比较偶发失败，本批已修复测试中的实例）。
 
+## 追加（2026-10-31 下午）：真实中转站验证通过 + 两处修复
+
+- **真实中转站 E2E 通过（含计费一次）**：用户提供 KKAI 中转站（https://api.kkrich.ltd/v1）。
+  UI 链路全通：新建供应商 → 拉取模型列表（gpt-image-2 / 2.5-flare / 2.5-sunburst）→
+  启用 gpt-image-2.5-sunburst 并勾选"图片生成" → 绑定用途 → 创作台真实出图
+  **SUCCEEDED**（约 90 秒，b64 返回直接入库，产物 1.5MB 已入项目素材库）。
+  注意：该绑定替换了用户原来的 DashScope wanx2.1-t2i-plus 用户绑定，可在模型设置一键改回。
+- **修复 1（bug-2026-10-31-vpn-fakeip）**：用户 VPN 把中转站域名解析成 fake-IP
+  （fdfe:dcba:9876::fb 落在 ULA 段）被模型地址公网校验误拦。本机部署模式下主机名
+  形式地址跳过 DNS 公网校验（ModelCatalogService.isHostnameEndpoint），application-local.yml
+  经用户同意加 allow-local-model-endpoints: true。IP 字面量校验不放宽。
+- **修复 2**：创作台固定发送 watermark 参数被 openAiImages schema 按 BR07 拒绝
+  （提交按钮点了没反应，后端 4xx）。BindingView 增加 protocol 字段，前端仅对
+  dashscope 协议发送/展示水印参数；Agent 工具与工作流节点本就只发 size，无需改。
+- target/classes 曾残留 "Name N.class" 垃圾文件导致打包失败，`mvn clean package` 解决。
+- 未提交：以上修复与 ChatRoom 去头像改动待用户确认后提交。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

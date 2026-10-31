@@ -61,6 +61,7 @@ public class MediaJobScheduler {
     private final TransactionTemplate transactionTemplate;
     private final Map<String, MediaProviderAdapter> adapters;
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    private final com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage;
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @Value("${creative.scheduler.enabled:false}")
@@ -100,6 +101,7 @@ public class MediaJobScheduler {
                              AssetIngestService ingestService, ConfigSecretCipher secretCipher,
                              TransactionTemplate transactionTemplate, List<MediaProviderAdapter> adapters,
                              org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+                             com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage,
                              io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         this.jobRepository = jobRepository;
         this.eventRepository = eventRepository;
@@ -111,6 +113,7 @@ public class MediaJobScheduler {
         this.adapters = adapters.stream().collect(Collectors.toMap(
                 MediaProviderAdapter::key, Function.identity(), (a, b) -> a));
         this.jdbcTemplate = jdbcTemplate;
+        this.mediaStorage = mediaStorage;
         this.meterRegistry = meterRegistry;
     }
 
@@ -234,7 +237,10 @@ public class MediaJobScheduler {
         startAttempt(job.id(), attemptNo, AttemptAction.SUBMIT);
         MediaProviderAdapter.SubmitResult result;
         try {
-            result = adapter.submit(resolved, job.inputSnapshot(), submissionKey);
+            // image_edit：把参考素材解析成字节交给适配器（仅本人 READY 素材，受理时已校验）
+            java.util.Map<java.util.UUID, byte[]> referenceAssets =
+                    resolveReferenceAssets(job.inputSnapshot().referenceAssetIds());
+            result = adapter.submit(resolved, job.inputSnapshot(), submissionKey, referenceAssets);
         } catch (Exception exception) {
             result = MediaProviderAdapter.SubmitResult.unknown(exception.getMessage());
         }
@@ -514,6 +520,23 @@ public class MediaJobScheduler {
     private void lockQuota(String scopeType, String scopeId) {
         jdbcTemplate.query("SELECT max_inflight FROM media_provider_quota WHERE scope_type = ? AND scope_id = ? FOR UPDATE",
                 rs -> { }, scopeType, scopeId);
+    }
+
+    /** 参考素材字节解析：素材库存对象直读；单张超过下载上限按失败处理（提交结果由异常路径收敛为 Unknown 前先本地失败）。 */
+    private java.util.Map<java.util.UUID, byte[]> resolveReferenceAssets(java.util.List<java.util.UUID> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) return java.util.Map.of();
+        var result = new java.util.LinkedHashMap<java.util.UUID, byte[]>();
+        for (java.util.UUID assetId : assetIds) {
+            var row = jdbcTemplate.queryForMap(
+                    "SELECT object_key, media_type FROM creative_asset WHERE id = ?", assetId);
+            String objectKey = String.valueOf(row.get("object_key"));
+            try (var in = mediaStorage.open(objectKey)) {
+                result.put(assetId, in.readAllBytes());
+            } catch (Exception exception) {
+                throw new IllegalStateException("参考素材读取失败：" + assetId + "；" + exception.getMessage(), exception);
+            }
+        }
+        return result;
     }
 
     private MediaProviderAdapter adapterFor(String adapterKey) {

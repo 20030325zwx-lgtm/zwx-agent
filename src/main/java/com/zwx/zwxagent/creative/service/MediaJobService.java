@@ -58,7 +58,13 @@ public class MediaJobService {
     private final CreativeProjectRepository projectRepository;
     private final MediaProviderQuotaRepository quotaRepository;
     private final MediaModelResolver modelResolver;
+    private final com.zwx.zwxagent.creative.repository.CreativeAssetRepository assetRepository;
+    private final com.zwx.zwxagent.creative.repository.MediaJobAssetRefRepository assetRefRepository;
     private final TransactionTemplate transactionTemplate;
+
+    /** image_edit 允许的参考图数量上限（模特/上衣/裤子等；防止 multipart 过大）。 */
+    public static final int MAX_REFERENCE_ASSETS = 3;
+    public static final String OPERATION_IMAGE_EDIT = "image_edit";
 
     @org.springframework.beans.factory.annotation.Value("${creative.submissions-enabled:true}")
     private boolean submissionsEnabled;
@@ -66,12 +72,17 @@ public class MediaJobService {
     public MediaJobService(MediaJobRepository jobRepository, MediaJobEventRepository eventRepository,
                            CreativeProjectRepository projectRepository,
                            MediaProviderQuotaRepository quotaRepository,
-                           MediaModelResolver modelResolver, TransactionTemplate transactionTemplate) {
+                           MediaModelResolver modelResolver,
+                           com.zwx.zwxagent.creative.repository.CreativeAssetRepository assetRepository,
+                           com.zwx.zwxagent.creative.repository.MediaJobAssetRefRepository assetRefRepository,
+                           TransactionTemplate transactionTemplate) {
         this.jobRepository = jobRepository;
         this.eventRepository = eventRepository;
         this.projectRepository = projectRepository;
         this.quotaRepository = quotaRepository;
         this.modelResolver = modelResolver;
+        this.assetRepository = assetRepository;
+        this.assetRefRepository = assetRefRepository;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -258,14 +269,19 @@ public class MediaJobService {
         }
         var referenceAssetIds = request == null || request.referenceAssetIds() == null
                 ? java.util.List.<UUID>of() : request.referenceAssetIds();
-        // BR08：text_to_image 不接受参考图（P1）
-        if (!referenceAssetIds.isEmpty()) {
+        // BR08（2026-10-31 扩展）：text_to_image 仍不接受参考图；image_edit 需要 1–3 张本人 READY 素材作参考
+        if (OPERATION_IMAGE_EDIT.equals(operation)) {
+            if (referenceAssetIds.isEmpty() || referenceAssetIds.size() > MAX_REFERENCE_ASSETS) {
+                throw CreativeException.unsupportedParameter(
+                        "image_edit 需要 " + MAX_REFERENCE_ASSETS + " 张以内参考图（referenceAssetIds）");
+            }
+        } else if (!referenceAssetIds.isEmpty()) {
             throw CreativeException.unsupportedParameter("text_to_image 不支持参考图（referenceAssetIds）");
         }
         validateParent(actor, request);
 
         String hash = requestHash(operation, request.originalPrompt(), effectivePrompt,
-                request.modelRowId(), request.parameters());
+                request.modelRowId(), request.parameters(), referenceAssetIds);
 
         // 幂等预检（短事务，锁项目行）：同键复用 / 改正文 409
         var existing = transactionTemplate.execute(status -> {
@@ -288,7 +304,7 @@ public class MediaJobService {
         if (existing.isPresent()) return toResult(existing.get(), true);
 
         // 解析模型（BR03：仅 image_generation，不回退 chat）与参数校验
-        ResolvedMediaModel model = modelResolver.resolve(actor.userId(), request.modelRowId());
+        ResolvedMediaModel model = modelResolver.resolve(actor.userId(), request.modelRowId(), operation);
         var parameters = request.parameters() == null ? Map.<String, Object>of() : request.parameters();
         var violations = model.parameterSchema().validate(parameters);
         if (!violations.isEmpty()) {
@@ -297,10 +313,20 @@ public class MediaJobService {
         if (effectivePrompt.length() > ParameterSchema.MODEL_PROMPT_MAX) {
             throw CreativeException.unsupportedParameter("提示词超过模型上限 " + ParameterSchema.MODEL_PROMPT_MAX + " 个字符");
         }
+        // 参考图必须是本人的 READY 素材（image_edit）
+        if (!referenceAssetIds.isEmpty()) {
+            for (UUID assetId : referenceAssetIds) {
+                var asset = assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId)
+                        .orElseThrow(() -> new IllegalArgumentException("参考素材不存在或无权使用：" + assetId));
+                if (asset.status() != com.zwx.zwxagent.creative.domain.AssetStatus.READY) {
+                    throw new IllegalArgumentException("参考素材不可用（未就绪或已删除）：" + assetId);
+                }
+            }
+        }
         InputSnapshot input = new InputSnapshot(operation, effectivePrompt, parameters, referenceAssetIds);
         ModelSnapshot modelSnapshot = new ModelSnapshot(model.providerId(), model.modelRowId(),
                 "DashScope", model.protocol(), model.baseUrl(), model.modelName(), model.adapterKey(),
-                java.util.List.of(CreativeDraftService.OPERATION_TEXT_TO_IMAGE), model.profileRevision());
+                java.util.List.of(operation), model.profileRevision());
 
         try {
             var job = transactionTemplate.execute(status ->
@@ -340,6 +366,10 @@ public class MediaJobService {
                 Instant.now(), null, false, null, null, null,
                 null, null, null, Instant.now(), Instant.now(), null);
         jobRepository.insert(job);
+        // 参考图引用事实来源（BR14 删除保护）：input 引用与任务同事务登记
+        for (UUID assetId : input.referenceAssetIds()) {
+            assetRefRepository.addRef(job.id(), assetId, "input", job.tenantId(), job.userId());
+        }
         eventRepository.append(job.id(), job.tenantId(), job.userId(), EVENT_JOB_CREATED,
                 CreativeJson.toJson(java.util.Map.of("operation", input.operation(),
                         "status", MediaJobStatus.QUEUED.name())));
@@ -369,15 +399,16 @@ public class MediaJobService {
     private static String normalizeOperation(String operation) {
         String value = operation == null || operation.isBlank()
                 ? CreativeDraftService.OPERATION_TEXT_TO_IMAGE : operation.trim();
-        if (!CreativeDraftService.OPERATION_TEXT_TO_IMAGE.equals(value)) {
+        if (!CreativeDraftService.OPERATION_TEXT_TO_IMAGE.equals(value) && !OPERATION_IMAGE_EDIT.equals(value)) {
             throw new IllegalArgumentException("暂不支持的创作类型：" + value);
         }
         return value;
     }
 
-    /** 稳定字段排序的请求哈希；不含时间、requestId 与短期 URL。 */
+    /** 稳定字段排序的请求哈希；不含时间、requestId 与短期 URL。参考图 ID 参与幂等判定。 */
     static String requestHash(String operation, String originalPrompt, String effectivePrompt,
-                              Long modelRowId, Map<String, Object> parameters) {
+                              Long modelRowId, Map<String, Object> parameters,
+                              java.util.List<UUID> referenceAssetIds) {
         var sorted = new TreeMap<>(parameters == null ? Map.<String, Object>of() : parameters);
         var canonical = new java.util.LinkedHashMap<String, Object>();
         canonical.put("operation", operation);
@@ -385,6 +416,7 @@ public class MediaJobService {
         canonical.put("effectivePrompt", effectivePrompt);
         canonical.put("parameters", sorted);
         canonical.put("modelRowId", modelRowId);
+        canonical.put("referenceAssetIds", referenceAssetIds == null ? java.util.List.of() : referenceAssetIds);
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(CreativeJson.toJson(canonical).getBytes(StandardCharsets.UTF_8));

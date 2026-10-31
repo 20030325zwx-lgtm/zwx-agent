@@ -36,11 +36,11 @@ class MediaJobServiceRulesTest {
         Map<String, Object> second = new LinkedHashMap<>();
         second.put("watermark", false);
         second.put("size", "1024*1024");
-        String a = MediaJobService.requestHash("text_to_image", "想法", "最终", 1L, first);
-        String b = MediaJobService.requestHash("text_to_image", "想法", "最终", 1L, second);
+        String a = MediaJobService.requestHash("text_to_image", "想法", "最终", 1L, first, java.util.List.of());
+        String b = MediaJobService.requestHash("text_to_image", "想法", "最终", 1L, second, java.util.List.of());
         Assertions.assertEquals(a, b, "参数顺序不同不能产生不同哈希");
 
-        String changed = MediaJobService.requestHash("text_to_image", "想法", "改过的最终", 1L, first);
+        String changed = MediaJobService.requestHash("text_to_image", "想法", "改过的最终", 1L, first, java.util.List.of());
         Assertions.assertNotEquals(a, changed, "内容变化必须产生不同哈希（同键改内容应 409）");
     }
 }

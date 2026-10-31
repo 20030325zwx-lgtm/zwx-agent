@@ -29,6 +29,7 @@ class OpenAiImagesMediaProviderAdapterTest {
     private String baseUrl;
     private final AtomicInteger submitCount = new AtomicInteger();
     private final AtomicReference<String> lastBody = new AtomicReference<>();
+    private final AtomicReference<byte[]> lastBodyBytes = new AtomicReference<>();
 
     private volatile Responder submitResponder = request -> reply(200,
             "{\"data\":[{\"b64_json\":\"" + Base64.getEncoder().encodeToString(PNG_BYTES) + "\"}]}");
@@ -56,6 +57,18 @@ class OpenAiImagesMediaProviderAdapterTest {
             lastBody.set(body);
             try {
                 write(exchange, submitResponder.respond(body));
+            } catch (Exception exception) {
+                write(exchange, reply(500, "mock failure"));
+            }
+        });
+        // image_edit：multipart 请求，读取整个请求体供断言
+        server.createContext("/v1/images/edits", exchange -> {
+            submitCount.incrementAndGet();
+            byte[] bodyBytes = exchange.getRequestBody().readAllBytes();
+            lastBodyBytes.set(bodyBytes);
+            lastBody.set(new String(bodyBytes, StandardCharsets.ISO_8859_1));
+            try {
+                write(exchange, submitResponder.respond(""));
             } catch (Exception exception) {
                 write(exchange, reply(500, "mock failure"));
             }
@@ -165,6 +178,59 @@ class OpenAiImagesMediaProviderAdapterTest {
     void queryAlwaysUnknownForSyncProtocol() {
         var result = adapter().query(model(), "any-task");
         Assertions.assertEquals(MediaProviderAdapter.QueryState.UNKNOWN, result.state());
+    }
+
+    /** image_edit：multipart /v1/images/edits，参考图以 image[] 数组上传，响应解析同 generations。 */
+    @Test
+    void editSubmitsMultipartWithReferenceImages() throws Exception {
+        byte[] modelPhoto = PNG_BYTES;
+        byte[] garment = new byte[]{-119, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4, 5, 6};
+        var references = java.util.Map.of(java.util.UUID.randomUUID(), modelPhoto,
+                java.util.UUID.randomUUID(), garment);
+        var result = adapter().submit(model(),
+                new InputSnapshot("image_edit", "让模特穿上参考的上衣与裤子", Map.of("size", "1024*1024"), List.of()),
+                "sub-edit", references);
+        Assertions.assertEquals(MediaProviderAdapter.SubmitOutcome.COMPLETED, result.outcome());
+        Assertions.assertArrayEquals(PNG_BYTES, result.outputs().get(0).bytes());
+        byte[] body = lastBodyBytes.get();
+        Assertions.assertTrue(contains(body, "name=\"model\"".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertTrue(contains(body, "flux-dev".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertTrue(contains(body, "name=\"prompt\"".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertTrue(contains(body, "让模特穿上参考的上衣与裤子".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertTrue(contains(body, "name=\"size\"".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertTrue(contains(body, "1024x1024".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertEquals(2, countOccurrences(body, "name=\"image[]\"".getBytes(StandardCharsets.UTF_8)),
+                "应有 2 个 image[] 文件段");
+        Assertions.assertTrue(contains(body, modelPhoto), "模特图字节应原样上传");
+        Assertions.assertTrue(contains(body, garment), "上衣图字节应原样上传");
+        // 空 referenceAssets 时回退 JSON generations（不带 image[] 段）
+        adapter().submit(model(), new InputSnapshot("text_to_image", "一只橘猫", Map.of(), List.of()), "sub-gen");
+        Assertions.assertFalse(lastBody.get().contains("image[]"));
+    }
+
+    private static boolean contains(byte[] haystack, byte[] needle) {
+        return indexOf(haystack, needle, 0) >= 0;
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle, int from) {
+        outer:
+        for (int i = from; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) continue outer;
+            }
+            return i;
+        }
+        return -1;
+    }
+
+    private static int countOccurrences(byte[] haystack, byte[] needle) {
+        int count = 0;
+        int at = indexOf(haystack, needle, 0);
+        while (at >= 0) {
+            count++;
+            at = indexOf(haystack, needle, at + 1);
+        }
+        return count;
     }
 
     @Test

@@ -53,7 +53,8 @@ public class WorkflowService {
 
     public static final Set<String> NODE_TYPES = Set.of(
             "start", "search_image", "image_understand", "llm_text", "web_search", "poster_render",
-            "image_generate", "media_image_generate", "http_request", "db_query", "text_template", "file_export");
+            "image_generate", "media_image_generate", "media_image_edit",
+            "http_request", "db_query", "text_template", "file_export");
 
     public record StepDef(String key, String name, String description) {
     }
@@ -505,6 +506,7 @@ public class WorkflowService {
             case "http_request" -> httpRequest(context, params);
             case "db_query" -> dbQuery(text(params.get("sql")));
             case "media_image_generate" -> startMediaImageTask(context, node, params);
+            case "media_image_edit" -> startMediaImageTask(context, node, params);
             case "image_generate" -> imageGenerate(context, text(params.get("prompt")),
                     textOrDefault(text(params.get("size")), "1024*1024"),
                     textOrDefault(text(params.get("model")), "wanx2.1-t2i-turbo"));
@@ -764,12 +766,19 @@ public class WorkflowService {
     /** 媒体节点：受理创作任务后立即让出线程；结果由 WorkflowMediaResumeScheduler 推进。 */
     private NodeResult startMediaImageTask(RunContext context, GraphNodeDef node,
                                            Map<String, Object> params) {
+        boolean isEdit = "media_image_edit".equals(node.type());
+        String operation = isEdit ? "image_edit" : "text_to_image";
         String prompt = text(params.get("prompt"));
         if (prompt == null || prompt.isBlank()) {
-            throw new IllegalArgumentException("图片生成提示词为空");
+            throw new IllegalArgumentException((isEdit ? "图片编辑" : "图片生成") + "提示词为空");
         }
         if (prompt.length() > 500) {
             throw new IllegalArgumentException("提示词超过模型上限 500 个字符");
+        }
+        // 参考图：imageAssetIds 接受数组或逗号/空白分隔的 assetId 列表（支持 {{节点.output.assetId}} 引用）
+        java.util.List<UUID> referenceAssetIds = parseAssetIdList(params.get("imageAssetIds"));
+        if (isEdit && referenceAssetIds.isEmpty()) {
+            throw new IllegalArgumentException("image_edit 节点需要 imageAssetIds（1–3 张参考素材）");
         }
         String size = textOrDefault(text(params.get("size")), "1024*1024");
         var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
@@ -781,8 +790,8 @@ public class WorkflowService {
                 : workflowProject(actor, text(params.get("projectId")));
         com.zwx.zwxagent.creative.service.MediaJobService.CreateJobResult created = mediaJobService.create(actor,
                 "workflow-" + context.id() + "-" + node.key(), projectId,
-                new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, "text_to_image", null,
-                        prompt, prompt, Map.of("size", size), List.of(), null, null, false),
+                new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, operation, null,
+                        prompt, prompt, Map.of("size", size), referenceAssetIds, null, null, false),
                 com.zwx.zwxagent.creative.domain.JobSourceType.WORKFLOW, context.id(), node.key());
         jdbcTemplate.update("""
                         INSERT INTO workflow_node_execution (run_id, node_key, status, media_job_id, attempt)
@@ -793,7 +802,27 @@ public class WorkflowService {
                             updated_at = CURRENT_TIMESTAMP
                         """,
                 context.id(), node.key(), created.jobId());
-        return NodeResult.waiting("图片生成中（任务 " + created.jobId() + "）");
+        return NodeResult.waiting((isEdit ? "参考图编辑中" : "图片生成中") + "（任务 " + created.jobId() + "）");
+    }
+
+    /** imageAssetIds 参数解析：List / 逗号或空白分隔字符串 → UUID 列表（非法值报错）。 */
+    private static java.util.List<UUID> parseAssetIdList(Object raw) {
+        if (raw == null) return List.of();
+        java.util.List<String> tokens = new ArrayList<>();
+        if (raw instanceof java.util.List<?> list) {
+            for (Object item : list) {
+                if (item != null && !String.valueOf(item).isBlank()) tokens.add(String.valueOf(item).trim());
+            }
+        } else {
+            for (String token : String.valueOf(raw).split("[,，\\s]+")) {
+                if (!token.isBlank()) tokens.add(token.trim());
+            }
+        }
+        try {
+            return tokens.stream().map(UUID::fromString).toList();
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("imageAssetIds 格式不正确（应为素材 ID 列表）");
+        }
     }
 
     private UUID workflowProject(com.zwx.zwxagent.platform.security.CurrentActor actor, String requested) {

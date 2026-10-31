@@ -20,6 +20,15 @@ public interface MediaProviderAdapter {
      */
     SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey);
 
+    /**
+     * 带参考图的提交（image_edit）：参考图字节由调用方解析自素材库（仅本人 READY 素材）。
+     * 不支持参考图的适配器沿用三参 submit（DashScope 文生图等）。
+     */
+    default SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey,
+                                java.util.Map<java.util.UUID, byte[]> referenceAssets) {
+        return submit(model, input, submissionKey);
+    }
+
     /** 查询上游任务状态与结果（结果 URL 24h 有效，调用方须及时转存）。 */
     QueryResult query(ResolvedMediaModel model, String providerTaskId);
 

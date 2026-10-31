@@ -40,6 +40,11 @@ public class MediaModelResolver {
     }
 
     public ResolvedMediaModel resolve(String userId, Long explicitModelRowId) {
+        return resolve(userId, explicitModelRowId, OPERATION_TEXT_TO_IMAGE);
+    }
+
+    /** 按操作解析：档案必须声明该操作能力（text_to_image / image_edit）。 */
+    public ResolvedMediaModel resolve(String userId, Long explicitModelRowId, String operation) {
         ModelCatalogService.ImageBinding binding;
         if (explicitModelRowId != null) {
             var selection = modelCatalogService.resolveModelRow(userId, explicitModelRowId);
@@ -48,12 +53,14 @@ public class MediaModelResolver {
         } else {
             binding = modelCatalogService.resolveImageBinding(userId)
                     .orElseThrow(() -> CreativeException.modelNotConfigured(
-                            "未绑定图片生成模型：请在模型设置中为「图片生成」用途绑定 DashScope 生图模型"));
+                            "未绑定图片生成模型：请在模型设置中为「图片生成」用途绑定生图模型"));
         }
         var profile = ensureProfile(binding);
         ParameterSchema schema = parseSchema(profile.parameterSchemaJson());
-        if (!Boolean.TRUE.equals(profile.operations().get(OPERATION_TEXT_TO_IMAGE))) {
-            throw CreativeException.unsupportedParameter("该模型不支持 " + OPERATION_TEXT_TO_IMAGE);
+        String requestedOperation = operation == null || operation.isBlank()
+                ? OPERATION_TEXT_TO_IMAGE : operation;
+        if (!Boolean.TRUE.equals(profile.operations().get(requestedOperation))) {
+            throw CreativeException.unsupportedParameter("该模型不支持 " + requestedOperation);
         }
         return new ResolvedMediaModel(binding.providerId(), binding.modelRowId(),
                 binding.config().provider(), binding.config().baseUrl(),
@@ -80,6 +87,7 @@ public class MediaModelResolver {
         String adapterKey;
         ParameterSchema schema;
         VerificationStatus verification;
+        Map<String, Boolean> operations = Map.of(OPERATION_TEXT_TO_IMAGE, true);
         switch (protocol.toLowerCase()) {
             case "dashscope" -> {
                 adapterKey = ADAPTER_DASHSCOPE_TEXT2IMAGE;
@@ -90,15 +98,16 @@ public class MediaModelResolver {
             case "openai-compatible" -> {
                 adapterKey = ADAPTER_OPENAI_IMAGES;
                 schema = ParameterSchema.openAiImages();
-                // 中转站模型未经真实出图验证，不标 VERIFIED
+                // 中转站模型未经真实出图验证，不标 VERIFIED；支持文生图与参考图编辑两个操作
                 verification = VerificationStatus.UNVERIFIED;
+                operations = Map.of(OPERATION_TEXT_TO_IMAGE, true, "image_edit", true);
             }
             default -> throw CreativeException.modelNotConfigured(
                     "该模型没有可用的图片生成适配器：" + binding.config().provider() + "/"
                             + binding.config().modelName());
         }
         profileRepository.upsert(binding.modelRowId(), adapterKey, "1",
-                Map.of(OPERATION_TEXT_TO_IMAGE, true),
+                operations,
                 Map.of("operation", ParameterSchema.IMAGE_GENERATION,
                         "parameters", schema.parameters()),
                 verification, Instant.now());

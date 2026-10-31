@@ -64,6 +64,54 @@ public class OpenAiImagesMediaProviderAdapter implements MediaProviderAdapter {
                 .POST(HttpRequest.BodyPublishers.ofString(
                         com.zwx.zwxagent.creative.support.CreativeJson.toJson(payload)))
                 .build();
+        return send(request);
+    }
+
+    /**
+     * 参考图编辑（image_edit）：multipart POST {base}/v1/images/edits。
+     * 参考图以 image[] 数组上传（gpt-image 系支持多图：如模特图 + 上衣 + 裤子）。
+     */
+    @Override
+    public SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey,
+                               java.util.Map<java.util.UUID, byte[]> referenceAssets) {
+        if (referenceAssets == null || referenceAssets.isEmpty()) {
+            return submit(model, input, submissionKey);
+        }
+        String boundary = "aster-" + java.util.UUID.randomUUID().toString().replace("-", "");
+        var parts = new ArrayList<byte[]>();
+        var charset = java.nio.charset.StandardCharsets.UTF_8;
+        java.util.function.BiConsumer<String, String> field = (name, value) -> {
+            parts.add(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name
+                    + "\"\r\n\r\n" + value + "\r\n").getBytes(charset));
+        };
+        field.accept("model", model.modelName());
+        field.accept("prompt", input.prompt());
+        field.accept("n", "1");
+        Object size = input.parameters().get("size");
+        if (size != null && !String.valueOf(size).isBlank()) {
+            field.accept("size", String.valueOf(size).replace('*', 'x'));
+        }
+        int index = 0;
+        for (var entry : referenceAssets.entrySet()) {
+            byte[] bytes = entry.getValue() == null ? new byte[0] : entry.getValue();
+            String filename = "reference-" + (++index) + guessExtension(bytes);
+            String contentType = guessMime(bytes);
+            parts.add(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\""
+                    + filename + "\"\r\nContent-Type: " + contentType + "\r\n\r\n").getBytes(charset));
+            parts.add(bytes);
+            parts.add("\r\n".getBytes(charset));
+        }
+        parts.add(("--" + boundary + "--\r\n").getBytes(charset));
+        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint(model.baseUrl(), "/images/edits")))
+                .timeout(Duration.ofSeconds(Math.max(30, timeoutSeconds)))
+                .header("Authorization", "Bearer " + model.apiKey())
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArrays(parts))
+                .build();
+        return send(request);
+    }
+
+    private MediaProviderAdapter.SubmitResult send(HttpRequest request) {
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             int status = response.statusCode();
@@ -105,6 +153,24 @@ public class OpenAiImagesMediaProviderAdapter implements MediaProviderAdapter {
             return MediaProviderAdapter.SubmitResult.unknown(
                     exception.getClass().getSimpleName() + ": " + exception.getMessage());
         }
+    }
+
+    private static String guessMime(byte[] bytes) {
+        if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xFF && (bytes[1] & 0xff) == 0xD8) return "image/jpeg";
+        if (bytes.length >= 12 && "RIFF".equalsIgnoreCase(new String(bytes, 0, 4, java.nio.charset.StandardCharsets.US_ASCII))
+                && "WEBP".equalsIgnoreCase(new String(bytes, 8, 4, java.nio.charset.StandardCharsets.US_ASCII))) {
+            return "image/webp";
+        }
+        return "image/png";
+    }
+
+    private static String guessExtension(byte[] bytes) {
+        String mime = guessMime(bytes);
+        return switch (mime) {
+            case "image/jpeg" -> ".jpg";
+            case "image/webp" -> ".webp";
+            default -> ".png";
+        };
     }
 
     @Override

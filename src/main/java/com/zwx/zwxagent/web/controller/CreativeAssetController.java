@@ -55,10 +55,11 @@ public class CreativeAssetController {
     public CreativeAssetService.AssetList list(CurrentActor actor,
                                                @RequestParam(required = false) UUID projectId,
                                                @RequestParam(required = false) String mediaType,
+                                               @RequestParam(required = false) String origin,
                                                @RequestParam(defaultValue = "false") boolean starred,
                                                @RequestParam(required = false) String cursor,
                                                @RequestParam(required = false) Integer limit) {
-        return assetService.list(actor, projectId, mediaType, starred, cursor, limit);
+        return assetService.list(actor, projectId, mediaType, starred, origin, cursor, limit);
     }
 
     @GetMapping("/{assetId}/thumbnail")

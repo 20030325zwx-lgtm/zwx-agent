@@ -276,12 +276,26 @@
         </div>
         <p v-if="assetError" class="cr-error">{{ assetError }}</p>
         <p v-if="!assets.length" class="cr-empty">还没有素材。生成结果会自动进入这里；也可以上传 PNG/JPEG/WebP。</p>
+        <div class="origin-filter" role="radiogroup" aria-label="素材来源">
+          <button v-for="option in originOptions" :key="option.value" type="button"
+                  class="origin-chip" :class="{ active: assetOrigin === option.value }"
+                  @click="assetOrigin = option.value">{{ option.label }}</button>
+        </div>
+        <p v-if="!filteredAssets.length" class="cr-empty">这个分类下还没有素材。</p>
         <div v-else class="asset-grid">
-          <figure v-for="asset in assets" :key="asset.id" class="asset-card">
-            <img v-if="thumbs[asset.id] || urls[asset.id]" :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
-            <div v-else class="asset-placeholder">加载中…</div>
+          <figure v-for="asset in filteredAssets" :key="asset.id" class="asset-card">
+            <button type="button" class="asset-thumb" :aria-label="`预览 ${asset.displayName}`"
+                    @click="openAssetPreview(asset)">
+              <img v-if="thumbs[asset.id] || urls[asset.id]" :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
+              <span v-else class="asset-placeholder">加载中…</span>
+            </button>
             <figcaption>
-              <span class="asset-name">{{ asset.displayName }}</span>
+              <span class="asset-name">
+                {{ asset.displayName }}
+                <em class="asset-origin" :class="asset.origin === 'GENERATED' ? 'gen' : 'up'">
+                  {{ asset.origin === 'GENERATED' ? '生成' : '上传' }}
+                </em>
+              </span>
               <span class="asset-meta">{{ formatBytes(asset.byteSize) }} · {{ formatTime(asset.createdAt) }}</span>
               <span class="asset-actions">
                 <button type="button" class="cr-ghost" :aria-pressed="asset.starred"
@@ -295,6 +309,17 @@
         </div>
       </div>
     </div>
+
+    <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
+      <template #actions>
+        <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred"
+                @click="toggleStar(previewAsset); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
+          {{ previewAsset.starred ? '已收藏' : '收藏' }}
+        </button>
+        <button v-if="previewAsset.jobId" type="button" class="cr-ghost" @click="continueFromAsset(previewAsset)">继续创作</button>
+        <button type="button" class="cr-ghost danger" @click="removeAsset(previewAsset); previewAsset = null">删除</button>
+      </template>
+    </AssetPreview>
 
     <!-- 任务详情抽屉 -->
     <div v-if="detailJob" class="detail-backdrop" @click.self="closeJob">
@@ -357,6 +382,7 @@ import {
   uploadCreativeAsset
 } from '../../api'
 import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta } from './shared'
+import AssetPreview from './AssetPreview.vue'
 
 const PROMPT_MAX = 500
 const route = useRoute()
@@ -551,6 +577,25 @@ async function loadAssets() {
   } catch (error) {
     assetError.value = '素材加载失败'
   }
+}
+
+// ---------------------------------------------------------------- 素材来源筛选与预览
+
+const assetOrigin = ref('')
+const originOptions = [
+  { value: '', label: '全部' },
+  { value: 'UPLOAD', label: '原始素材' },
+  { value: 'GENERATED', label: '生成结果' }
+]
+const filteredAssets = computed(() =>
+  assets.value.filter(asset => !assetOrigin.value || asset.origin === assetOrigin.value))
+const previewAsset = ref(null)
+const previewSrc = ref('')
+
+async function openAssetPreview(asset) {
+  previewAsset.value = asset
+  previewSrc.value = ''
+  previewSrc.value = await urlFor(asset.id)
 }
 
 function markDirty() {
@@ -1140,6 +1185,26 @@ onBeforeUnmount(() => {
 
 .upload-label { cursor: pointer; }
 
+.origin-filter { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+.origin-chip {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--wb-border);
+  background: var(--wb-surface);
+  color: var(--wb-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.origin-chip.active {
+  color: var(--wb-brand);
+  border-color: color-mix(in srgb, var(--wb-brand) 40%, transparent);
+  background: var(--wb-brand-soft);
+}
+.asset-thumb { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+.asset-thumb img { display: block; width: 100%; }
+.asset-origin { font-style: normal; font-size: 10.5px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
+.asset-origin.gen { background: var(--wb-brand-soft); color: var(--wb-brand); }
+.asset-origin.up { background: var(--wb-fill); color: var(--wb-text-2); }
 .asset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

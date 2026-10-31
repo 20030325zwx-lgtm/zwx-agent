@@ -30,7 +30,7 @@ public class CreativeAssetService {
 
     public record AssetView(UUID id, UUID projectId, UUID jobId, String mediaType, String displayName,
                             boolean starred, String status, long byteSize,
-                            Integer width, Integer height, Instant createdAt) {
+                            Integer width, Integer height, Instant createdAt, String origin) {
     }
 
     public record AssetList(List<AssetView> items, String nextCursor) {
@@ -177,12 +177,12 @@ public class CreativeAssetService {
     }
 
     public AssetList list(CurrentActor actor, UUID projectId, String mediaType, boolean starred,
-                          String cursor, Integer limit) {
+                          String origin, String cursor, Integer limit) {
         int size = limit == null || limit <= 0 ? 20 : Math.min(limit, 100);
         var decoded = decodeCursor(cursor);
         List<com.zwx.zwxagent.creative.domain.CreativeAssetRecord> records =
                 assetRepository.listForOwner(actor.tenantId(), actor.userId(), projectId,
-                        mediaType, starred, decoded.createdAt(), decoded.id(), size + 1);
+                        mediaType, starred, origin, decoded.createdAt(), decoded.id(), size + 1);
         List<AssetView> items = records.stream().limit(size)
                 .map(CreativeAssetService::toView).toList();
         String nextCursor = null;
@@ -227,6 +227,6 @@ public class CreativeAssetService {
     private static AssetView toView(CreativeAssetRecord record) {
         return new AssetView(record.id(), record.projectId(), record.sourceJobId(), record.mediaType(), record.displayName(),
                 record.starred(), record.status().name(), record.byteSize(),
-                record.width(), record.height(), record.createdAt());
+                record.width(), record.height(), record.createdAt(), record.origin().name());
     }
 }

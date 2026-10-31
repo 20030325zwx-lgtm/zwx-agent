@@ -51,6 +51,56 @@
 - target/classes 曾残留 "Name N.class" 垃圾文件导致打包失败，`mvn clean package` 解决。
 - 未提交：以上修复与 ChatRoom 去头像改动待用户确认后提交。
 
+## 追加 2（2026-10-31 傍晚）：淘宝服饰海报工作流全链路跑通（image_edit 能力）
+
+- **新能力**：创作操作 `image_edit`（参考图编辑）。MediaJobService BR08 按操作区分
+  （text_to_image 仍拒参考图；image_edit 需 1–3 张本人 READY 素材，受理时校验并同事务登记
+  media_job_asset_ref role=input）；requestHash 纳入参考图 ID；resolver 按 operation 校验档案能力，
+  openai-compatible 档案 operations={text_to_image,image_edit}；适配器接口加 4 参 submit 重载
+  （参考图字节由调度器从素材库读出传入），OpenAiImagesMediaProviderAdapter 走 multipart
+  POST /v1/images/edits（image[] 多文件）；工作流新节点 `media_image_edit`（imageAssetIds 支持数组
+  或逗号分隔、可引用 {{节点.output.assetId}}），复用 WAITING_EXTERNAL 等待恢复链路。
+- **模板**：taobao-apparel-poster「淘宝服饰海报（模特试穿）」：
+  start(模特/上衣/裤子素材ID + 卖点关键词) → 模特理解 → 试穿提示词(text_template) →
+  模特试穿(media_image_edit) → 海报文案(llm_text) → 海报合成(poster_render)。
+- **E2E 结果（运行 c1e9e60a）**：6 步全部 SUCCEEDED；中转站生成素材 3 张（模特/上衣/裤子，
+  low quality）→ 试穿图（同一模特换装，SUCCEEDED ~90s）→ LLM 文案 JSON → 1200×1600 海报
+  （标题「加绒显瘦秋冬装」+ 副标题 + 3 卖点 + 暖色配色）；试穿图与海报均自动归入项目素材库。
+- **计费记录**：本日中转站出图 5 张（edits 探测 1 low + 素材 3 low + 试穿 1 默认档）。
+- 已知边界：海报版式固定（单面板 1200×1600）；试穿保真度依赖中转站模型；创作台 UI 暂无
+  image_edit 表单（工作流/Agent 链路可用）；素材上传 >1MB 的 base64 无法经浏览器 evaluate
+  中转（工具限制），演示用 sips 转 JPEG。
+- 未提交：image_edit 能力 + 工作流节点 + 测试待提交。
+
+## 追加 3（2026-10-31 晚）：工作流编辑器素材上传与交互修复
+
+- **节点设置面板可关闭**：面板加 × 按钮；VueFlow @pane-click 点画布空白即取消选中。
+- **素材参数控件**（新组件 components/workflow/AssetParamField.vue）：节点面板中
+  imageAssetId/imageAssetIds 等素材参数渲染为「项目选择 + 素材选择 + 上传图片」控件
+  （imageAssetIds 多选 chips）；值为 {{...}} 引用表达式时显示表达式与"改为手动选择"切换。
+- **运行对话框**：编辑器"运行"改为弹窗，自动从图参数扫描运行输入
+  （{{input.KEY}} 与 {{start.output.KEY}}），*AssetId* 键渲染素材控件、其余为文本框；
+  增加目标创作项目选择（运行绑定 + 产物归属）；startWorkflow 带 input map + projectId。
+- **修复 graphDirty 误判**：markDirtyOnChange 过滤 dimensions/select 事件，
+  此前画布刚加载就被当成"未保存修改"而阻止运行。
+- 验证：面板开/关（× 与空白点击）、运行对话框 3 个素材字段自动识别、素材下拉列出项目素材、
+  节点面板模板表达式降级提示。文件上传走真实 file input（用户浏览器可用；ZCode 内嵌浏览器
+  无法自动化文件选择，未自动化验证）。
+- 未提交：编辑器改动 + AssetParamField 组件。
+
+## 追加 4（2026-10-31 晚）：素材库来源分组与大图预览
+
+- **后端**：AssetView 增加 origin 字段；/ai/creative/assets 支持 origin 过滤
+  （UPLOAD=原始素材（上传），GENERATED=生成结果（任务产物/工作流海报））。
+- **前端**：素材库页与项目素材库 tab 均增加「全部 / 原始素材 / 生成结果」筛选 chips +
+  卡片来源徽标 + 点击大图预览（新组件 views/creative/AssetPreview.vue：大图、尺寸/大小/时间、
+  收藏/继续创作/删除/下载，删除后自动关闭）。
+- 过程 bug：一次 python 批量补丁误删了 CreativeAssets.vue 的 starred ref 定义导致列表报错，
+  已修复并让 load 错误透出真实 message。
+- 验证：素材库 全部 7 / 生成结果 2 / 原始素材 5，徽标正确，预览打开正常；
+  项目 tab 筛选生成结果=2（试穿图 + 海报）。
+- 未提交：素材分组与预览改动。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

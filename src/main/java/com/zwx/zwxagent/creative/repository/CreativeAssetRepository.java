@@ -73,7 +73,7 @@ public class CreativeAssetRepository {
 
     /** 列表：类型/收藏/项目筛选 + 游标分页；不返回已软删除项。 */
     public List<CreativeAssetRecord> listForOwner(String tenantId, String userId, UUID projectId,
-                                                  String mediaType, boolean starred,
+                                                  String mediaType, boolean starred, String origin,
                                                   Instant cursorCreatedAt, UUID cursorId, int limit) {
         StringBuilder where = new StringBuilder(" WHERE tenant_id = ? AND user_id = ? AND status <> 'DELETED'");
         java.util.List<Object> args = new java.util.ArrayList<>();
@@ -89,6 +89,10 @@ public class CreativeAssetRepository {
         }
         if (starred) {
             where.append(" AND starred = TRUE");
+        }
+        if (origin != null && !origin.isBlank()) {
+            where.append(" AND origin = ?");
+            args.add(origin);
         }
         if (cursorCreatedAt != null && cursorId != null) {
             where.append(" AND (created_at, id) < (?, ?)");

@@ -44,7 +44,8 @@ import { listCreativeAssets, listCreativeProjects, uploadCreativeAsset } from '.
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
-  multiple: { type: Boolean, default: false }
+  multiple: { type: Boolean, default: false },
+  defaultProjectId: { type: String, default: '' }
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -160,7 +161,9 @@ onMounted(async () => {
   try {
     const data = await listCreativeProjects({ limit: 20 })
     projects.value = (data.items || []).filter(project => project.status === 'ACTIVE')
-    projectId.value = projects.value[0]?.id || ''
+    projectId.value = (props.defaultProjectId && projects.value.some(p => p.id === props.defaultProjectId)
+      ? props.defaultProjectId
+      : projects.value[0]?.id) || ''
   } catch (error) {
     /* 保持空列表，选择器显示禁用 */
   } finally {

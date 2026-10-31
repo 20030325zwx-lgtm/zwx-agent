@@ -187,6 +187,15 @@
           </button>
           <p v-if="project && project.status !== 'ACTIVE'" class="cr-field-help">项目已归档，不能发起新任务。</p>
         </div>
+
+        <div class="panel-block wf-launch-block">
+          <div class="model-line">
+            <span class="cr-field-help">多步创作（如淘宝服饰海报：试穿 + 文案 + 排版）</span>
+          </div>
+          <button type="button" class="cr-secondary" @click="openWorkflowCreate">
+            <Workflow :size="15" /> 用工作流创作
+          </button>
+        </div>
       </aside>
     </div>
 
@@ -313,6 +322,54 @@
       </div>
     </div>
 
+    <div v-if="wfCreateOpen" class="cr-dialog-backdrop" @click.self="wfCreateOpen = false">
+      <div class="cr-dialog" role="dialog" aria-modal="true" aria-labelledby="wf-project-create-title">
+        <h2 id="wf-project-create-title">用工作流创作 · {{ project?.name }}</h2>
+        <p v-if="wfCreate.loading" class="cr-hint">加载工作流…</p>
+        <template v-else>
+          <label class="cr-field">
+            <span class="cr-field-label"><span>工作流模板</span></span>
+            <select v-model="wfCreate.workflowKey" class="cr-input" @change="loadWorkflowInputs">
+              <option value="" disabled>选择工作流</option>
+              <option v-for="wf in workflows" :key="wf.key" :value="wf.key">
+                {{ wf.name || wf.key }}（{{ (wf.steps || []).length }} 节点）
+              </option>
+            </select>
+            <span v-if="wfFormHint" class="cr-field-help">{{ wfFormHint }}</span>
+          </label>
+          <label class="cr-field">
+            <span class="cr-field-label"><span>关键词 / 卖点</span></span>
+            <input v-model.trim="wfCreate.keyword" class="cr-input" maxlength="200"
+                   placeholder="如：加绒保暖 不起球 显瘦百搭" />
+          </label>
+          <div v-for="key in wfCreate.assetKeys" :key="key" class="cr-field">
+            <span class="cr-field-label"><span class="wf-input-key">{{ key }}</span></span>
+            <AssetParamField
+              :model-value="wfCreate.input[key] || ''"
+              :multiple="key === 'imageAssetIds'"
+              :default-project-id="projectId"
+              @update:model-value="value => wfCreate.input[key] = value"
+            />
+          </div>
+          <label v-for="key in wfCreate.textKeys" :key="key" class="cr-field">
+            <span class="cr-field-label"><span class="wf-input-key">{{ key }}</span></span>
+            <input v-model.trim="wfCreate.input[key]" class="cr-input" maxlength="200"
+                   :placeholder="`运行输入 ${key}`" />
+          </label>
+          <p v-if="wfCreate.error" class="cr-error">{{ wfCreate.error }}</p>
+        </template>
+        <div class="cr-dialog-actions">
+          <button type="button" class="cr-secondary" @click="wfCreateOpen = false">取消</button>
+          <button type="button" class="cr-primary"
+                  :disabled="wfCreate.starting || !wfCreate.workflowKey || !wfCreate.keyword
+                    || wfCreate.assetKeys.some(key => !(wfCreate.input[key] || '').trim())"
+                  @click="startProjectWorkflow">
+            {{ wfCreate.starting ? '发起中…' : '发起运行' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
       <template #actions>
         <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred"
@@ -374,19 +431,21 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AlertCircle, ArrowLeft, ImagePlus, Sparkles, Upload } from 'lucide-vue-next'
+import { AlertCircle, ArrowLeft, ImagePlus, Sparkles, Upload, Workflow } from 'lucide-vue-next'
 import {
   cancelCreativeJob, createCreativeDraft, createCreativeJob, deleteCreativeAsset,
-  getCreativeJob, getCreativeProject, getWorkflowRun, listCreativeAssets, listCreativeDrafts,
-  listCreativeJobs, listModelCatalog, listWorkflowRuns, optimizeCreativePrompt,
-  resumeCreativeJobIngest, retryCreativeJob, updateCreativeAsset, updateCreativeDraft,
-  uploadCreativeAsset
+  getCreativeJob, getCreativeProject, getWorkflowDefinition, getWorkflowRun, listCreativeAssets,
+  listCreativeDrafts, listCreativeJobs, listModelCatalog, listWorkflowRuns, listWorkflows,
+  optimizeCreativePrompt, resumeCreativeJobIngest, retryCreativeJob, startWorkflow,
+  updateCreativeAsset, updateCreativeDraft, uploadCreativeAsset
 } from '../../api'
 import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta } from './shared'
 import AssetPreview from './AssetPreview.vue'
 import { getCreativeAssetBlob } from '../../api'
+import AssetParamField from '../../components/workflow/AssetParamField.vue'
+import { deriveRunInputs } from './workflowInputs'
 
 const PROMPT_MAX = 500
 const route = useRoute()
@@ -617,6 +676,80 @@ async function redoEdit(job) {
     showToast(error.response?.data?.error || '提交失败', 'error')
   } finally {
     busyJob.value = ''
+  }
+}
+
+// ---------------------------------------------------------------- 项目内工作流创作
+
+const wfCreateOpen = ref(false)
+const workflows = ref([])
+const wfCreate = reactive({
+  loading: false, starting: false, error: '',
+  workflowKey: '', keyword: '', assetKeys: [], textKeys: [], input: {}
+})
+const wfFormHint = computed(() => {
+  const wf = workflows.value.find(item => item.key === wfCreate.workflowKey)
+  return wf?.description || ''
+})
+
+async function openWorkflowCreate() {
+  wfCreateOpen.value = true
+  wfCreate.error = ''
+  wfCreate.workflowKey = ''
+  wfCreate.keyword = ''
+  wfCreate.assetKeys = []
+  wfCreate.textKeys = []
+  wfCreate.input = {}
+  if (!workflows.value.length) {
+    wfCreate.loading = true
+    try {
+      const data = await listWorkflows(30)
+      workflows.value = data.definitions || []
+    } catch (error) {
+      wfCreate.error = '工作流列表加载失败'
+    } finally {
+      wfCreate.loading = false
+    }
+  }
+}
+
+async function loadWorkflowInputs() {
+  wfCreate.assetKeys = []
+  wfCreate.textKeys = []
+  wfCreate.input = {}
+  if (!wfCreate.workflowKey) return
+  try {
+    const definition = await getWorkflowDefinition(wfCreate.workflowKey)
+    const { assetKeys, textKeys } = deriveRunInputs(definition.graph)
+    wfCreate.assetKeys = assetKeys
+    wfCreate.textKeys = textKeys.filter(key => key !== 'keyword')
+  } catch (error) {
+    wfCreate.error = '工作流定义加载失败，无法校验运行输入'
+  }
+}
+
+async function startProjectWorkflow() {
+  if (wfCreate.starting || !wfCreate.workflowKey || !wfCreate.keyword) return
+  if (wfCreate.assetKeys.some(key => !(wfCreate.input[key] || '').trim())) return
+  wfCreate.starting = true
+  wfCreate.error = ''
+  try {
+    const input = {}
+    for (const key of [...wfCreate.assetKeys, ...wfCreate.textKeys]) {
+      const value = (wfCreate.input[key] || '').trim()
+      if (value) input[key] = value
+    }
+    const run = await startWorkflow(wfCreate.workflowKey, wfCreate.keyword, projectId.value, input)
+    wfCreateOpen.value = false
+    showToast('工作流已发起，产物将归入本项目', 'success')
+    await router.push({ path: `/creative/projects/${projectId.value}`, query: { tab: 'workflow', runId: run.id } })
+    if (tab.value === 'workflow') await loadWorkflowRuns()
+    tab.value = 'workflow'
+    await loadWorkflowRuns()
+  } catch (error) {
+    wfCreate.error = error.response?.data?.error || '发起失败，请稍后重试'
+  } finally {
+    wfCreate.starting = false
   }
 }
 
@@ -1221,6 +1354,8 @@ onBeforeUnmount(() => {
 
 .upload-label { cursor: pointer; }
 
+.wf-launch-block { border-top: 1px dashed var(--wb-border); padding-top: 12px; }
+.wf-input-key { font-family: var(--wb-font-mono, monospace); font-size: 12px; color: var(--wb-text-2); }
 .origin-filter { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
 .origin-chip {
   padding: 4px 12px;

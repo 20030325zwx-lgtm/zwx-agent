@@ -136,6 +136,14 @@
   allow-local-model-endpoints=true，VPN fake-IP 放行在桌面端同样生效。
 - 安装：退出正在运行的旧版 Aster → 打开 DMG 拖入 Applications 覆盖 → 启动（自有库会增量跑 V1–V12 迁移）。
 
+## 追加 8（2026-10-31 晚）：项目创作台内的工作流创作入口
+
+- 用户反馈"创作台里看不到怎么用工作流"：项目详情创作 tab 右侧面板新增「用工作流创作」——
+  弹窗内选模板（自动加载定义并推导输入字段：图片类用 AssetParamField 上传/选择，defaultProjectId
+  默认当前项目）、填关键词，目标项目固定为当前项目，产物直接归入。
+- AssetParamField 增加 defaultProjectId 属性；修复 CreativeProject 缺 reactive 导入导致的白屏。
+- 验证：弹窗模板选择 → 3 个素材字段自动出现（默认项目=当前项目），构建通过。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

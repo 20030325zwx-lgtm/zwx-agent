@@ -76,6 +76,11 @@
               <span class="node-name">{{ nodeProps.data.label }}</span>
             </div>
             <span v-if="nodeProps.data.statusText" class="node-status">{{ nodeProps.data.statusText }}</span>
+            <span
+              v-else-if="isTerminalProducer(nodeProps.id)"
+              class="node-status node-output-tag"
+              title="该节点的产物会自动归入创作项目素材库，不需要下游连线"
+            >产物入库</span>
             <Handle type="source" :position="Position.Right" class="wf-handle source" />
           </div>
         </template>
@@ -306,7 +311,7 @@ const NODE_HELP = {
   web_search: '联网搜索：query 填搜索词。输出为搜索结果文本（需要配置搜索 API Key）。',
   image_generate: '图片生成（旧）：仅支持 DashScope 协议绑定，同步轮询约 120 秒；新流程建议改用「图片生成（创作）」——它走 AI 创作任务队列、可持久等待恢复，且能用模型设置里通过中转站接入的生图模型。',
   media_image_generate: '图片生成（创作）：提交到 AI 创作队列并持久等待，服务重启后可继续。输出为 JSON：jobId / assetId / mediaType，可用 {{节点.output.assetId}} 引用到图片理解或海报合成。支持 DashScope 与中转站（OpenAI 兼容）生图模型。按张计费。',
-  media_image_edit: '图片编辑（参考图）：带 1–3 张本人素材作参考生成新图（中转站 OpenAI images/edits 协议）。imageAssetIds 填素材 ID 列表（逗号分隔或数组，支持 {{节点.output.assetId}} 引用），第一个通常是模特图。输出 JSON：jobId / assetId / mediaType。按张计费。',
+  media_image_edit: '图片编辑（参考图）：带 1–3 张本人素材作参考生成新图（中转站 OpenAI images/edits 协议）。imageAssetIds 填素材 ID 列表（逗号分隔或数组，支持 {{节点.output.assetId}} 引用），第一个通常是模特图。输出 JSON：jobId / assetId / mediaType。按张计费。作为末级节点时（如多机位中的侧面/背面）产物会自动归入素材库，无需下游连线。',
   http_request: 'REST 请求：method 选 GET/POST 等，url 填地址，headers/body 填 JSON。输出为响应体（截断 4000 字）；非 2xx 视为失败。',
   db_query: '数据库查询：sql 只能写单条 SELECT/WITH（最多 200 行、10 秒超时）。输出为结果 JSON。',
   text_template: '文本模板：template 里可混合文字与引用，如“报告：{{llm_text.output}}”。输出为替换后的文本，不消耗模型。',
@@ -329,6 +334,17 @@ const starting = ref(false)
 const savingVersion = ref(false)
 const flowNodes = ref([])
 const flowEdges = ref([])
+// 无下游连线的产物类节点（媒体生成/编辑、海报、文件导出）：产物自动入库，属有意的终点而非漏连
+const PRODUCER_TYPES = new Set(['media_image_edit', 'media_image_generate', 'image_generate', 'poster_render', 'file_export'])
+const terminalProducerIds = computed(() => {
+  const hasOutgoing = new Set(flowEdges.value.map(edge => edge.source))
+  return new Set(flowNodes.value
+    .filter(node => PRODUCER_TYPES.has(node.data?.nodeType) && !hasOutgoing.has(node.id))
+    .map(node => node.id))
+})
+function isTerminalProducer(nodeId) {
+  return terminalProducerIds.value.has(nodeId)
+}
 const selectedNode = ref(null)
 const connectDrag = reactive({ sourceId: '', justConnected: false, dragging: false })
 const expandedOutput = ref('')
@@ -944,6 +960,11 @@ onBeforeUnmount(() => {
 .node-name { color: var(--wb-text); font-size: 13px; font-weight: 600; }
 .node-type { color: var(--node-color, var(--wb-muted)); font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .node-status { margin-left: auto; padding: 1px 8px; border-radius: 999px; background: var(--wb-fill); color: var(--wb-text-2); font-size: 11px; }
+.node-output-tag {
+  background: var(--wb-brand-soft);
+  color: var(--wb-brand);
+  cursor: help;
+}
 .wf-node.is-start { border-color: var(--wb-brand); background: var(--wb-brand-soft); }
 .wf-node.is-start .node-name { color: var(--wb-brand); }
 .inspector-row.align-top { align-items: flex-start; }

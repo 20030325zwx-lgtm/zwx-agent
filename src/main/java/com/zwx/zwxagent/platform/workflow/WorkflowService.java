@@ -448,7 +448,8 @@ public class WorkflowService {
                 StepState existing = context.steps().stream()
                         .filter(step -> step.key().equals(node.key())).findFirst().orElse(null);
                 if (existing != null && ("SUCCEEDED".equals(existing.status())
-                        || "SKIPPED".equals(existing.status()))) {
+                        || "SKIPPED".equals(existing.status()) || "FAILED".equals(existing.status()))) {
+                    // FAILED：失败范围语义下不阻断运行的分支失败，续跑时不自动重跑（重试走任务级操作）
                     continue;
                 }
                 StepState running = new StepState(node.key(), node.name(), "RUNNING", "", "",
@@ -871,7 +872,11 @@ public class WorkflowService {
         });
     }
 
-    /** 媒体任务失败：节点与运行都标记失败，未执行步骤置为跳过。 */
+    /**
+     * 媒体任务失败：按依赖图界定失败范围（联合评审 §3"失败范围"）。
+     * 失败节点存在下游依赖 → 依赖跳过、运行失败（原语义）；
+     * 无下游依赖（如三机位中的侧面机位）→ 仅标记该节点失败，其余分支继续，运行仍可成功。
+     */
     public void failMediaNode(String runId, String nodeKey, String error) {
         transactionTemplate.executeWithoutResult(status -> {
             int updated = jdbcTemplate.update("""
@@ -882,24 +887,57 @@ public class WorkflowService {
             if (updated == 0) return;
             WorkflowRunRow row = findAny(runId);
             if (row == null) return;
+            WorkflowGraph graph = row.graphSnapshot() != null
+                    ? parseGraph(row.graphSnapshot().toString())
+                    : latestVersion(row.tenantId(), row.workflowKey()).graph();
+            var dependents = transitiveDependents(graph, nodeKey);
             List<StepState> steps = parseSteps(row.steps());
             List<StepState> updatedSteps = steps.stream().map(step -> {
                 if (step.key().equals(nodeKey)) {
                     return new StepState(step.key(), step.name(), "FAILED", truncate(error, 300),
                             step.output(), step.startedAt(), Instant.now());
                 }
-                if ("PENDING".equals(step.status()) || "RUNNING".equals(step.status())) {
+                if (dependents.contains(step.key())
+                        && ("PENDING".equals(step.status()) || "RUNNING".equals(step.status()))) {
                     return new StepState(step.key(), step.name(), "SKIPPED", "前序步骤失败",
                             step.output(), step.startedAt(), Instant.now());
                 }
                 return step;
             }).toList();
-            jdbcTemplate.update("""
-                    UPDATE workflow_run SET steps = ?::jsonb, status = 'FAILED', error = ?,
-                        current_step = NULL, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ? AND status = 'WAITING_EXTERNAL'
-                    """, toJson(updatedSteps), truncate(error, 400), runId);
+            if (dependents.isEmpty()) {
+                // 失败不阻断其余分支：保持 WAITING_EXTERNAL 让恢复器/续跑推进剩余节点
+                jdbcTemplate.update("""
+                        UPDATE workflow_run SET steps = ?::jsonb, error = NULL,
+                            current_step = NULL, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                        """, toJson(updatedSteps), runId);
+                resumeWaiting(runId);
+            } else {
+                jdbcTemplate.update("""
+                        UPDATE workflow_run SET steps = ?::jsonb, status = 'FAILED', error = ?,
+                            current_step = NULL, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                        """, toJson(updatedSteps), truncate(error, 400), runId);
+            }
         });
+    }
+
+    /** 有向依赖的传递闭包：failedKey 的全部直接/间接下游。 */
+    private static java.util.Set<String> transitiveDependents(WorkflowGraph graph, String failedKey) {
+        var adjacency = new java.util.HashMap<String, List<String>>();
+        for (GraphEdgeDef edge : graph.edges()) {
+            adjacency.computeIfAbsent(edge.from(), key -> new ArrayList<>()).add(edge.to());
+        }
+        var result = new java.util.HashSet<String>();
+        var stack = new java.util.ArrayDeque<String>();
+        stack.push(failedKey);
+        while (!stack.isEmpty()) {
+            String current = stack.pop();
+            for (String next : adjacency.getOrDefault(current, List.of())) {
+                if (result.add(next)) stack.push(next);
+            }
+        }
+        return result;
     }
 
     private void updateWaitingStep(String runId, String nodeKey, String status, String message, String output) {

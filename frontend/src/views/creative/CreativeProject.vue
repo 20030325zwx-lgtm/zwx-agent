@@ -91,7 +91,10 @@
                     class="cr-secondary" :disabled="busyJob === job.jobId" @click="retry(job)">重新生成</button>
             <button v-else-if="job.status === 'RECONCILING'" type="button" class="cr-secondary"
                     :disabled="busyJob === job.jobId" @click="retry(job)">确认后重试</button>
-            <button v-if="job.status === 'SUCCEEDED'" type="button" class="cr-secondary"
+            <button v-if="job.status === 'SUCCEEDED' && job.operation === 'image_edit'" type="button"
+                    class="cr-secondary" :disabled="busyJob === job.jobId"
+                    @click="redoEdit(job)">再做一版（同参考）</button>
+            <button v-else-if="job.status === 'SUCCEEDED'" type="button" class="cr-secondary"
                     @click="continueFrom(job)">继续创作</button>
             <button type="button" class="cr-ghost" @click="openJob(job.jobId)">任务详情</button>
           </div>
@@ -292,8 +295,8 @@
             <figcaption>
               <span class="asset-name">
                 {{ asset.displayName }}
-                <em class="asset-origin" :class="asset.origin === 'GENERATED' ? 'gen' : 'up'">
-                  {{ asset.origin === 'GENERATED' ? '生成' : '上传' }}
+                <em class="asset-origin" :class="asset.origin === 'UPLOAD' ? 'up' : 'gen'">
+                  {{ asset.origin === 'UPLOAD' ? '上传' : '生成' }}
                 </em>
               </span>
               <span class="asset-meta">{{ formatBytes(asset.byteSize) }} · {{ formatTime(asset.createdAt) }}</span>
@@ -383,6 +386,7 @@ import {
 } from '../../api'
 import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta } from './shared'
 import AssetPreview from './AssetPreview.vue'
+import { getCreativeAssetBlob } from '../../api'
 
 const PROMPT_MAX = 500
 const route = useRoute()
@@ -591,6 +595,30 @@ const filteredAssets = computed(() =>
   assets.value.filter(asset => !assetOrigin.value || asset.origin === assetOrigin.value))
 const previewAsset = ref(null)
 const previewSrc = ref('')
+
+// R04（评审 2026-10-31）：image_edit 结果的"继续创作"必须保留操作语义与参考图，
+// 不得静默降级为文生图（会花一次费用得到完全不同的人/商品）。
+async function redoEdit(job) {
+  if (!window.confirm('将用相同的参考图与提示词再生成一版（会再次计费），继续吗？')) return
+  busyJob.value = job.jobId
+  try {
+    await createCreativeJob('redo-' + job.jobId + '-' + Date.now(), {
+      projectId: job.projectId,
+      operation: 'image_edit',
+      originalPrompt: job.prompt,
+      effectivePrompt: job.prompt,
+      parameters: job.parameters || {},
+      referenceAssetIds: job.referenceAssetIds || [],
+      parentJobId: job.jobId
+    })
+    showToast('已受理，正在生成', 'success')
+    await loadJobs()
+  } catch (error) {
+    showToast(error.response?.data?.error || '提交失败', 'error')
+  } finally {
+    busyJob.value = ''
+  }
+}
 
 async function openAssetPreview(asset) {
   previewAsset.value = asset
@@ -918,6 +946,14 @@ async function toggleRunDetail(run) {
   }
   try {
     const detail = await getWorkflowRun(run.id)
+    for (const artifact of detail.artifacts || []) {
+      if (artifact.url && artifact.url.startsWith('asset:')) {
+        try {
+          const blob = await getCreativeAssetBlob(artifact.url.slice(6))
+          artifact.url = URL.createObjectURL(blob)
+        } catch (error) { artifact.url = '' }
+      }
+    }
     wfDetails.value = { ...wfDetails.value, [run.id]: detail }
   } catch (error) {
     showToast(error.response?.data?.error || '运行详情加载失败', 'error')

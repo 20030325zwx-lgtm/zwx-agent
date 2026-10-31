@@ -52,8 +52,8 @@
             <figcaption>
               <span class="asset-name">
                 {{ asset.displayName }}
-                <em class="asset-origin" :class="asset.origin === 'GENERATED' ? 'gen' : 'up'">
-                  {{ asset.origin === 'GENERATED' ? '生成' : '上传' }}
+                <em class="asset-origin" :class="asset.origin === 'UPLOAD' ? 'up' : 'gen'">
+                  {{ asset.origin === 'UPLOAD' ? '上传' : '生成' }}
                 </em>
               </span>
               <span class="asset-meta">

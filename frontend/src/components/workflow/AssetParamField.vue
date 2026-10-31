@@ -71,6 +71,13 @@ watch(parsedIds, ids => {
   if (props.multiple) pickedIds.value = [...ids]
 }, { immediate: true })
 
+// 单选：外部值变化时回显（如父级预填/上传后刷新）
+watch(() => props.modelValue, value => {
+  if (!props.multiple && value && !value.includes('{{')) {
+    selectedId.value = value
+  }
+}, { immediate: true })
+
 function switchToManual() {
   emit('update:modelValue', props.multiple ? '' : '')
 }
@@ -123,6 +130,7 @@ async function upload(event) {
       pickedIds.value = [...pickedIds.value, asset.id]
       emitMultiple()
     } else {
+      selectedId.value = asset.id
       emitSingle(asset.id)
     }
   } catch (error) {
@@ -164,8 +172,18 @@ onMounted(async () => {
 <style scoped>
 .asset-field { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .asset-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.asset-project { flex: 0 0 110px; min-width: 0; }
-.asset-select { flex: 1; min-width: 0; }
+.asset-project, .asset-select {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--wf-border, #d8dce8);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--wf-text, #1f2430);
+  font-size: 12.5px;
+  height: auto;
+}
+.asset-project { flex: 0 0 110px; }
+.asset-select { flex: 1; }
 .asset-mini-btn {
   padding: 4px 10px;
   border: 1px solid var(--wf-border, #d8dce8);

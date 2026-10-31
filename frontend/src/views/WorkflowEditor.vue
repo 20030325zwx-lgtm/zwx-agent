@@ -258,7 +258,9 @@ import { History } from 'lucide-vue-next'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import AssetParamField from '../components/workflow/AssetParamField.vue'
+import { deriveRunInputs } from './creative/workflowInputs'
 import {
+  getCreativeAssetBlob,
   getWorkflowDefinition,
   getWorkflowRun,
   listCreativeProjects,
@@ -713,7 +715,7 @@ function schedulePoll() {
 
 async function loadDetail(runId, { silent } = {}) {
   try {
-    detail.value = await getWorkflowRun(runId)
+    detail.value = await resolveArtifactUrls(await getWorkflowRun(runId))
     applyRunStatus(detail.value)
   } catch (error) {
     if (!silent) message.error(error?.response?.data?.error || '运行详情加载失败')
@@ -753,19 +755,10 @@ const runDialog = reactive({ open: false, keyword: '', projectId: '', values: {}
 const runDialogProjects = ref([])
 const isAssetKey = key => /AssetIds?$/.test(key)
 
-/** 从图参数里扫描运行输入键：{{input.KEY}} 与 {{start.output.KEY}} 都算运行输入。 */
+/** 从图参数里扫描运行输入键（与创作首页/项目页共用同一推导）。 */
 const runInputKeys = computed(() => {
-  const keys = new Set()
-  const scan = value => {
-    const text = String(value ?? '')
-    for (const match of text.matchAll(/\{\{(?:input|start\.output)\.([A-Za-z0-9_]+)\}\}/g)) {
-      keys.add(match[1])
-    }
-  }
-  for (const node of graphNodes.value) {
-    Object.values(node.data?.params || {}).forEach(scan)
-  }
-  return [...keys]
+  const { assetKeys, textKeys } = deriveRunInputs({ nodes: graphNodes.value.map(node => ({ params: node.data?.params })) })
+  return [...assetKeys, ...textKeys]
 })
 
 const canStartRun = computed(() => {
@@ -825,6 +818,21 @@ async function submitRunDialog() {
   } finally {
     starting.value = false
   }
+}
+
+// R05：已登记素材的产物（url=asset:ID）经鉴权 blob 渲染，本地/OSS 存储都可用
+async function resolveArtifactUrls(detail) {
+  for (const artifact of detail.artifacts || []) {
+    if (artifact.url && artifact.url.startsWith('asset:')) {
+      try {
+        const blob = await getCreativeAssetBlob(artifact.url.slice(6))
+        artifact.url = URL.createObjectURL(blob)
+      } catch (error) {
+        artifact.url = ''
+      }
+    }
+  }
+  return detail
 }
 
 function clearSelection() {

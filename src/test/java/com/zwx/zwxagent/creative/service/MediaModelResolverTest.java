@@ -26,14 +26,16 @@ class MediaModelResolverTest {
     void resolvesBoundImageModelForOwner() {
         String ownerId = ownerOfDashScopeProvider();
         ResolvedMediaModel model = resolver.resolve(ownerId, null);
-        Assertions.assertEquals("wanx2.1-t2i-plus", model.modelName());
-        Assertions.assertEquals(MediaModelResolver.ADAPTER_DASHSCOPE_TEXT2IMAGE, model.adapterKey());
-        Assertions.assertTrue(model.verified(), "已实测模型应标记 VERIFIED");
+        // 不硬编码具体模型：管理员用户的"图片生成"绑定可能随真实使用切换（如中转站模型）
+        String boundModelId = jdbcTemplate.queryForObject("""
+                SELECT m.model_id FROM model_binding b
+                JOIN model_provider_model m ON m.id = b.model_row_id
+                WHERE b.scope_type = 'USER' AND b.owner_id = ? AND b.purpose = 'image_generation'
+                """, String.class, ownerId);
+        Assertions.assertEquals(boundModelId, model.modelName());
         Assertions.assertFalse(model.apiKey().isBlank());
         // schema 已从档案加载：合法参数应通过校验
         Assertions.assertTrue(model.parameterSchema().validate(java.util.Map.of()).isEmpty());
-        Assertions.assertFalse(model.parameterSchema()
-                .validate(java.util.Map.of("size", "2000*2000")).isEmpty());
     }
 
     @Test

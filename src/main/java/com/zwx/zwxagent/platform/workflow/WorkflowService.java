@@ -84,7 +84,10 @@ public class WorkflowService {
                             Instant startedAt, Instant finishedAt) {
     }
 
-    public record Artifact(String type, String name, String objectKey) {
+    public record Artifact(String type, String name, String objectKey, String assetId) {
+        public Artifact(String type, String name, String objectKey) {
+            this(type, name, objectKey, null);
+        }
     }
 
     public record WorkflowRunView(String id, String workflowKey, String workflowName, int definitionVersion,
@@ -93,7 +96,7 @@ public class WorkflowService {
                                   Instant createdAt, Instant updatedAt, UUID creativeProjectId) {
     }
 
-    public record ArtifactView(String type, String name, String url) {
+    public record ArtifactView(String type, String name, String url, String assetId) {
     }
 
     public record SaveVersionRequest(String name, String description, WorkflowGraph graph) {
@@ -160,6 +163,7 @@ public class WorkflowService {
     private final com.zwx.zwxagent.creative.asset.CreativeAssetService creativeAssetService;
     private final com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository;
     private final com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage;
+    private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
     private final ExecutorService executor = Executors.newFixedThreadPool(2, task -> {
         Thread thread = new Thread(task, "workflow-runner");
         thread.setDaemon(true);
@@ -185,7 +189,8 @@ public class WorkflowService {
                            com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService,
                            com.zwx.zwxagent.creative.asset.CreativeAssetService creativeAssetService,
                            com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository,
-                           com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage) {
+                           com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage,
+                           org.springframework.transaction.support.TransactionTemplate transactionTemplate) {
         this.jdbcTemplate = jdbcTemplate;
         this.mcpServerConfigurationService = mcpServerConfigurationService;
         this.imageAnalysisService = imageAnalysisService;
@@ -202,6 +207,7 @@ public class WorkflowService {
         this.creativeAssetService = creativeAssetService;
         this.creativeAssetRepository = creativeAssetRepository;
         this.mediaStorage = mediaStorage;
+        this.transactionTemplate = transactionTemplate;
     }
 
     // ---------------------------------------------------------------- 定义版本
@@ -500,7 +506,7 @@ public class WorkflowService {
                 yield new NodeResult(answer == null ? "" : answer, "文本已生成");
             }
             case "web_search" -> webSearch(text(params.get("query")));
-            case "poster_render" -> renderPoster(context, text(params.get("image")),
+            case "poster_render" -> renderPoster(context, node.key(), text(params.get("image")),
                     text(params.get("imageAssetId")), text(params.get("copy")));
             case "start" -> new NodeResult(toJson(context.input()), "开始");
             case "http_request" -> httpRequest(context, params);
@@ -611,7 +617,7 @@ public class WorkflowService {
         return new NodeResult(result, "联网搜索完成");
     }
 
-    private NodeResult renderPoster(RunContext context, String imageUrl, String imageAssetId,
+    private NodeResult renderPoster(RunContext context, String nodeKey, String imageUrl, String imageAssetId,
                                     String copyJson) throws Exception {
         if ((imageUrl == null || imageUrl.isBlank()) && (imageAssetId == null || imageAssetId.isBlank())) {
             throw new IllegalArgumentException("海报缺少商品图输入");
@@ -628,21 +634,28 @@ public class WorkflowService {
         byte[] productImage = imageAssetId == null || imageAssetId.isBlank()
                 ? downloadImage(imageUrl) : readAssetBytes(context, imageAssetId);
         byte[] poster = PosterComposer.compose(productImage, copy);
-        Artifact artifact = storeArtifact(context, poster);
-        if (context.creativeProjectId() != null) {
-            // 运行绑定了创作项目：海报同步登记进项目素材库（尽力而为，失败不阻塞工作流）
-            try {
-                var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
-                        context.userId(), context.tenantId(), context.userId(),
-                        com.zwx.zwxagent.platform.security.Role.USER);
-                creativeAssetService.upload(actor, context.creativeProjectId(),
-                        "poster-" + context.id() + ".png", poster);
-            } catch (Exception exception) {
-                log.warn("海报登记创作素材库失败（不阻塞工作流）：runId={}；{}",
-                        context.id(), exception.getMessage());
-            }
-        }
-        return new NodeResult(artifact.objectKey(), "海报已生成");
+        // R05（评审 2026-10-31）：单一存储 + 统一素材登记。对象键带 nodeKey 与随机后缀，
+        // 多个海报节点互不覆盖；经 mediaStorage 适配本地/OSS（此前直写 OSS，本地模式海报链路必失败）。
+        // 登记失败让节点可重试失败——渲染确定性且零计费，重试不会重新调用模型。
+        String objectKey = "workflow/" + context.userId() + "/" + context.id() + "/"
+                + nodeKey + "/poster-" + UUID.randomUUID().toString().substring(0, 8) + ".png";
+        mediaStorage.put(objectKey, "image/png", new java.io.ByteArrayInputStream(poster), poster.length);
+        var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
+                context.userId(), context.tenantId(), context.userId(),
+                com.zwx.zwxagent.platform.security.Role.USER);
+        UUID projectId = context.creativeProjectId() != null
+                ? context.creativeProjectId()
+                : workflowProject(actor, null);
+        var asset = creativeAssetService.registerRendered(actor, projectId,
+                "poster-" + context.id() + "-" + nodeKey + ".png", poster, objectKey,
+                java.util.Map.of("workflowRunId", context.id(), "workflowNode", nodeKey));
+        Artifact artifact = new Artifact("poster", "海报.png", objectKey, asset.id().toString());
+        context.artifacts().add(artifact);
+        jdbcTemplate.update("UPDATE workflow_run SET artifacts = ?::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                toJson(context.artifacts()), context.id());
+        return new NodeResult(toJson(java.util.Map.of(
+                "assetId", asset.id().toString(),
+                "objectKey", objectKey)), "海报已生成并归入素材库");
     }
 
     private NodeResult httpRequest(RunContext context, Map<String, Object> params) throws Exception {
@@ -843,41 +856,50 @@ public class WorkflowService {
 
     /** 媒体任务成功：节点写入结构化输出并尝试一次性推进后续节点。 */
     public void advanceMediaNode(String runId, String nodeKey, String outputJson, String message) {
-        jdbcTemplate.update("""
-                UPDATE workflow_node_execution SET status = 'SUCCEEDED', output_json = ?::jsonb,
-                    error = NULL, updated_at = CURRENT_TIMESTAMP
-                WHERE run_id = ? AND node_key = ? AND status = 'WAITING_EXTERNAL'
-                """, outputJson, runId, nodeKey);
-        updateWaitingStep(runId, nodeKey, "SUCCEEDED", message, outputJson);
-        resumeWaiting(runId);
+        // R01（评审 2026-10-31）：节点终态、steps 更新与运行唤醒放同一事务——
+        // 此前为三条独立写入，节点写完 SUCCEEDED 后崩溃会让运行永久等待。
+        transactionTemplate.executeWithoutResult(status -> {
+            int updated = jdbcTemplate.update("""
+                    UPDATE workflow_node_execution SET status = 'SUCCEEDED', output_json = ?::jsonb,
+                        error = NULL, updated_at = CURRENT_TIMESTAMP
+                    WHERE run_id = ? AND node_key = ? AND status = 'WAITING_EXTERNAL'
+                    """, outputJson, runId, nodeKey);
+            if (updated > 0) {
+                updateWaitingStep(runId, nodeKey, "SUCCEEDED", message, outputJson);
+                resumeWaiting(runId);
+            }
+        });
     }
 
     /** 媒体任务失败：节点与运行都标记失败，未执行步骤置为跳过。 */
     public void failMediaNode(String runId, String nodeKey, String error) {
-        jdbcTemplate.update("""
-                UPDATE workflow_node_execution SET status = 'FAILED', error = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE run_id = ? AND node_key = ? AND status = 'WAITING_EXTERNAL'
-                """, truncate(error, 400), runId, nodeKey);
-        WorkflowRunRow row = findAny(runId);
-        if (row == null) return;
-        List<StepState> steps = parseSteps(row.steps());
-        List<StepState> updated = steps.stream().map(step -> {
-            if (step.key().equals(nodeKey)) {
-                return new StepState(step.key(), step.name(), "FAILED", truncate(error, 300),
-                        step.output(), step.startedAt(), Instant.now());
-            }
-            if ("PENDING".equals(step.status()) || "RUNNING".equals(step.status())) {
-                return new StepState(step.key(), step.name(), "SKIPPED", "前序步骤失败",
-                        step.output(), step.startedAt(), Instant.now());
-            }
-            return step;
-        }).toList();
-        jdbcTemplate.update("""
-                UPDATE workflow_run SET steps = ?::jsonb, status = 'FAILED', error = ?,
-                    current_step = NULL, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND status = 'WAITING_EXTERNAL'
-                """, toJson(updated), truncate(error, 400), runId);
+        transactionTemplate.executeWithoutResult(status -> {
+            int updated = jdbcTemplate.update("""
+                    UPDATE workflow_node_execution SET status = 'FAILED', error = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE run_id = ? AND node_key = ? AND status = 'WAITING_EXTERNAL'
+                    """, truncate(error, 400), runId, nodeKey);
+            if (updated == 0) return;
+            WorkflowRunRow row = findAny(runId);
+            if (row == null) return;
+            List<StepState> steps = parseSteps(row.steps());
+            List<StepState> updatedSteps = steps.stream().map(step -> {
+                if (step.key().equals(nodeKey)) {
+                    return new StepState(step.key(), step.name(), "FAILED", truncate(error, 300),
+                            step.output(), step.startedAt(), Instant.now());
+                }
+                if ("PENDING".equals(step.status()) || "RUNNING".equals(step.status())) {
+                    return new StepState(step.key(), step.name(), "SKIPPED", "前序步骤失败",
+                            step.output(), step.startedAt(), Instant.now());
+                }
+                return step;
+            }).toList();
+            jdbcTemplate.update("""
+                    UPDATE workflow_run SET steps = ?::jsonb, status = 'FAILED', error = ?,
+                        current_step = NULL, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                    """, toJson(updatedSteps), truncate(error, 400), runId);
+        });
     }
 
     private void updateWaitingStep(String runId, String nodeKey, String status, String message, String output) {
@@ -909,7 +931,8 @@ public class WorkflowService {
         });
         List<Artifact> artifacts = new ArrayList<>();
         row.artifacts().forEach(node -> artifacts.add(new Artifact(
-                node.path("type").asText(), node.path("name").asText(), node.path("objectKey").asText())));
+                node.path("type").asText(), node.path("name").asText(), node.path("objectKey").asText(),
+                node.path("assetId").asText().isBlank() ? null : node.path("assetId").asText())));
         RunContext context = new RunContext(row.id(), row.tenantId(), row.userId(), row.workflowKey(),
                 row.definitionVersion(), row.workflowKey(), "", graph, input, parseSteps(row.steps()), artifacts,
                 row.creativeProjectId());
@@ -1323,12 +1346,16 @@ public class WorkflowService {
             String objectKey = node.path("objectKey").asText();
             String type = node.path("type").asText();
             String name = node.path("name").asText();
+            String assetId = node.path("assetId").asText("");
             String url = "";
-            if (withArtifactUrl && !objectKey.isBlank()) {
+            if (withArtifactUrl && !assetId.isBlank()) {
+                // R05：已登记为创作素材的产物（海报等），前端经鉴权 blob 读取，本地/OSS 存储都可用
+                url = "asset:" + assetId;
+            } else if (withArtifactUrl && !objectKey.isBlank()) {
                 url = presignArtifact(row.tenantId(), row.userId(), row.id(), objectKey,
                         "file".equals(type) ? name : null);
             }
-            artifacts.add(new ArtifactView(type, name, url));
+            artifacts.add(new ArtifactView(type, name, url, assetId.isBlank() ? null : assetId));
         });
         Map<String, Object> input = objectMapper.convertValue(row.input(), new TypeReference<>() {
         });

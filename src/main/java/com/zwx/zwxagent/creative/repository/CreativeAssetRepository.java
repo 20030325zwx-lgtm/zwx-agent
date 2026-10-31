@@ -91,8 +91,13 @@ public class CreativeAssetRepository {
             where.append(" AND starred = TRUE");
         }
         if (origin != null && !origin.isBlank()) {
-            where.append(" AND origin = ?");
-            args.add(origin);
+            // "生成结果"包含模型产物（GENERATED）与确定性渲染产物（DERIVED，如海报）
+            if ("GENERATED".equalsIgnoreCase(origin)) {
+                where.append(" AND origin IN ('GENERATED', 'DERIVED')");
+            } else {
+                where.append(" AND origin = ?");
+                args.add(origin);
+            }
         }
         if (cursorCreatedAt != null && cursorId != null) {
             where.append(" AND (created_at, id) < (?, ?)");

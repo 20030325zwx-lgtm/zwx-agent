@@ -101,6 +101,19 @@
   项目 tab 筛选生成结果=2（试穿图 + 海报）。
 - 未提交：素材分组与预览改动。
 
+## 追加 5（2026-10-31 晚）：专家联合评审第一批修复
+
+- 专家评审落库：docs/design/2026-10-31-workflow-creative-expert-review.md（P1×5/P2×2 + 架构/规范/产品/UI 建议）。
+- 本轮修复（详见 docs/design/2026-10-31-workflow-creative-expert-review-response.md）：
+  R02 恢复器 SQL 筛终态（队首阻塞，事务级验证 20+1）；R01 advance/fail 同事务 + 孤儿任务重链 + 运行态修复；
+  R04 image_edit 结果「再做一版（同参考）」保留语义（详情接口补 referenceAssetIds）；
+  R05 海报单次存储（mediaStorage）+ registerRendered（origin=DERIVED + metadata）+ Artifact 带 assetId + 产物 asset: blob 渲染；
+  R07 档案解析只创建不覆盖 + V12 回填 image_edit；
+  R03 部分：workflowInputs.js 共享推导，创作首页弹窗渲染同一运行表单（3 素材字段）。
+- 连带修正：素材"生成结果"筛选语义含 DERIVED；徽标按 UPLOAD 判断；MediaModelResolverTest 改绑定派生断言
+  （管理员绑定已切到中转站模型，硬编码 wanx 属环境性假设）；评审材料 §7 表述修正。
+- 后续批次：R06、R03 完整版（schema/预检/幂等键）、调度器有界执行池、WAITING_USER、三版式、模板导出导入。
+
 ## 环境注意事项
 - 未读取/修改 application-local.yml；启动/重启按 AGENTS.md launchctl 流程执行。
 - 本地库存在两个挂 wanx 模型的供应商（官方+UI Mock），MediaModelResolverTest 辅助查询已改为固定取 id 最小的官方供应商。

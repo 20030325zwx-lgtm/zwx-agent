@@ -93,6 +93,9 @@ public class CreativeJobController {
         MediaJobRecord job = jobService.getForOwner(actor, jobId);
         Map<String, Object> body = new LinkedHashMap<>(summary(job));
         body.put("parameters", job.inputSnapshot().parameters());
+        // R04（评审 2026-10-31）：继续创作需要保留操作语义与参考图顺序，不再静默降级为文生图
+        body.put("referenceAssetIds", job.inputSnapshot().referenceAssetIds().stream()
+                .map(UUID::toString).toList());
         body.put("modelRowId", job.modelSnapshot().modelRowId());
         body.put("modelName", job.modelSnapshot().modelName());
         body.put("parentJobId", job.parentJobId() == null ? null : job.parentJobId().toString());

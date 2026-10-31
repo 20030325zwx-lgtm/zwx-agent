@@ -151,9 +151,9 @@
         <template v-else>
           <label class="cr-field">
             <span class="cr-field-label"><span>工作流</span></span>
-            <select v-model="wfForm.workflowKey" class="cr-input">
+            <select v-model="wfForm.workflowKey" class="cr-input" @change="loadWorkflowInputs(wfForm.workflowKey)">
               <option value="" disabled>选择工作流</option>
-              <option v-for="wf in workflows" :key="wf.key" :value="wf.key">
+              <option v-for="wf in workflows" :key="wf.key" :value="wf.key" @click="loadWorkflowInputs(wf.key)">
                 {{ wf.name || wf.key }}（{{ (wf.steps || []).length }} 节点）
               </option>
             </select>
@@ -173,11 +173,26 @@
             <input v-model.trim="wfForm.keyword" class="cr-input" maxlength="200"
                    placeholder="如：不锈钢保温杯" />
           </label>
+          <div v-for="key in wfForm.assetKeys" :key="key" class="cr-field">
+            <span class="cr-field-label"><span class="wf-input-key">{{ key }}</span></span>
+            <AssetParamField
+              :model-value="wfForm.input[key] || ''"
+              :multiple="key === 'imageAssetIds'"
+              @update:model-value="value => wfForm.input[key] = value"
+            />
+          </div>
+          <label v-for="key in wfForm.textKeys" :key="key" class="cr-field">
+            <span class="cr-field-label"><span class="wf-input-key">{{ key }}</span></span>
+            <input v-model.trim="wfForm.input[key]" class="cr-input" maxlength="200"
+                   :placeholder="`运行输入 ${key}`" />
+          </label>
           <p v-if="wfError" class="cr-error">{{ wfError }}</p>
         </template>
         <div class="cr-dialog-actions">
           <button type="button" class="cr-secondary" @click="wfOpen = false">取消</button>
-          <button type="button" class="cr-primary" :disabled="wfStarting || !wfForm.workflowKey || !wfForm.projectId || !wfForm.keyword"
+          <button type="button" class="cr-primary"
+                  :disabled="wfStarting || !wfForm.workflowKey || !wfForm.projectId || !wfForm.keyword
+                    || wfForm.assetKeys.some(key => !(wfForm.input[key] || '').trim())"
                   @click="startWorkflowRun">
             {{ wfStarting ? '发起中…' : '发起运行' }}
           </button>
@@ -194,10 +209,12 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlertCircle, Palette, Plus, Workflow } from 'lucide-vue-next'
 import {
-  createCreativeProject, listCreativeJobs, listCreativeProjects, listModelCatalog,
-  listWorkflows, startWorkflow
+  createCreativeProject, getWorkflowDefinition, listCreativeJobs, listCreativeProjects,
+  listModelCatalog, listWorkflows, startWorkflow
 } from '../../api'
 import { formatTime, kindLabel, statusMeta } from './shared'
+import AssetParamField from '../../components/workflow/AssetParamField.vue'
+import { deriveRunInputs } from './workflowInputs'
 
 const router = useRouter()
 const projects = ref([])
@@ -222,7 +239,7 @@ const wfLoading = ref(false)
 const wfStarting = ref(false)
 const wfError = ref('')
 const workflows = ref([])
-const wfForm = reactive({ workflowKey: '', projectId: null, keyword: '' })
+const wfForm = reactive({ workflowKey: '', projectId: null, keyword: '', assetKeys: [], textKeys: [], input: {} })
 const activeProjects = computed(() => projects.value.filter(p => p.status === 'ACTIVE'))
 const selectedWorkflow = computed(() => workflows.value.find(wf => wf.key === wfForm.workflowKey))
 
@@ -260,6 +277,22 @@ async function create() {
   }
 }
 
+// R03（评审 2026-10-31）：与编辑器/项目页共用同一运行输入推导，避免首页入口缺字段
+async function loadWorkflowInputs(workflowKey) {
+  wfForm.assetKeys = []
+  wfForm.textKeys = []
+  wfForm.input = {}
+  if (!workflowKey) return
+  try {
+    const definition = await getWorkflowDefinition(workflowKey)
+    const { assetKeys, textKeys } = deriveRunInputs(definition.graph)
+    wfForm.assetKeys = assetKeys
+    wfForm.textKeys = textKeys.filter(key => key !== 'keyword')
+  } catch (error) {
+    wfError.value = '工作流定义加载失败，无法校验运行输入'
+  }
+}
+
 function openWorkflowCreate() {
   wfOpen.value = true
   wfError.value = ''
@@ -285,7 +318,12 @@ async function startWorkflowRun() {
   wfStarting.value = true
   wfError.value = ''
   try {
-    const run = await startWorkflow(wfForm.workflowKey, wfForm.keyword, wfForm.projectId)
+    const input = {}
+    for (const key of [...wfForm.assetKeys, ...wfForm.textKeys]) {
+      const value = (wfForm.input[key] || '').trim()
+      if (value) input[key] = value
+    }
+    const run = await startWorkflow(wfForm.workflowKey, wfForm.keyword, wfForm.projectId, input)
     wfOpen.value = false
     showToast('工作流已发起，产物将归入所选项目')
     router.push({ path: `/creative/projects/${wfForm.projectId}`, query: { tab: 'workflow', runId: run.id } })

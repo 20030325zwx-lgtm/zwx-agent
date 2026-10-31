@@ -78,16 +78,16 @@ public class MediaModelResolver {
             ModelCatalogService.ImageBinding binding) {
         var existing = profileRepository.findByModelRowId(binding.modelRowId());
         if (existing.isPresent()) {
-            String current = existing.get().adapterKey();
-            if (!ADAPTER_DASHSCOPE_TEXT2IMAGE.equals(current) && !ADAPTER_OPENAI_IMAGES.equals(current)) {
-                return existing.get(); // 已被 Mock 等其他适配器接管，尊重现状
-            }
+            // R07（评审 2026-10-31）：档案是能力与验证结论的事实来源，解析只创建、不覆盖——
+            // 否则人工维护的能力开关/验证状态会在每次 resolve 时被默认值冲掉，revision 也失真。
+            // 既有 openai-images 档案的 image_edit 能力由 V12 一次性回填。
+            return existing.get();
         }
         String protocol = String.valueOf(binding.config().provider());
         String adapterKey;
         ParameterSchema schema;
         VerificationStatus verification;
-        Map<String, Boolean> operations = Map.of(OPERATION_TEXT_TO_IMAGE, true);
+        java.util.Map<String, Boolean> operations = java.util.Map.of(OPERATION_TEXT_TO_IMAGE, true);
         switch (protocol.toLowerCase()) {
             case "dashscope" -> {
                 adapterKey = ADAPTER_DASHSCOPE_TEXT2IMAGE;

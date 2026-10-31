@@ -5,8 +5,8 @@
       <header class="ap-head">
         <div class="ap-title">
           <strong>{{ asset.displayName }}</strong>
-          <span class="ap-origin" :class="asset.origin === 'GENERATED' ? 'gen' : 'up'">
-            {{ asset.origin === 'GENERATED' ? '生成结果' : '原始素材' }}
+          <span class="ap-origin" :class="asset.origin === 'UPLOAD' ? 'up' : 'gen'">
+            {{ asset.origin === 'UPLOAD' ? '原始素材' : '生成结果' }}
           </span>
         </div>
         <button type="button" class="ap-close" aria-label="关闭预览" @click="emit('close')">×</button>

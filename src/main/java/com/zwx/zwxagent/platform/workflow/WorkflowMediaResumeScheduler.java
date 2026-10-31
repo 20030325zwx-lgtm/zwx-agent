@@ -39,21 +39,60 @@ public class WorkflowMediaResumeScheduler {
     @Scheduled(fixedDelayString = "${app.workflow.media-resume.interval-ms:5000}")
     public void tick() {
         if (!enabled) return;
-        List<Map<String, Object>> waiting = jdbcTemplate.queryForList("""
+        // R02（评审 2026-10-31）：SQL 层先筛媒体已终态的等待节点，避免"前 20 个长期生成
+        // 任务"把已完成任务堵在扫描之外（队首阻塞）；仍在生成的节点不进入本轮结果。
+        List<Map<String, Object>> ready = jdbcTemplate.queryForList("""
                 SELECT e.run_id, e.node_key, e.media_job_id, j.status AS job_status
                 FROM workflow_node_execution e
                 JOIN media_job j ON j.id = e.media_job_id
                 WHERE e.status = 'WAITING_EXTERNAL'
-                ORDER BY e.updated_at
+                  AND j.status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                ORDER BY j.finished_at NULLS LAST, e.updated_at
                 LIMIT ?
                 """, batchSize);
-        for (var row : waiting) {
+        for (var row : ready) {
             try {
                 handle(row);
             } catch (Exception exception) {
                 log.warn("工作流媒体恢复失败：run={} node={}；{}", row.get("run_id"), row.get("node_key"),
                         exception.getMessage());
             }
+        }
+        repairStuckRuns();
+    }
+
+    /**
+     * R01（评审 2026-10-31）崩溃窗口修复：
+     * ① 媒体任务已创建但节点等待关系未落库（孤儿任务）→ 按 source_run_id/node_id 重链；
+     * ② 节点已在等待但运行仍是 RUNNING（markWaiting 前崩溃 / 恢复翻转后被中断）→ 把运行翻回 WAITING_EXTERNAL，
+     *    让 resumeWaiting 认领续跑（媒体节点幂等键复用既有任务，不会重复计费）。
+     */
+    private void repairStuckRuns() {
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO workflow_node_execution (run_id, node_key, status, media_job_id, attempt)
+                    SELECT j.source_run_id, j.source_node_id, 'WAITING_EXTERNAL', j.id, 1
+                    FROM media_job j
+                    WHERE j.source_type = 'WORKFLOW' AND j.source_run_id IS NOT NULL AND j.source_node_id IS NOT NULL
+                      AND j.status IN ('QUEUED', 'SUBMITTING', 'RECONCILING', 'RUNNING', 'CANCEL_REQUESTED',
+                                       'FETCHING', 'INGEST_FAILED', 'SUCCEEDED')
+                      AND NOT EXISTS (
+                          SELECT 1 FROM workflow_node_execution e
+                          WHERE e.run_id = j.source_run_id AND e.node_key = j.source_node_id)
+                      AND EXISTS (
+                          SELECT 1 FROM workflow_run r
+                          WHERE r.id = j.source_run_id AND r.status IN ('RUNNING', 'WAITING_EXTERNAL'))
+                    LIMIT ?
+                    """, Math.max(1, batchSize));
+            jdbcTemplate.update("""
+                    UPDATE workflow_run r SET status = 'WAITING_EXTERNAL', updated_at = CURRENT_TIMESTAMP
+                    WHERE r.status = 'RUNNING'
+                      AND EXISTS (
+                          SELECT 1 FROM workflow_node_execution e
+                          WHERE e.run_id = r.id AND e.status = 'WAITING_EXTERNAL')
+                    """);
+        } catch (Exception exception) {
+            log.warn("工作流等待修复失败：{}", exception.getMessage());
         }
     }
 

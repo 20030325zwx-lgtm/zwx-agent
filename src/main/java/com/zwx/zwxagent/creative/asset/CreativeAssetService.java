@@ -103,6 +103,55 @@ public class CreativeAssetService {
         return toView(assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId).orElseThrow());
     }
 
+    /**
+     * 工作流渲染产物登记（R05，2026-10-31 评审）：调用方已把字节写入 objectKey（mediaStorage 适配本地/OSS），
+     * 这里补齐校验、素材行（origin=DERIVED）与缩略图。失败即抛错，由调用方把节点置为可重试失败——
+     * 渲染是确定性且零计费的，重试不会重新调用模型。
+     */
+    public AssetView registerRendered(CurrentActor actor, UUID projectId, String displayName,
+                                      byte[] bytes, String objectKey, java.util.Map<String, Object> metadata) {
+        var project = projectRepository.findByIdForOwner(actor.tenantId(), actor.userId(), projectId)
+                .orElseThrow(() -> new IllegalArgumentException("创作项目不存在"));
+        if (project.status() != ProjectStatus.ACTIVE) {
+            throw new IllegalStateException("项目已归档，不能登记素材");
+        }
+        if (!com.zwx.zwxagent.creative.asset.ImageInspector.withinByteBudget(bytes == null ? 0 : bytes.length)) {
+            throw new IllegalArgumentException("渲染产物超过 20MiB 上限");
+        }
+        var inspection = com.zwx.zwxagent.creative.asset.ImageInspector.inspect(bytes);
+        if (!inspection.supported()) {
+            throw new IllegalArgumentException("渲染产物不是受支持的图片格式");
+        }
+        if (!inspection.withinPixelBudget()) {
+            throw new IllegalArgumentException("渲染产物像素超过 40MP 上限");
+        }
+        String mimeType = switch (inspection.type()) {
+            case PNG -> "image/png";
+            case JPEG -> "image/jpeg";
+            default -> "image/webp";
+        };
+        UUID assetId = UUID.randomUUID();
+        String metadataJson = metadata == null || metadata.isEmpty() ? "{}"
+                : com.zwx.zwxagent.creative.support.CreativeJson.toJson(metadata);
+        var record = new CreativeAssetRecord(assetId, projectId, actor.tenantId(), actor.userId(),
+                null, null, com.zwx.zwxagent.creative.domain.AssetOrigin.DERIVED,
+                "IMAGE", com.zwx.zwxagent.creative.domain.StorageBackend.valueOf(storage.backend()),
+                objectKey, mimeType, bytes.length,
+                com.zwx.zwxagent.creative.asset.MockAssetIngestService.sha256(bytes),
+                inspection.width(), inspection.height(), null,
+                displayNameOf(displayName), false, com.zwx.zwxagent.creative.domain.AssetStatus.PENDING,
+                metadataJson, Instant.now(), null);
+        assetRepository.insert(record);
+        try {
+            putThumbnailBestEffort(objectKey, bytes);
+        } catch (RuntimeException exception) {
+            assetRepository.softDelete(assetId);
+            throw new IllegalStateException("渲染产物缩略图生成失败", exception);
+        }
+        assetRepository.markReady(assetId, inspection.width(), inspection.height(), null);
+        return toView(assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId).orElseThrow());
+    }
+
     /** 内容读取（BR16）：仅本人；流式返回，不暴露对象键与磁盘路径。 */
     public ContentContent content(CurrentActor actor, UUID assetId) {
         var asset = requireOwned(actor, assetId);

@@ -1,0 +1,28 @@
+日期：2026-11-01
+
+## 问题现象
+
+视频生成产物入库后 width/height/duration_ms 全为 null（素材列表/预览看不到画幅与时长），尽管 StorageAssetIngestService 的 VideoProbe 探测成功（日志 w=1280 h=720 dur=5062）。回溯发现：**所有走 ingest 直插 READY 行的 GENERATED 素材（包括图片）尺寸一直是 null**，只是图片时代 UI 主要靠 markReady 路径（上传/渲染登记），未被察觉。
+
+## 影响范围
+
+- 走 MediaJob 入库链（StorageAssetIngestService）生成的所有素材的尺寸/时长元数据。
+- 视频素材因此缺少时长/画幅展示。
+
+## 原因
+
+`CreativeAssetRepository.insert` 的 INSERT SQL 列清单里没有 width/height/duration_ms 三列——record 里有值但从未写入。上传路径靠随后的 markReady 补尺寸所以正常；ingest 路径直接插 READY 行，元数据丢失。
+
+## 解决方式
+
+insert SQL 补上三列（含 NULL 分支）。重建后用「删产物行 → 任务置 INGEST_FAILED → 调度器自动重入库」实验验证：行内 width=1280/height=720/duration_ms=5062。
+
+## 验证结果
+
+本地全链路真实视频生成（sd_2.0_special_720p，5 秒，约 4.5 分钟）SUCCEEDED 后元数据正确入库。
+
+## 后续注意事项
+
+- 新增素材字段时检查 `CreativeAssetRepository.insert` 的列清单是否同步（本次即漏列导致）。
+- 排查此类「探针正常但落库为空」问题时，先怀疑 SQL 列清单，再怀疑探测逻辑；可用 resume-ingest 重放入库做免费实验。
+- 关联：2026-10-31 曾发生 target/ 残留 macOS 复制副本（"Name N.class"）导致打包失败；本次又在 target/classes 发现 232 个 "* 2.class" 垃圾文件（已清理）。构建前留意。

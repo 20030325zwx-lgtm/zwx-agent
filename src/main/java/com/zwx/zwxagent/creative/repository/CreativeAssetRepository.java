@@ -40,8 +40,9 @@ public class CreativeAssetRepository {
                         INSERT INTO creative_asset
                             (id, project_id, tenant_id, user_id, source_job_id, output_index, origin,
                              media_type, storage_backend, object_key, mime_type, byte_size, sha256,
+                             width, height, duration_ms,
                              display_name, status, metadata)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                         """,
                 ps -> {
                     ps.setObject(1, asset.id());
@@ -60,9 +61,15 @@ public class CreativeAssetRepository {
                     ps.setString(11, asset.mimeType());
                     ps.setLong(12, asset.byteSize());
                     ps.setString(13, asset.sha256());
-                    ps.setString(14, asset.displayName());
-                    ps.setString(15, asset.status().name());
-                    ps.setString(16, asset.metadataJson() == null ? "{}" : asset.metadataJson());
+                    if (asset.width() == null) ps.setNull(14, java.sql.Types.INTEGER);
+                    else ps.setInt(14, asset.width());
+                    if (asset.height() == null) ps.setNull(15, java.sql.Types.INTEGER);
+                    else ps.setInt(15, asset.height());
+                    if (asset.durationMs() == null) ps.setNull(16, java.sql.Types.BIGINT);
+                    else ps.setLong(16, asset.durationMs());
+                    ps.setString(17, asset.displayName());
+                    ps.setString(18, asset.status().name());
+                    ps.setString(19, asset.metadataJson() == null ? "{}" : asset.metadataJson());
                 });
     }
 

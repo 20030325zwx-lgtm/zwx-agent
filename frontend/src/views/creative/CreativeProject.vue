@@ -16,6 +16,7 @@
       <nav class="studio-tabs" aria-label="创作台视图">
         <button v-if="project?.kind !== 'NOVEL'" type="button" :class="{ active: tab === 'studio' }" @click="tab = 'studio'">创作</button>
         <button v-if="project?.kind === 'NOVEL'" type="button" :class="{ active: tab === 'chapters' }" @click="tab = 'chapters'">章节</button>
+        <button v-if="project?.kind === 'VIDEO'" type="button" :class="{ active: tab === 'story' }" @click="tab = 'story'">剧情</button>
         <button type="button" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
         <button type="button" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">
           任务记录<span v-if="activeCount" class="tab-badge">{{ activeCount }}</span>
@@ -239,6 +240,14 @@
           </button>
         </div>
       </aside>
+    </div>
+
+    <!-- 剧情（视频 P1/P2）：剧集/场次/镜头工作区 + 候选选片；独立组件承载，不再内嵌业务 -->
+    <div v-else-if="tab === 'story'" class="cr-scroll studio-sub">
+      <div class="cr-inner">
+        <StoryWorkspace :project-id="projectId" @open-settings="storySettings = true" />
+      </div>
+      <StorySettingsPanel v-if="storySettings" :project-id="projectId" @close="storySettings = false" />
     </div>
 
     <!-- 章节（AI 小说）：创作项目的有状态内容层，每写一章 = 一次工作流运行读状态生成写回 -->
@@ -670,6 +679,8 @@ import Spinner from '../../components/ui/Spinner.vue'
 import ToggleSwitch from '../../components/ui/ToggleSwitch.vue'
 import { getCreativeAssetBlob } from '../../api'
 import AssetParamField from '../../components/workflow/AssetParamField.vue'
+import StoryWorkspace from './story/StoryWorkspace.vue'
+import StorySettingsPanel from './story/StorySettingsPanel.vue'
 import { buildRunForm } from './workflowInputs'
 
 const PROMPT_MAX = 500
@@ -684,7 +695,8 @@ const imageBinding = ref(null)
 const videoBinding = ref(null)
 const imageProtocol = computed(() => imageBinding.value?.protocol || 'dashscope')
 const pageError = ref('')
-const tab = ref(['workflow', 'chapters'].includes(route.query.tab) ? route.query.tab : 'studio')
+const tab = ref(['workflow', 'chapters', 'story'].includes(route.query.tab) ? route.query.tab : 'studio')
+const storySettings = ref(false)
 
 const idea = ref('')
 const effective = ref('')
@@ -794,8 +806,9 @@ async function loadProject() {
     return
   }
   await Promise.all([loadCatalog(), loadDrafts(), loadJobs(), loadAssets()])
-  // 小说项目默认落在章节 tab（创作层的有状态内容视图）
+  // 小说项目默认落在章节 tab；视频项目默认落在剧情 tab（创作层的有状态内容视图）
   if (project.value?.kind === 'NOVEL' && !route.query.tab) tab.value = 'chapters'
+  if (project.value?.kind === 'VIDEO' && !route.query.tab) tab.value = 'story'
 }
 
 async function loadCatalog() {
@@ -1319,7 +1332,10 @@ async function optimize() {
   optimizeError.value = ''
   suggestion.value = ''
   try {
-    const result = await optimizeCreativePrompt({ prompt: (effective.value || idea.value).trim() })
+    // P0：同一输入按项目类型分流策略——图片项目走文生图改写，视频项目走视频提示词策略
+    const result = await optimizeCreativePrompt(isVideoProject.value
+      ? { prompt: (effective.value || idea.value).trim(), mode: 'VIDEO_PROMPT', projectId: projectId.value }
+      : { prompt: (effective.value || idea.value).trim() })
     suggestion.value = result.optimizedPrompt
   } catch (error) {
     optimizeError.value = error.response?.data?.error || '提示词优化失败，可直接使用原文生成'

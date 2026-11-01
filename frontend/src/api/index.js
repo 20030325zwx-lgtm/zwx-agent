@@ -352,6 +352,69 @@ export const updateCreativeDraft = (draftId, payload) =>
   request.patch(`/ai/creative/drafts/${encodeURIComponent(draftId)}`, payload).then(response => response.data)
 export const optimizeCreativePrompt = payload =>
   request.post('/ai/creative/prompts/optimize', payload).then(response => response.data)
+// 视频剧情域（P1/P2）：剧集/场次/镜头/角色/地点/连续性 + 候选选片
+export const getStoryWorkspace = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/workspace`).then(r => r.data)
+export const createStoryEpisode = (projectId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes`, payload).then(r => r.data)
+export const updateStoryEpisode = (projectId, episodeId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}`, payload).then(r => r.data)
+export const confirmStoryEpisode = (projectId, episodeId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}/confirm`).then(r => r.data)
+export const moveStoryEpisode = (projectId, episodeId, direction) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}/move`, { direction }).then(r => r.data)
+export const deleteStoryEpisode = (projectId, episodeId) =>
+  request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}`).then(r => r.data)
+export const createStoryScene = (projectId, episodeId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}/scenes`, payload).then(r => r.data)
+export const updateStoryScene = (projectId, sceneId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/scenes/${sceneId}`, payload).then(r => r.data)
+export const confirmStoryScene = (projectId, sceneId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/scenes/${sceneId}/confirm`).then(r => r.data)
+export const deleteStoryScene = (projectId, sceneId) =>
+  request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/scenes/${sceneId}`).then(r => r.data)
+export const createStoryShot = (projectId, sceneId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/scenes/${sceneId}/shots`, payload).then(r => r.data)
+export const getStoryShot = (projectId, shotId) =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}`).then(r => r.data)
+export const updateStoryShot = (projectId, shotId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}`, payload).then(r => r.data)
+export const deleteStoryShot = (projectId, shotId) =>
+  request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}`).then(r => r.data)
+export const listShotCandidates = (projectId, shotId) =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}/candidates`).then(r => r.data)
+export const generateShotVideo = (projectId, shotId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}/generate`, payload).then(r => r.data)
+export const uploadShotCandidate = (projectId, shotId, assetId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}/candidates/upload`, { assetId }).then(r => r.data)
+export const selectShotCandidate = (projectId, shotId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}/select`, payload).then(r => r.data)
+export const unselectShotCandidate = (projectId, shotId, candidateId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}/unselect`, { candidateId }).then(r => r.data)
+export const deleteShotCandidate = (projectId, shotId, candidateId) =>
+  request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}/candidates/${candidateId}`).then(r => r.data)
+export const createStoryCharacter = (projectId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/characters`, payload).then(r => r.data)
+export const updateStoryCharacter = (projectId, characterId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/characters/${characterId}`, payload).then(r => r.data)
+export const deleteStoryCharacter = (projectId, characterId) =>
+  request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/characters/${characterId}`).then(r => r.data)
+export const createStoryLocation = (projectId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/locations`, payload).then(r => r.data)
+export const updateStoryLocation = (projectId, locationId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/locations/${locationId}`, payload).then(r => r.data)
+export const deleteStoryLocation = (projectId, locationId) =>
+  request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/locations/${locationId}`).then(r => r.data)
+export const attachStoryRef = (projectId, entityType, entityId, assetId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/refs`, { entityType, entityId, assetId }).then(r => r.data)
+export const listStoryNotes = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/notes`).then(r => r.data)
+export const createStoryNote = (projectId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/notes`, payload).then(r => r.data)
+export const updateStoryNote = (projectId, noteId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/notes/${noteId}`, payload).then(r => r.data)
+export const deleteStoryNote = (projectId, noteId) =>
+  request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/notes/${noteId}`).then(r => r.data)
 export const listCreativeJobs = (params = {}) =>
   request.get('/ai/creative/jobs', { params }).then(response => response.data)
 export const getCreativeJob = jobId =>

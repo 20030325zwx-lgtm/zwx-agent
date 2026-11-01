@@ -1,0 +1,467 @@
+package com.zwx.zwxagent.creative.story;
+
+import com.zwx.zwxagent.creative.domain.CandidateStatus;
+import com.zwx.zwxagent.creative.domain.CreativeConflictException;
+import com.zwx.zwxagent.creative.domain.VideoCharacterRecord;
+import com.zwx.zwxagent.creative.domain.VideoContinuityNoteRecord;
+import com.zwx.zwxagent.creative.domain.VideoEpisodeRecord;
+import com.zwx.zwxagent.creative.domain.VideoLocationRecord;
+import com.zwx.zwxagent.creative.domain.VideoSceneRecord;
+import com.zwx.zwxagent.creative.domain.VideoShotCandidateRecord;
+import com.zwx.zwxagent.creative.domain.VideoShotRecord;
+import com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository;
+import com.zwx.zwxagent.creative.repository.VideoStoryContentRepository;
+import com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository;
+import com.zwx.zwxagent.creative.service.CreativeProjectService;
+import com.zwx.zwxagent.platform.security.CurrentActor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+/**
+ * 视频剧情域（P1/P2）：剧集/场次/镜头/角色/地点/连续性记录的内容管理。
+ * 归属校验走 CreativeProjectService + 组合键查询；层级归属在服务层显式校验，
+ * 组合外键在 DB 层兜底。镜头更新/选片使用 version 乐观锁（旧版本提交返回 409）。
+ */
+@Service
+public class StoryContentService {
+
+    public static final int TEXT_MAX = 20000;
+    public static final int NAME_MAX = 100;
+
+    private final CreativeProjectService projectService;
+    private final VideoStoryContentRepository contentRepository;
+    private final VideoStoryResourceRepository resourceRepository;
+    private final VideoShotCandidateRepository candidateRepository;
+    private final TransactionTemplate transactionTemplate;
+
+    public StoryContentService(CreativeProjectService projectService,
+                               VideoStoryContentRepository contentRepository,
+                               VideoStoryResourceRepository resourceRepository,
+                               VideoShotCandidateRepository candidateRepository,
+                               TransactionTemplate transactionTemplate) {
+        this.projectService = projectService;
+        this.contentRepository = contentRepository;
+        this.resourceRepository = resourceRepository;
+        this.candidateRepository = candidateRepository;
+        this.transactionTemplate = transactionTemplate;
+    }
+
+    // ---------------------------------------------------------------- 视图
+
+    /** 工作区一次取全：剧集/场次/镜头 + 角色/地点/连续性记录；候选按镜头汇总为计数与选定指针。 */
+    public WorkspaceView workspace(CurrentActor actor, UUID projectId) {
+        requireProject(actor, projectId);
+        String tenantId = actor.tenantId();
+        String userId = actor.userId();
+        var episodes = contentRepository.listEpisodes(tenantId, userId, projectId);
+        var scenes = contentRepository.listScenesByProject(tenantId, userId, projectId);
+        var shots = contentRepository.listShotsByProject(tenantId, userId, projectId);
+        Map<UUID, List<VideoShotCandidateRecord>> candidatesByShot =
+                candidateRepository.listByProject(tenantId, userId, projectId).stream()
+                        .collect(Collectors.groupingBy(VideoShotCandidateRecord::shotId));
+        var candidateCounts = shots.stream().collect(Collectors.toMap(VideoShotRecord::id,
+                shot -> candidateRepository.countByShot(tenantId, userId, shot.id())));
+        return new WorkspaceView(episodes, scenes, shots, candidatesByShot, candidateCounts,
+                resourceRepository.listCharacters(tenantId, userId, projectId),
+                resourceRepository.listLocations(tenantId, userId, projectId),
+                resourceRepository.listNotes(tenantId, userId, projectId));
+    }
+
+    public record WorkspaceView(List<VideoEpisodeRecord> episodes,
+                                List<VideoSceneRecord> scenes,
+                                List<VideoShotRecord> shots,
+                                Map<UUID, List<VideoShotCandidateRecord>> candidatesByShot,
+                                Map<UUID, Integer> candidateCounts,
+                                List<VideoCharacterRecord> characters,
+                                List<VideoLocationRecord> locations,
+                                List<VideoContinuityNoteRecord> notes) {
+    }
+
+    // ---------------------------------------------------------------- 剧集
+
+    public VideoEpisodeRecord createEpisode(CurrentActor actor, UUID projectId, EpisodeRequest request) {
+        requireProject(actor, projectId);
+        validateText("剧集标题", request.title(), true);
+        var record = new VideoEpisodeRecord(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
+                contentRepository.nextEpisodeNumber(projectId),
+                request.title().trim(), text(request.goal()), text(request.synopsis()), text(request.script()),
+                "DRAFT", null, null);
+        contentRepository.insertEpisode(record);
+        return contentRepository.findEpisode(actor.tenantId(), actor.userId(), record.id()).orElseThrow();
+    }
+
+    public VideoEpisodeRecord updateEpisode(CurrentActor actor, UUID projectId, UUID episodeId,
+                                            EpisodeRequest request) {
+        requireEpisode(actor, projectId, episodeId);
+        validateText("剧集标题", request.title(), true);
+        if (!contentRepository.updateEpisode(episodeId, request.title().trim(),
+                text(request.goal()), text(request.synopsis()), text(request.script()))) {
+            throw new IllegalArgumentException("剧集不存在");
+        }
+        return contentRepository.findEpisode(actor.tenantId(), actor.userId(), episodeId).orElseThrow();
+    }
+
+    /** 确认剧集（DRAFT→CONFIRMED 单向，照小说章节语义）。 */
+    public VideoEpisodeRecord confirmEpisode(CurrentActor actor, UUID projectId, UUID episodeId) {
+        var episode = requireEpisode(actor, projectId, episodeId);
+        if (!episode.confirmed()) {
+            contentRepository.updateEpisodeStatus(episodeId, "CONFIRMED");
+        }
+        return contentRepository.findEpisode(actor.tenantId(), actor.userId(), episodeId).orElseThrow();
+    }
+
+    /** 剧集上移/下移：与相邻剧集交换顺序号（同事务，ID 不变）。 */
+    public List<VideoEpisodeRecord> moveEpisode(CurrentActor actor, UUID projectId, UUID episodeId, int direction) {
+        var episodes = contentRepository.listEpisodes(actor.tenantId(), actor.userId(), projectId);
+        int index = -1;
+        for (int i = 0; i < episodes.size(); i++) {
+            if (episodes.get(i).id().equals(episodeId)) index = i;
+        }
+        if (index < 0) throw new IllegalArgumentException("剧集不存在");
+        int target = index + (direction > 0 ? 1 : -1);
+        if (target < 0 || target >= episodes.size()) {
+            return episodes; // 已在边界：原样返回
+        }
+        var current = episodes.get(index);
+        var other = episodes.get(target);
+        transactionTemplate.executeWithoutResult(status -> {
+            contentRepository.updateEpisodeNumber(current.id(), other.episodeNumber());
+            contentRepository.updateEpisodeNumber(other.id(), current.episodeNumber());
+        });
+        return contentRepository.listEpisodes(actor.tenantId(), actor.userId(), projectId);
+    }
+
+    public void deleteEpisode(CurrentActor actor, UUID projectId, UUID episodeId) {
+        var episode = requireEpisode(actor, projectId, episodeId);
+        if (episode.confirmed()) {
+            throw new CreativeConflictException("已确认剧集不可删除；如需调整请先取消确认语义的新建剧集承接");
+        }
+        // 级联：场次→镜头→候选（DB 外键不级联，逐层删除）
+        var scenes = contentRepository.listScenesByProject(actor.tenantId(), actor.userId(), projectId).stream()
+                .filter(scene -> scene.episodeId().equals(episodeId)).toList();
+        for (var scene : scenes) {
+            deleteSceneInternal(actor, scene);
+        }
+        contentRepository.deleteEpisode(episodeId);
+    }
+
+    // ---------------------------------------------------------------- 场次
+
+    public VideoSceneRecord createScene(CurrentActor actor, UUID projectId, UUID episodeId,
+                                        SceneRequest request) {
+        requireEpisode(actor, projectId, episodeId);
+        var record = new VideoSceneRecord(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
+                episodeId, contentRepository.nextSceneNumber(episodeId),
+                text(request.title()), text(request.locationText()), text(request.timeOfDay()),
+                text(request.charactersText()), text(request.goal()), text(request.conflict()),
+                text(request.entryState()), text(request.exitState()), "DRAFT", null, null);
+        contentRepository.insertScene(record);
+        return contentRepository.findScene(actor.tenantId(), actor.userId(), record.id()).orElseThrow();
+    }
+
+    public VideoSceneRecord updateScene(CurrentActor actor, UUID projectId, UUID sceneId,
+                                        SceneRequest request) {
+        var scene = requireScene(actor, projectId, sceneId);
+        requireEpisode(actor, projectId, scene.episodeId());
+        contentRepository.updateScene(sceneId, text(request.title()), text(request.locationText()),
+                text(request.timeOfDay()), text(request.charactersText()), text(request.goal()),
+                text(request.conflict()), text(request.entryState()), text(request.exitState()));
+        return contentRepository.findScene(actor.tenantId(), actor.userId(), sceneId).orElseThrow();
+    }
+
+    public VideoSceneRecord confirmScene(CurrentActor actor, UUID projectId, UUID sceneId) {
+        var scene = requireScene(actor, projectId, sceneId);
+        contentRepository.updateSceneStatus(sceneId, "CONFIRMED");
+        return contentRepository.findScene(actor.tenantId(), actor.userId(), scene.id()).orElseThrow();
+    }
+
+    public void deleteScene(CurrentActor actor, UUID projectId, UUID sceneId) {
+        var scene = requireScene(actor, projectId, sceneId);
+        deleteSceneInternal(actor, scene);
+    }
+
+    private void deleteSceneInternal(CurrentActor actor, VideoSceneRecord scene) {
+        var shots = contentRepository.listShotsByProject(actor.tenantId(), actor.userId(), scene.projectId()).stream()
+                .filter(shot -> shot.sceneId().equals(scene.id())).toList();
+        for (var shot : shots) {
+            candidateRepository.deleteByShot(shot.id());
+            contentRepository.deleteShot(shot.id());
+        }
+        contentRepository.deleteScene(scene.id());
+    }
+
+    // ---------------------------------------------------------------- 镜头
+
+    public VideoShotRecord createShot(CurrentActor actor, UUID projectId, UUID sceneId, ShotRequest request) {
+        requireScene(actor, projectId, sceneId);
+        var shot = new VideoShotRecord(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
+                sceneId, contentRepository.nextShotNumber(sceneId),
+                text(request.purpose()), text(request.action()), text(request.camera()),
+                text(request.dialogue()), text(request.continuity()),
+                duration(request.durationTargetSeconds()), text(request.promptText()),
+                "DRAFT", 1L, null, null);
+        contentRepository.insertShot(shot);
+        return contentRepository.findShot(actor.tenantId(), actor.userId(), shot.id()).orElseThrow();
+    }
+
+    /** 镜头字段更新（乐观锁）：内容就绪（有 prompt 或动作细节）时置 READY，供生成按钮门禁。 */
+    public VideoShotRecord updateShot(CurrentActor actor, UUID projectId, UUID shotId,
+                                      long expectedVersion, ShotRequest request) {
+        var shot = requireShot(actor, projectId, shotId);
+        if (shot.version() != expectedVersion) {
+            throw new CreativeConflictException("镜头已被其他页面修改（版本 " + shot.version()
+                    + "），请刷新后重试；你的编辑未覆盖他人改动");
+        }
+        boolean ready = shot.confirmedReady() || !text(request.promptText()).isBlank();
+        if (!contentRepository.updateShotFields(shotId, expectedVersion,
+                text(request.purpose()), text(request.action()), text(request.camera()),
+                text(request.dialogue()), text(request.continuity()),
+                duration(request.durationTargetSeconds()), text(request.promptText()))) {
+            throw new CreativeConflictException("镜头已被其他页面修改，请刷新后重试");
+        }
+        if (ready && "DRAFT".equals(shot.status())) {
+            contentRepository.updateShotStatus(shotId, expectedVersion + 1, "READY");
+        }
+        return contentRepository.findShot(actor.tenantId(), actor.userId(), shotId).orElseThrow();
+    }
+
+    public void deleteShot(CurrentActor actor, UUID projectId, UUID shotId) {
+        requireShot(actor, projectId, shotId);
+        candidateRepository.deleteByShot(shotId);
+        contentRepository.deleteShot(shotId);
+    }
+
+    public List<VideoShotRecord> listShots(CurrentActor actor, UUID projectId) {
+        requireProject(actor, projectId);
+        return contentRepository.listShotsByProject(actor.tenantId(), actor.userId(), projectId);
+    }
+
+    /** 生产闭环与抽屉需要读取镜头（归属校验后返回）。 */
+    public VideoShotRecord getShot(CurrentActor actor, UUID projectId, UUID shotId) {
+        return requireShot(actor, projectId, shotId);
+    }
+
+    /** 优化上下文等外部读取（归属校验后返回）。 */
+    public VideoEpisodeRecord getEpisode(CurrentActor actor, UUID projectId, UUID episodeId) {
+        return requireEpisode(actor, projectId, episodeId);
+    }
+
+    public VideoSceneRecord getScene(CurrentActor actor, UUID projectId, UUID sceneId) {
+        return requireScene(actor, projectId, sceneId);
+    }
+
+    public List<VideoEpisodeRecord> episodes(CurrentActor actor, UUID projectId) {
+        requireProject(actor, projectId);
+        return contentRepository.listEpisodes(actor.tenantId(), actor.userId(), projectId);
+    }
+
+    public List<VideoSceneRecord> scenes(CurrentActor actor, UUID projectId) {
+        requireProject(actor, projectId);
+        return contentRepository.listScenesByProject(actor.tenantId(), actor.userId(), projectId);
+    }
+
+    // ---------------------------------------------------------------- 角色 / 地点 / 连续性
+
+    public VideoCharacterRecord createCharacter(CurrentActor actor, UUID projectId, ResourceRequest request) {
+        requireProject(actor, projectId);
+        validateText("角色名", request.name(), true);
+        var record = new VideoCharacterRecord(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
+                request.name().trim(), text(request.appearance()), text(request.personality()),
+                text(request.notes()), null, null);
+        resourceRepository.insertCharacter(record);
+        return resourceRepository.findCharacter(actor.tenantId(), actor.userId(), record.id()).orElseThrow();
+    }
+
+    public VideoCharacterRecord updateCharacter(CurrentActor actor, UUID projectId, UUID characterId,
+                                                ResourceRequest request) {
+        requireCharacter(actor, projectId, characterId);
+        validateText("角色名", request.name(), true);
+        resourceRepository.updateCharacter(characterId, request.name().trim(), text(request.appearance()),
+                text(request.personality()), text(request.notes()));
+        return resourceRepository.findCharacter(actor.tenantId(), actor.userId(), characterId).orElseThrow();
+    }
+
+    public void deleteCharacter(CurrentActor actor, UUID projectId, UUID characterId) {
+        requireCharacter(actor, projectId, characterId);
+        resourceRepository.deleteAssetRefsByEntity("CHARACTER", characterId);
+        resourceRepository.deleteCharacter(characterId);
+    }
+
+    public VideoLocationRecord createLocation(CurrentActor actor, UUID projectId, ResourceRequest request) {
+        requireProject(actor, projectId);
+        validateText("地点名", request.name(), true);
+        var record = new VideoLocationRecord(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
+                request.name().trim(), text(request.description()), null, null);
+        resourceRepository.insertLocation(record);
+        return record;
+    }
+
+    public void updateLocation(CurrentActor actor, UUID projectId, UUID locationId,
+                               ResourceRequest request) {
+        requireProject(actor, projectId);
+        validateText("地点名", request.name(), true);
+        resourceRepository.updateLocation(locationId, request.name().trim(), text(request.description()));
+    }
+
+    public void deleteLocation(CurrentActor actor, UUID projectId, UUID locationId) {
+        requireProject(actor, projectId);
+        resourceRepository.deleteAssetRefsByEntity("LOCATION", locationId);
+        resourceRepository.deleteLocation(locationId);
+    }
+
+    public VideoContinuityNoteRecord createNote(CurrentActor actor, UUID projectId, NoteRequest request) {
+        requireProject(actor, projectId);
+        validateText("记录内容", request.content(), true);
+        var kind = normalizeKind(request.kind());
+        var record = new VideoContinuityNoteRecord(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
+                kind, request.content().trim(), text(request.sourceLabel()),
+                foreshadowStatus(kind, request.foreshadowStatus()), null, null);
+        resourceRepository.insertNote(record);
+        return record;
+    }
+
+    public VideoContinuityNoteRecord updateNote(CurrentActor actor, UUID projectId, UUID noteId,
+                                                NoteRequest request) {
+        requireProject(actor, projectId);
+        validateText("记录内容", request.content(), true);
+        var kind = normalizeKind(request.kind());
+        if (!resourceRepository.updateNote(noteId, request.content().trim(), text(request.sourceLabel()),
+                foreshadowStatus(kind, request.foreshadowStatus()))) {
+            throw new IllegalArgumentException("记录不存在");
+        }
+        return resourceRepository.listNotes(actor.tenantId(), actor.userId(), projectId).stream()
+                .filter(note -> note.id().equals(noteId)).findFirst().orElseThrow();
+    }
+
+    public void deleteNote(CurrentActor actor, UUID projectId, UUID noteId) {
+        requireProject(actor, projectId);
+        resourceRepository.deleteNote(noteId);
+    }
+
+    public void attachReference(CurrentActor actor, UUID projectId, String entityType, UUID entityId, UUID assetId) {
+        requireProject(actor, projectId);
+        if (!"CHARACTER".equals(entityType) && !"LOCATION".equals(entityType)) {
+            throw new IllegalArgumentException("不支持的参考对象类型");
+        }
+        resourceRepository.insertAssetRef(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
+                entityType, entityId, assetId);
+    }
+
+    public void detachReference(CurrentActor actor, UUID projectId, String entityType, UUID entityId, UUID assetId) {
+        requireProject(actor, projectId);
+        resourceRepository.deleteAssetRef(entityType, entityId, assetId);
+    }
+
+    public List<UUID> listReferences(String entityType, UUID entityId) {
+        return resourceRepository.listAssetRefs(entityType, entityId);
+    }
+
+    /** 素材反查：素材被哪些镜头候选引用（素材库「用于镜头」与删除保护展示）。 */
+    public List<VideoShotCandidateRepository.CandidateUsageView> assetUsage(CurrentActor actor, UUID projectId,
+                                                                            UUID assetId) {
+        requireProject(actor, projectId);
+        return candidateRepository.listUsageByAsset(actor.tenantId(), actor.userId(), projectId, assetId);
+    }
+
+    // ---------------------------------------------------------------- 校验辅助
+
+    private void requireProject(CurrentActor actor, UUID projectId) {
+        projectService.get(actor, projectId);
+    }
+
+    private VideoEpisodeRecord requireEpisode(CurrentActor actor, UUID projectId, UUID episodeId) {
+        var episode = contentRepository.findEpisode(actor.tenantId(), actor.userId(), episodeId)
+                .orElseThrow(() -> new IllegalArgumentException("剧集不存在"));
+        if (!episode.projectId().equals(projectId)) {
+            throw new CreativeConflictException("剧集不属于该创作项目");
+        }
+        return episode;
+    }
+
+    private VideoSceneRecord requireScene(CurrentActor actor, UUID projectId, UUID sceneId) {
+        var scene = contentRepository.findScene(actor.tenantId(), actor.userId(), sceneId)
+                .orElseThrow(() -> new IllegalArgumentException("场次不存在"));
+        if (!scene.projectId().equals(projectId)) {
+            throw new CreativeConflictException("场次不属于该创作项目");
+        }
+        return scene;
+    }
+
+    private VideoShotRecord requireShot(CurrentActor actor, UUID projectId, UUID shotId) {
+        var shot = contentRepository.findShot(actor.tenantId(), actor.userId(), shotId)
+                .orElseThrow(() -> new IllegalArgumentException("镜头不存在"));
+        if (!shot.projectId().equals(projectId)) {
+            throw new CreativeConflictException("镜头不属于该创作项目");
+        }
+        return shot;
+    }
+
+    private VideoCharacterRecord requireCharacter(CurrentActor actor, UUID projectId, UUID characterId) {
+        var character = resourceRepository.findCharacter(actor.tenantId(), actor.userId(), characterId)
+                .orElseThrow(() -> new IllegalArgumentException("角色不存在"));
+        if (!character.projectId().equals(projectId)) {
+            throw new CreativeConflictException("角色不属于该创作项目");
+        }
+        return character;
+    }
+
+    private static String text(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.length() > TEXT_MAX) throw new IllegalArgumentException("内容超过 " + TEXT_MAX + " 字上限");
+        return trimmed;
+    }
+
+    private static void validateText(String label, String value, boolean required) {
+        String trimmed = value == null ? "" : value.trim();
+        if (required && trimmed.isEmpty()) throw new IllegalArgumentException(label + "必填");
+        if (trimmed.length() > NAME_MAX) throw new IllegalArgumentException(label + "超过 " + NAME_MAX + " 字上限");
+    }
+
+    private static int duration(Integer value) {
+        if (value == null || value <= 0) return 4;
+        return Math.min(value, 60);
+    }
+
+    private static String normalizeKind(String kind) {
+        String value = kind == null ? "" : kind.trim().toUpperCase(java.util.Locale.ROOT);
+        return switch (value) {
+            case "FACT", "STATE", "FORESHADOW" -> value;
+            default -> throw new IllegalArgumentException("不支持的记录类型：" + kind);
+        };
+    }
+
+    private static String foreshadowStatus(String kind, String status) {
+        if (!"FORESHADOW".equals(kind)) return "PENDING";
+        String value = status == null ? "" : status.trim().toUpperCase(java.util.Locale.ROOT);
+        return switch (value) {
+            case "PLANTED", "REINFORCED", "PENDING", "PAYOFF" -> value;
+            default -> "PENDING";
+        };
+    }
+
+    // ---------------------------------------------------------------- 请求体
+
+    public record EpisodeRequest(String title, String goal, String synopsis, String script) {
+    }
+
+    public record SceneRequest(String title, String locationText, String timeOfDay, String charactersText,
+                               String goal, String conflict, String entryState, String exitState) {
+    }
+
+    public record ShotRequest(String purpose, String action, String camera, String dialogue,
+                              String continuity, Integer durationTargetSeconds, String promptText) {
+    }
+
+    public record ResourceRequest(String name, String appearance, String personality, String notes,
+                                  String description) {
+    }
+
+    public record NoteRequest(String kind, String content, String sourceLabel, String foreshadowStatus) {
+    }
+}

@@ -8,7 +8,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 提示词优化 API（C09）：只返回改写结果，不创建任务、不触发图片生成。
+ * 提示词优化 API（C09 + P0 扩展）：只返回改写结果，不创建任务、不触发生成。
+ * 请求 mode：缺省 IMAGE（旧图片调用方零迁移兼容）；VIDEO_PROMPT/VIDEO_STORY/VIDEO_STORYBOARD
+ * 按 projectId/episodeId/sceneId/shotId 由服务端读取上下文（不信任客户端拼装）。
  */
 @RestController
 @RequestMapping("/ai/creative/prompts")
@@ -23,6 +25,9 @@ public class CreativePromptController {
     @PostMapping("/optimize")
     public PromptOptimizationService.OptimizeResult optimize(
             CurrentActor actor, @RequestBody PromptOptimizationService.OptimizeRequest body) {
-        return optimizationService.optimize(actor.userId(), body == null ? null : body.prompt());
+        var request = body == null
+                ? new PromptOptimizationService.OptimizeRequest(null, null, null, null, null, null)
+                : body;
+        return optimizationService.optimize(actor, request);
     }
 }

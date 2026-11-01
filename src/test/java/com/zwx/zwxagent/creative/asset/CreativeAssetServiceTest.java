@@ -62,7 +62,8 @@ class CreativeAssetServiceTest {
                 new CreativeProjectRepository(jdbcTemplate),
                 new MediaJobRepository(jdbcTemplate),
                 new MediaJobAssetRefRepository(jdbcTemplate),
-                storage);
+                storage,
+                100L * 1024 * 1024);
         projectService = new com.zwx.zwxagent.creative.service.CreativeProjectService(
                 new CreativeProjectRepository(jdbcTemplate));
         actor = new CurrentActor(TEST_USER, "default", TEST_USER, Role.USER);

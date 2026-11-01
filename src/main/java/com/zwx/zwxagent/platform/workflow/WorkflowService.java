@@ -55,7 +55,7 @@ public class WorkflowService {
 
     public static final Set<String> NODE_TYPES = Set.of(
             "start", "search_image", "image_understand", "llm_text", "web_search", "poster_render",
-            "image_generate", "media_image_generate", "media_image_edit",
+            "image_generate", "media_image_generate", "media_image_edit", "media_video_generate",
             "http_request", "db_query", "text_template", "file_export",
             "novel_context", "novel_chapter_save");
 
@@ -378,6 +378,7 @@ public class WorkflowService {
             Map.entry("image_generate", List.of(List.of("prompt"))),
             Map.entry("media_image_generate", List.of(List.of("prompt"))),
             Map.entry("media_image_edit", List.of(List.of("prompt"), List.of("imageAssetIds"))),
+            Map.entry("media_video_generate", List.of(List.of("prompt"))),
             Map.entry("http_request", List.of(List.of("url"))),
             Map.entry("db_query", List.of(List.of("sql"))),
             Map.entry("text_template", List.of(List.of("template"))),
@@ -789,6 +790,7 @@ public class WorkflowService {
             case "db_query" -> dbQuery(text(params.get("sql")));
             case "media_image_generate" -> startMediaImageTask(context, node, params);
             case "media_image_edit" -> startMediaImageTask(context, node, params);
+            case "media_video_generate" -> startMediaVideoTask(context, node, params);
             case "novel_context" -> novelContext(context, params);
             case "novel_chapter_save" -> novelChapterSave(context, params);
             case "image_generate" -> imageGenerate(context, text(params.get("prompt")),
@@ -1094,6 +1096,52 @@ public class WorkflowService {
                         """,
                 context.id(), node.key(), created.jobId());
         return NodeResult.waiting((isEdit ? "参考图编辑中" : "图片生成中") + "（任务 " + created.jobId() + "）");
+    }
+
+    /**
+     * 视频生成节点（V1-A，2026-11-01）：text_to_video / image_to_video（imageAssetIds 提供时）。
+     * seconds/size 可选；有参考图走图生视频（恰 1 张首帧，由 MediaJobService 校验）。
+     * 任务/等待/恢复与图片节点同一链路，产物 mediaType 由恢复器按素材实际值返回。
+     */
+    private NodeResult startMediaVideoTask(RunContext context, GraphNodeDef node,
+                                           Map<String, Object> params) {
+        String prompt = text(params.get("prompt"));
+        if (prompt == null || prompt.isBlank()) {
+            throw new IllegalArgumentException("视频生成提示词为空");
+        }
+        if (prompt.length() > 500) {
+            throw new IllegalArgumentException("提示词超过模型上限 500 个字符");
+        }
+        java.util.List<UUID> referenceAssetIds = parseAssetIdList(params.get("imageAssetIds"));
+        String operation = referenceAssetIds.isEmpty()
+                ? com.zwx.zwxagent.creative.domain.ParameterSchema.TEXT_TO_VIDEO
+                : com.zwx.zwxagent.creative.domain.ParameterSchema.IMAGE_TO_VIDEO;
+        var videoParams = new java.util.LinkedHashMap<String, Object>();
+        String seconds = text(params.get("seconds"));
+        if (seconds != null && !seconds.isBlank()) videoParams.put("seconds", seconds);
+        String size = text(params.get("size"));
+        if (size != null && !size.isBlank()) videoParams.put("size", size.replace('*', 'x'));
+        var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
+                context.userId(), context.tenantId(), context.userId(),
+                com.zwx.zwxagent.platform.security.Role.USER);
+        UUID projectId = context.creativeProjectId() != null
+                ? context.creativeProjectId()
+                : workflowProject(actor, text(params.get("projectId")));
+        com.zwx.zwxagent.creative.service.MediaJobService.CreateJobResult created = mediaJobService.create(actor,
+                "workflow-" + context.id() + "-" + node.key(), projectId,
+                new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, operation, null,
+                        prompt, prompt, videoParams, referenceAssetIds, null, null, false),
+                com.zwx.zwxagent.creative.domain.JobSourceType.WORKFLOW, context.id(), node.key());
+        jdbcTemplate.update("""
+                        INSERT INTO workflow_node_execution (run_id, node_key, status, media_job_id, attempt)
+                        VALUES (?, ?, 'WAITING_EXTERNAL', ?, 1)
+                        ON CONFLICT (run_id, node_key) DO UPDATE
+                        SET status = 'WAITING_EXTERNAL',
+                            media_job_id = COALESCE(workflow_node_execution.media_job_id, EXCLUDED.media_job_id),
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                context.id(), node.key(), created.jobId());
+        return NodeResult.waiting("视频生成中（任务 " + created.jobId() + "）");
     }
 
     /** imageAssetIds 参数解析：List / 逗号或空白分隔字符串 → UUID 列表（非法值报错）。 */

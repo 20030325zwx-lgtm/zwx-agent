@@ -30,13 +30,15 @@ public class ModelCatalogService {
     public static final String PURPOSE_CHAT = "chat";
     public static final String PURPOSE_VISION = "vision";
     public static final String PURPOSE_IMAGE = "image_generation";
+    public static final String PURPOSE_VIDEO = "video_generation";
     // 场景级绑定（专用覆盖通用）：未绑定时由 resolveWithFallback 回退到通用对话
     public static final String PURPOSE_NOVEL = "novel";
     public static final String PURPOSE_AGENT = "agent";
     public static final String PURPOSE_OPTIMIZE = "optimize";
     private static final Set<String> PURPOSES = Set.of(PURPOSE_CHAT, PURPOSE_VISION, PURPOSE_IMAGE,
-            "embedding", PURPOSE_NOVEL, PURPOSE_AGENT, PURPOSE_OPTIMIZE);
-    private static final Set<String> CAPABILITIES = Set.of("tools", "vision", "embedding", "image_generation");
+            PURPOSE_VIDEO, "embedding", PURPOSE_NOVEL, PURPOSE_AGENT, PURPOSE_OPTIMIZE);
+    private static final Set<String> CAPABILITIES = Set.of("tools", "vision", "embedding", "image_generation",
+            "video_generation");
     private static final long CACHE_TTL_MILLIS = Duration.ofSeconds(30).toMillis();
 
     public record ModelEntryView(long id, String modelId, String displayName, List<String> capabilities, boolean enabled) {
@@ -492,8 +494,21 @@ public class ModelCatalogService {
                 .or(() -> imageBinding(ConfigurationScope.SYSTEM, ""));
     }
 
+    /**
+     * 视频生成用途：与图片同构（用户优先、系统其次，只认专用绑定）。
+     * 未绑定返回 empty，由 MediaModelResolver 明确阻断——视频用途不回退图片或 chat。
+     */
+    public Optional<ImageBinding> resolveVideoBinding(String userId) {
+        return imageBinding(ConfigurationScope.USER, owner(userId), PURPOSE_VIDEO)
+                .or(() -> imageBinding(ConfigurationScope.SYSTEM, "", PURPOSE_VIDEO));
+    }
+
     private Optional<ImageBinding> imageBinding(ConfigurationScope scope, String ownerId) {
-        return findBinding(scope, ownerId, PURPOSE_IMAGE).flatMap(binding -> {
+        return imageBinding(scope, ownerId, PURPOSE_IMAGE);
+    }
+
+    private Optional<ImageBinding> imageBinding(ConfigurationScope scope, String ownerId, String purpose) {
+        return findBinding(scope, ownerId, purpose).flatMap(binding -> {
             ProviderRow provider = findProvider(binding.providerId()).orElse(null);
             if (provider == null || !provider.enabled()) return Optional.empty();
             ModelRow model = findModelRow(provider.id(), binding.modelRowId()).orElse(null);
@@ -501,7 +516,7 @@ public class ModelCatalogService {
             String baseUrl = "dashscope".equals(provider.protocol()) && isBlank(provider.baseUrl())
                     ? null : provider.baseUrl();
             String source = scope == ConfigurationScope.SYSTEM ? "SYSTEM" : "USER";
-            return Optional.of(new ImageBinding(new ResolvedModelConfig(PURPOSE_IMAGE, provider.protocol(),
+            return Optional.of(new ImageBinding(new ResolvedModelConfig(purpose, provider.protocol(),
                     baseUrl, model.modelId(), decrypt(provider), source), provider.id(), model.id()));
         });
     }

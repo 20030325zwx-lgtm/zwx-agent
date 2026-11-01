@@ -1,5 +1,5 @@
 import { onBeforeUnmount, reactive } from 'vue'
-import { getCreativeAssetBlob, getCreativeAssetThumbnail } from '../../api'
+import { getCreativeAssetBlob, getCreativeAssetPlaybackUrl, getCreativeAssetThumbnail } from '../../api'
 
 export const KIND_LABEL = {
   IMAGE: '图片',
@@ -18,8 +18,8 @@ export const JOB_STATUS = {
   RUNNING: { label: '生成中', tone: 'info', hint: '供应商正在生成，可离开页面' },
   CANCEL_REQUESTED: { label: '取消中', tone: 'warning', hint: '已请求取消，结果仍可能产生' },
   RECONCILING: { label: '结果待确认', tone: 'warning', hint: '提交结果不确定，可能已产生供应商任务' },
-  FETCHING: { label: '保存结果中', tone: 'info', hint: '图片已生成，正在保存到素材库' },
-  INGEST_FAILED: { label: '保存失败', tone: 'danger', hint: '图片可能已生成，但保存到素材库失败' },
+  FETCHING: { label: '保存结果中', tone: 'info', hint: '产物已生成，正在保存到素材库' },
+  INGEST_FAILED: { label: '保存失败', tone: 'danger', hint: '产物可能已生成，但保存到素材库失败' },
   SUCCEEDED: { label: '已完成', tone: 'success', hint: '结果已保存，可预览与下载' },
   FAILED: { label: '生成失败', tone: 'danger', hint: '未产生可用图片，可修改后重试' },
   CANCELLED: { label: '已取消', tone: 'muted', hint: '任务已取消' }
@@ -49,6 +49,48 @@ export function formatBytes(size) {
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
   return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+export function formatDuration(ms) {
+  if (!ms || ms <= 0) return ''
+  const total = Math.round(ms / 1000)
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return minutes > 0 ? `${minutes}分${String(seconds).padStart(2, '0')}秒` : `${seconds}秒`
+}
+
+/**
+ * 视频播放 URL（V1-A）：<video> 标签带不了 Authorization 头，也不适合整段 blob 下载，
+ * 走后端短时效签名 URL（HMAC 绑定素材与用户）。过期前自动重取。
+ */
+export function useVideoUrls() {
+  const state = reactive({})
+  const pending = new Map()
+
+  async function videoUrlFor(assetId) {
+    if (!assetId) return ''
+    const cached = state[assetId]
+    if (cached && cached.expiresAt > Date.now() + 60_000) return cached.url
+    if (pending.has(assetId)) return pending.get(assetId)
+    const task = getCreativeAssetPlaybackUrl(assetId)
+      .then(data => {
+        const entry = { url: data.url, expiresAt: new Date(data.expiresAt).getTime() || 0 }
+        state[assetId] = entry
+        return entry.url
+      })
+      .catch(() => '')
+      .finally(() => pending.delete(assetId))
+    pending.set(assetId, task)
+    return task
+  }
+
+  function release() {
+    Object.keys(state).forEach(key => delete state[key])
+    pending.clear()
+  }
+
+  onBeforeUnmount(release)
+  return { videoUrls: state, videoUrlFor, release }
 }
 
 /**

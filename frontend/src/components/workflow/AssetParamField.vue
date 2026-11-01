@@ -22,10 +22,10 @@
       </div>
       <div class="asset-row">
         <button type="button" class="asset-mini-btn" :disabled="uploading" @click="fileInput?.click()">
-          {{ uploading ? '上传中…' : '上传图片' }}
+          {{ uploading ? '上传中…' : (mediaType === 'VIDEO' ? '上传视频' : '上传图片') }}
         </button>
         <span v-if="uploadError" class="asset-error">{{ uploadError }}</span>
-        <span v-else-if="multiple && pickedIds.length" class="asset-count">已选 {{ pickedIds.length }} 张</span>
+        <span v-else-if="multiple && pickedIds.length" class="asset-count">已选 {{ pickedIds.length }} 个</span>
       </div>
       <div v-if="multiple && pickedIds.length" class="asset-chips">
         <span v-for="id in pickedIds" :key="id" class="asset-chip">
@@ -33,7 +33,7 @@
           <button type="button" :aria-label="`移除 ${nameOf(id) || id.slice(0, 8)}`" @click="removeId(id)">×</button>
         </span>
       </div>
-      <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="upload" />
+      <input ref="fileInput" type="file" :accept="acceptTypes" hidden @change="upload" />
     </template>
   </div>
 </template>
@@ -45,9 +45,15 @@ import { listCreativeAssets, listCreativeProjects, uploadCreativeAsset } from '.
 const props = defineProps({
   modelValue: { type: String, default: '' },
   multiple: { type: Boolean, default: false },
-  defaultProjectId: { type: String, default: '' }
+  defaultProjectId: { type: String, default: '' },
+  // 媒体类型过滤（V1-A）：IMAGE（默认，兼容旧用法）/ VIDEO
+  mediaType: { type: String, default: 'IMAGE' }
 })
 const emit = defineEmits(['update:modelValue'])
+
+const acceptTypes = computed(() => props.mediaType === 'VIDEO'
+  ? 'video/mp4,video/quicktime,video/webm'
+  : 'image/png,image/jpeg,image/webp')
 
 const projects = ref([])
 const projectId = ref('')
@@ -145,7 +151,7 @@ async function loadAssets() {
   if (!projectId.value) { assets.value = []; return }
   assetsLoading.value = true
   try {
-    const data = await listCreativeAssets({ projectId: projectId.value, mediaType: 'IMAGE', limit: 30 })
+    const data = await listCreativeAssets({ projectId: projectId.value, mediaType: props.mediaType, limit: 30 })
     assets.value = (data.items || []).filter(asset => asset.status === 'READY')
   } catch (error) {
     assets.value = []

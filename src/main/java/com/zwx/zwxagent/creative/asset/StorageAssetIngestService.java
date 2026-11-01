@@ -42,32 +42,53 @@ public class StorageAssetIngestService implements AssetIngestService {
             throw new IllegalStateException("产物为空，拒绝入库");
         }
         String contentType = mimeType == null || mimeType.isBlank() ? "image/png" : mimeType;
+        boolean video = com.zwx.zwxagent.creative.job.MediaJobScheduler.isVideoOperation(job.operation());
         Optional<CreativeAssetRecord> existing = assetRepository.findByIdForOwner(
                 job.tenantId(), job.userId(), slot.assetId());
         // 对象键由槽位固定，重试覆盖同一对象，不会产生第二份产物
         storage.put(slot.objectKey(), contentType, new ByteArrayInputStream(bytes), bytes.length);
-        CreativeAssetService.putThumbnailBestEffort(storage, slot.objectKey(), contentType, bytes);
+        if (!video) {
+            CreativeAssetService.putThumbnailBestEffort(storage, slot.objectKey(), contentType, bytes);
+        }
         String sha256 = MockAssetIngestService.sha256(bytes);
-        // 尺寸解析是增强信息：解析失败不能让已生成的图片丢失
+        String mediaType = video ? "VIDEO" : "IMAGE";
+        String displayName = video ? "生成视频" : "生成图片";
+        // 尺寸/时长解析是增强信息：解析失败不能让已生成的产物丢失
         Integer width = null;
         Integer height = null;
-        try {
-            var inspection = com.zwx.zwxagent.creative.asset.ImageInspector.inspect(bytes);
-            if (inspection.supported()) {
+        Long durationMs = null;
+        if (video) {
+            // 视频探测尽力而为（MVHD/TKHD）；无 ffmpeg 运行时不阻断 READY，封面由播放器原生首帧承担
+            try {
+                var inspection = com.zwx.zwxagent.creative.video.VideoProbe.inspect(bytes);
                 width = inspection.width();
                 height = inspection.height();
+                durationMs = inspection.durationMs();
+                org.slf4j.LoggerFactory.getLogger(StorageAssetIngestService.class).info(
+                        "video ingest probe: bytes={} supported={} w={} h={} dur={}",
+                        bytes.length, inspection.supported(), width, height, durationMs);
+            } catch (RuntimeException ignored) {
+                // 保留 null 尺寸/时长
             }
-        } catch (RuntimeException ignored) {
-            // 保留 null 尺寸
+        } else {
+            try {
+                var inspection = com.zwx.zwxagent.creative.asset.ImageInspector.inspect(bytes);
+                if (inspection.supported()) {
+                    width = inspection.width();
+                    height = inspection.height();
+                }
+            } catch (RuntimeException ignored) {
+                // 保留 null 尺寸
+            }
         }
         if (existing.isEmpty()) {
             assetRepository.insert(new CreativeAssetRecord(
                     slot.assetId(), job.projectId(), job.tenantId(), job.userId(),
                     job.id(), slot.outputIndex(), AssetOrigin.GENERATED,
-                    "IMAGE", storageBackend(), slot.objectKey(),
+                    mediaType, storageBackend(), slot.objectKey(),
                     contentType, bytes.length, sha256,
-                    width, height, null,
-                    "生成图片", false, AssetStatus.READY,
+                    width, height, durationMs,
+                    displayName, false, AssetStatus.READY,
                     "{}", Instant.now(), null));
         }
         outputRepository.markDone(slot.id(), sha256, (long) bytes.length);

@@ -384,6 +384,15 @@ export const getCreativeAssetThumbnail = assetId =>
 export const getCreativeAssetBlob = assetId =>
   request.get(`/ai/creative/assets/${encodeURIComponent(assetId)}/content`, { responseType: 'blob' })
     .then(response => response.data)
+// 视频播放签名 URL（V1-A）：<video> 标签带不了 Authorization，换取短时效免头播放地址。
+// 后端返回相对 /api 路径；开发环境 API_BASE_URL 是跨端口绝对地址，需拼前缀（生产同源已是 /api）。
+export const getCreativeAssetPlaybackUrl = assetId =>
+  request.get(`/ai/creative/assets/${encodeURIComponent(assetId)}/playback-url`)
+    .then(response => {
+      const data = response.data
+      if (data?.url?.startsWith('/')) data.url = API_BASE_URL + data.url
+      return data
+    })
 export const updateCreativeAsset = (assetId, payload) =>
   request.patch(`/ai/creative/assets/${encodeURIComponent(assetId)}`, payload).then(response => response.data)
 export const deleteCreativeAsset = assetId =>

@@ -67,8 +67,9 @@ management:
     defaults:
       enabled: true
 spring.servlet.multipart:
-  max-file-size: 10MB
-  max-request-size: 10MB
+  # V1-A（2026-11-01）：视频上传需 100MB；图片仍由服务层 20MiB 预算兜底
+  max-file-size: 100MB
+  max-request-size: 100MB
 app:
   config:
     # 用户/系统自定义密钥的加密口令；生产环境必须单独配置，缺省回退 JWT_SECRET 便于本地开发
@@ -282,6 +283,12 @@ creative:
     # 仅桌面/测试允许回环与私网产物地址；云端保持 false 以阻断 SSRF
     allow-local: ${CREATIVE_DOWNLOAD_ALLOW_LOCAL:false}
     max-bytes: ${CREATIVE_DOWNLOAD_MAX_BYTES:20971520}
+  video:
+    # 视频生成（V1-A）：上传/下载预算与图片分开配置
+    upload-max-bytes: ${CREATIVE_VIDEO_UPLOAD_MAX_BYTES:104857600}
+    download-max-bytes: ${CREATIVE_VIDEO_DOWNLOAD_MAX_BYTES:209715200}
+  # 播放签名时效（秒）：<video> 免头播放的短时效 HMAC URL
+  playback-ttl-seconds: ${CREATIVE_PLAYBACK_TTL_SECONDS:3600}
   scheduler:
     # 生产/桌面默认开启；测试通过 src/test/resources/application.properties 关闭
     enabled: ${CREATIVE_SCHEDULER_ENABLED:true}

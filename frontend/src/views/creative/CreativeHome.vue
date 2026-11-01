@@ -12,7 +12,7 @@
               <span class="kind-chip is-open kind-chip-action" role="button" tabindex="0"
                     @click="openWorkflowCreate" @keydown.enter="openWorkflowCreate">工作流创作 · 已开放</span>
               <span class="kind-chip is-open">小说创作 · 已开放</span>
-              <span class="kind-chip">视频创作 · 规划中</span>
+              <span class="kind-chip is-open">视频创作 · 已开放</span>
               <span class="kind-chip">漫画创作 · 规划中</span>
             </div>
           </div>
@@ -224,7 +224,7 @@ const createError = ref('')
 const form = reactive({ name: '', description: '', kind: 'IMAGE' })
 const kindOptions = [
   { value: 'IMAGE', label: '图片创作', enabled: true },
-  { value: 'VIDEO', label: '视频创作', enabled: false },
+  { value: 'VIDEO', label: '视频创作', enabled: true },
   { value: 'NOVEL', label: '小说创作', enabled: true },
   { value: 'COMIC', label: '漫画创作', enabled: false }
 ]

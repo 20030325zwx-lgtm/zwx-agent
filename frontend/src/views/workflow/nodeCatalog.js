@@ -100,9 +100,18 @@ const CATALOG = {
     hint: '带 1–3 张参考素材生成（如模特试穿）；参数 prompt / imageAssetIds / size',
     help: '图片编辑（参考图）：带 1–3 张本人素材作参考生成新图（中转站 OpenAI images/edits 协议）。imageAssetIds 填素材 ID 列表（逗号分隔或数组，支持 {{节点.output.assetId}} 引用），第一个通常是模特图。输出 JSON：jobId / assetId / mediaType。按张计费。作为末级节点时（如多机位中的侧面/背面）产物会自动归入素材库，无需下游连线。',
     defaults: { prompt: '让参考图中的模特穿上参考图中的上衣和裤子，保持模特脸型与姿态不变，白底商品图', imageAssetIds: '{{start.output.modelAssetId}},{{start.output.topAssetId}},{{start.output.pantsAssetId}}', size: '1024*1024' },
-    outputs: [{ kind: 'asset', label: '图片素材' }],
-    inputs: [{ param: 'imageAssetIds', kind: 'asset', accept: ['asset'], multiple: true, max: 3, label: '参考素材' }],
+    outputs: [{ kind: 'asset', label: '图片素材', media: 'image' }],
+    inputs: [{ param: 'imageAssetIds', kind: 'asset', accept: ['asset'], multiple: true, max: 3, media: ['image'], label: '参考素材' }],
     required: [{ params: ['prompt'] }, { params: ['imageAssetIds'] }]
+  },
+  media_video_generate: {
+    type: 'media_video_generate', label: '视频生成（创作）', color: '#C25A2E', group: '视频生成',
+    hint: '文生视频/图生视频，持久等待；参数 prompt / seconds / size / imageAssetIds',
+    help: '视频生成（创作）：提交到 AI 创作队列并持久等待（视频通常以分钟计）。默认文生视频；imageAssetIds 提供 1 张首帧素材时走图生视频。seconds 填秒数（如 5）、size 填宽x高（如 1280x720），实际可用范围以模型实测为准（协议按 OpenAI Sora 兼容 /v1/videos 实现，初始 UNVERIFIED）。输出 JSON：jobId / assetId / mediaType=VIDEO，产物自动归入项目素材库。按条计费。',
+    defaults: { prompt: '为「{{input.keyword}}」生成一段 5 秒的实拍感短片', seconds: '5', size: '1280x720' },
+    outputs: [{ kind: 'asset', label: '视频素材', media: 'video' }],
+    inputs: [{ param: 'imageAssetIds', kind: 'asset', accept: ['asset'], multiple: true, max: 1, media: ['image'], label: '首帧素材' }],
+    required: [{ params: ['prompt'] }]
   },
   image_generate: {
     type: 'image_generate', label: '图片生成（旧）', color: '#A34FA8', group: '图片生成',
@@ -161,7 +170,7 @@ const CATALOG = {
 export const NODE_CATALOG = CATALOG
 
 /** 节点库分组顺序（start 不出现在库中）。 */
-export const NODE_GROUPS = ['输入', '理解与文本', '图片生成', '合成与导出', '小说']
+export const NODE_GROUPS = ['输入', '理解与文本', '图片生成', '视频生成', '合成与导出', '小说']
   .map(name => ({
     name,
     items: Object.values(CATALOG).filter(spec => spec.group === name)
@@ -190,18 +199,29 @@ export function outputKind(type) {
   return CATALOG[type]?.outputs?.[0]?.kind || null
 }
 
+/** 源节点 asset 输出的媒体子类型（旧节点未声明视为 image，零迁移兼容）。 */
+export function outputMedia(type) {
+  return CATALOG[type]?.outputs?.[0]?.media || 'image'
+}
+
 /**
  * 连线绑定匹配：返回
  * - { candidates, src }：存在 kind 兼容的可绑定输入（按声明顺序，调用方结合 params 取第一个可用的）
  * - { dependentOnly: true }：目标只有自由文本输入（llm_text/text_template），允许作为执行依赖但不自动绑定
  * - null：类型不兼容，应拒绝连线
+ * asset 连线附加媒体子类型约束（V1-A）：视频输出不能接入只接受图片的节点；未声明 media 的输入兼容一切。
  */
 export function matchBinding(sourceType, targetType) {
   if (sourceType === 'start') return { dependentOnly: true } // 开始节点是运行输入入口，可连一切作执行依赖
   const src = outputKind(sourceType)
   const spec = CATALOG[targetType]
   if (!src || !spec) return null
-  const candidates = (spec.inputs || []).filter(input => (input.accept || [input.kind]).includes(src))
+  const srcMedia = outputMedia(sourceType)
+  const candidates = (spec.inputs || []).filter(input => {
+    if (!(input.accept || [input.kind]).includes(src)) return false
+    if (src === 'asset' && Array.isArray(input.media) && !input.media.includes(srcMedia)) return false
+    return true
+  })
   if (candidates.length) return { candidates, src }
   if (targetType === 'llm_text' || targetType === 'text_template') return { dependentOnly: true, src }
   return null

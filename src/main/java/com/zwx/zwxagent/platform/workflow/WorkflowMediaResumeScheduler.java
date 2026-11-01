@@ -104,23 +104,27 @@ public class WorkflowMediaResumeScheduler {
         switch (status) {
             case "SUCCEEDED" -> {
                 List<Map<String, Object>> assets = jdbcTemplate.queryForList("""
-                        SELECT asset_id FROM media_job_output
-                        WHERE job_id = ? AND ingest_state = 'DONE'
-                        ORDER BY output_index LIMIT 1
+                        SELECT a.id AS asset_id, a.media_type AS media_type
+                        FROM media_job_output o
+                        JOIN creative_asset a ON a.id = o.asset_id
+                        WHERE o.job_id = ? AND o.ingest_state = 'DONE'
+                        ORDER BY o.output_index LIMIT 1
                         """, java.util.UUID.fromString(jobId));
                 if (assets.isEmpty()) {
-                    workflowService.failMediaNode(runId, nodeKey, "图片任务已完成但没有可用的入库产物");
+                    workflowService.failMediaNode(runId, nodeKey, "媒体任务已完成但没有可用的入库产物");
                     return;
                 }
                 String assetId = String.valueOf(assets.getFirst().get("asset_id"));
+                // 媒体类型按产物实际值返回（视频节点产出 VIDEO，图片仍 IMAGE）
+                String mediaType = String.valueOf(assets.getFirst().getOrDefault("media_type", "IMAGE"));
                 String output = writeJson(Map.of(
                         "assetId", assetId,
                         "jobId", jobId,
-                        "mediaType", "IMAGE"));
-                workflowService.advanceMediaNode(runId, nodeKey, output, "图片已生成并保存到素材库");
+                        "mediaType", mediaType));
+                workflowService.advanceMediaNode(runId, nodeKey, output, "产物已生成并保存到素材库");
             }
             case "FAILED" -> workflowService.failMediaNode(runId, nodeKey, mediaError(jobId));
-            case "CANCELLED" -> workflowService.failMediaNode(runId, nodeKey, "图片任务已取消");
+            case "CANCELLED" -> workflowService.failMediaNode(runId, nodeKey, "媒体任务已取消");
             default -> { /* 仍在生成/入库失败重试：保持等待，不推进 */ }
         }
     }

@@ -90,6 +90,9 @@ public class MediaJobScheduler {
     private boolean downloadAllowLocal;
     @Value("${creative.download.max-bytes:20971520}")
     private long downloadMaxBytes;
+    /** 视频产物下载上限：视频文件远大于图片，单独配置（默认 200MiB）。 */
+    @Value("${creative.video.download-max-bytes:209715200}")
+    private long videoDownloadMaxBytes;
 
     private ScheduledExecutorService loop;
     private volatile long lastRecoveryAt = 0;
@@ -386,8 +389,11 @@ public class MediaJobScheduler {
             slots = outputRepository.findByJob(job.id());
         }
         boolean allDone = true;
+        // 视频产物体积远大于图片：下载预算与鉴权按操作分流（/videos/{id}/content 需 Bearer）
+        boolean video = isVideoOperation(job.operation());
         var downloader = new com.zwx.zwxagent.creative.provider.SafeMediaDownloader(
-                downloadAllowLocal, downloadMaxBytes);
+                downloadAllowLocal, video ? videoDownloadMaxBytes : downloadMaxBytes);
+        String bearerToken = "openai-video".equals(resolved.adapterKey()) ? resolved.apiKey() : null;
         for (int i = 0; i < slots.size(); i++) {
             var slot = slots.get(i);
             var output = i < outputs.size() ? outputs.get(i) : null;
@@ -398,7 +404,7 @@ public class MediaJobScheduler {
             }
             try {
                 // 上游返回 URL 时逐跳校验并流式下载（C07）；Mock 直接给字节
-                byte[] bytes = payloadOf(output, downloader);
+                byte[] bytes = payloadOf(output, downloader, bearerToken);
                 ingestService.ingest(job, slot, output.mimeType(), bytes);
             } catch (Exception exception) {
                 outputRepository.markFailed(slot.id(), exception.getMessage());
@@ -597,12 +603,19 @@ public class MediaJobScheduler {
     }
 
     private static byte[] payloadOf(MediaProviderAdapter.Output output,
-                                    com.zwx.zwxagent.creative.provider.SafeMediaDownloader downloader) {
+                                    com.zwx.zwxagent.creative.provider.SafeMediaDownloader downloader,
+                                    String bearerToken) {
         if (output.bytes() != null && output.bytes().length > 0) return output.bytes();
         if (output.url() == null || output.url().isBlank()) {
             throw new IllegalStateException("供应商产物缺少 URL 与字节");
         }
-        return downloader.download(output.url());
+        return downloader.download(output.url(), bearerToken);
+    }
+
+    /** 视频操作判定：调度器据此选择下载预算、对象扩展名与入库媒体类型。 */
+    public static boolean isVideoOperation(String operation) {
+        return com.zwx.zwxagent.creative.domain.ParameterSchema.TEXT_TO_VIDEO.equals(operation)
+                || com.zwx.zwxagent.creative.domain.ParameterSchema.IMAGE_TO_VIDEO.equals(operation);
     }
 
     private void markAttention(MediaJobRecord job, String reason) {
@@ -646,8 +659,9 @@ public class MediaJobScheduler {
     }
 
     private static String objectKeyFor(MediaJobRecord job, UUID assetId) {
+        String extension = isVideoOperation(job.operation()) ? ".mp4" : ".png";
         return "creative/" + job.tenantId() + "/" + job.userId() + "/" + job.projectId()
-                + "/" + assetId + "/original.png";
+                + "/" + assetId + "/original" + extension;
     }
 
 }

@@ -25,7 +25,10 @@ public class MediaModelResolver {
 
     public static final String ADAPTER_DASHSCOPE_TEXT2IMAGE = "dashscope-text2image";
     public static final String ADAPTER_OPENAI_IMAGES = "openai-images";
+    public static final String ADAPTER_OPENAI_VIDEO = "openai-video";
     private static final String OPERATION_TEXT_TO_IMAGE = ParameterSchema.IMAGE_GENERATION;
+    private static final java.util.Set<String> VIDEO_OPERATIONS =
+            java.util.Set.of(ParameterSchema.TEXT_TO_VIDEO, ParameterSchema.IMAGE_TO_VIDEO);
 
     private final ModelCatalogService modelCatalogService;
     private final MediaModelProfileRepository profileRepository;
@@ -43,22 +46,27 @@ public class MediaModelResolver {
         return resolve(userId, explicitModelRowId, OPERATION_TEXT_TO_IMAGE);
     }
 
-    /** 按操作解析：档案必须声明该操作能力（text_to_image / image_edit）。 */
+    /** 按操作解析：档案必须声明该操作能力（text_to_image / image_edit / text_to_video / image_to_video）。 */
     public ResolvedMediaModel resolve(String userId, Long explicitModelRowId, String operation) {
+        String requestedOperation = operation == null || operation.isBlank()
+                ? OPERATION_TEXT_TO_IMAGE : operation;
+        boolean video = VIDEO_OPERATIONS.contains(requestedOperation);
         ModelCatalogService.ImageBinding binding;
         if (explicitModelRowId != null) {
             var selection = modelCatalogService.resolveModelRow(userId, explicitModelRowId);
             binding = new ModelCatalogService.ImageBinding(
                     selection.config(), providerIdOfModelRow(explicitModelRowId), explicitModelRowId);
+        } else if (video) {
+            binding = modelCatalogService.resolveVideoBinding(userId)
+                    .orElseThrow(() -> CreativeException.modelNotConfigured(
+                            "未绑定视频生成模型：请在模型设置中为「视频生成」用途绑定视频模型"));
         } else {
             binding = modelCatalogService.resolveImageBinding(userId)
                     .orElseThrow(() -> CreativeException.modelNotConfigured(
                             "未绑定图片生成模型：请在模型设置中为「图片生成」用途绑定生图模型"));
         }
-        var profile = ensureProfile(binding);
+        var profile = ensureProfile(binding, video);
         ParameterSchema schema = parseSchema(profile.parameterSchemaJson());
-        String requestedOperation = operation == null || operation.isBlank()
-                ? OPERATION_TEXT_TO_IMAGE : operation;
         if (!Boolean.TRUE.equals(profile.operations().get(requestedOperation))) {
             throw CreativeException.unsupportedParameter("该模型不支持 " + requestedOperation);
         }
@@ -75,7 +83,7 @@ public class MediaModelResolver {
      * 已被其他适配器（如测试 Mock）接管的模型尊重现状；未知协议明确拒绝。
      */
     private MediaModelProfileRepository.MediaModelProfileRecord ensureProfile(
-            ModelCatalogService.ImageBinding binding) {
+            ModelCatalogService.ImageBinding binding, boolean video) {
         var existing = profileRepository.findByModelRowId(binding.modelRowId());
         if (existing.isPresent()) {
             // R07（评审 2026-10-31）：档案是能力与验证结论的事实来源，解析只创建、不覆盖——
@@ -87,28 +95,47 @@ public class MediaModelResolver {
         String adapterKey;
         ParameterSchema schema;
         VerificationStatus verification;
-        java.util.Map<String, Boolean> operations = java.util.Map.of(OPERATION_TEXT_TO_IMAGE, true);
-        switch (protocol.toLowerCase()) {
-            case "dashscope" -> {
-                adapterKey = ADAPTER_DASHSCOPE_TEXT2IMAGE;
-                schema = ParameterSchema.dashscopeTextToImage();
-                // 2026-10-29 已用真实 Key 验证 wanx2.1 系列出图（见模型契约文档）
-                verification = VerificationStatus.VERIFIED;
+        java.util.Map<String, Boolean> operations;
+        String primaryOperation;
+        if (video) {
+            // 视频用途当前只有 OpenAI Sora 兼容（New API 中转站）适配器；DashScope 暂无视频契约
+            if (!"openai-compatible".equalsIgnoreCase(protocol)) {
+                throw CreativeException.modelNotConfigured(
+                        "该模型没有可用的视频生成适配器：" + binding.config().provider() + "/"
+                                + binding.config().modelName());
             }
-            case "openai-compatible" -> {
-                adapterKey = ADAPTER_OPENAI_IMAGES;
-                schema = ParameterSchema.openAiImages();
-                // 中转站模型未经真实出图验证，不标 VERIFIED；支持文生图与参考图编辑两个操作
-                verification = VerificationStatus.UNVERIFIED;
-                operations = Map.of(OPERATION_TEXT_TO_IMAGE, true, "image_edit", true);
+            adapterKey = ADAPTER_OPENAI_VIDEO;
+            schema = ParameterSchema.openAiVideo();
+            // KKAI 上 sd_* 模型是否真走 /v1/videos 未做真实调用验证，不标 VERIFIED（V00 记录见实施文档）
+            verification = VerificationStatus.UNVERIFIED;
+            operations = java.util.Map.of(ParameterSchema.TEXT_TO_VIDEO, true,
+                    ParameterSchema.IMAGE_TO_VIDEO, true);
+            primaryOperation = ParameterSchema.TEXT_TO_VIDEO;
+        } else {
+            operations = java.util.Map.of(OPERATION_TEXT_TO_IMAGE, true);
+            switch (protocol.toLowerCase()) {
+                case "dashscope" -> {
+                    adapterKey = ADAPTER_DASHSCOPE_TEXT2IMAGE;
+                    schema = ParameterSchema.dashscopeTextToImage();
+                    // 2026-10-29 已用真实 Key 验证 wanx2.1 系列出图（见模型契约文档）
+                    verification = VerificationStatus.VERIFIED;
+                }
+                case "openai-compatible" -> {
+                    adapterKey = ADAPTER_OPENAI_IMAGES;
+                    schema = ParameterSchema.openAiImages();
+                    // 中转站模型未经真实出图验证，不标 VERIFIED；支持文生图与参考图编辑两个操作
+                    verification = VerificationStatus.UNVERIFIED;
+                    operations = Map.of(OPERATION_TEXT_TO_IMAGE, true, "image_edit", true);
+                }
+                default -> throw CreativeException.modelNotConfigured(
+                        "该模型没有可用的图片生成适配器：" + binding.config().provider() + "/"
+                                + binding.config().modelName());
             }
-            default -> throw CreativeException.modelNotConfigured(
-                    "该模型没有可用的图片生成适配器：" + binding.config().provider() + "/"
-                            + binding.config().modelName());
+            primaryOperation = ParameterSchema.IMAGE_GENERATION;
         }
         profileRepository.upsert(binding.modelRowId(), adapterKey, "1",
                 operations,
-                Map.of("operation", ParameterSchema.IMAGE_GENERATION,
+                Map.of("operation", primaryOperation,
                         "parameters", schema.parameters()),
                 verification, Instant.now());
         return profileRepository.findByModelRowId(binding.modelRowId()).orElseThrow();

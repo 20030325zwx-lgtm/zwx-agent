@@ -27,10 +27,12 @@ public class CreativeAssetService {
 
     public static final int MAX_BYTES = 20 * 1024 * 1024;
     public static final long MAX_PIXELS = 40_000_000L;
+    /** 视频上传默认预算 100MiB：视频文件远大于图片，不能沿用图片 20MiB（配置 creative.video.upload-max-bytes）。 */
+    private static final long DEFAULT_VIDEO_MAX_BYTES = 100L * 1024 * 1024;
 
     public record AssetView(UUID id, UUID projectId, UUID jobId, String mediaType, String displayName,
                             boolean starred, String status, long byteSize,
-                            Integer width, Integer height, Instant createdAt, String origin) {
+                            Integer width, Integer height, Long durationMs, Instant createdAt, String origin) {
     }
 
     public record AssetList(List<AssetView> items, String nextCursor) {
@@ -44,17 +46,21 @@ public class CreativeAssetService {
     private final MediaJobRepository jobRepository;
     private final MediaJobAssetRefRepository assetRefRepository;
     private final MediaStorage storage;
+    private final long videoMaxBytes;
 
     public CreativeAssetService(CreativeAssetRepository assetRepository,
                                 CreativeProjectRepository projectRepository,
                                 MediaJobRepository jobRepository,
                                 MediaJobAssetRefRepository assetRefRepository,
-                                MediaStorage storage) {
+                                MediaStorage storage,
+                                @org.springframework.beans.factory.annotation.Value(
+                                        "${creative.video.upload-max-bytes:104857600}") long videoMaxBytes) {
         this.assetRepository = assetRepository;
         this.projectRepository = projectRepository;
         this.jobRepository = jobRepository;
         this.assetRefRepository = assetRefRepository;
         this.storage = storage;
+        this.videoMaxBytes = videoMaxBytes > 0 ? videoMaxBytes : DEFAULT_VIDEO_MAX_BYTES;
     }
 
     /** 上传：校验 → 写对象 → 建 PENDING 素材 → READY。失败不残留正式素材（A14）。 */
@@ -100,6 +106,72 @@ public class CreativeAssetService {
             throw new IllegalStateException("素材保存失败", exception);
         }
         assetRepository.markReady(assetId, inspection.width(), inspection.height(), null);
+        return toView(assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId).orElseThrow());
+    }
+
+    /**
+     * 视频上传（V1-A）：魔数判定（不信任扩展名）→ MP4/MOV/WebM → VideoProbe 尽力探测时长画幅 → READY。
+     * 视频不生成缩略图（无 ffmpeg 抽帧），封面由播放器原生首帧承担。
+     */
+    public AssetView uploadVideo(CurrentActor actor, UUID projectId, String filename, byte[] bytes) {
+        var project = projectRepository.findByIdForOwner(actor.tenantId(), actor.userId(), projectId)
+                .orElseThrow(() -> new IllegalArgumentException("创作项目不存在"));
+        if (project.status() != ProjectStatus.ACTIVE) {
+            throw new IllegalStateException("项目已归档，不能上传素材");
+        }
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("视频内容为空");
+        }
+        if (bytes.length > videoMaxBytes) {
+            throw new IllegalArgumentException("视频超过 " + (videoMaxBytes / 1024 / 1024) + "MiB 上限");
+        }
+        String extension;
+        String mimeType;
+        if (com.zwx.zwxagent.creative.video.VideoProbe.isMp4(bytes)) {
+            // ftyp major brand "qt  " 是 QuickTime 容器，其余按 mp4 处理
+            boolean quicktime = new String(bytes, 8, 4, java.nio.charset.StandardCharsets.US_ASCII).equals("qt  ");
+            extension = quicktime ? "mov" : "mp4";
+            mimeType = quicktime ? "video/quicktime" : "video/mp4";
+        } else if (bytes.length >= 4 && (bytes[0] & 0xff) == 0x1A && (bytes[1] & 0xff) == 0x45
+                && (bytes[2] & 0xff) == 0xDF && (bytes[3] & 0xff) == 0xA3) {
+            extension = "webm";
+            mimeType = "video/webm";
+        } else {
+            throw new IllegalArgumentException("仅支持 MP4/MOV/WebM 视频");
+        }
+        Integer width = null;
+        Integer height = null;
+        Long durationMs = null;
+        if ("mp4".equals(extension) || "mov".equals(extension)) {
+            // 探测尽力而为：失败不阻断上传，时长画幅留空由播放器自行解析
+            try {
+                var inspection = com.zwx.zwxagent.creative.video.VideoProbe.inspect(bytes);
+                width = inspection.width();
+                height = inspection.height();
+                durationMs = inspection.durationMs();
+            } catch (RuntimeException ignored) {
+                // 保留 null 探测结果
+            }
+        }
+        UUID assetId = UUID.randomUUID();
+        String objectKey = "creative/" + actor.tenantId() + "/" + actor.userId() + "/"
+                + projectId + "/" + assetId + "/original." + extension;
+        var record = new CreativeAssetRecord(assetId, projectId, actor.tenantId(), actor.userId(),
+                null, null, com.zwx.zwxagent.creative.domain.AssetOrigin.UPLOAD,
+                "VIDEO", com.zwx.zwxagent.creative.domain.StorageBackend.valueOf(storage.backend()),
+                objectKey, mimeType, bytes.length,
+                com.zwx.zwxagent.creative.asset.MockAssetIngestService.sha256(bytes),
+                width, height, durationMs,
+                displayNameOf(filename), false, com.zwx.zwxagent.creative.domain.AssetStatus.PENDING,
+                "{}", Instant.now(), null);
+        assetRepository.insert(record);
+        try {
+            storage.put(objectKey, mimeType, new ByteArrayInputStream(bytes), bytes.length);
+        } catch (RuntimeException exception) {
+            assetRepository.softDelete(assetId); // 不残留 PENDING 孤儿（A14）
+            throw new IllegalStateException("视频保存失败", exception);
+        }
+        assetRepository.markReady(assetId, width, height, durationMs);
         return toView(assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId).orElseThrow());
     }
 
@@ -168,6 +240,31 @@ public class CreativeAssetService {
     }
 
     public record ContentContent(String mimeType, String displayName, byte[] bytes) {
+    }
+
+    /** 视频流式播放元数据：大小与媒体类型，供 Range/206 分块响应。 */
+    public record PlaybackMeta(String mimeType, String displayName, long size) {
+    }
+
+    /** 流式打开素材内容（BR16 授权后调用）；调用方负责关闭流。视频播放必须走此路径。 */
+    public PlaybackMeta playbackMeta(CurrentActor actor, UUID assetId) {
+        var asset = requireOwned(actor, assetId);
+        if (asset.status() == com.zwx.zwxagent.creative.domain.AssetStatus.DELETED) {
+            throw new IllegalArgumentException("素材已删除");
+        }
+        return new PlaybackMeta(asset.mimeType(), asset.displayName(), asset.byteSize());
+    }
+
+    public java.io.InputStream openStream(CurrentActor actor, UUID assetId) {
+        var asset = requireOwned(actor, assetId);
+        if (asset.status() == com.zwx.zwxagent.creative.domain.AssetStatus.DELETED) {
+            throw new IllegalArgumentException("素材已删除");
+        }
+        try {
+            return storage.open(asset.objectKey());
+        } catch (Exception exception) {
+            throw new IllegalStateException("素材读取失败", exception);
+        }
     }
 
     /** 缩略图读取（A17）：没有缩略图时返回 null，由接口给 404，界面回退到原图。 */
@@ -276,6 +373,6 @@ public class CreativeAssetService {
     private static AssetView toView(CreativeAssetRecord record) {
         return new AssetView(record.id(), record.projectId(), record.sourceJobId(), record.mediaType(), record.displayName(),
                 record.starred(), record.status().name(), record.byteSize(),
-                record.width(), record.height(), record.createdAt(), record.origin().name());
+                record.width(), record.height(), record.durationMs(), record.createdAt(), record.origin().name());
     }
 }

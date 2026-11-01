@@ -32,14 +32,22 @@
     <!-- 创作视图 -->
     <div v-if="tab === 'studio'" class="studio-body">
       <section class="studio-results" aria-label="生成结果">
-        <div v-if="project && project.kind !== 'IMAGE'" class="cr-banner studio-banner">
+        <div v-if="project && !['IMAGE', 'VIDEO'].includes(project.kind)" class="cr-banner studio-banner">
           <AlertCircle :size="18" />
           <div class="cr-banner-body">
             <strong>{{ kindLabel(project.kind) }}创作尚未开放</strong>
             <p>项目与草稿已保存；该类型的生成链路上线后可直接继续使用，无需重建项目。</p>
           </div>
         </div>
-        <div v-else-if="!imageBinding" class="cr-banner studio-banner">
+        <div v-else-if="isVideoProject && !videoBinding" class="cr-banner studio-banner">
+          <AlertCircle :size="18" />
+          <div class="cr-banner-body">
+            <strong>还没有配置视频生成模型</strong>
+            <p>可以先输入并保存草稿；提交生成前需要在模型设置绑定「视频生成」用途。</p>
+          </div>
+          <router-link to="/settings/model" class="cr-banner-link">去配置</router-link>
+        </div>
+        <div v-else-if="!isVideoProject && !imageBinding" class="cr-banner studio-banner">
           <AlertCircle :size="18" />
           <div class="cr-banner-body">
             <strong>还没有配置图片生成模型</strong>
@@ -49,7 +57,7 @@
         </div>
 
         <p v-if="cleanJobList.length === 0 && !jobsLoading" class="cr-empty studio-empty">
-          还没有生成记录。在右侧输入想法，点击「生成图片」。
+          还没有生成记录。在右侧输入想法，点击「{{ isVideoProject ? '生成视频' : '生成图片' }}」。
         </p>
 
         <article v-for="job in cleanJobList" :key="job.jobId" class="job-card">
@@ -62,11 +70,19 @@
 
           <div v-if="jobImages(job).length" class="job-images">
             <figure v-for="output in jobImages(job)" :key="output.assetId" class="job-image">
-              <img v-if="urls[output.assetId]" :src="urls[output.assetId]" :alt="`生成结果 ${output.index + 1}`" />
-              <div v-else class="job-image-placeholder">图片加载中…</div>
+              <!-- 视频产物：签名播放 URL（Range 拖动）；图片：鉴权 blob -->
+              <video v-if="isVideoJob(job) && (videoUrls[output.assetId]?.url || videoUrls[output.assetId])"
+                     :src="videoUrls[output.assetId]?.url || videoUrls[output.assetId]"
+                     controls preload="metadata"></video>
+              <img v-else-if="!isVideoJob(job) && urls[output.assetId]"
+                   :src="urls[output.assetId]" :alt="`生成结果 ${output.index + 1}`" />
+              <div v-else class="job-image-placeholder">{{ isVideoJob(job) ? '视频加载中…' : '图片加载中…' }}</div>
               <figcaption class="job-image-actions">
                 <span class="job-image-meta">{{ output.meta }}</span>
-                <button v-if="urls[output.assetId]" type="button" class="cr-ghost"
+                <button v-if="isVideoJob(job) && (videoUrls[output.assetId]?.url || videoUrls[output.assetId])"
+                        type="button" class="cr-ghost"
+                        @click="downloadBlob(videoUrls[output.assetId]?.url || videoUrls[output.assetId], downloadName(job, output))">下载</button>
+                <button v-else-if="!isVideoJob(job) && urls[output.assetId]" type="button" class="cr-ghost"
                         @click="downloadBlob(urls[output.assetId], downloadName(job, output))">下载</button>
               </figcaption>
             </figure>
@@ -157,27 +173,49 @@
         </div>
 
         <div class="panel-block">
-          <label class="cr-field">
-            <span class="cr-field-label"><span>尺寸</span></span>
-            <select v-model="size" class="cr-select" @change="markDirty">
-              <option value="1024*1024">1024 × 1024（方形）</option>
-              <option value="1280*720">1280 × 720（横版）</option>
-              <option value="720*1280">720 × 1280（竖版）</option>
-              <option value="1152*768">1152 × 768（横版）</option>
-              <option value="768*1152">768 × 1152（竖版）</option>
-            </select>
-          </label>
-          <label v-if="imageProtocol === 'dashscope'" class="panel-switch">
-            <ToggleSwitch v-model="watermark" @update:model-value="markDirty" />
-            <span>添加 AI 生成水印</span>
-          </label>
-          <p class="cr-field-help">输出 1 张；供应商计费，当前无法估算金额。</p>
+          <!-- 视频生成参数（V1-A）：文生视频已实测跑通；图生视频待参考 URL 传输验证后开放 -->
+          <template v-if="isVideoProject">
+            <label class="cr-field">
+              <span class="cr-field-label"><span>生成方式</span></span>
+              <select v-model="videoOperation" class="cr-select" @change="markDirty">
+                <option value="text_to_video">文生视频</option>
+                <option value="image_to_video">图生视频（首帧）· 即将开放</option>
+              </select>
+            </label>
+            <label v-if="videoOperation === 'image_to_video'" class="cr-field">
+              <span class="cr-field-label"><span>首帧图片</span></span>
+              <AssetParamField v-model="videoRefAssetId" media-type="IMAGE" @update:model-value="markDirty" />
+              <span class="cr-field-help">图生视频需要把首帧以 URL 交给上游，传输方式验证后开放；当前提交会收到明确报错</span>
+            </label>
+            <label class="cr-field">
+              <span class="cr-field-label"><span>时长（秒）</span></span>
+              <input v-model="videoSeconds" class="cr-input" type="text" placeholder="如 5" @input="markDirty" />
+            </label>
+            <p class="cr-field-help">输出 1 条视频；实测 5 秒约 5 分钟生成，供应商计费金额未知。</p>
+          </template>
+          <template v-else>
+            <label class="cr-field">
+              <span class="cr-field-label"><span>尺寸</span></span>
+              <select v-model="size" class="cr-select" @change="markDirty">
+                <option value="1024*1024">1024 × 1024（方形）</option>
+                <option value="1280*720">1280 × 720（横版）</option>
+                <option value="720*1280">720 × 1280（竖版）</option>
+                <option value="1152*768">1152 × 768（横版）</option>
+                <option value="768*1152">768 × 1152（竖版）</option>
+              </select>
+            </label>
+            <label v-if="imageProtocol === 'dashscope'" class="panel-switch">
+              <ToggleSwitch v-model="watermark" @update:model-value="markDirty" />
+              <span>添加 AI 生成水印</span>
+            </label>
+            <p class="cr-field-help">输出 1 张；供应商计费，当前无法估算金额。</p>
+          </template>
         </div>
 
         <div class="panel-block">
           <div class="model-line">
-            <span class="cr-field-help">图片模型</span>
-            <span class="model-name">{{ imageBinding ? `${imageBinding.providerName} / ${imageBinding.modelName}` : '未配置' }}</span>
+            <span class="cr-field-help">{{ isVideoProject ? '视频模型' : '图片模型' }}</span>
+            <span class="model-name">{{ activeBindingName }}</span>
           </div>
           <div class="save-line">
             <span>{{ saveStateText }}</span>
@@ -187,7 +225,7 @@
           <button type="button" class="cr-primary generate-btn"
                   :disabled="!canGenerate || generating" @click="generate">
             <Spinner v-if="generating" />
-            <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : '生成图片' }}
+            <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : (isVideoProject ? '生成视频' : '生成图片') }}
           </button>
           <p v-if="project && project.status !== 'ACTIVE'" class="cr-field-help">项目已归档，不能发起新任务。</p>
         </div>
@@ -390,7 +428,11 @@
           <figure v-for="asset in filteredAssets" :key="asset.id" class="asset-card">
             <button type="button" class="asset-thumb" :aria-label="`预览 ${asset.displayName}`"
                     @click="openAssetPreview(asset)">
-              <img v-if="thumbs[asset.id] || urls[asset.id]" :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
+              <!-- 视频素材：签名 URL + 原生首帧，不走图片缩略图链路 -->
+              <video v-if="asset.mediaType === 'VIDEO' && videoUrls[asset.id]"
+                     :src="videoUrls[asset.id].url || videoUrls[asset.id]" muted preload="metadata"></video>
+              <img v-else-if="asset.mediaType !== 'VIDEO' && (thumbs[asset.id] || urls[asset.id])"
+                   :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
               <span v-else class="asset-placeholder">加载中…</span>
             </button>
             <figcaption>
@@ -620,7 +662,7 @@ import {
   retryCreativeJob, startWorkflow, suggestNovelPlot, updateCreativeAsset, updateCreativeDraft,
   updateNovelChapter, updateNovelSettings, uploadCreativeAsset
 } from '../../api'
-import { useAssetUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta, starBurst } from './shared'
+import { useAssetUrls, useVideoUrls, downloadBlob, formatBytes, formatTime, kindLabel, statusMeta, starBurst } from './shared'
 import AssetPreview from './AssetPreview.vue'
 import AssetCompare from '../../components/creative/AssetCompare.vue'
 import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
@@ -634,10 +676,12 @@ const PROMPT_MAX = 500
 const route = useRoute()
 const router = useRouter()
 const { urls, thumbs, urlFor, thumbFor } = useAssetUrls()
+const { videoUrls, videoUrlFor } = useVideoUrls()
 
 const projectId = computed(() => route.params.projectId)
 const project = ref(null)
 const imageBinding = ref(null)
+const videoBinding = ref(null)
 const imageProtocol = computed(() => imageBinding.value?.protocol || 'dashscope')
 const pageError = ref('')
 const tab = ref(['workflow', 'chapters'].includes(route.query.tab) ? route.query.tab : 'studio')
@@ -647,6 +691,12 @@ const effective = ref('')
 const finalSynced = ref(true)
 const size = ref('1024*1024')
 const watermark = ref(false)
+
+// 视频生成表单（V1-A）：文生视频 / 图生视频（首帧），秒数与画幅按中转站模型自由填写
+const videoOperation = ref('text_to_video')
+const videoSeconds = ref('5')
+const videoSize = ref('1280x720')
+const videoRefAssetId = ref('')
 
 const draft = ref(null)
 const saveState = ref('idle') // idle | saving | saved | error
@@ -675,9 +725,19 @@ const assets = ref([])
 const assetError = ref('')
 
 const canOptimize = computed(() => (idea.value.trim() || effective.value.trim()).length > 0)
+const isVideoProject = computed(() => project.value?.kind === 'VIDEO')
+const activeBindingName = computed(() => {
+  const binding = isVideoProject.value ? videoBinding.value : imageBinding.value
+  return binding ? `${binding.providerName} / ${binding.modelName}` : '未配置'
+})
+function isVideoJob(job) {
+  return ['text_to_video', 'image_to_video'].includes(job?.operation)
+}
 const canGenerate = computed(() => project.value?.status === 'ACTIVE'
-  && project.value?.kind === 'IMAGE'
-  && !!imageBinding.value && (idea.value.trim() || effective.value.trim()).length > 0)
+  && (isVideoProject.value
+    ? !!videoBinding.value
+    : project.value?.kind === 'IMAGE' && !!imageBinding.value)
+  && (idea.value.trim() || effective.value.trim()).length > 0)
 const activeCount = computed(() => jobs.value.filter(job => !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(job.status)).length)
 const cleanJobList = computed(() => jobs.value)
 const suggestionLength = computed(() => (suggestion.value || '').length)
@@ -719,7 +779,8 @@ function jobImages(job) {
 }
 
 function downloadName(job, output) {
-  return `creative-${job.jobId.slice(0, 8)}-${output.index + 1}.png`
+  const extension = isVideoJob(job) ? 'mp4' : 'png'
+  return `creative-${job.jobId.slice(0, 8)}-${output.index + 1}.${extension}`
 }
 
 async function loadProject() {
@@ -742,8 +803,11 @@ async function loadCatalog() {
     const catalog = await listModelCatalog()
     imageBinding.value = catalog.userBindings?.image_generation
       || catalog.systemBindings?.image_generation || null
+    videoBinding.value = catalog.userBindings?.video_generation
+      || catalog.systemBindings?.video_generation || null
   } catch (error) {
     imageBinding.value = null
+    videoBinding.value = null
   }
 }
 
@@ -785,10 +849,13 @@ async function refreshDetails() {
     if (result.status === 'fulfilled') next[targets[index].jobId] = result.value
   })
   details.value = next
-  // 预取所有产物图片（鉴权接口 → blob）
+  // 预取产物：图片走鉴权 blob；视频走签名播放 URL（整段 blob 下载太重且不支持拖动）
   Object.values(next).forEach(job => {
-    (job.outputs || []).forEach(output => {
-      if (output.state === 'DONE') urlFor(output.assetId)
+    const isVideoJob = ['text_to_video', 'image_to_video'].includes(job.operation)
+    ;(job.outputs || []).forEach(output => {
+      if (output.state !== 'DONE') return
+      if (isVideoJob) videoUrlFor(output.assetId)
+      else urlFor(output.assetId)
     })
   })
   if (detailJob.value) detailJob.value = next[detailJob.value.jobId] || detailJob.value
@@ -821,7 +888,10 @@ async function loadAssets() {
   try {
     const data = await listCreativeAssets({ projectId: projectId.value, limit: 60 })
     assets.value = data.items || []
-    assets.value.forEach(asset => thumbFor(asset.id))
+    assets.value.forEach(asset => {
+      if (asset.mediaType === 'VIDEO') videoUrlFor(asset.id)
+      else thumbFor(asset.id)
+    })
   } catch (error) {
     assetError.value = '素材加载失败'
   }
@@ -936,7 +1006,8 @@ async function startProjectWorkflow() {
 async function openAssetPreview(asset) {
   previewAsset.value = asset
   previewSrc.value = ''
-  previewSrc.value = await urlFor(asset.id)
+  // 视频走签名播放 URL（Range 拖动），图片走鉴权 blob
+  previewSrc.value = asset.mediaType === 'VIDEO' ? await videoUrlFor(asset.id) : await urlFor(asset.id)
 }
 
 // ---------------------------------------------------------------- 候选对比与选定（创作闭环 B1）
@@ -1281,16 +1352,29 @@ async function generate() {
   if (!pendingKey) pendingKey = newIdempotencyKey()
   try {
     await saveDraft()
-    const result = await createCreativeJob(pendingKey, {
-      projectId: projectId.value,
-      operation: 'text_to_image',
-      originalPrompt: idea.value.trim(),
-      effectivePrompt: prompt,
-      // 参数按模型协议声明：watermark 是 DashScope 专有；中转站（openai-images）schema 只收 size
-      parameters: imageProtocol.value === 'dashscope'
-        ? { size: size.value, watermark: watermark.value }
-        : { size: size.value }
-    })
+    const payload = isVideoProject.value
+      ? {
+          projectId: projectId.value,
+          operation: videoOperation.value,
+          originalPrompt: idea.value.trim(),
+          effectivePrompt: prompt,
+          // size 字段未经验证不发送（2026-11-01 实测：JSON model/prompt/seconds）
+          parameters: { seconds: videoSeconds.value },
+          referenceAssetIds: videoOperation.value === 'image_to_video'
+            ? [videoRefAssetId.value].filter(Boolean)
+            : []
+        }
+      : {
+          projectId: projectId.value,
+          operation: 'text_to_image',
+          originalPrompt: idea.value.trim(),
+          effectivePrompt: prompt,
+          // 参数按模型协议声明：watermark 是 DashScope 专有；中转站（openai-images）schema 只收 size
+          parameters: imageProtocol.value === 'dashscope'
+            ? { size: size.value, watermark: watermark.value }
+            : { size: size.value }
+        }
+    const result = await createCreativeJob(pendingKey, payload)
     pendingKey = null
     showToast(result.reused ? '已复用原任务，未重复提交' : '任务已受理，正在生成', 'success')
     await loadJobs()
@@ -1691,6 +1775,9 @@ onBeforeUnmount(() => {
   background: var(--wb-fill);
 }
 .job-image img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: contain; }
+/* 视频产物默认 16:9 展示（宽卡），元数据未加载时不塌陷/不拉长 */
+.job-image:has(video) { width: min(480px, 100%); }
+.job-image video { display: block; width: 100%; aspect-ratio: 16 / 9; height: auto; object-fit: contain; background: #000; }
 .job-image-placeholder {
   aspect-ratio: 1 / 1;
   display: flex;
@@ -1794,6 +1881,8 @@ onBeforeUnmount(() => {
 }
 .asset-thumb { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .asset-thumb img { display: block; width: 100%; }
+/* 视频素材卡默认 16:9，与创作结果卡一致 */
+.asset-thumb video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
 .asset-origin { font-style: normal; font-size: 10.5px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
 .asset-origin.gen { background: var(--wb-brand-soft); color: var(--wb-brand); }
 .asset-origin.up { background: var(--wb-fill); color: var(--wb-text-2); }

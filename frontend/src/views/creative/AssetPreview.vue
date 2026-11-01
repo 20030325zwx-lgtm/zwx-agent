@@ -12,18 +12,21 @@
         <button type="button" class="ap-close" aria-label="关闭预览" @click="emit('close')">×</button>
       </header>
       <div class="ap-body">
-        <img v-if="src" :src="src" :alt="asset.displayName" />
-        <p v-else class="ap-hint">图片加载中…</p>
+        <video v-if="isVideo && src" :src="src" controls preload="metadata" class="ap-video"></video>
+        <img v-else-if="src" :src="src" :alt="asset.displayName" />
+        <p v-else class="ap-hint">{{ isVideo ? '视频加载中…' : '图片加载中…' }}</p>
       </div>
       <footer class="ap-foot">
         <span class="ap-meta">
           {{ formatBytes(asset.byteSize) }}
           <template v-if="asset.width && asset.height"> · {{ asset.width }}×{{ asset.height }}</template>
+          <template v-if="isVideo && formatDuration(asset.durationMs)"> · {{ formatDuration(asset.durationMs) }}</template>
           · {{ formatTime(asset.createdAt) }}
         </span>
         <div class="ap-actions">
           <slot name="actions" />
-          <a v-if="src" class="cr-ghost" :href="src" :download="asset.displayName || 'asset.png'"
+          <a v-if="src" class="cr-ghost" :href="src"
+             :download="asset.displayName || (isVideo ? 'video.mp4' : 'asset.png')"
              target="_blank" rel="noopener">下载</a>
         </div>
       </footer>
@@ -32,13 +35,15 @@
 </template>
 
 <script setup>
-import { formatBytes, formatTime } from './shared'
+import { computed } from 'vue'
+import { formatBytes, formatDuration, formatTime } from './shared'
 
-defineProps({
+const props = defineProps({
   asset: { type: Object, required: true },
   src: { type: String, default: '' }
 })
 const emit = defineEmits(['close'])
+const isVideo = computed(() => props.asset?.mediaType === 'VIDEO')
 </script>
 
 <style scoped>
@@ -82,6 +87,7 @@ const emit = defineEmits(['close'])
   overflow: auto;
 }
 .ap-body img { max-width: 100%; max-height: 64vh; object-fit: contain; }
+.ap-body video.ap-video { max-width: 100%; max-height: 64vh; border-radius: 8px; background: #000; }
 .ap-hint { color: var(--wb-muted); font-size: 12.5px; }
 .ap-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .ap-meta { color: var(--wb-muted); font-size: 12px; }

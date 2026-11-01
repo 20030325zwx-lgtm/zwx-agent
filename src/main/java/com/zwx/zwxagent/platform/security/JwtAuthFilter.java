@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * JWT 解析本机回环令牌双通道。桌面版由 Electron 主进程生成随机令牌注入后端环境变量，
@@ -32,15 +33,18 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final PlaybackSignatureService playbackSignatures;
     private final String loopbackToken;
     private final String localUsername;
 
     public JwtAuthFilter(JwtService jwtService,
                          UserRepository userRepository,
+                         PlaybackSignatureService playbackSignatures,
                          @Value("${app.desktop.loopback-token:}") String loopbackToken,
                          @Value("${app.security.admin-username:admin}") String localUsername) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
+        this.playbackSignatures = playbackSignatures;
         this.loopbackToken = loopbackToken == null ? "" : loopbackToken.trim();
         this.localUsername = localUsername;
     }
@@ -61,8 +65,32 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                     && !loopbackToken.isBlank() && matches(request)) {
                 localActor().ifPresent(this::install);
             }
+            // 视频播放签名（V1-A）：<video> 标签带不了 Authorization，签名绑定
+            // 「用户 + 素材 + 过期」，且仅对 GET 的素材内容端点放行，不产生通用身份。
+            if (SecurityContextHolder.getContext().getAuthentication() == null) {
+                playbackActor(request).ifPresent(this::install);
+            }
         }
         filterChain.doFilter(request, response);
+    }
+
+    /** 校验 ?playback= 签名并装配素材归属者身份；任何不匹配都视为匿名。 */
+    private Optional<CurrentActor> playbackActor(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod())) return Optional.empty();
+        // 去掉 servlet context-path（/api）后再匹配控制器路径
+        String uri = request.getRequestURI().substring(request.getContextPath().length());
+        String prefix = "/ai/creative/assets/";
+        String suffix = "/content";
+        if (uri == null || !uri.startsWith(prefix) || !uri.endsWith(suffix)) return Optional.empty();
+        UUID assetId;
+        try {
+            assetId = UUID.fromString(uri.substring(prefix.length(), uri.length() - suffix.length()));
+        } catch (IllegalArgumentException exception) {
+            return Optional.empty();
+        }
+        return playbackSignatures.verify(assetId, request.getParameter("playback"))
+                .flatMap(access -> userRepository.findById(access.userId()))
+                .map(user -> new CurrentActor(user.id(), user.tenantId(), user.username(), user.role()));
     }
 
     private boolean matches(HttpServletRequest request) {

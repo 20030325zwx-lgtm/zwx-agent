@@ -269,14 +269,20 @@ public class MediaJobService {
         }
         var referenceAssetIds = request == null || request.referenceAssetIds() == null
                 ? java.util.List.<UUID>of() : request.referenceAssetIds();
-        // BR08（2026-10-31 扩展）：text_to_image 仍不接受参考图；image_edit 需要 1–3 张本人 READY 素材作参考
+        // BR08（2026-10-31 扩展，2026-11-01 视频扩展）：按操作校验参考图——
+        // text_to_image / text_to_video 不接受参考图；image_edit 需要 1–3 张；image_to_video 恰 1 张（首帧）
         if (OPERATION_IMAGE_EDIT.equals(operation)) {
             if (referenceAssetIds.isEmpty() || referenceAssetIds.size() > MAX_REFERENCE_ASSETS) {
                 throw CreativeException.unsupportedParameter(
                         "image_edit 需要 " + MAX_REFERENCE_ASSETS + " 张以内参考图（referenceAssetIds）");
             }
+        } else if (ParameterSchema.IMAGE_TO_VIDEO.equals(operation)) {
+            if (referenceAssetIds.size() != 1) {
+                throw CreativeException.unsupportedParameter(
+                        "image_to_video 需要恰好 1 张参考图作为首帧（referenceAssetIds）");
+            }
         } else if (!referenceAssetIds.isEmpty()) {
-            throw CreativeException.unsupportedParameter("text_to_image 不支持参考图（referenceAssetIds）");
+            throw CreativeException.unsupportedParameter(operation + " 不支持参考图（referenceAssetIds）");
         }
         validateParent(actor, request);
 
@@ -290,8 +296,9 @@ public class MediaJobService {
             if (project.status() != ProjectStatus.ACTIVE) {
                 throw new CreativeConflictException("项目已归档，不能发起新任务");
             }
-            if (project.kind() != com.zwx.zwxagent.creative.domain.CreativeKind.IMAGE) {
-                throw CreativeException.unsupportedParameter("当前仅支持图片创作项目的生成任务");
+            if (!operationAllowedForKind(project.kind(), operation)) {
+                throw CreativeException.unsupportedParameter(
+                        "该创作项目类型（" + project.kind() + "）不支持 " + operation + " 任务");
             }
             return jobRepository.findByIdempotencyKey(actor.tenantId(), actor.userId(), idempotencyKey)
                     .map(job -> {
@@ -313,13 +320,16 @@ public class MediaJobService {
         if (effectivePrompt.length() > ParameterSchema.MODEL_PROMPT_MAX) {
             throw CreativeException.unsupportedParameter("提示词超过模型上限 " + ParameterSchema.MODEL_PROMPT_MAX + " 个字符");
         }
-        // 参考图必须是本人的 READY 素材（image_edit）
+        // 参考图必须是本人的 READY 图片素材（image_edit / image_to_video 首帧）
         if (!referenceAssetIds.isEmpty()) {
             for (UUID assetId : referenceAssetIds) {
                 var asset = assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId)
                         .orElseThrow(() -> new IllegalArgumentException("参考素材不存在或无权使用：" + assetId));
                 if (asset.status() != com.zwx.zwxagent.creative.domain.AssetStatus.READY) {
                     throw new IllegalArgumentException("参考素材不可用（未就绪或已删除）：" + assetId);
+                }
+                if (!"IMAGE".equals(asset.mediaType())) {
+                    throw new IllegalArgumentException("参考素材必须是图片：" + assetId);
                 }
             }
         }
@@ -350,8 +360,9 @@ public class MediaJobService {
         if (project.status() != ProjectStatus.ACTIVE) {
             throw new CreativeConflictException("项目已归档，不能发起新任务");
         }
-        if (project.kind() != com.zwx.zwxagent.creative.domain.CreativeKind.IMAGE) {
-            throw CreativeException.unsupportedParameter("当前仅支持图片创作项目的生成任务");
+        if (!operationAllowedForKind(project.kind(), input.operation())) {
+            throw CreativeException.unsupportedParameter(
+                    "该创作项目类型（" + project.kind() + "）不支持 " + input.operation() + " 任务");
         }
         int queued = jobRepository.countByOwnerAndStatus(actor.tenantId(), actor.userId(), MediaJobStatus.QUEUED);
         int maxQueued = maxQueuedFor(actor.userId());
@@ -399,10 +410,29 @@ public class MediaJobService {
     private static String normalizeOperation(String operation) {
         String value = operation == null || operation.isBlank()
                 ? CreativeDraftService.OPERATION_TEXT_TO_IMAGE : operation.trim();
-        if (!CreativeDraftService.OPERATION_TEXT_TO_IMAGE.equals(value) && !OPERATION_IMAGE_EDIT.equals(value)) {
+        if (!CreativeDraftService.OPERATION_TEXT_TO_IMAGE.equals(value) && !OPERATION_IMAGE_EDIT.equals(value)
+                && !ParameterSchema.TEXT_TO_VIDEO.equals(value) && !ParameterSchema.IMAGE_TO_VIDEO.equals(value)) {
             throw new IllegalArgumentException("暂不支持的创作类型：" + value);
         }
         return value;
+    }
+
+    /**
+     * 项目类型×操作矩阵（视频第一批，2026-11-01）：IMAGE 项目只做图像操作；
+     * VIDEO 项目允许视频操作与关键帧图像操作（剧情关键帧复用生图/改图链路）；
+     * NOVEL/COMIC 在对应能力落地前不允许提交任何生成任务。
+     */
+    static boolean operationAllowedForKind(com.zwx.zwxagent.creative.domain.CreativeKind kind,
+                                           String operation) {
+        boolean imageOperation = CreativeDraftService.OPERATION_TEXT_TO_IMAGE.equals(operation)
+                || OPERATION_IMAGE_EDIT.equals(operation);
+        boolean videoOperation = ParameterSchema.TEXT_TO_VIDEO.equals(operation)
+                || ParameterSchema.IMAGE_TO_VIDEO.equals(operation);
+        return switch (kind) {
+            case IMAGE -> imageOperation;
+            case VIDEO -> videoOperation || imageOperation;
+            case NOVEL, COMIC -> false;
+        };
     }
 
     /** 稳定字段排序的请求哈希；不含时间、requestId 与短期 URL。参考图 ID 参与幂等判定。 */

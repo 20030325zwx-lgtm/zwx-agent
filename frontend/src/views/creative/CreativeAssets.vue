@@ -46,7 +46,11 @@
           <figure v-for="asset in assets" :key="asset.id" class="asset-card">
             <button type="button" class="asset-thumb" :aria-label="`预览 ${asset.displayName}`"
                     @click="openPreview(asset)">
-              <img v-if="thumbs[asset.id] || urls[asset.id]" :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
+              <!-- 视频卡片：签名 URL + 原生首帧（preload=metadata），不走图片缩略图链路 -->
+              <video v-if="asset.mediaType === 'VIDEO' && videoUrls[asset.id]"
+                     :src="videoUrls[asset.id].url || videoUrls[asset.id]" muted preload="metadata"></video>
+              <img v-else-if="asset.mediaType !== 'VIDEO' && (thumbs[asset.id] || urls[asset.id])"
+                   :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
               <span v-else class="asset-placeholder">加载中…</span>
             </button>
             <figcaption>
@@ -97,12 +101,13 @@ import { useRouter } from 'vue-router'
 import {
   deleteCreativeAsset, getCreativeJob, listCreativeAssets, listCreativeProjects, updateCreativeAsset
 } from '../../api'
-import { useAssetUrls, downloadBlob, formatBytes, formatTime, starBurst } from './shared'
+import { useAssetUrls, useVideoUrls, downloadBlob, formatBytes, formatTime, starBurst } from './shared'
 import AssetPreview from './AssetPreview.vue'
 import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
 
 const router = useRouter()
 const { urls, thumbs, urlFor, thumbFor } = useAssetUrls()
+const { videoUrls, videoUrlFor } = useVideoUrls()
 
 const assets = ref([])
 const projects = ref([])
@@ -142,7 +147,10 @@ async function load(cursor = null, append = false) {
     })
     assets.value = append ? [...assets.value, ...(data.items || [])] : (data.items || [])
     nextCursor.value = data.nextCursor
-    assets.value.forEach(asset => thumbFor(asset.id))
+    assets.value.forEach(asset => {
+      if (asset.mediaType === 'VIDEO') videoUrlFor(asset.id)
+      else thumbFor(asset.id)
+    })
   } catch (exception) {
     error.value = exception.response?.data?.error || `素材加载失败：${exception.message || exception}`
   } finally {
@@ -170,10 +178,15 @@ async function toggleStar(asset, event) {
 async function openPreview(asset) {
   previewAsset.value = asset
   previewSrc.value = ''
-  previewSrc.value = await urlFor(asset.id)
+  // 视频走签名播放 URL（支持 Range 拖动），图片仍走鉴权 blob
+  previewSrc.value = asset.mediaType === 'VIDEO' ? await videoUrlFor(asset.id) : await urlFor(asset.id)
 }
 
 function downloadAsset(asset) {
+  if (asset.mediaType === 'VIDEO') {
+    videoUrlFor(asset.id).then(url => downloadBlob(url, `${asset.displayName || asset.id}.mp4`))
+    return
+  }
   urlFor(asset.id).then(url => downloadBlob(url, `${asset.displayName || asset.id}.png`))
 }
 
@@ -231,6 +244,7 @@ onMounted(async () => {
 }
 .asset-thumb { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .asset-thumb img { display: block; width: 100%; }
+.asset-thumb video { display: block; width: 100%; background: #000; aspect-ratio: 16 / 9; object-fit: cover; }
 .asset-origin { font-style: normal; font-size: 10.5px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
 .asset-origin.gen { background: var(--wb-brand-soft); color: var(--wb-brand); }
 .asset-origin.up { background: var(--wb-fill); color: var(--wb-text-2); }

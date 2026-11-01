@@ -27,14 +27,29 @@ public class SafeMediaDownloader {
     }
 
     public byte[] download(String url) {
+        return download(url, null);
+    }
+
+    /**
+     * 带鉴权下载（视频供应商内容端点如 /v1/videos/{id}/content 需要 Bearer）。
+     * 令牌仅用于本次请求头，不写入日志或重定向目标校验。
+     */
+    public byte[] download(String url, String bearerToken) {
         URI current = URI.create(url);
+        String originalHost = current.getHost();
         for (int hop = 0; hop < 4; hop++) {
             validate(current);
-            HttpRequest request = HttpRequest.newBuilder(current)
+            HttpRequest.Builder builder = HttpRequest.newBuilder(current)
                     .timeout(Duration.ofSeconds(30))
                     .header("User-Agent", "Aster-Creative/0.1")
-                    .GET()
-                    .build();
+                    .GET();
+            // 令牌不跟随跨域重定向：只对与初始 URL 同主机的请求附带 Authorization
+            boolean sameHost = bearerToken != null && !bearerToken.isBlank()
+                    && originalHost != null && originalHost.equals(current.getHost());
+            if (sameHost) {
+                builder.header("Authorization", "Bearer " + bearerToken);
+            }
+            HttpRequest request = builder.build();
             HttpResponse<java.io.InputStream> response;
             try {
                 // 流式读取：超限立即中断，避免把超大响应整体读入内存

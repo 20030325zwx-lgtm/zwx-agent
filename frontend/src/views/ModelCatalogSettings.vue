@@ -236,7 +236,8 @@ const capabilityOptions = [
   { value: 'tools', label: '工具调用' },
   { value: 'vision', label: '视觉' },
   { value: 'embedding', label: 'Embedding' },
-  { value: 'image_generation', label: '图片生成' }
+  { value: 'image_generation', label: '图片生成' },
+  { value: 'video_generation', label: '视频生成' }
 ]
 const PURPOSES = [
   { key: 'chat', label: '对话模型', desc: '所有文本场景的通用默认', fallback: false },
@@ -244,7 +245,8 @@ const PURPOSES = [
   { key: 'agent', label: '智能体对话', desc: '工作台对话的默认模型', fallback: true },
   { key: 'optimize', label: '提示词优化', desc: '创作台提示词改写', fallback: true },
   { key: 'vision', label: '视觉模型', desc: '图片理解（本地素材）', fallback: false },
-  { key: 'image_generation', label: '图片生成', desc: '创作生成与工作流生图', fallback: false }
+  { key: 'image_generation', label: '图片生成', desc: '创作生成与工作流生图', fallback: false },
+  { key: 'video_generation', label: '视频生成', desc: '创作台与工作流视频生成（文生/图生视频）；不回退其他模型', fallback: false }
 ]
 
 const purposeRows = computed(() => PURPOSES.map(({ key, label, desc, fallback }) => ({
@@ -266,7 +268,7 @@ function protocolLabel(protocol) {
   return protocol === 'dashscope' ? 'DashScope' : 'OpenAI 兼容'
 }
 function capLabel(cap) {
-  return { tools: '工具', vision: '视觉', embedding: '向量', image_generation: '生图' }[cap] || cap
+  return { tools: '工具', vision: '视觉', embedding: '向量', image_generation: '生图', video_generation: '视频' }[cap] || cap
 }
 function testDotClass(provider) {
   if (provider.lastTestOk === true) return 'ok'

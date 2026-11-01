@@ -1,8 +1,8 @@
 package com.zwx.zwxagent.creative.domain;
 
 /**
- * 创作项目类型。IMAGE（图片生成）与 NOVEL（章节创作，V13）已有执行链路；
- * VIDEO/COMIC 复用同一项目容器，在对应能力落地前不允许提交生成任务。
+ * 创作项目类型。IMAGE（图片生成）、NOVEL（章节创作，V13）与 VIDEO（视频生成，V1-A 2026-11-01）
+ * 已有执行链路；COMIC 复用同一项目容器，在对应能力落地前不允许提交生成任务。
  */
 public enum CreativeKind {
     IMAGE,
@@ -21,6 +21,6 @@ public enum CreativeKind {
 
     /** 当前是否已有可执行的生成链路。 */
     public boolean enabled() {
-        return this == IMAGE || this == NOVEL;
+        return this == IMAGE || this == NOVEL || this == VIDEO;
     }
 }

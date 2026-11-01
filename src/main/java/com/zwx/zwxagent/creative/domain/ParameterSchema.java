@@ -11,6 +11,8 @@ public record ParameterSchema(String operation, List<ParameterSpec> parameters) 
     }
 
     public static final String IMAGE_GENERATION = "text_to_image";
+    public static final String TEXT_TO_VIDEO = "text_to_video";
+    public static final String IMAGE_TO_VIDEO = "image_to_video";
 
     /**
      * 文生图 P1 参数 schema：提示词是 effectivePrompt（独立校验），这里只声明可选参数
@@ -30,6 +32,17 @@ public record ParameterSchema(String operation, List<ParameterSpec> parameters) 
      */
     public static ParameterSchema openAiImages() {
         return new ParameterSchema(IMAGE_GENERATION, List.of(
+                new ParameterSpec("size", "string", false, List.of(), 2L, 32L)));
+    }
+
+    /**
+     * OpenAI Sora 兼容视频接口（New API 中转站）参数 schema：异步 POST /v1/videos，
+     * seconds 为秒数（上游按字符串处理，可选），size 为自由 WxH（中转站代理模型各有
+     * 时长/画幅范围，闭集会误拒，能力以实测为准——档案初始 UNVERIFIED）。
+     */
+    public static ParameterSchema openAiVideo() {
+        return new ParameterSchema(TEXT_TO_VIDEO, List.of(
+                new ParameterSpec("seconds", "string", false, List.of(), 1L, 8L),
                 new ParameterSpec("size", "string", false, List.of(), 2L, 32L)));
     }
 

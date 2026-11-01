@@ -1,5 +1,6 @@
 package com.zwx.zwxagent.creative.story;
 
+import com.zwx.zwxagent.creative.repository.VideoBatchRepository;
 import com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository;
 import com.zwx.zwxagent.creative.repository.VideoStoryContentRepository;
 import org.slf4j.Logger;
@@ -23,13 +24,16 @@ public class ShotCandidateResumeScheduler {
 
     private final VideoShotCandidateRepository candidateRepository;
     private final VideoStoryContentRepository contentRepository;
+    private final VideoBatchRepository batchRepository;
     private final boolean enabled;
 
     public ShotCandidateResumeScheduler(VideoShotCandidateRepository candidateRepository,
                                         VideoStoryContentRepository contentRepository,
+                                        VideoBatchRepository batchRepository,
                                         @Value("${app.story.candidate-resume.enabled:true}") boolean enabled) {
         this.candidateRepository = candidateRepository;
         this.contentRepository = contentRepository;
+        this.batchRepository = batchRepository;
         this.enabled = enabled;
     }
 
@@ -58,17 +62,32 @@ public class ShotCandidateResumeScheduler {
                     // 任务成功但没有可入库产物：如实标失败（同媒体节点语义）
                     candidateRepository.markFailed(row.id());
                     contentRepository.transitionShotStatus(row.shotId(), "GENERATING", "READY");
+                    finalizeBatchItem(row.id(), false);
                     return;
                 }
                 if (candidateRepository.attachAsset(row.id(), assetId.get())) {
                     contentRepository.transitionShotStatus(row.shotId(), "GENERATING", "PENDING_SELECTION");
+                    finalizeBatchItem(row.id(), true);
                 }
             }
             case "FAILED", "CANCELLED" -> {
                 candidateRepository.markFailed(row.id());
                 contentRepository.transitionShotStatus(row.shotId(), "GENERATING", "READY");
+                finalizeBatchItem(row.id(), false);
             }
             default -> { /* 不可能到达：扫描 SQL 已过滤终态 */ }
+        }
+    }
+
+    /** P3 联动：候选终态同步批次子项，并尝试收敛批次（无待提交/在途即完成）。 */
+    private void finalizeBatchItem(UUID candidateId, boolean success) {
+        try {
+            if (batchRepository.finalizeItem(candidateId, success)) {
+                batchRepository.batchIdOfCandidate(candidateId)
+                        .ifPresent(batchRepository::finalizeBatchIfSettled);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("批次子项终态化失败：candidate={}", candidateId, exception);
         }
     }
 }

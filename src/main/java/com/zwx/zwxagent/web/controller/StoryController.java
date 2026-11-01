@@ -4,8 +4,10 @@ import com.zwx.zwxagent.creative.domain.VideoCharacterRecord;
 import com.zwx.zwxagent.creative.domain.VideoContinuityNoteRecord;
 import com.zwx.zwxagent.creative.domain.VideoEpisodeRecord;
 import com.zwx.zwxagent.creative.domain.VideoLocationRecord;
+import com.zwx.zwxagent.creative.domain.VideoBatchRecord;
 import com.zwx.zwxagent.creative.domain.VideoSceneRecord;
 import com.zwx.zwxagent.creative.domain.VideoShotRecord;
+import com.zwx.zwxagent.creative.story.BatchProductionService;
 import com.zwx.zwxagent.creative.story.ShotProductionService;
 import com.zwx.zwxagent.creative.story.StoryContentService;
 import com.zwx.zwxagent.platform.security.CurrentActor;
@@ -33,10 +35,13 @@ public class StoryController {
 
     private final StoryContentService contentService;
     private final ShotProductionService productionService;
+    private final BatchProductionService batchProductionService;
 
-    public StoryController(StoryContentService contentService, ShotProductionService productionService) {
+    public StoryController(StoryContentService contentService, ShotProductionService productionService,
+                           BatchProductionService batchProductionService) {
         this.contentService = contentService;
         this.productionService = productionService;
+        this.batchProductionService = batchProductionService;
     }
 
     // ---------------------------------------------------------------- 工作区
@@ -194,6 +199,38 @@ public class StoryController {
                                                @PathVariable UUID shotId, @PathVariable UUID candidateId) {
         productionService.deleteCandidate(actor, projectId, shotId, candidateId);
         return Map.of("ok", true);
+    }
+
+    // ---------------------------------------------------------------- 批次生产（P3）
+
+    @PostMapping("/batches")
+    public VideoBatchRecord createBatch(CurrentActor actor, @PathVariable UUID projectId,
+                                        @RequestBody BatchProductionService.CreateBatchRequest body) {
+        return batchProductionService.createBatch(actor, projectId,
+                body == null ? new BatchProductionService.CreateBatchRequest(List.of(), "") : body);
+    }
+
+    @GetMapping("/batches")
+    public List<VideoBatchRecord> batches(CurrentActor actor, @PathVariable UUID projectId) {
+        return batchProductionService.list(actor, projectId);
+    }
+
+    @GetMapping("/batches/{batchId}")
+    public BatchProductionService.BatchView batch(CurrentActor actor, @PathVariable UUID projectId,
+                                                  @PathVariable UUID batchId) {
+        return batchProductionService.view(actor, projectId, batchId);
+    }
+
+    @PostMapping("/batches/{batchId}/stop")
+    public VideoBatchRecord stopBatch(CurrentActor actor, @PathVariable UUID projectId,
+                                      @PathVariable UUID batchId) {
+        return batchProductionService.stop(actor, projectId, batchId);
+    }
+
+    @PostMapping("/batches/{batchId}/retry-failed")
+    public VideoBatchRecord retryBatch(CurrentActor actor, @PathVariable UUID projectId,
+                                       @PathVariable UUID batchId) {
+        return batchProductionService.retryFailed(actor, projectId, batchId);
     }
 
     // ---------------------------------------------------------------- 角色 / 地点 / 连续性

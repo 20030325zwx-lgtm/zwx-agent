@@ -1,5 +1,7 @@
 # 设计文档
 
+- [视频创作完善：项目素材、剧集剧情、任务与提示词统一管理（调研方案）](./2026-11-01-video-production-management-research.md)
+
 - [AI 创作模块：业务实施细则与执行台账](./2026-10-29-ai-creative-implementation.md)
 - [AI 创作模块：首个图片模型契约（C00）](./2026-10-29-ai-creative-model-contract.md)
 

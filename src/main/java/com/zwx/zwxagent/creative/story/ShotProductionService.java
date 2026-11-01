@@ -75,24 +75,38 @@ public class ShotProductionService {
         if (!contentRepository.updateShotStatus(shotId, shot.version(), ShotStatus.GENERATING.name())) {
             throw new CreativeConflictException("镜头状态已被其他操作改变，请刷新后重试");
         }
-        var candidate = new VideoShotCandidateRecord(UUID.randomUUID(), projectId, actor.tenantId(),
-                actor.userId(), shotId, null, null, "GENERATED", prompt,
-                CandidateStatus.GENERATING.name(), null, null);
-        candidateRepository.insert(candidate);
         try {
-            var created = mediaJobService.create(actor, "shot-" + shotId + "-" + candidate.id(), projectId,
-                    new MediaJobService.CreateJobRequest(projectId, "text_to_video", null,
-                            prompt, prompt, Map.of("seconds", String.valueOf(seconds)),
-                            List.of(), null, null, false));
-            candidateRepository.attachJob(candidate.id(), created.jobId());
+            return toView(submitGeneration(actor, projectId, shot, seconds));
         } catch (RuntimeException exception) {
             // 受理失败（未配置模型/参数拒绝等）：回滚占位并如实清理候选，不留孤儿
-            candidateRepository.delete(candidate.id());
             contentRepository.transitionShotStatus(shotId, ShotStatus.GENERATING.name(),
                     ShotStatus.READY.name());
             throw exception;
         }
-        return toView(candidateRepository.findById(actor.tenantId(), actor.userId(), candidate.id()).orElseThrow());
+    }
+
+    /**
+     * 受理内核（P3 批次复用）：候选预建 + MediaJob 创建 + job 回填。
+     * 调用方负责镜头状态占位与失败回滚；返回落库后的候选记录。
+     */
+    public VideoShotCandidateRecord submitGeneration(CurrentActor actor, UUID projectId,
+                                                     VideoShotRecord shot, int seconds) {
+        String prompt = shot.promptText() == null ? "" : shot.promptText().trim();
+        var candidate = new VideoShotCandidateRecord(UUID.randomUUID(), projectId, actor.tenantId(),
+                actor.userId(), shot.id(), null, null, "GENERATED", prompt,
+                CandidateStatus.GENERATING.name(), null, null);
+        candidateRepository.insert(candidate);
+        try {
+            var created = mediaJobService.create(actor, "shot-" + shot.id() + "-" + candidate.id(), projectId,
+                    new MediaJobService.CreateJobRequest(projectId, "text_to_video", null,
+                            prompt, prompt, Map.of("seconds", String.valueOf(Math.max(1, seconds))),
+                            List.of(), null, null, false));
+            candidateRepository.attachJob(candidate.id(), created.jobId());
+        } catch (RuntimeException exception) {
+            candidateRepository.delete(candidate.id());
+            throw exception;
+        }
+        return candidateRepository.findById(actor.tenantId(), actor.userId(), candidate.id()).orElseThrow();
     }
 
     /** 上传已有视频作为候选（显式操作，不生成、不计费）。 */

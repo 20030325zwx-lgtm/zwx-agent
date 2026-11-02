@@ -76,7 +76,13 @@ public class CreativeSkillService {
     void seed() {
         try {
             for (CreativeSkillContent.Seed seed : CreativeSkillContent.SEEDS) {
-                if (repository.skillSlugExists(seed.slug())) continue;
+                if (repository.skillSlugExists(seed.slug())) {
+                    // 系统技能元数据随种子演进同步（能力/分类）；正文升版仍走显式版本流程
+                    repository.syncSystemSkillMeta(seed.slug(), seed.name(), seed.summary(),
+                            seed.category(), seed.stage(), seed.inputTypes(), seed.outputTypes(),
+                            seed.requiredCapabilities());
+                    continue;
+                }
                 UUID skillId = UUID.randomUUID();
                 repository.insertSkill(CreativeSkillContent.skillRecord(seed, skillId));
                 if (!repository.versionExists(skillId, 1)) {

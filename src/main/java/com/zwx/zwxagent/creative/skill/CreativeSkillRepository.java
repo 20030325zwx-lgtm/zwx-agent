@@ -128,6 +128,18 @@ public class CreativeSkillRepository {
         return count != null && count > 0;
     }
 
+    /** 系统技能种子同步：仅更新 visibility=SYSTEM 的行，用户私有导入永不被启动覆盖。 */
+    public boolean syncSystemSkillMeta(String slug, String name, String summary, String category,
+                                       String stage, String inputTypes, String outputTypes,
+                                       List<String> requiredCapabilities) {
+        return jdbcTemplate.update("""
+                        UPDATE creative_skill SET name = ?, summary = ?, category = ?, stage = ?,
+                            input_types = ?, output_types = ?, required_capabilities = ?::jsonb, updated_at = now()
+                        WHERE slug = ? AND visibility = 'SYSTEM'
+                        """, name, summary, category, stage, inputTypes, outputTypes,
+                CreativeJson.toJson(requiredCapabilities), slug) > 0;
+    }
+
     public Optional<CreativeSkillVersionRecord> findVersion(UUID skillId, int version) {
         return jdbcTemplate.query(
                 "SELECT * FROM creative_skill_version WHERE skill_id = ? AND version = ?",

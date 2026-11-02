@@ -88,9 +88,9 @@ final class CreativeSkillContent {
                     "COMMERCE", "GENERATE", "TEXT+IMAGE", "VIDEO",
                     List.of("CHAT", "IMAGE_TO_VIDEO"), PRODUCT_SHOWCASE),
             new Seed("script-to-storyboard", "剧本转分镜",
-                    "把剧本片段拆解为结构化镜头表与逐镜提示词，先确认再逐镜生成。",
+                    "把剧本片段拆解为结构化镜头表与逐镜提示词，确认后可逐镜生成（每镜独立任务）。",
                     "DIRECTING", "STORYBOARD", "TEXT", "TEXT",
-                    List.of("CHAT"), SCRIPT_TO_STORYBOARD));
+                    List.of("CHAT", "TEXT_TO_VIDEO"), SCRIPT_TO_STORYBOARD));
 
     static String hashOf(String body) {
         try {
@@ -105,7 +105,7 @@ final class CreativeSkillContent {
     static CreativeSkillRecord skillRecord(Seed seed, UUID id) {
         return new CreativeSkillRecord(id, seed.slug(), seed.name(), seed.summary(), seed.category(),
                 seed.stage(), seed.inputTypes(), seed.outputTypes(), seed.requiredCapabilities(),
-                "SYSTEM", "PUBLISHED", 1);
+                "SYSTEM", null, "PUBLISHED", 1);
     }
 
     static CreativeSkillVersionRecord versionRecord(Seed seed, UUID skillId, UUID versionId, String body) {

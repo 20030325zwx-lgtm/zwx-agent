@@ -26,7 +26,7 @@
       </div>
 
       <p v-if="!jobs.length && !jobsStore.loading.value" class="cr-empty">
-        还没有生成记录。在右侧输入想法，点击「{{ isVideoProject ? '生成视频' : '生成图片' }}」。
+        还没有生成记录。在下方输入想法，点击「{{ isVideoProject ? '生成视频' : '生成图片' }}」；结果会在这里出现。
       </p>
 
       <article v-for="job in jobs" :key="job.jobId" class="job-card">
@@ -38,7 +38,9 @@
         <p v-if="job.prompt" class="job-card-prompt">「{{ job.prompt }}」</p>
 
         <div v-if="jobOutputs(job).length" class="job-images">
-          <figure v-for="output in jobOutputs(job)" :key="output.assetId" class="job-image">
+          <motion.figure v-for="output in jobOutputs(job)" :key="output.assetId" class="job-image"
+                         :initial="motionInitial" :animate="{ opacity: 1, y: 0 }"
+                         :transition="{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }">
             <video v-if="isVideoJob(job) && videoUrlOf(output.assetId)"
                    :src="videoUrlOf(output.assetId)" controls preload="metadata"></video>
             <img v-else-if="!isVideoJob(job) && urls[output.assetId]"
@@ -51,7 +53,7 @@
               <button v-else-if="!isVideoJob(job) && urls[output.assetId]" type="button" class="cr-ghost"
                       @click="downloadBlob(urls[output.assetId], downloadName(job, output))">下载</button>
             </figcaption>
-          </figure>
+          </motion.figure>
         </div>
 
         <p v-if="job.status === 'INGEST_FAILED'" class="cr-error job-card-error">
@@ -167,7 +169,12 @@
           <p v-for="warning in planWarnings" :key="warning" class="cr-field-help skill-warning">注意：{{ warning }}</p>
           <p v-for="item in planMissing" :key="item" class="cr-field-help skill-warning">待补：{{ item }}</p>
           <div class="suggestion-actions">
-            <button v-if="skillRun.mediaOperation" type="button" class="cr-primary"
+            <button v-if="hasShots" type="button" class="cr-primary"
+                    :disabled="skillConfirming" @click="confirmShots"
+                    title="每个镜头独立任务，失败可单独重试">
+              <Spinner v-if="skillConfirming" /> {{ skillConfirming ? '提交中…' : `确认并逐镜生成（${shotCount} 镜）` }}
+            </button>
+            <button v-else-if="skillRun.mediaOperation" type="button" class="cr-primary"
                     :disabled="skillConfirming || !planPrompt.trim()" @click="confirmPlan">
               <Spinner v-if="skillConfirming" /> {{ skillConfirming ? '提交中…' : '确认并生成' }}
             </button>
@@ -185,9 +192,23 @@
           </button>
         </div>
 
-        <p v-else-if="skillRun && skillRun.planStatus === 'CONFIRMED'" class="cr-field-help">
-          方案已确认{{ skillRun.job ? `，任务${statusMeta(skillRun.job.status).label}` : '' }}；结果见左侧生成记录。
-        </p>
+        <div v-else-if="skillRun && skillRun.planStatus === 'CONFIRMED'">
+          <p class="cr-field-help">
+            方案已确认{{ skillRun.job ? `，任务${statusMeta(skillRun.job.status).label}` : '' }}；结果见生成记录。
+          </p>
+          <template v-if="shotJobItems.length">
+            <ul class="shot-jobs">
+              <li v-for="item in shotJobItems" :key="item.jobId">
+                <span class="cr-status" :class="statusMeta(item.status).tone">{{ statusMeta(item.status).label }}</span>
+                <span class="shot-job-title">{{ item.shotTitle }}</span>
+                <button type="button" class="inline-link" @click="openJob(item.jobId)">详情</button>
+              </li>
+            </ul>
+            <button type="button" class="cr-ghost" :disabled="shotRefreshing" @click="refreshRun">
+              <Spinner v-if="shotRefreshing" /> 刷新镜头状态
+            </button>
+          </template>
+        </div>
       </div>
 
       <div class="panel-block">
@@ -224,24 +245,6 @@
         </template>
       </div>
 
-      <div class="panel-block">
-        <div class="model-line">
-          <span class="cr-field-help">{{ isVideoProject ? '视频模型' : '图片模型' }}</span>
-          <span class="model-name">{{ activeBindingName }}</span>
-        </div>
-        <div class="save-line">
-          <span>{{ saveStateText }}</span>
-          <button v-if="conflict" type="button" class="inline-link" @click="resolveConflict">另存为新草稿</button>
-        </div>
-        <p v-if="submitError" class="cr-error">{{ submitError }}</p>
-        <button type="button" class="cr-primary generate-btn"
-                :disabled="!canGenerate || generating" @click="generate">
-          <Spinner v-if="generating" />
-          <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : (isVideoProject ? '生成视频' : '生成图片') }}
-        </button>
-        <p v-if="project && project.status !== 'ACTIVE'" class="cr-field-help">项目已归档，不能发起新任务。</p>
-      </div>
-
       <div class="panel-block wf-launch-block">
         <div class="model-line">
           <span class="cr-field-help">多步创作（如淘宝服饰海报：试穿 + 文案 + 排版）</span>
@@ -251,6 +254,40 @@
         </button>
       </div>
     </aside>
+
+    <!-- 底部输入台（redesign §5.5）：稳定常驻，结果是主角；提交语义不变 -->
+    <footer class="st-composer" aria-label="创作输入台">
+      <div class="composer-main">
+        <label class="composer-idea">
+          <span class="cr-field-help">想法</span>
+          <textarea v-model="idea" class="cr-textarea composer-textarea" rows="2" maxlength="8000"
+                    placeholder="描述主体、场景、风格…（可先在右侧优化）"
+                    @input="markDirty" />
+        </label>
+        <div v-if="isVideoProject && videoOperation === 'image_to_video' && videoRefAssetId"
+             class="composer-ref" :title="`首帧素材 ${videoRefAssetId.slice(0, 8)}…`">
+          <ImageIcon :size="14" />
+          <span>首帧已选</span>
+        </div>
+        <div class="composer-side">
+          <div class="model-line">
+            <span class="cr-field-help">{{ isVideoProject ? '视频模型' : '图片模型' }}</span>
+            <span class="model-name">{{ activeBindingName }}</span>
+          </div>
+          <div class="save-line">
+            <span>{{ saveStateText }}</span>
+            <button v-if="conflict" type="button" class="inline-link" @click="resolveConflict">另存为新草稿</button>
+          </div>
+          <p v-if="submitError" class="cr-error">{{ submitError }}</p>
+          <button type="button" class="cr-primary generate-btn"
+                  :disabled="!canGenerate || generating" @click="generate">
+            <Spinner v-if="generating" />
+            <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : (isVideoProject ? '生成视频' : '生成图片') }}
+          </button>
+          <p v-if="project && project.status !== 'ACTIVE'" class="cr-field-help">项目已归档，不能发起新任务。</p>
+        </div>
+      </div>
+    </footer>
 
     <!-- 用工作流创作：产物归入本项目，发起后跳到工作流分区 -->
     <div v-if="wfCreateOpen" class="cr-dialog-backdrop" @click.self="wfCreateOpen = false">
@@ -297,11 +334,12 @@
 
 <script setup>
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { AlertCircle, ImagePlus, Sparkles, Workflow } from 'lucide-vue-next'
+import { AlertCircle, Image as ImageIcon, ImagePlus, Sparkles, Workflow } from 'lucide-vue-next'
+import { motion, useReducedMotion } from 'motion-v'
 import {
-  confirmCreativeSkillRun, createCreativeDraft, createCreativeJob, createCreativeSkillRun,
-  getWorkflowDefinition, listCreativeDrafts, listCreativeSkills, optimizeCreativePrompt,
-  retryCreativeSkillPlan, startWorkflow, updateCreativeDraft
+  confirmCreativeSkillRun, confirmCreativeSkillShots, createCreativeDraft, createCreativeJob,
+  createCreativeSkillRun, getCreativeSkillRun, getWorkflowDefinition, listCreativeDrafts,
+  listCreativeSkills, optimizeCreativePrompt, retryCreativeSkillPlan, startWorkflow, updateCreativeDraft
 } from '../../../api'
 import { formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta } from '../shared'
 import {
@@ -317,6 +355,10 @@ import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 
 const ctx = inject(PROJECT_CTX)
 const { projectId, project, imageBinding, videoBinding, imageProtocol, jobsStore, showToast, openJob, urls, videoUrls, router } = ctx
+
+// 结果就绪交叉淡入（redesign §7.2，180ms）；减弱动态效果时直接出现
+const reduceMotion = useReducedMotion()
+const motionInitial = computed(() => (reduceMotion.value ? false : { opacity: 0, y: 8 }))
 
 const { workflows, ensureLoaded } = useWorkflowList()
 
@@ -366,6 +408,37 @@ const selectedSkill = computed(() => skills.value.find(skill => skill.slug === s
 const planSummary = computed(() => skillRun.value?.plan?.summary || '')
 const planWarnings = computed(() => skillRun.value?.plan?.warnings || [])
 const planMissing = computed(() => skillRun.value?.plan?.missing || [])
+// 多镜头方案（P1 MVP）：shots ≥2 时走逐镜生成，每镜独立任务
+const hasShots = computed(() => (skillRun.value?.plan?.shots || []).length >= 2
+  && skillRun.value?.planStatus === 'PENDING_CONFIRM')
+const shotCount = computed(() => (skillRun.value?.plan?.shots || []).length)
+const shotJobItems = computed(() => skillRun.value?.shotJobs?.items || [])
+const shotRefreshing = ref(false)
+
+async function confirmShots() {
+  if (!skillRun.value || skillConfirming.value) return
+  skillConfirming.value = true
+  skillError.value = ''
+  try {
+    skillRun.value = await confirmCreativeSkillShots(skillRun.value.runId)
+    showToast('逐镜任务已受理，每镜独立执行', 'success')
+    await jobsStore.load()
+  } catch (exception) {
+    skillError.value = exception.response?.data?.error || '逐镜确认失败，请稍后重试'
+  } finally {
+    skillConfirming.value = false
+  }
+}
+
+async function refreshRun() {
+  if (!skillRun.value || shotRefreshing.value) return
+  shotRefreshing.value = true
+  try {
+    skillRun.value = await getCreativeSkillRun(skillRun.value.runId)
+  } catch (exception) { /* 保留当前状态 */ } finally {
+    shotRefreshing.value = false
+  }
+}
 
 async function loadSkills() {
   try {
@@ -388,6 +461,12 @@ function consumeHandoff() {
   } catch (exception) { /* 忽略 */ }
   const skill = routeSkill || handoff?.skill || ''
   if (skill) skillSlug.value = skill
+  // 首帧素材直通（redesign §6 从素材继续创作）：来自素材库「用作首帧」
+  if (handoff?.firstFrame) {
+    videoOperation.value = 'image_to_video'
+    videoRefAssetId.value = handoff.firstFrame
+    markDirty()
+  }
   if (handoff?.prompt && !idea.value.trim()) {
     idea.value = handoff.prompt
     effective.value = handoff.prompt
@@ -798,14 +877,17 @@ onBeforeUnmount(() => {
 <style scoped src="../creative.css"></style>
 
 <style scoped>
+/* 沉浸式创作台（redesign §5.5）：中央结果舞台 + 底部输入台 + 按需参数侧栏 */
 .st-body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .st-results {
+  grid-area: 1 / 1 / 2 / 2;
   min-width: 0;
   overflow-y: auto;
   padding: var(--wb-space-4) var(--wb-space-5);
@@ -813,6 +895,57 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--wb-space-3);
 }
+
+/* 底部输入台：稳定常驻；提示词与提交动作始终可见 */
+.st-composer {
+  grid-area: 2 / 1 / 3 / 2;
+  border-top: 1px solid var(--wb-border);
+  background: var(--cr-surface, var(--wb-surface));
+  padding: var(--wb-space-3) var(--wb-space-5);
+}
+
+.composer-main {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--wb-space-3);
+}
+
+.composer-idea {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-textarea {
+  min-height: 44px;
+  max-height: 120px;
+  resize: none;
+}
+
+.composer-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 999px;
+  background: var(--wb-brand-soft);
+  color: var(--wb-brand);
+  font-size: 12px;
+}
+
+.composer-side {
+  flex: 0 0 262px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer-side .model-line span:first-child { white-space: nowrap; }
+.composer-side .generate-btn { justify-content: center; padding: 9px 14px; }
 
 .job-card {
   border: 1px solid var(--wb-border);
@@ -840,17 +973,6 @@ onBeforeUnmount(() => {
 .job-card-error { margin: 0; }
 .job-card-actions { display: flex; flex-wrap: wrap; gap: var(--wb-space-2); align-items: center; }
 
-.job-images { display: flex; flex-wrap: wrap; gap: 10px; }
-.job-image {
-  margin: 0;
-  width: min(320px, 100%);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
-  overflow: hidden;
-  background: var(--wb-fill);
-}
-.job-image img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: contain; }
-.job-image:has(video) { width: min(480px, 100%); }
 .job-image video {
   display: block;
   width: 100%;
@@ -877,6 +999,7 @@ onBeforeUnmount(() => {
 }
 
 .st-panel {
+  grid-area: 1 / 2 / 3 / 3;
   border-left: 1px solid var(--wb-border);
   background: var(--wb-surface);
   overflow-y: auto;
@@ -918,6 +1041,18 @@ onBeforeUnmount(() => {
 .skill-plan-failed { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .skill-plan-failed .cr-error { margin: 0; }
 
+.shot-jobs {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.shot-jobs li { display: flex; align-items: center; gap: 8px; }
+.shot-job-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-text-2); }
+
 .panel-switch { display: flex; align-items: center; gap: var(--wb-space-2); font-size: var(--wb-fs-compact); color: var(--wb-text-2); }
 .model-line, .save-line {
   display: flex;
@@ -931,13 +1066,30 @@ onBeforeUnmount(() => {
 .generate-btn { justify-content: center; padding: 10px 14px; }
 .wf-launch-block { border-top: 1px solid var(--wb-border); padding-top: var(--wb-space-3); }
 
+/* 轮次候选组（redesign §5.5）：结果就绪在原占位出现，深色媒体舞台 */
+.job-images { display: flex; flex-wrap: wrap; gap: 12px; }
+.job-image {
+  margin: 0;
+  width: min(360px, 100%);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--cr-radius-media, 14px);
+  overflow: hidden;
+  background: var(--cr-media-stage, var(--wb-media-bg));
+}
+.job-image img { display: block; width: 100%; height: auto; max-height: 480px; object-fit: contain; }
+.job-image:has(video) { width: min(560px, 100%); }
+
 @media (max-width: 1080px) {
   .st-body { grid-template-columns: minmax(0, 1fr) 320px; }
+  .composer-side { flex-basis: 200px; }
 }
 
 @media (max-width: 900px) {
   .st-body { display: flex; flex-direction: column; overflow-y: auto; }
   .st-results { overflow: visible; }
+  .st-composer { order: -1; border-top: 0; border-bottom: 1px solid var(--wb-border); position: sticky; top: 0; z-index: 5; }
+  .composer-main { flex-direction: column; align-items: stretch; }
+  .composer-side { flex-basis: auto; }
   .st-panel { border-left: none; border-top: 1px solid var(--wb-border); overflow: visible; }
 }
 </style>

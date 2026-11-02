@@ -68,9 +68,10 @@ public class CreativeAssetController {
                                                @RequestParam(defaultValue = "false") boolean starred,
                                                @RequestParam(required = false) String businessType,
                                                @RequestParam(defaultValue = "false") boolean trashed,
+                                               @RequestParam(required = false) String q,
                                                @RequestParam(required = false) String cursor,
                                                @RequestParam(required = false) Integer limit) {
-        return assetService.list(actor, projectId, mediaType, starred, origin, businessType, trashed, cursor, limit);
+        return assetService.list(actor, projectId, mediaType, starred, origin, businessType, trashed, q, cursor, limit);
     }
 
     @GetMapping("/{assetId}/thumbnail")

@@ -53,6 +53,13 @@
               </button>
             </div>
           </div>
+          <div v-if="firstFrameId" class="home-firstframe">
+            <ImagePlay :size="14" />
+            <span>已选首帧素材</span>
+            <button type="button" class="home-firstframe-clear" aria-label="移除首帧" @click="clearFirstFrame">
+              <X :size="12" />
+            </button>
+          </div>
           <p v-if="startError" class="cr-error">{{ startError }}</p>
         </section>
 
@@ -251,7 +258,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertCircle, History, Images, PenLine, Plus, Sparkles, Workflow } from 'lucide-vue-next'
+import { AlertCircle, History, ImagePlay, Images, PenLine, Plus, Sparkles, Workflow, X } from 'lucide-vue-next'
 import {
   createCreativeDraft, createCreativeProject, getCreativeHealth, getCreativeSummary, getWorkflowDefinition,
   listCreativeProjects, listCreativeSkills, listModelCatalog, listWorkflows, startWorkflow
@@ -272,6 +279,7 @@ const loadError = ref('')
 const idea = ref('')
 const composeKind = ref('IMAGE')
 const composeSkill = ref('')
+const firstFrameId = ref('')
 const skills = ref([])
 const starting = ref(false)
 const startError = ref('')
@@ -294,13 +302,14 @@ function restoreDraft() {
       composeKind.value = draft.kind
     }
     if (typeof draft.skill === 'string') composeSkill.value = draft.skill
+    if (typeof draft.firstFrame === 'string' && draft.firstFrame) firstFrameId.value = draft.firstFrame
   } catch (error) { /* 草稿损坏按空处理 */ }
 }
 
 function persistDraft() {
   try {
     localStorage.setItem(COMPOSER_KEY, JSON.stringify({
-      idea: idea.value, kind: composeKind.value, skill: composeSkill.value
+      idea: idea.value, kind: composeKind.value, skill: composeSkill.value, firstFrame: firstFrameId.value
     }))
   } catch (error) { /* 隐私模式忽略 */ }
 }
@@ -309,7 +318,7 @@ function clearDraft() {
   try { localStorage.removeItem(COMPOSER_KEY) } catch (error) { /* 忽略 */ }
 }
 
-// 技能库「使用」经 sessionStorage 交接（不把提示词放 URL）
+// 技能库/素材库「使用」「用作首帧」经 sessionStorage 交接（不把提示词放 URL）
 function readHandoff() {
   try {
     const raw = sessionStorage.getItem('aster.creative.handoff')
@@ -319,8 +328,18 @@ function readHandoff() {
     if (handoff.skill) composeSkill.value = handoff.skill
     if (typeof handoff.prompt === 'string' && handoff.prompt && !idea.value) idea.value = handoff.prompt
     if (handoff.kind) composeKind.value = handoff.kind
+    // 从素材库带过来的首帧（redesign §5.4 大预览主动作）
+    if (handoff.firstFrame) {
+      firstFrameId.value = handoff.firstFrame
+      composeKind.value = 'VIDEO'
+    }
     persistDraft()
   } catch (error) { /* 忽略 */ }
+}
+
+function clearFirstFrame() {
+  firstFrameId.value = ''
+  persistDraft()
 }
 
 function focusComposer() {
@@ -331,7 +350,7 @@ function goProject(project) {
   router.push(`/creative/projects/${project.id}`)
 }
 
-watch([idea, composeKind, composeSkill], persistDraft)
+watch([idea, composeKind, composeSkill, firstFrameId], persistDraft)
 const createOpen = ref(false)
 const creating = ref(false)
 const createError = ref('')
@@ -411,11 +430,14 @@ async function startFromComposer() {
       }).catch(() => null)
     }
     clearDraft()
-    if (skill) {
-      try { sessionStorage.setItem('aster.creative.handoff', JSON.stringify({
-        skill, prompt: composeKind.value === 'IMAGE' ? '' : text, kind: composeKind.value
-      })) } catch (error) { /* 忽略 */ }
-      router.push(`/creative/projects/${project.id}?tab=studio&skill=${encodeURIComponent(skill)}`)
+    const handoff = { kind: composeKind.value }
+    if (skill) handoff.skill = skill
+    if (composeKind.value !== 'IMAGE') handoff.prompt = text
+    if (firstFrameId.value) handoff.firstFrame = firstFrameId.value
+    if (skill || firstFrameId.value) {
+      try { sessionStorage.setItem('aster.creative.handoff', JSON.stringify(handoff)) } catch (error) { /* 忽略 */ }
+      const query = skill ? `?tab=studio&skill=${encodeURIComponent(skill)}` : '?tab=studio'
+      router.push(`/creative/projects/${project.id}${query}`)
       return
     }
     router.push(`/creative/projects/${project.id}`)
@@ -629,6 +651,32 @@ onMounted(load)
 /* 输入台内的可选技能 */
 .home-skill-slot { display: inline-flex; }
 .home-skill { width: 150px; }
+
+/* 首帧交接 chip：素材库「用作首帧」进入后的可见状态 */
+.home-firstframe {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 999px;
+  background: var(--wb-brand-soft);
+  color: var(--wb-brand);
+  font-size: 12px;
+  width: fit-content;
+}
+.home-firstframe-clear {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.home-firstframe-clear:hover { background: rgba(0, 0, 0, 0.08); }
 
 /* 四种起点（redesign §5.1）：写想法 / 素材 / 技能 / 最近创作 */
 .home-starts {

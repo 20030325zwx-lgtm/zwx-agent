@@ -9,6 +9,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,8 +38,8 @@ public class CreativeSkillRepository {
     public void insertSkill(CreativeSkillRecord skill) {
         jdbcTemplate.update("""
                         INSERT INTO creative_skill (id, slug, name, summary, category, stage, input_types,
-                            output_types, required_capabilities, visibility, lifecycle, latest_version)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                            output_types, required_capabilities, visibility, owner_user_id, lifecycle, latest_version)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
                         """,
                 ps -> {
                     ps.setObject(1, skill.id());
@@ -51,8 +52,9 @@ public class CreativeSkillRepository {
                     ps.setString(8, skill.outputTypes());
                     ps.setString(9, CreativeJson.toJson(skill.requiredCapabilities()));
                     ps.setString(10, skill.visibility());
-                    ps.setString(11, skill.lifecycle());
-                    ps.setInt(12, skill.latestVersion());
+                    ps.setString(11, skill.ownerUserId());
+                    ps.setString(12, skill.lifecycle());
+                    ps.setInt(13, skill.latestVersion());
                 });
     }
 
@@ -96,10 +98,34 @@ public class CreativeSkillRepository {
                 "SELECT * FROM creative_skill WHERE lifecycle = 'PUBLISHED' ORDER BY category, slug", SKILL_MAPPER);
     }
 
+    /** 目录可见范围：系统技能 + 本人私有导入（redesign/skill 设计 §8.5 默认私有）。 */
+    public List<CreativeSkillRecord> listVisibleFor(String userId) {
+        return jdbcTemplate.query("""
+                        SELECT * FROM creative_skill
+                        WHERE lifecycle = 'PUBLISHED'
+                          AND (visibility = 'SYSTEM' OR (visibility = 'PRIVATE' AND owner_user_id = ?))
+                        ORDER BY category, slug
+                        """, SKILL_MAPPER, userId);
+    }
+
     public Optional<CreativeSkillRecord> findPublishedBySlug(String slug) {
         return jdbcTemplate.query(
                 "SELECT * FROM creative_skill WHERE slug = ? AND lifecycle = 'PUBLISHED'",
                 SKILL_MAPPER, slug).stream().findFirst();
+    }
+
+    public Optional<CreativeSkillRecord> findVisibleBySlug(String slug, String userId) {
+        return jdbcTemplate.query("""
+                        SELECT * FROM creative_skill
+                        WHERE slug = ? AND lifecycle = 'PUBLISHED'
+                          AND (visibility = 'SYSTEM' OR (visibility = 'PRIVATE' AND owner_user_id = ?))
+                        """, SKILL_MAPPER, slug, userId).stream().findFirst();
+    }
+
+    public boolean slugTaken(String slug) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM creative_skill WHERE slug = ?", Integer.class, slug);
+        return count != null && count > 0;
     }
 
     public Optional<CreativeSkillVersionRecord> findVersion(UUID skillId, int version) {
@@ -158,6 +184,106 @@ public class CreativeSkillRepository {
                 CreativeSkillRunRecord.STATUS_PENDING_CONFIRM) > 0;
     }
 
+    /** 逐镜确认：多任务不绑单一 media_job_id，状态仍置 CONFIRMED（P1 MVP）。 */
+    public boolean markRunConfirmed(UUID runId, long expectedVersion) {
+        return jdbcTemplate.update("""
+                        UPDATE creative_skill_run SET plan_status = ?,
+                            version = version + 1, updated_at = now()
+                        WHERE id = ? AND version = ? AND plan_status = ?
+                        """, CreativeSkillRunRecord.STATUS_CONFIRMED, runId, expectedVersion,
+                CreativeSkillRunRecord.STATUS_PENDING_CONFIRM) > 0;
+    }
+
+    public void insertRunJob(UUID runId, UUID jobId, int shotIndex, String shotTitle) {
+        jdbcTemplate.update("""
+                        INSERT INTO creative_skill_run_job (id, run_id, job_id, shot_index, shot_title)
+                        VALUES (?, ?, ?, ?, ?)
+                        """, UUID.randomUUID(), runId, jobId, shotIndex, shotTitle == null ? "" : shotTitle);
+    }
+
+    public List<Map<String, Object>> listRunJobs(UUID runId) {
+        return jdbcTemplate.query("""
+                        SELECT job_id, shot_index, shot_title FROM creative_skill_run_job
+                        WHERE run_id = ? ORDER BY shot_index
+                        """, (rs, rowNum) -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("jobId", rs.getObject("job_id", UUID.class).toString());
+            row.put("shotIndex", rs.getInt("shot_index"));
+            row.put("shotTitle", rs.getString("shot_title"));
+            return row;
+        }, runId);
+    }
+
+    // ---------------------------------------------------------------- 导入记录（P0-C）
+
+    public void insertImport(UUID id, String tenantId, String userId, String sourceType, String sourceRef,
+                             String rawHash, Map<String, Object> parsed) {
+        jdbcTemplate.update("""
+                        INSERT INTO creative_skill_import (id, tenant_id, user_id, source_type, source_ref,
+                            raw_hash, parsed, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, 'PARSED')
+                        """,
+                ps -> {
+                    ps.setObject(1, id);
+                    ps.setString(2, tenantId);
+                    ps.setString(3, userId);
+                    ps.setString(4, sourceType);
+                    ps.setString(5, sourceRef == null ? "" : sourceRef);
+                    ps.setString(6, rawHash);
+                    ps.setString(7, CreativeJson.toJson(parsed));
+                });
+    }
+
+    public Optional<Map<String, Object>> findImportByIdForOwner(String tenantId, String userId, UUID id) {
+        return jdbcTemplate.query("""
+                        SELECT id, tenant_id, user_id, source_type, source_ref, raw_hash, parsed, status,
+                               skill_id, error, created_at
+                        FROM creative_skill_import WHERE id = ? AND tenant_id = ? AND user_id = ?
+                        """, (rs, rowNum) -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", rs.getObject("id", UUID.class).toString());
+            row.put("sourceType", rs.getString("source_type"));
+            row.put("sourceRef", rs.getString("source_ref"));
+            row.put("rawHash", rs.getString("raw_hash"));
+            row.put("parsed", CreativeJson.readMap(rs.getString("parsed")));
+            row.put("status", rs.getString("status"));
+            Object skillId = rs.getObject("skill_id", UUID.class);
+            row.put("skillId", skillId == null ? null : skillId.toString());
+            row.put("error", rs.getString("error"));
+            return row;
+        }, id, tenantId, userId).stream().findFirst();
+    }
+
+    /** 同用户同内容 hash 幂等：重复导入返回已有预检记录。 */
+    public Optional<Map<String, Object>> findImportByHashForOwner(String tenantId, String userId, String hash) {
+        return jdbcTemplate.query("""
+                        SELECT id, tenant_id, user_id, source_type, source_ref, raw_hash, parsed, status,
+                               skill_id, error, created_at
+                        FROM creative_skill_import
+                        WHERE tenant_id = ? AND user_id = ? AND raw_hash = ? AND status = 'PARSED'
+                        ORDER BY created_at DESC LIMIT 1
+                        """, (rs, rowNum) -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", rs.getObject("id", UUID.class).toString());
+            row.put("sourceType", rs.getString("source_type"));
+            row.put("sourceRef", rs.getString("source_ref"));
+            row.put("rawHash", rs.getString("raw_hash"));
+            row.put("parsed", CreativeJson.readMap(rs.getString("parsed")));
+            row.put("status", rs.getString("status"));
+            Object skillId = rs.getObject("skill_id", UUID.class);
+            row.put("skillId", skillId == null ? null : skillId.toString());
+            row.put("error", rs.getString("error"));
+            return row;
+        }, tenantId, userId, hash).stream().findFirst();
+    }
+
+    public boolean confirmImport(UUID id, String tenantId, String userId, UUID skillId) {
+        return jdbcTemplate.update("""
+                        UPDATE creative_skill_import SET status = 'CONFIRMED', skill_id = ?, updated_at = now()
+                        WHERE id = ? AND tenant_id = ? AND user_id = ? AND status = 'PARSED'
+                        """, skillId, id, tenantId, userId) > 0;
+    }
+
     // ---------------------------------------------------------------- 映射
 
     private static CreativeSkillRecord mapSkill(ResultSet rs, int rowNum) throws SQLException {
@@ -172,6 +298,7 @@ public class CreativeSkillRepository {
                 rs.getString("output_types"),
                 CreativeJson.readStringList(rs.getString("required_capabilities")),
                 rs.getString("visibility"),
+                rs.getString("owner_user_id"),
                 rs.getString("lifecycle"),
                 rs.getInt("latest_version"));
     }

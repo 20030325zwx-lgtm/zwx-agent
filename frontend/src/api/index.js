@@ -449,12 +449,14 @@ export const listCreativeJobEvents = (jobId, afterSeq = 0) =>
 // 素材列表：支持 projectId/mediaType/origin/starred/businessType/trashed
 export const listCreativeAssets = (params = {}) =>
   request.get('/ai/creative/assets', { params }).then(response => response.data)
-export const uploadCreativeAsset = (projectId, file) => {
+export const uploadCreativeAsset = (projectId, file, onProgress) => {
   const form = new FormData()
   form.append('projectId', projectId)
   form.append('file', file)
   return request.post('/ai/creative/assets/uploads', form, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    // 逐文件进度（redesign §5.3 多项上传）：onProgress 可选，百分比来自浏览器上传事件
+    onUploadProgress: onProgress
   }).then(response => response.data)
 }
 export const getCreativeAssetThumbnail = assetId =>
@@ -496,6 +498,12 @@ export const retryCreativeSkillPlan = runId =>
   request.post(`/ai/creative/skill-runs/${encodeURIComponent(runId)}/retry-plan`).then(r => r.data)
 export const confirmCreativeSkillRun = (runId, payload) =>
   request.post(`/ai/creative/skill-runs/${encodeURIComponent(runId)}/confirm`, payload).then(r => r.data)
+export const confirmCreativeSkillShots = runId =>
+  request.post(`/ai/creative/skill-runs/${encodeURIComponent(runId)}/confirm-shots`).then(r => r.data)
+export const previewCreativeSkillImport = payload =>
+  request.post('/ai/creative/skills/imports', payload).then(r => r.data)
+export const confirmCreativeSkillImport = (importId, payload) =>
+  request.post(`/ai/creative/skills/imports/${encodeURIComponent(importId)}/confirm`, payload).then(r => r.data)
 export const updateCreativeAsset = (assetId, payload) =>
   request.patch(`/ai/creative/assets/${encodeURIComponent(assetId)}`, payload).then(response => response.data)
 export const deleteCreativeAsset = assetId =>

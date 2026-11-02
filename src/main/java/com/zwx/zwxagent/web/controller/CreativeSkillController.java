@@ -35,6 +35,12 @@ public class CreativeSkillController {
     public record ConfirmRunBody(String effectivePrompt, Map<String, Object> parameters) {
     }
 
+    public record ImportPreviewBody(String markdown, String sourceRef) {
+    }
+
+    public record ImportConfirmBody(String slug) {
+    }
+
     @GetMapping("/skills")
     public Map<String, Object> list(CurrentActor actor,
                                     @RequestParam(required = false) String category,
@@ -89,5 +95,26 @@ public class CreativeSkillController {
         return skillService.confirm(actor, runId,
                 body == null ? null : body.effectivePrompt(),
                 body == null ? null : body.parameters());
+    }
+
+    /** 逐镜生成（P1 MVP）：方案 shots[] 每镜独立 MediaJob，失败镜头原位重试。 */
+    @PostMapping("/skill-runs/{runId}/confirm-shots")
+    public Map<String, Object> confirmShots(CurrentActor actor, @PathVariable UUID runId) {
+        return skillService.confirmShots(actor, runId);
+    }
+
+    /** 导入预检（P0-C MVP）：只解析产生预览草稿，不进入系统目录。 */
+    @PostMapping("/skills/imports")
+    public Map<String, Object> previewImport(CurrentActor actor, @RequestBody ImportPreviewBody body) {
+        if (body == null || body.markdown() == null || body.markdown().isBlank()) {
+            throw new IllegalArgumentException("请提供 Markdown 技能内容");
+        }
+        return skillService.previewImport(actor, body.markdown(), body.sourceRef());
+    }
+
+    @PostMapping("/skills/imports/{importId}/confirm")
+    public Map<String, Object> confirmImport(CurrentActor actor, @PathVariable UUID importId,
+                                             @RequestBody(required = false) ImportConfirmBody body) {
+        return skillService.confirmImport(actor, importId, body == null ? null : body.slug());
     }
 }

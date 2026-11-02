@@ -19,6 +19,7 @@ public record CreativeSkillRecord(
         String outputTypes,
         List<String> requiredCapabilities,
         String visibility,
+        String ownerUserId,
         String lifecycle,
         int latestVersion) {
 

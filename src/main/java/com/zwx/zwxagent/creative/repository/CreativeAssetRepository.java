@@ -81,7 +81,7 @@ public class CreativeAssetRepository {
     /** 列表：类型/收藏/项目/业务分类筛选 + 游标分页；trashed=true 时只返回回收站（已软删除）项。 */
     public List<CreativeAssetRecord> listForOwner(String tenantId, String userId, UUID projectId,
                                                   String mediaType, boolean starred, String origin,
-                                                  String businessType, boolean trashed,
+                                                  String businessType, boolean trashed, String q,
                                                   Instant cursorCreatedAt, UUID cursorId, int limit) {
         StringBuilder where = new StringBuilder(" WHERE tenant_id = ? AND user_id = ? AND status "
                 + (trashed ? "= 'DELETED'" : "<> 'DELETED'"));
@@ -95,6 +95,12 @@ public class CreativeAssetRepository {
         if (mediaType != null && !mediaType.isBlank()) {
             where.append(" AND media_type = ?");
             args.add(mediaType);
+        }
+        if (q != null && !q.isBlank()) {
+            // 名称模糊搜索：转义用户输入中的通配符，避免 %/_ 被当作模式
+            String escaped = q.trim().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+            where.append(" AND display_name ILIKE ? ESCAPE '\\'");
+            args.add("%" + escaped + "%");
         }
         if (starred) {
             where.append(" AND starred = TRUE");

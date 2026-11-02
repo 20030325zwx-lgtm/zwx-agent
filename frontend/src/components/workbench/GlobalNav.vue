@@ -1,9 +1,9 @@
 <template>
   <nav class="wb-nav" :class="{ collapsed }" aria-label="全局导航">
-    <div class="wb-nav-brand">
+    <router-link to="/creative" class="wb-nav-brand" title="Aster 创作">
       <div class="wb-nav-logo" aria-hidden="true"><AsterMark /></div>
       <span class="wb-nav-wordmark">Aster</span>
-    </div>
+    </router-link>
 
     <button type="button" class="wb-collapse" :title="collapsed ? '展开导航' : '收起导航'" @click="toggle">
       <PanelLeftClose v-if="!collapsed" :size="17" :stroke-width="1.8" />
@@ -13,7 +13,7 @@
 
     <div class="wb-nav-items">
       <router-link
-        v-for="item in items"
+        v-for="item in primaryItems"
         :key="item.to"
         :to="item.to"
         class="wb-nav-item"
@@ -22,6 +22,20 @@
         :aria-label="item.label"
       >
         <component :is="item.icon" :size="19" :stroke-width="1.9" />
+        <span class="wb-nav-label">{{ item.label }}</span>
+      </router-link>
+
+      <p class="wb-nav-group-label">更多</p>
+      <router-link
+        v-for="item in secondaryItems"
+        :key="item.to"
+        :to="item.to"
+        class="wb-nav-item wb-nav-item-quiet"
+        :class="{ active: isActive(item) }"
+        :title="item.label"
+        :aria-label="item.label"
+      >
+        <component :is="item.icon" :size="18" :stroke-width="1.9" />
         <span class="wb-nav-label">{{ item.label }}</span>
       </router-link>
     </div>
@@ -53,7 +67,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
-  PanelLeftClose, PanelLeftOpen, Workflow, Palette
+  PanelLeftClose, PanelLeftOpen, Workflow, Palette, FolderOpen, Images, ListChecks
 } from 'lucide-vue-next'
 import AsterMark from '../AsterMark.vue'
 import { resolvedTheme, themeMode, setThemeMode } from '../../design/apply-tokens'
@@ -77,14 +91,20 @@ function handleViewportChange() {
 onMounted(() => window.addEventListener('resize', handleViewportChange))
 onBeforeUnmount(() => window.removeEventListener('resize', handleViewportChange))
 
-// 只挂已上线能力，不做空占位入口
-const items = [
-  { to: '/workbench', label: '工作台', icon: Compass, match: ['/workbench'] },
-  { to: '/super-agent', label: '任务', icon: MessagesSquare, match: ['/super-agent'] },
-  { to: '/workflows', label: '工作流', icon: Workflow, match: ['/workflows'] },
-  { to: '/creative', label: 'AI 创作', icon: Palette, match: ['/creative'] },
-  { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] }
+// 一级导航只挂已上线能力，不做空占位入口：创作主线常驻，系统模块收进「更多」。
+const primaryItems = [
+  { to: '/creative', label: '创作', icon: Palette, match: ['/creative'] },
+  { to: '/creative/works', label: '作品', icon: FolderOpen, match: ['/creative/works'] },
+  { to: '/creative/assets', label: '素材', icon: Images, match: ['/creative/assets'] },
+  { to: '/creative/tasks', label: '任务', icon: ListChecks, match: ['/creative/tasks'] }
 ]
+const secondaryItems = [
+  { to: '/workflows', label: '工作流', icon: Workflow, match: ['/workflows'] },
+  { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] },
+  { to: '/super-agent', label: '智能体', icon: MessagesSquare, match: ['/super-agent'] },
+  { to: '/workbench', label: '服务概览', icon: Compass, match: ['/workbench'] }
+]
+const items = [...primaryItems, ...secondaryItems]
 
 const user = computed(() => getCurrentUser() || {})
 const userName = computed(() => user.value?.username || '本机用户')
@@ -100,8 +120,21 @@ const themeTitle = computed(() => {
   return `主题：${label}（点击切换）`
 })
 
+// 最长前缀命中：/creative/works、/creative/assets 各自独立高亮，不重复点亮「创作」
+const activePath = computed(() => {
+  let best = ''
+  for (const item of items) {
+    for (const path of item.match) {
+      if ((route.path === path || route.path.startsWith(`${path}/`)) && path.length > best.length) {
+        best = path
+      }
+    }
+  }
+  return best
+})
+
 function isActive(item) {
-  return item.match.some(path => route.path === path || route.path.startsWith(`${path}/`))
+  return item.match.includes(activePath.value)
 }
 
 function cycleTheme() {
@@ -136,6 +169,8 @@ function cycleTheme() {
   gap: 10px;
   padding: 2px 4px 10px;
   white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
 }
 
 .wb-nav-logo {
@@ -209,6 +244,34 @@ function cycleTheme() {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* 系统模块分组：视觉降权，只做分隔与弱化，不与创作主线争注意力 */
+.wb-nav-group-label {
+  margin: 12px 10px 2px;
+  color: var(--wb-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.wb-nav.collapsed .wb-nav-group-label {
+  margin: 10px 0 2px;
+  text-align: center;
+  font-size: 10px;
+  overflow: hidden;
+}
+
+.wb-nav-item-quiet {
+  height: 34px;
+  font-size: 12.5px;
+  opacity: 0.86;
+}
+
+.wb-nav-item-quiet:hover,
+.wb-nav-item-quiet.active {
+  opacity: 1;
 }
 
 .wb-nav-item {

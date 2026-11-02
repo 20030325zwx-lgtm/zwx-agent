@@ -16,11 +16,11 @@ const routes = [
     children: [
       {
         path: '',
-        redirect: '/workbench'
+        redirect: '/creative'
       },
       {
         path: 'home',
-        redirect: '/workbench'
+        redirect: '/creative'
       },
       {
         path: 'workbench',
@@ -65,6 +65,15 @@ const routes = [
         meta: {
           title: 'AI 创作 - Aster',
           description: '图片、视频、小说与漫画创作：任务与素材保存在服务端，可随时找回。'
+        }
+      },
+      {
+        path: 'creative/works',
+        name: 'CreativeWorks',
+        component: () => import('../views/creative/ProjectLibrary.vue'),
+        meta: {
+          title: '作品 - Aster',
+          description: '全部作品的筛选、搜索与最近更新。'
         }
       },
       {

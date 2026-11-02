@@ -2,109 +2,131 @@
   <div class="cr-page">
     <div class="cr-scroll">
       <div class="cr-inner">
-        <header class="cr-head">
+        <header class="cr-head home-head">
           <div>
             <p class="cr-kicker">AI 创作</p>
-            <h1 class="cr-title">AI 创作</h1>
-            <p class="cr-sub">输入想法，创作图片、视频、小说与漫画。任务与结果保存在服务端，刷新、离开页面或重启服务后仍能找回。</p>
-            <div class="kind-strip" aria-label="创作类型">
-              <span class="kind-chip is-open">图片创作 · 已开放</span>
-              <span class="kind-chip is-open kind-chip-action" role="button" tabindex="0"
-                    @click="openWorkflowCreate" @keydown.enter="openWorkflowCreate">工作流创作 · 已开放</span>
-              <span class="kind-chip is-open">小说创作 · 已开放</span>
-              <span class="kind-chip is-open">视频创作 · 已开放</span>
-              <span class="kind-chip">漫画创作 · 规划中</span>
-            </div>
+            <h1 class="cr-title">想做点什么？</h1>
+            <p class="cr-sub">写一句想法，选一种创作类型，进入作品工作区继续细化。作品、任务与素材都在服务端，离开页面也能找回。</p>
           </div>
-          <button type="button" class="cr-primary" @click="openCreate">
-            <Plus :size="15" /> 新建项目
+          <button type="button" class="cr-secondary" @click="openCreate">
+            <Plus :size="15" /> 新建作品
           </button>
         </header>
+
+        <section class="home-compose">
+          <textarea
+            v-model.trim="idea"
+            class="cr-textarea home-idea"
+            rows="3"
+            maxlength="500"
+            placeholder="例如：雨夜车站，一个女孩把怀表交给陌生人，然后列车进站"
+            @keydown.ctrl.enter="startFromIdea"
+            @keydown.meta.enter="startFromIdea"
+          />
+          <div class="home-compose-foot">
+            <div class="home-kind" role="radiogroup" aria-label="创作类型">
+              <button
+                v-for="option in kindOptions"
+                :key="option.value"
+                type="button"
+                class="home-kind-chip"
+                :class="{ selected: composeKind === option.value }"
+                :disabled="!option.enabled"
+                role="radio"
+                :aria-checked="composeKind === option.value"
+                @click="composeKind = option.value"
+              >
+                {{ option.label }}
+                <em v-if="!option.enabled">规划中</em>
+              </button>
+            </div>
+            <div class="home-compose-actions">
+              <span class="home-compose-hint">创建作品不会计费，生成时才会调用模型</span>
+              <button type="button" class="cr-primary" :disabled="!idea || starting" @click="startFromIdea">
+                <Spinner v-if="starting" /> {{ starting ? '创建中…' : '开始创作' }}
+              </button>
+            </div>
+          </div>
+          <p v-if="startError" class="cr-error">{{ startError }}</p>
+        </section>
 
         <div v-if="bindingChecked && !imageBinding" class="cr-banner">
           <AlertCircle :size="18" />
           <div class="cr-banner-body">
             <strong>还没有配置「图片生成」模型</strong>
-            <p>创作模块只使用图片生成绑定，不会回退到对话模型。配置后回到这里继续，已输入的草稿会保留。</p>
+            <p>图片创作只使用图片生成绑定，不会回退到对话模型。视频与小说不受影响；配置后回到这里继续。</p>
           </div>
           <router-link to="/settings/model" class="cr-banner-link">去配置</router-link>
         </div>
 
         <section>
           <div class="cr-section-head">
-            <h2>工作流创作</h2>
-            <router-link to="/workflows">打开画布</router-link>
-          </div>
-          <div class="wf-entry">
-            <span class="wf-entry-icon"><Workflow :size="18" /></span>
-            <div class="wf-entry-body">
-              <strong>用多步工作流创作</strong>
-              <p>把搜图、理解、文案、生图、合成串成一条流程（如商品海报），运行产物自动归入创作项目的素材库与任务列表。</p>
-            </div>
-            <button type="button" class="cr-secondary" @click="openWorkflowCreate">
-              <Workflow :size="14" /> 发起工作流
-            </button>
-          </div>
-        </section>
-
-        <section>
-          <div class="cr-section-head">
-            <h2>最近项目</h2>
-            <router-link to="/creative/tasks">任务记录</router-link>
+            <h2>最近作品</h2>
+            <router-link to="/creative/works">全部作品</router-link>
           </div>
           <p v-if="loading" class="cr-hint">加载中…</p>
           <p v-else-if="loadError" class="cr-error">{{ loadError }}</p>
-          <p v-else-if="!projects.length" class="cr-empty">
-            还没有创作项目。新建项目后即可开始创作（当前开放图片创作）。
-          </p>
-          <div v-else class="cr-grid">
-            <router-link
-              v-for="project in projects"
-              :key="project.id"
-              :to="`/creative/projects/${project.id}`"
-              class="cr-card"
-            >
-              <div class="home-card-top">
-                <span class="home-card-icon"><Palette :size="17" /></span>
-                <span class="status-pair">
-                  <span class="cr-kind-badge">{{ kindLabel(project.kind) }}</span>
-                  <span class="cr-status" :class="project.status === 'ACTIVE' ? 'success' : 'muted'">
-                    {{ project.status === 'ACTIVE' ? '进行中' : '已归档' }}
-                  </span>
-                </span>
-              </div>
-              <strong class="cr-card-name">{{ project.name }}</strong>
-              <p class="cr-card-desc">{{ project.description || '暂无描述' }}</p>
-              <span class="cr-card-time">更新于 {{ formatTime(project.updatedAt) }}</span>
-            </router-link>
-            <button type="button" class="cr-card cr-add" @click="openCreate">
-              <Plus :size="20" />
-              <span>新建项目</span>
-            </button>
+          <div v-else-if="!projects.length" class="cr-empty home-empty">
+            <strong>还没有作品</strong>
+            <p>在上面写一句想法就能开始；也可以从已有素材或工作流起步。</p>
+            <div class="home-empty-actions">
+              <button type="button" class="cr-primary" @click="openCreate">新建作品</button>
+              <button type="button" class="cr-secondary" @click="openWorkflowCreate">从工作流创建</button>
+            </div>
+          </div>
+          <div v-else class="home-works">
+            <ProjectCard v-for="project in projects" :key="project.id" :project="project" />
           </div>
         </section>
 
         <section>
           <div class="cr-section-head">
-            <h2>最近任务</h2>
-            <router-link to="/creative/assets">素材库</router-link>
+            <h2>待处理</h2>
+            <router-link to="/creative/tasks">任务记录</router-link>
           </div>
-          <p v-if="!recentJobs.length" class="cr-hint">还没有生成任务。</p>
-          <ul v-else class="home-jobs">
-            <li v-for="job in recentJobs" :key="job.jobId" class="home-job">
-              <span class="cr-status" :class="statusMeta(job.status).tone">{{ statusMeta(job.status).label }}</span>
-              <span class="home-job-text">{{ statusMeta(job.status).hint }}</span>
-              <span class="home-job-time">{{ formatTime(job.createdAt) }}</span>
-              <router-link class="home-job-link" :to="`/creative/tasks/${job.jobId}`">查看</router-link>
-            </li>
-          </ul>
+          <div class="home-pending">
+            <div class="home-pending-counts">
+              <span class="home-count">
+                <em>{{ jobCounts.active }}</em> 生成中
+              </span>
+              <span class="home-count" :class="{ 'is-warn': failedCount > 0 }">
+                <em>{{ failedCount }}</em> 最近失败
+              </span>
+              <span class="home-count" :class="{ 'is-warn': uncertainCount > 0 }">
+                <em>{{ uncertainCount }}</em> 结果待确认
+              </span>
+            </div>
+            <p v-if="!pendingJobs.length" class="cr-hint">
+              没有需要处理的任务。生成中或失败的镜头会出现在这里。
+            </p>
+            <ul v-else class="home-jobs">
+              <li v-for="job in pendingJobs" :key="job.jobId" class="home-job">
+                <span class="cr-status" :class="statusMeta(job.status).tone">{{ statusMeta(job.status).label }}</span>
+                <span class="home-job-text">
+                  <strong>{{ projectName(job.projectId) }}</strong>
+                  · {{ job.prompt ? truncate(job.prompt, 40) : '生成任务' }}
+                </span>
+                <span class="home-job-time">{{ formatTime(job.createdAt) }}</span>
+                <router-link class="home-job-link" :to="jobLink(job)">打开</router-link>
+              </li>
+            </ul>
+          </div>
         </section>
+
+        <p class="home-more">
+          <button type="button" class="home-link" @click="openWorkflowCreate">
+            <Workflow :size="14" /> 从工作流创建
+          </button>
+          <router-link to="/creative/assets" class="home-link">
+            <Images :size="14" /> 素材库
+          </router-link>
+        </p>
       </div>
     </div>
 
     <div v-if="createOpen" class="cr-dialog-backdrop" @click.self="createOpen = false">
       <div class="cr-dialog" role="dialog" aria-modal="true" aria-labelledby="create-project-title">
-        <h2 id="create-project-title">新建创作项目</h2>
+        <h2 id="create-project-title">新建作品</h2>
         <div class="cr-field">
           <span class="cr-field-label"><span>创作类型</span></span>
           <div class="kind-options" role="radiogroup" aria-label="创作类型">
@@ -123,10 +145,9 @@
               <span>{{ option.enabled ? '可使用' : '规划中' }}</span>
             </button>
           </div>
-          <span class="cr-field-help">视频、小说与漫画会复用同一套项目、草稿与素材数据，能力上线后无需迁移项目。</span>
         </div>
         <label class="cr-field">
-          <span class="cr-field-label"><span>项目名称</span><span class="count">{{ form.name.length }}/80</span></span>
+          <span class="cr-field-label"><span>作品名称</span><span class="count">{{ form.name.length }}/80</span></span>
           <input v-model.trim="form.name" class="cr-input" maxlength="80" placeholder="如：秋季新品视觉" />
         </label>
         <label class="cr-field">
@@ -160,9 +181,9 @@
             <span v-if="selectedWorkflow?.description" class="cr-field-help">{{ selectedWorkflow.description }}</span>
           </label>
           <label class="cr-field">
-            <span class="cr-field-label"><span>目标创作项目</span><span class="count">产物与任务归入该项目</span></span>
+            <span class="cr-field-label"><span>目标作品</span><span class="count">产物与任务归入该作品</span></span>
             <select v-model="wfForm.projectId" class="cr-input">
-              <option :value="null" disabled>选择项目</option>
+              <option :value="null" disabled>选择作品</option>
               <option v-for="project in activeProjects" :key="project.id" :value="project.id">
                 {{ project.name }}
               </option>
@@ -203,12 +224,13 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertCircle, Palette, Plus, Workflow } from 'lucide-vue-next'
+import { AlertCircle, Images, Plus, Workflow } from 'lucide-vue-next'
 import {
-  createCreativeProject, getWorkflowDefinition, listCreativeJobs, listCreativeProjects,
-  listModelCatalog, listWorkflows, startWorkflow
+  createCreativeDraft, createCreativeProject, getCreativeHealth, getWorkflowDefinition,
+  listCreativeJobs, listCreativeProjects, listModelCatalog, listWorkflows, startWorkflow
 } from '../../api'
-import { formatTime, kindLabel, statusMeta } from './shared'
+import { formatTime, statusMeta } from './shared'
+import ProjectCard from '../../components/creative/ProjectCard.vue'
 import Spinner from '../../components/ui/Spinner.vue'
 import AssetParamField from '../../components/workflow/AssetParamField.vue'
 import { buildRunForm } from './workflowInputs'
@@ -216,17 +238,22 @@ import { buildRunForm } from './workflowInputs'
 const router = useRouter()
 const projects = ref([])
 const recentJobs = ref([])
+const health = ref(null)
 const loading = ref(true)
 const loadError = ref('')
+const idea = ref('')
+const composeKind = ref('IMAGE')
+const starting = ref(false)
+const startError = ref('')
 const createOpen = ref(false)
 const creating = ref(false)
 const createError = ref('')
 const form = reactive({ name: '', description: '', kind: 'IMAGE' })
 const kindOptions = [
-  { value: 'IMAGE', label: '图片创作', enabled: true },
-  { value: 'VIDEO', label: '视频创作', enabled: true },
-  { value: 'NOVEL', label: '小说创作', enabled: true },
-  { value: 'COMIC', label: '漫画创作', enabled: false }
+  { value: 'IMAGE', label: '图片', enabled: true },
+  { value: 'VIDEO', label: '视频', enabled: true },
+  { value: 'NOVEL', label: '小说', enabled: true },
+  { value: 'COMIC', label: '漫画', enabled: false }
 ]
 const imageBinding = ref(null)
 const bindingChecked = ref(false)
@@ -240,6 +267,32 @@ const wfForm = reactive({ workflowKey: '', projectId: null, fields: [], input: {
 const activeProjects = computed(() => projects.value.filter(p => p.status === 'ACTIVE'))
 const selectedWorkflow = computed(() => workflows.value.find(wf => wf.key === wfForm.workflowKey))
 
+// 待处理：健康接口给在途总量，任务列表给可点开的条目（失败优先，其次结果待确认）
+const jobCounts = computed(() => {
+  const jobs = health.value?.jobs || {}
+  return { active: jobs.active || 0 }
+})
+const failedJobs = computed(() => recentJobs.value
+  .filter(job => job.status === 'FAILED' || job.status === 'INGEST_FAILED'))
+const uncertainJobs = computed(() => recentJobs.value
+  .filter(job => job.status === 'RECONCILING'))
+const pendingJobs = computed(() => [...failedJobs.value, ...uncertainJobs.value].slice(0, 5))
+const failedCount = computed(() => failedJobs.value.length)
+const uncertainCount = computed(() => uncertainJobs.value.length)
+
+function projectName(projectId) {
+  return projects.value.find(project => project.id === projectId)?.name || '未归档任务'
+}
+
+function jobLink(job) {
+  return `/creative/projects/${job.projectId}?tab=tasks&jobId=${job.jobId}`
+}
+
+function truncate(text, max) {
+  const value = String(text || '')
+  return value.length > max ? `${value.slice(0, max)}…` : value
+}
+
 function showToast(text, tone = '') {
   toast.text = text
   toast.tone = tone
@@ -247,10 +300,36 @@ function showToast(text, tone = '') {
   showToast.timer = window.setTimeout(() => { toast.text = '' }, 3200)
 }
 
+/** 想法直接起项目：名称取首行前 30 字，完整想法进描述；图片项目顺带写入草稿，进入即可继续编辑。 */
+async function startFromIdea() {
+  if (!idea.value || starting.value) return
+  starting.value = true
+  startError.value = ''
+  const text = idea.value
+  try {
+    const project = await createCreativeProject({
+      name: text.split('\n')[0].slice(0, 30) || '未命名作品',
+      description: text.slice(0, 500),
+      kind: composeKind.value
+    })
+    if (composeKind.value === 'IMAGE') {
+      // 草稿只用于图片链路（视频/小说走各自的剧情与章节域）；失败不影响进入作品
+      await createCreativeDraft(project.id, {
+        operation: 'text_to_image', originalPrompt: text, effectivePrompt: text
+      }).catch(() => null)
+    }
+    router.push(`/creative/projects/${project.id}`)
+  } catch (error) {
+    startError.value = error.response?.data?.error || '创建失败，请稍后重试'
+  } finally {
+    starting.value = false
+  }
+}
+
 function openCreate() {
   form.name = ''
   form.description = ''
-  form.kind = 'IMAGE'
+  form.kind = composeKind.value
   createError.value = ''
   createOpen.value = true
 }
@@ -321,7 +400,7 @@ async function startWorkflowRun() {
     }
     const run = await startWorkflow(wfForm.workflowKey, input.keyword || '', wfForm.projectId, input)
     wfOpen.value = false
-    showToast('工作流已发起，产物将归入所选项目')
+    showToast('工作流已发起，产物将归入所选作品')
     router.push({ path: `/creative/projects/${wfForm.projectId}`, query: { tab: 'workflow', runId: run.id } })
   } catch (error) {
     wfError.value = error.response?.data?.error || '发起失败，请稍后重试'
@@ -333,21 +412,23 @@ async function startWorkflowRun() {
 async function load() {
   loading.value = true
   loadError.value = ''
-  const [projectResult, jobResult, catalogResult] = await Promise.allSettled([
-    listCreativeProjects({ limit: 12 }),
-    listCreativeJobs({ limit: 6 }),
-    listModelCatalog()
+  const [projectResult, jobResult, catalogResult, healthResult] = await Promise.allSettled([
+    listCreativeProjects({ limit: 6 }),
+    listCreativeJobs({ limit: 20 }),
+    listModelCatalog(),
+    getCreativeHealth()
   ])
   if (projectResult.status === 'fulfilled') {
     projects.value = projectResult.value.items || []
   } else {
-    loadError.value = '项目加载失败，请确认后端服务可用'
+    loadError.value = '作品加载失败，请确认后端服务可用'
   }
   if (jobResult.status === 'fulfilled') recentJobs.value = jobResult.value.items || []
   if (catalogResult.status === 'fulfilled') {
     imageBinding.value = catalogResult.value.userBindings?.image_generation
       || catalogResult.value.systemBindings?.image_generation || null
   }
+  if (healthResult.status === 'fulfilled') health.value = healthResult.value
   bindingChecked.value = true
   loading.value = false
 }
@@ -358,58 +439,194 @@ onMounted(load)
 <style scoped src="./creative.css"></style>
 
 <style scoped>
-.kind-strip {
+.home-head { align-items: flex-start; }
+
+.home-compose {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-.kind-chip {
-  font-size: 11.5px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--wb-border);
-  color: var(--wb-muted);
-}
-.kind-chip.is-open {
-  color: var(--wb-brand);
-  border-color: color-mix(in srgb, var(--wb-brand) 40%, transparent);
-  background: var(--wb-brand-soft);
-}
-.kind-chip-action { cursor: pointer; }
-.wf-entry {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 12px;
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius-lg);
   background: var(--wb-surface);
 }
-.wf-entry-icon {
+
+.home-idea {
+  min-height: 76px;
+  border: 0;
+  padding: 2px 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.home-idea:focus { outline: none; }
+
+.home-compose-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--wb-border);
+  padding-top: 10px;
+}
+
+.home-kind {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.home-kind-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  gap: 5px;
+  padding: 4px 11px;
+  border: 1px solid var(--wb-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wb-text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.home-kind-chip em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--wb-muted);
+}
+
+.home-kind-chip.selected {
+  border-color: var(--wb-brand);
   background: var(--wb-brand-soft);
   color: var(--wb-brand);
-  flex-shrink: 0;
 }
-.wf-entry-body { flex: 1; min-width: 0; }
-.wf-entry-body strong { font-size: 13px; }
-.wf-entry-body p {
-  margin: 3px 0 0;
-  font-size: 12px;
+
+.home-kind-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.home-compose-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-compose-hint {
+  font-size: 11.5px;
   color: var(--wb-muted);
-  line-height: 1.5;
 }
+
+.home-works {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 12px;
+}
+
+.home-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.home-empty p { margin: 0; }
+
+.home-empty-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+.home-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 15px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg);
+  background: var(--wb-surface);
+}
+
+.home-pending-counts {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--wb-text-2);
+}
+
+.home-count em {
+  font-style: normal;
+  font-size: 15px;
+  font-weight: 620;
+  color: var(--wb-text);
+  margin-right: 3px;
+}
+
+.home-count.is-warn em { color: var(--wb-warning); }
+
+.home-jobs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--wb-border);
+}
+
+.home-job {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--wb-border);
+  font-size: 12.5px;
+}
+
+.home-job:last-child { border-bottom: none; padding-bottom: 0; }
+
+.home-job-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wb-text-2);
+}
+
+.home-job-text strong { color: var(--wb-text); font-weight: 560; }
+
+.home-job-time { color: var(--wb-muted); font-size: 11.5px; }
+
+.home-job-link {
+  color: var(--wb-brand);
+  text-decoration: none;
+  font-weight: 550;
+}
+
+.home-more {
+  display: flex;
+  gap: 16px;
+  margin: 4px 0 0;
+}
+
+.home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--wb-muted);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.home-link:hover { color: var(--wb-brand); }
+
 .kind-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
+
 .kind-option {
   display: flex;
   flex-direction: column;
@@ -423,71 +640,15 @@ onMounted(load)
   cursor: pointer;
   text-align: left;
 }
+
 .kind-option strong { font-size: 12.5px; }
 .kind-option span { font-size: 11px; color: var(--wb-muted); }
 .kind-option.selected { border-color: var(--wb-brand); box-shadow: 0 0 0 2px var(--wb-brand-soft); }
 .kind-option:disabled { opacity: 0.55; cursor: not-allowed; }
-.status-pair { display: flex; align-items: center; gap: 6px; }
-.cr-kind-badge {
-  font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--wb-border);
-  color: var(--wb-text-2);
-}
 
-.home-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.home-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--wb-brand-soft);
-  color: var(--wb-brand);
-}
-
-.home-jobs {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-lg);
-  background: var(--wb-surface);
-  overflow: hidden;
-}
-
-.home-job {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--wb-border);
-  font-size: 12.5px;
-}
-
-.home-job:last-child { border-bottom: none; }
-
-.home-job-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--wb-text-2);
-}
-
-.home-job-time { color: var(--wb-muted); font-size: 11.5px; }
-
-.home-job-link {
-  color: var(--wb-brand);
-  text-decoration: none;
-  font-weight: 550;
+@media (max-width: 720px) {
+  .home-compose-foot { align-items: flex-start; }
+  .home-compose-actions { width: 100%; justify-content: space-between; }
+  .home-compose-hint { display: none; }
 }
 </style>

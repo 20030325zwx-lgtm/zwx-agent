@@ -336,8 +336,12 @@ export default {
 }
 
 // AI 创作（P1）：项目、草稿、任务、素材、提示词优化
+// 列表支持 kind/q/sort（updated|created）/cursor；返回项含 coverAssetId/coverMediaType
 export const listCreativeProjects = (params = {}) =>
   request.get('/ai/creative/projects', { params }).then(response => response.data)
+// 创作健康：提交/调度开关、存储后端、图片模型绑定与当前用户任务计数（首页待处理）
+export const getCreativeHealth = () =>
+  request.get('/ai/creative/health').then(response => response.data)
 export const createCreativeProject = payload =>
   request.post('/ai/creative/projects', payload).then(response => response.data)
 export const getCreativeProject = projectId =>

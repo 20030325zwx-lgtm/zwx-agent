@@ -11,6 +11,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -64,24 +65,74 @@ public class CreativeProjectRepository {
                 MAPPER, id, tenantId, userId).stream().findFirst();
     }
 
-    /** 游标分页：(created_at, id) 降序；cursor 为上一页最后一行。 */
-    public List<CreativeProjectRecord> listByOwner(String tenantId, String userId,
-                                                   Instant cursorCreatedAt, UUID cursorId, int limit) {
-        if (cursorCreatedAt == null || cursorId == null) {
-            return jdbcTemplate.query("""
-                            SELECT id, tenant_id, user_id, name, description, kind, status, version, created_at, updated_at
-                            FROM creative_project WHERE tenant_id = ? AND user_id = ?
-                            ORDER BY created_at DESC, id DESC LIMIT ?
-                            """,
-                    MAPPER, tenantId, userId, limit);
+    /** 列表排序：最近更新（默认，走 V8 索引）与创建时间。 */
+    public enum Sort {
+        UPDATED("updated_at"),
+        CREATED("created_at");
+
+        private final String column;
+
+        Sort(String column) {
+            this.column = column;
         }
-        return jdbcTemplate.query("""
-                        SELECT id, tenant_id, user_id, name, description, kind, status, version, created_at, updated_at
-                        FROM creative_project WHERE tenant_id = ? AND user_id = ?
-                          AND (created_at, id) < (?, ?)
-                        ORDER BY created_at DESC, id DESC LIMIT ?
-                        """,
-                MAPPER, tenantId, userId, Timestamp.from(cursorCreatedAt), cursorId, limit);
+
+        public static Sort parse(String value) {
+            if (value == null || value.isBlank() || "updated".equalsIgnoreCase(value.trim())) return UPDATED;
+            if ("created".equalsIgnoreCase(value.trim())) return CREATED;
+            throw new IllegalArgumentException("不支持的排序方式：" + value);
+        }
+    }
+
+    /** 列表行：项目本身 + 即时计算的封面（最新 READY 素材，图片优先）。 */
+    public record ProjectListRow(CreativeProjectRecord project, UUID coverAssetId, String coverMediaType) {
+    }
+
+    private static final RowMapper<ProjectListRow> LIST_MAPPER = (rs, rowNum) -> new ProjectListRow(
+            map(rs, rowNum),
+            rs.getString("cover_asset_id") == null ? null : UUID.fromString(rs.getString("cover_asset_id")),
+            rs.getString("cover_media_type"));
+
+    /**
+     * 游标分页列表：按 owner 过滤，可选类型/关键词；默认 (updated_at, id) 降序。
+     * 封面用一条 LATERAL 子查询取每个项目最新 READY 素材，避免前端按项目逐条反查（N+1）。
+     */
+    public List<ProjectListRow> listByOwner(String tenantId, String userId, CreativeKind kind, String keyword,
+                                            Sort sort, Instant cursorAt, UUID cursorId, int limit) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT p.id, p.tenant_id, p.user_id, p.name, p.description, p.kind, p.status, p.version,
+                       p.created_at, p.updated_at, cov.asset_id AS cover_asset_id, cov.media_type AS cover_media_type
+                FROM creative_project p
+                LEFT JOIN LATERAL (
+                    SELECT a.id AS asset_id, a.media_type AS media_type
+                    FROM creative_asset a
+                    WHERE a.project_id = p.id AND a.tenant_id = p.tenant_id AND a.user_id = p.user_id
+                      AND a.status = 'READY'
+                    ORDER BY (a.media_type = 'IMAGE') DESC, a.created_at DESC, a.id DESC
+                    LIMIT 1
+                ) cov ON TRUE
+                WHERE p.tenant_id = ? AND p.user_id = ?
+                """);
+        List<Object> args = new ArrayList<>();
+        args.add(tenantId);
+        args.add(userId);
+        if (kind != null) {
+            sql.append(" AND p.kind = ?");
+            args.add(kind.name());
+        }
+        if (keyword != null) {
+            sql.append(" AND (p.name ILIKE ? OR p.description ILIKE ?)");
+            args.add(keyword);
+            args.add(keyword);
+        }
+        String column = "p." + sort.column;
+        if (cursorAt != null && cursorId != null) {
+            sql.append(" AND (").append(column).append(", p.id) < (?, ?)");
+            args.add(Timestamp.from(cursorAt));
+            args.add(cursorId);
+        }
+        sql.append(" ORDER BY ").append(column).append(" DESC, p.id DESC LIMIT ?");
+        args.add(limit);
+        return jdbcTemplate.query(sql.toString(), LIST_MAPPER, args.toArray());
     }
 
     /** 归档（BR02）：只在 ACTIVE 且版本匹配时成功；返回是否命中。 */

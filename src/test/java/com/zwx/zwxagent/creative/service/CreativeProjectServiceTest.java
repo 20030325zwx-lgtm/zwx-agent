@@ -151,4 +151,40 @@ class CreativeProjectServiceTest {
         Assertions.assertEquals(2, loaded.referenceAssetIds().size());
         Assertions.assertEquals("1024*1024", loaded.parameters().get("size"));
     }
+
+    @Test
+    void listsProjectsWithKindFilterSearchAndCover() {
+        CurrentActor actor = actor("list");
+        var image = projectService.create(actor,
+                new CreativeProjectService.CreateProjectRequest("青色山谷", "图片系列", "IMAGE"));
+        var video = projectService.create(actor,
+                new CreativeProjectService.CreateProjectRequest("雨夜车站", "短剧第一集", "VIDEO"));
+
+        // 类型过滤（作品列表 chips）
+        var videos = projectService.list(actor, "VIDEO", null, null, null, 20);
+        Assertions.assertEquals(1, videos.items().size());
+        Assertions.assertEquals(video.id(), videos.items().get(0).id());
+        Assertions.assertEquals("IMAGE", projectService.list(actor, "IMAGE", null, null, null, 20)
+                .items().get(0).kind());
+
+        // 关键词搜索：名称命中，且 % 被转义而不是通配
+        var searched = projectService.list(actor, null, "雨夜", null, null, 20);
+        Assertions.assertEquals(1, searched.items().size());
+        Assertions.assertEquals(video.id(), searched.items().get(0).id());
+        Assertions.assertTrue(projectService.list(actor, null, "%", null, null, 20).items().isEmpty());
+
+        // 无素材时封面为空（封面由即时 LATERAL 计算，不写项目表）
+        Assertions.assertNull(videos.items().get(0).coverAssetId());
+        Assertions.assertNull(videos.items().get(0).coverMediaType());
+
+        // 默认按最近更新：改动较早创建的项目后，它应排到最前；按创建时间排序仍然后建在前
+        projectService.update(actor, image.id(),
+                new CreativeProjectService.UpdateProjectRequest("青色山谷 2", null, null, 1L));
+        Assertions.assertEquals(image.id(), projectService.list(actor, null, null, null, null, 20)
+                .items().get(0).id());
+        Assertions.assertEquals(video.id(), projectService.list(actor, null, null, "created", null, 20)
+                .items().get(0).id());
+        Assertions.assertThrows(IllegalArgumentException.class,
+                () -> projectService.list(actor, null, null, "popular", null, 20));
+    }
 }

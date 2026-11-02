@@ -54,9 +54,12 @@ public class CreativeProjectController {
 
     @GetMapping("/projects")
     public CreativeProjectService.ProjectList list(CurrentActor actor,
+                                                   @RequestParam(required = false) String kind,
+                                                   @RequestParam(required = false) String q,
+                                                   @RequestParam(required = false) String sort,
                                                    @RequestParam(required = false) String cursor,
                                                    @RequestParam(required = false) Integer limit) {
-        return projectService.list(actor, cursor, limit);
+        return projectService.list(actor, kind, q, sort, cursor, limit);
     }
 
     @GetMapping("/projects/{projectId}")

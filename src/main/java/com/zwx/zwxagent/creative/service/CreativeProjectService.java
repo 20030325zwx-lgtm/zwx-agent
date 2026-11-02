@@ -25,8 +25,13 @@ public class CreativeProjectService {
     public static final int DEFAULT_PAGE_SIZE = 20;
     public static final int MAX_PAGE_SIZE = 100;
 
+    /**
+     * 项目视图。coverAssetId/coverMediaType 仅在列表查询中返回（最新 READY 素材，图片优先）；
+     * 创建/详情等单条路径不做封面反查，保持零额外查询。
+     */
     public record ProjectView(UUID id, String name, String description, String kind, String status,
-                              long version, Instant createdAt, Instant updatedAt) {
+                              long version, Instant createdAt, Instant updatedAt,
+                              UUID coverAssetId, String coverMediaType) {
     }
 
     public record CreateProjectRequest(String name, String description, String kind) {
@@ -83,16 +88,30 @@ public class CreativeProjectService {
                 .orElseThrow(() -> new IllegalArgumentException("创作项目不存在"));
     }
 
+    /** 兼容旧调用：默认按最近更新排序、不过滤。 */
     public ProjectList list(CurrentActor actor, String cursor, Integer limit) {
+        return list(actor, null, null, null, cursor, limit);
+    }
+
+    /**
+     * 作品列表：可选类型过滤、关键词搜索（名称/描述）与排序（最近更新/创建时间）。
+     * 游标按当前排序列取值，前端切换筛选时需重置游标。
+     */
+    public ProjectList list(CurrentActor actor, String kind, String q, String sort, String cursor, Integer limit) {
         int size = normalizeLimit(limit);
+        CreativeKind filterKind = kind == null || kind.isBlank() ? null : CreativeKind.parse(kind);
+        String keyword = normalizeKeyword(q);
+        var order = CreativeProjectRepository.Sort.parse(sort);
         var decoded = decodeCursor(cursor);
         List<ProjectView> items = repository
-                .listByOwner(actor.tenantId(), actor.userId(), decoded.createdAt(), decoded.id(), size + 1)
+                .listByOwner(actor.tenantId(), actor.userId(), filterKind, keyword, order,
+                        decoded.createdAt(), decoded.id(), size + 1)
                 .stream().map(CreativeProjectService::toView).toList();
         if (items.size() > size) {
             items = items.subList(0, size);
             var last = items.get(size - 1);
-            return new ProjectList(items, encodeCursor(last.createdAt(), last.id()));
+            Instant cursorAt = order == CreativeProjectRepository.Sort.CREATED ? last.createdAt() : last.updatedAt();
+            return new ProjectList(items, encodeCursor(cursorAt, last.id()));
         }
         return new ProjectList(items, null);
     }
@@ -178,9 +197,28 @@ public class CreativeProjectService {
         }
     }
 
+    /** 搜索词：trim 后不超过 80 字符，转义 LIKE 通配符后包成 %kw%，空词视为不过滤。 */
+    public static String normalizeKeyword(String q) {
+        String value = q == null ? "" : q.trim();
+        if (value.isEmpty()) return null;
+        if (value.length() > NAME_MAX) {
+            throw new IllegalArgumentException("搜索词不能超过 " + NAME_MAX + " 个字符");
+        }
+        String escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+        return "%" + escaped + "%";
+    }
+
+    private static ProjectView toView(CreativeProjectRepository.ProjectListRow row) {
+        return toView(row.project(), row.coverAssetId(), row.coverMediaType());
+    }
+
     private static ProjectView toView(CreativeProjectRecord record) {
+        return toView(record, null, null);
+    }
+
+    private static ProjectView toView(CreativeProjectRecord record, UUID coverAssetId, String coverMediaType) {
         return new ProjectView(record.id(), record.name(), record.description(),
                 record.kind().name(), record.status().name(), record.version(),
-                record.createdAt(), record.updatedAt());
+                record.createdAt(), record.updatedAt(), coverAssetId, coverMediaType);
     }
 }

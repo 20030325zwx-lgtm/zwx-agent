@@ -88,6 +88,16 @@ public class MediaJobRepository {
                 MAPPER, tenantId, userId, idempotencyKey).stream().findFirst();
     }
 
+    /** 是否已经开始过供应商提交；恢复时用来区分“调用前中断”和“提交结果未知”。 */
+    public boolean hasSubmitAttempt(UUID jobId) {
+        Boolean exists = jdbcTemplate.queryForObject("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM media_job_attempt WHERE job_id = ? AND action = 'SUBMIT'
+                        )
+                        """, Boolean.class, jobId);
+        return Boolean.TRUE.equals(exists);
+    }
+
     /** 事务内锁行（事件与状态同事务写入的前置条件）。 */
     public Optional<MediaJobRecord> lockById(UUID id) {
         return jdbcTemplate.query(SELECT + " WHERE id = ? FOR UPDATE", MAPPER, id).stream().findFirst();
@@ -213,6 +223,25 @@ public class MediaJobRepository {
     }
 
     /**
+     * 人工重试复用原任务：清理本轮执行态并推进 epoch，使旧 worker 的迟到回写失效。
+     * 输入、模型快照、幂等键、事件和 attempt 历史全部保留。
+     */
+    public boolean retryInPlaceFenced(UUID id, long expectedVersion, long expectedLeaseEpoch) {
+        return jdbcTemplate.update("""
+                        UPDATE media_job
+                        SET status = 'QUEUED', provider_task_id = NULL, submission_key = NULL,
+                            lease_owner = NULL, lease_until = NULL, lease_epoch = lease_epoch + 1,
+                            inflight_reserved = FALSE, next_action_at = now(), blocked_reason = NULL,
+                            attention_required = FALSE, error_code = NULL, error_summary = NULL,
+                            cancel_requested_at = NULL, observation_deadline_at = NULL,
+                            reconcile_after = NULL, manual_resolution = NULL, finished_at = NULL,
+                            version = version + 1, updated_at = now()
+                        WHERE id = ? AND version = ? AND lease_epoch = ?
+                          AND status IN ('FAILED', 'CANCELLED', 'RECONCILING')
+                        """, id, expectedVersion, expectedLeaseEpoch) > 0;
+    }
+
+    /**
      * 调度候选：未终态、到期、租约过期（SKIP LOCKED 由调用方事务提供）。
      * SUBMITTING 不进入普通认领：提交结果不明，只能由恢复器判定去向，普通 tick 空操作
      * 会把租约清成 NULL 导致周期恢复永远选不到（R1）。
@@ -283,6 +312,7 @@ public class MediaJobRepository {
         return jdbcTemplate.update("""
                         UPDATE media_job
                         SET status = ?, next_action_at = ?, observation_deadline_at = ?,
+                            attention_required = TRUE, blocked_reason = 'SUBMISSION_UNCERTAIN',
                             version = version + 1, updated_at = now()
                         WHERE id = ? AND version = ? AND lease_epoch = ?
                         """,

@@ -271,4 +271,38 @@ class MediaJobServiceTest {
         Assertions.assertThrows(IllegalArgumentException.class,
                 () -> jobService.eventPage(actor, job.jobId(), -1, 100));
     }
+
+    @Test
+    @Order(9)
+    void retryRequeuesSameJobAndPreservesAttemptHistory() {
+        var created = jobService.create(actor, "key-retry-in-place", projectId, request("原任务重试"));
+        jdbcTemplate.update("""
+                UPDATE media_job SET status = 'FAILED', error_code = 'PRE_SUBMIT_FAILED',
+                    error_summary = '调用前失败', finished_at = now(), next_action_at = now() + interval '1 hour'
+                WHERE id = ?
+                """, created.jobId());
+        UUID preservedAttemptId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO media_job_attempt (id, job_id, attempt_no, action, outcome, started_at, finished_at)
+                VALUES (?, ?, 1, 'SUBMIT', 'REJECTED', now(), now())
+                """, preservedAttemptId, created.jobId());
+        Integer beforeCount = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM media_job WHERE user_id = ?", Integer.class, TEST_USER);
+
+        var retried = jobService.retry(actor, created.jobId(), false);
+
+        Assertions.assertEquals(created.jobId(), retried.jobId(), "重试必须复用原任务 ID");
+        Assertions.assertEquals("QUEUED", retried.status());
+        Integer afterCount = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM media_job WHERE user_id = ?", Integer.class, TEST_USER);
+        Assertions.assertEquals(beforeCount, afterCount, "重试不得新建 media_job");
+        Integer preservedAttempts = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM media_job_attempt WHERE id = ? AND job_id = ?",
+                Integer.class, preservedAttemptId, created.jobId());
+        Assertions.assertEquals(1, preservedAttempts, "既有 attempt 历史必须保留");
+        Integer retryEvents = jdbcTemplate.queryForObject("""
+                SELECT count(*) FROM media_job_event WHERE job_id = ? AND event_type = 'RETRY_QUEUED'
+                """, Integer.class, created.jobId());
+        Assertions.assertEquals(1, retryEvents);
+    }
 }

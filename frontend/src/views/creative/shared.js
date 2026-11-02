@@ -31,6 +31,10 @@ export function statusMeta(status) {
   return JOB_STATUS[status] || { label: status || '未知', tone: 'muted', hint: '' }
 }
 
+export function retryNeedsRiskAcknowledgement(job) {
+  return job?.status === 'RECONCILING' || job?.errorCode === 'SUBMISSION_UNCERTAIN'
+}
+
 export function formatTime(value) {
   if (!value) return ''
   const date = new Date(value)

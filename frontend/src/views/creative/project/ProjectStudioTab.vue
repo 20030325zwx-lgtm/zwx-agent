@@ -72,10 +72,11 @@
                   :disabled="busyJob === job.jobId" @click="jobsStore.resumeIngest(job)">
             <Spinner v-if="busyJob === job.jobId" /> 重新保存
           </button>
+          <HoldToConfirm v-else-if="retryNeedsRiskAcknowledgement(job)"
+                         label="确认后重试（可能二次计费）"
+                         :disabled="busyJob === job.jobId" @confirm="jobsStore.retry(job, true)" />
           <button v-else-if="job.status === 'FAILED' || job.status === 'CANCELLED'" type="button"
                   class="cr-secondary" :disabled="busyJob === job.jobId" @click="jobsStore.retry(job)">重新生成</button>
-          <HoldToConfirm v-else-if="job.status === 'RECONCILING'" label="确认后重试（可能二次计费）"
-                         :disabled="busyJob === job.jobId" @confirm="jobsStore.retry(job, true)" />
           <HoldToConfirm v-if="job.status === 'SUCCEEDED' && job.operation === 'image_edit'"
                          label="再做一版（同参考）" :disabled="busyJob === job.jobId"
                          @confirm="redoEdit(job)" />
@@ -249,7 +250,7 @@ import {
   createCreativeDraft, createCreativeJob, getWorkflowDefinition, listCreativeDrafts, optimizeCreativePrompt,
   startWorkflow, updateCreativeDraft
 } from '../../../api'
-import { formatBytes, formatTime, kindLabel, statusMeta } from '../shared'
+import { formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta } from '../shared'
 import {
   PROMPT_MAX, blockedText, downloadName, isVideoJob, jobOutputs as doneOutputs
 } from './helpers'

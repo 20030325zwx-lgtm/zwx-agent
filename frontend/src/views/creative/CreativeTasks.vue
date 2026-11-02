@@ -78,7 +78,7 @@
                   :disabled="busy" @click="resume">
             <Spinner v-if="busy" /> 重新保存
           </button>
-          <HoldToConfirm v-if="detail.status === 'RECONCILING'" label="确认后重试（可能二次计费）"
+          <HoldToConfirm v-if="retryNeedsRiskAcknowledgement(detail)" label="确认后重试（可能二次计费）"
                          :disabled="busy" @confirm="retry" />
           <button v-else-if="['FAILED','CANCELLED'].includes(detail.status)" type="button"
                   class="cr-secondary" :disabled="busy" @click="retry">重试</button>
@@ -97,7 +97,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   cancelCreativeJob, getCreativeJob, listCreativeJobs, resumeCreativeJobIngest, retryCreativeJob
 } from '../../api'
-import { formatTime, statusMeta } from './shared'
+import { formatTime, retryNeedsRiskAcknowledgement, statusMeta } from './shared'
 import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
 import Spinner from '../../components/ui/Spinner.vue'
 
@@ -198,13 +198,12 @@ async function resume() {
 }
 
 async function retry() {
-  // RECONCILING 的长按确认已在前端按钮上完成（结果未确认，重试可能二次计费）
   busy.value = true
   try {
     await retryCreativeJob(detail.value.jobId,
-      { acknowledgePossibleDuplicateCharge: detail.value.status === 'RECONCILING' })
+      { acknowledgePossibleDuplicateCharge: retryNeedsRiskAcknowledgement(detail.value) })
     await reload()
-    showToast('已创建新的生成任务', 'success')
+    showToast('原任务已重新排队', 'success')
   } catch (exception) {
     showToast(exception.response?.data?.error || '重试失败', 'error')
   } finally {

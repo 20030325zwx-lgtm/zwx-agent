@@ -114,7 +114,7 @@ export function useProjectJobs(projectId, showToast) {
     busyJob.value = job.jobId
     try {
       await retryCreativeJob(job.jobId, { acknowledgePossibleDuplicateCharge: acknowledge })
-      showToast('已创建新的生成任务', 'success')
+      showToast('原任务已重新排队', 'success')
       await load()
     } catch (exception) {
       showToast(exception.response?.data?.error || '重试失败', 'error')

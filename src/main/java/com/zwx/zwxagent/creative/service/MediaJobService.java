@@ -185,30 +185,37 @@ public class MediaJobService {
     }
 
     /**
-     * 普通重试（A23）：仅 FAILED/CANCELLED 可建新 job 并关联 parent；
-     * RECONCILING 结果不确定，必须显式确认可能重复计费；INGEST_FAILED 应走恢复入库。
+     * 人工重试（A23）：复用原 media_job 并保留 attempt/event 历史，不再创建子任务。
+     * RECONCILING 或由不确定提交收敛的 FAILED 必须显式确认可能重复计费。
      */
-    public CreateJobResult retry(CurrentActor actor, UUID jobId, String idempotencyKey,
+    public CreateJobResult retry(CurrentActor actor, UUID jobId,
                                  boolean acknowledgePossibleDuplicateCharge) {
-        var parent = getForOwner(actor, jobId);
-        if (parent.status() == MediaJobStatus.INGEST_FAILED) {
-            throw new CreativeConflictException("请使用恢复入库，不要重新生成");
-        }
-        if (parent.status() == MediaJobStatus.RECONCILING
-                && !acknowledgePossibleDuplicateCharge) {
-            throw new CreativeConflictException("原任务结果尚未确定，重试可能重复计费，请确认后再试");
-        }
-        if (parent.status() != MediaJobStatus.FAILED && parent.status() != MediaJobStatus.CANCELLED
-                && parent.status() != MediaJobStatus.RECONCILING) {
-            throw new CreativeConflictException("当前任务状态不支持重试");
-        }
-        String key = idempotencyKey == null || idempotencyKey.isBlank()
-                ? "retry-" + jobId + "-" + UUID.randomUUID() : idempotencyKey;
-        var input = parent.inputSnapshot();
-        return create(actor, key, parent.projectId(), new CreateJobRequest(
-                parent.projectId(), input.operation(), parent.modelSnapshot().modelRowId(),
-                input.prompt(), input.prompt(), input.parameters(), List.of(),
-                null, parent.id(), acknowledgePossibleDuplicateCharge));
+        return transactionTemplate.execute(status -> {
+            var job = jobRepository.lockById(jobId).orElse(null);
+            if (job == null || !job.tenantId().equals(actor.tenantId())
+                    || !job.userId().equals(actor.userId())) {
+                throw new IllegalArgumentException("任务不存在");
+            }
+            if (job.status() == MediaJobStatus.INGEST_FAILED) {
+                throw new CreativeConflictException("请使用恢复入库，不要重新生成");
+            }
+            boolean uncertain = job.status() == MediaJobStatus.RECONCILING
+                    || "SUBMISSION_UNCERTAIN".equals(job.errorCode());
+            if (uncertain && !acknowledgePossibleDuplicateCharge) {
+                throw new CreativeConflictException("原任务结果尚未确定，重试可能重复计费，请确认后再试");
+            }
+            if (job.status() != MediaJobStatus.FAILED && job.status() != MediaJobStatus.CANCELLED
+                    && job.status() != MediaJobStatus.RECONCILING) {
+                throw new CreativeConflictException("当前任务状态不支持重试");
+            }
+            if (!jobRepository.retryInPlaceFenced(job.id(), job.version(), job.leaseEpoch())) {
+                throw new CreativeConflictException("任务状态已变化，请刷新后重试");
+            }
+            eventRepository.append(job.id(), job.tenantId(), job.userId(), "RETRY_QUEUED",
+                    CreativeJson.toJson(Map.of("acknowledgePossibleDuplicateCharge", uncertain)));
+            var queued = jobRepository.findById(job.id()).orElseThrow();
+            return new CreateJobResult(queued.id(), queued.status().name(), true, queued.version());
+        });
     }
 
     /** 事件游标读取（A24）：只返回 seq 之后已提交的事件，调用方按 seq 去重。 */

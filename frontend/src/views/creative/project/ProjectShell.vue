@@ -97,7 +97,7 @@
                   @click="jobsStore.resumeIngest(detailJob)">
             <Spinner v-if="jobsStore.busyJob.value === detailJob.jobId" /> 重新保存
           </button>
-          <HoldToConfirm v-if="detailJob.status === 'RECONCILING'" label="确认后重试（可能二次计费）"
+          <HoldToConfirm v-if="retryNeedsRiskAcknowledgement(detailJob)" label="确认后重试（可能二次计费）"
                          :disabled="jobsStore.busyJob.value === detailJob.jobId"
                          @confirm="jobsStore.retry(detailJob, true)" />
           <button v-else-if="['FAILED','CANCELLED'].includes(detailJob.status)" type="button"
@@ -118,7 +118,7 @@ import {
   ArrowLeft, BookOpen, FileText, Images, LayoutGrid, ListChecks, Palette, RefreshCw, Users, Workflow
 } from 'lucide-vue-next'
 import { getCreativeProject, getCreativeJob, listModelCatalog } from '../../../api'
-import { downloadBlob, formatBytes, formatTime, kindLabel, statusMeta, useAssetUrls, useVideoUrls } from '../shared'
+import { downloadBlob, formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta, useAssetUrls, useVideoUrls } from '../shared'
 import { blockedText, isVideoJob, sourceLabel } from './helpers'
 import { PROJECT_CTX, useProjectJobs, useStoryWorkspace } from './composables'
 import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'

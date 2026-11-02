@@ -285,6 +285,7 @@ class MediaJobSchedulerTest {
         var reconciling = jobRepository.findById(job.id()).orElseThrow();
         Assertions.assertEquals(MediaJobStatus.RECONCILING, reconciling.status());
         Assertions.assertNull(reconciling.providerTaskId());
+        Assertions.assertNotNull(reconciling.observationDeadlineAt());
         Assertions.assertEquals(1, mockAdapter.submitCount("sub-" + job.id() + "-1"));
         // 无对账依据（DashScope 无幂等键查询）：保持 RECONCILING 并标记关注，绝不重发
         pushNextActionNow(job.id());
@@ -293,6 +294,18 @@ class MediaJobSchedulerTest {
         Assertions.assertEquals(MediaJobStatus.RECONCILING, still.status());
         Assertions.assertNull(still.providerTaskId());
         Assertions.assertTrue(still.attentionRequired());
+        Assertions.assertEquals(1, mockAdapter.submitCount());
+
+        // 观察窗口到期后收敛为普通失败，保留安全重试入口，但仍不得自动重发。
+        jdbcTemplate.update("""
+                UPDATE media_job SET observation_deadline_at = ?, next_action_at = ?, lease_until = ?
+                WHERE id = ?
+                """, pastMillis(1000), pastMillis(0), pastMillis(1000), job.id());
+        scheduler.tick();
+        var failed = jobRepository.findById(job.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.FAILED, failed.status());
+        Assertions.assertEquals("SUBMISSION_UNCERTAIN", failed.errorCode());
+        Assertions.assertTrue(MediaJobService.allowedActions(failed.status()).contains("retry"));
         Assertions.assertEquals(1, mockAdapter.submitCount());
     }
 
@@ -409,7 +422,7 @@ class MediaJobSchedulerTest {
         mockAdapter.setDefaultQueryScript(
                 new MockMediaProviderAdapter.QueryScript(0, MockMediaProviderAdapter.QueryState.SUCCEEDED,
                         List.of(), null));
-        // 场景一：无 task id 的 SUBMITTING（提交结果不明），租约先未到期、再过期、再清空
+        // 场景一：没有 SUBMIT attempt 的 SUBMITTING 说明调用前中断，应失败并允许安全重试。
         var uncertain = createQueued("sched-r1-uncertain", "R1 恢复结果不明");
         jdbcTemplate.update("""
                 UPDATE media_job SET status = 'SUBMITTING', lease_until = now() + interval '1 minute',
@@ -429,13 +442,31 @@ class MediaJobSchedulerTest {
                 "租约过期后普通 tick 仍不得动 SUBMITTING");
         jdbcTemplate.update("UPDATE media_job SET lease_until = NULL WHERE id = ?", uncertain.id());
         scheduler.recover();
-        var reconciling = jobRepository.findById(uncertain.id()).orElseThrow();
-        Assertions.assertEquals(MediaJobStatus.RECONCILING, reconciling.status(),
-                "NULL 租约的 SUBMITTING 必须被恢复器选中并转 RECONCILING");
-        Assertions.assertNull(reconciling.providerTaskId());
+        var preSubmitFailed = jobRepository.findById(uncertain.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.FAILED, preSubmitFailed.status(),
+                "没有提交尝试的任务不得误报可能已计费");
+        Assertions.assertEquals("PRE_SUBMIT_INTERRUPTED", preSubmitFailed.errorCode());
+        Assertions.assertTrue(MediaJobService.allowedActions(preSubmitFailed.status()).contains("retry"));
         Assertions.assertEquals(0, mockAdapter.submitCount(), "恢复只改状态，绝不重新提交");
 
-        // 场景二：已拿到上游 task id 的 SUBMITTING（attach 后、转 RUNNING 前中断）→ 恢复查询
+        // 场景二：已有 SUBMIT attempt 但没有 task id，才属于真实结果未知；必须设置观察截止时间。
+        var started = createQueued("sched-r1-started", "R1 已开始提交");
+        jdbcTemplate.update("""
+                UPDATE media_job SET status = 'SUBMITTING', lease_until = NULL, version = version + 1
+                WHERE id = ?
+                """, started.id());
+        jdbcTemplate.update("""
+                INSERT INTO media_job_attempt (id, job_id, attempt_no, action, outcome, started_at, finished_at)
+                VALUES (?, ?, 1, 'SUBMIT', 'UNKNOWN', now(), now())
+                """, UUID.randomUUID(), started.id());
+        scheduler.recover();
+        var reconciling = jobRepository.findById(started.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.RECONCILING, reconciling.status());
+        Assertions.assertNotNull(reconciling.observationDeadlineAt());
+        Assertions.assertTrue(reconciling.attentionRequired());
+        Assertions.assertEquals("SUBMISSION_UNCERTAIN", reconciling.blockedReason());
+
+        // 场景三：已拿到上游 task id 的 SUBMITTING（attach 后、转 RUNNING 前中断）→ 恢复查询
         var withTask = createQueued("sched-r1-taskid", "R1 恢复任务号");
         scheduler.tick();
         Assertions.assertEquals(MediaJobStatus.RUNNING,
@@ -513,6 +544,32 @@ class MediaJobSchedulerTest {
             releaseSubmit.countDown();
             worker.join(10_000);
         }
+    }
+
+    @Test
+    @Order(13)
+    void preSubmitConfigurationFailureIsSafeToRetry() {
+        mockAdapter.reset();
+        profileRepository.upsert(TEST_MODEL_ROW_ID, "missing-adapter", "1",
+                Map.of("text_to_image", true),
+                Map.of("operation", "text_to_image", "parameters", List.of()), null, null);
+        var job = createQueued("sched-pre-submit-failed", "提交前配置失败");
+        // 快照已经冻结错误适配器，立即恢复测试配置，避免影响后续用例。
+        profileRepository.upsert(TEST_MODEL_ROW_ID, "mock-text2image", "1",
+                Map.of("text_to_image", true),
+                Map.of("operation", "text_to_image", "parameters", List.of()), null, null);
+
+        scheduler.tick();
+
+        var failed = jobRepository.findById(job.id()).orElseThrow();
+        Assertions.assertEquals(MediaJobStatus.FAILED, failed.status());
+        Assertions.assertEquals("PRE_SUBMIT_FAILED", failed.errorCode());
+        Assertions.assertTrue(failed.errorSummary().contains("可直接重试"));
+        Assertions.assertTrue(MediaJobService.allowedActions(failed.status()).contains("retry"));
+        Integer attempts = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM media_job_attempt WHERE job_id = ?", Integer.class, job.id());
+        Assertions.assertEquals(0, attempts);
+        Assertions.assertEquals(0, mockAdapter.submitCount());
     }
 
     @Test

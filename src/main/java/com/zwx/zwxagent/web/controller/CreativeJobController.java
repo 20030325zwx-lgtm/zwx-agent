@@ -125,11 +125,10 @@ public class CreativeJobController {
     @PostMapping("/{jobId}/retry")
     public ResponseEntity<Map<String, Object>> retry(
             CurrentActor actor, @PathVariable UUID jobId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody(required = false) RetryBody body) {
-        var result = jobService.retry(actor, jobId, idempotencyKey,
+        var result = jobService.retry(actor, jobId,
                 body != null && Boolean.TRUE.equals(body.acknowledgePossibleDuplicateCharge()));
-        return ResponseEntity.status(result.reused() ? HttpStatus.OK : HttpStatus.ACCEPTED)
+        return ResponseEntity.ok()
                 .body(Map.of("jobId", result.jobId().toString(), "status", result.status(),
                         "reused", result.reused(), "version", result.version()));
     }

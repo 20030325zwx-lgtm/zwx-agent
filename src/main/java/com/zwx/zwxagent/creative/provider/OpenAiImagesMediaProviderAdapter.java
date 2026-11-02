@@ -73,7 +73,7 @@ public class OpenAiImagesMediaProviderAdapter implements MediaProviderAdapter {
      */
     @Override
     public SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey,
-                               java.util.Map<java.util.UUID, byte[]> referenceAssets) {
+                               java.util.Map<java.util.UUID, ReferenceAsset> referenceAssets) {
         if (referenceAssets == null || referenceAssets.isEmpty()) {
             return submit(model, input, submissionKey);
         }
@@ -93,7 +93,7 @@ public class OpenAiImagesMediaProviderAdapter implements MediaProviderAdapter {
         }
         int index = 0;
         for (var entry : referenceAssets.entrySet()) {
-            byte[] bytes = entry.getValue() == null ? new byte[0] : entry.getValue();
+            byte[] bytes = entry.getValue() == null ? new byte[0] : entry.getValue().bytes();
             String filename = "reference-" + (++index) + guessExtension(bytes);
             String contentType = guessMime(bytes);
             parts.add(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\""

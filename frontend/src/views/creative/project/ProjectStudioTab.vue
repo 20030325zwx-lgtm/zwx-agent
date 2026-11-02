@@ -148,8 +148,9 @@
           </label>
           <label v-if="videoOperation === 'image_to_video'" class="cr-field">
             <span class="cr-field-label"><span>首帧图片</span></span>
-            <AssetParamField v-model="videoRefAssetId" media-type="IMAGE" @update:model-value="markDirty" />
-            <span class="cr-field-help">图生视频需要把首帧以 URL 交给上游，传输方式验证后开放；当前提交会收到明确报错</span>
+            <AssetParamField v-model="videoRefAssetId" media-type="IMAGE"
+                             :default-project-id="projectId" @update:model-value="markDirty" />
+            <span class="cr-field-help">从素材库选择或上传一张图片，作为视频首帧。</span>
           </label>
           <label class="cr-field">
             <span class="cr-field-label"><span>时长（秒）</span></span>
@@ -302,7 +303,8 @@ const canGenerate = computed(() => project.value?.status === 'ACTIVE'
   && (isVideoProject.value
     ? !!videoBinding.value
     : project.value?.kind === 'IMAGE' && !!imageBinding.value)
-  && (idea.value.trim() || effective.value.trim()).length > 0)
+  && (idea.value.trim() || effective.value.trim()).length > 0
+  && (!isVideoProject.value || videoOperation.value !== 'image_to_video' || !!videoRefAssetId.value))
 const saveStateText = computed(() => {
   if (conflict.value) return '草稿冲突：其他页签已修改'
   if (saveState.value === 'saving') return '草稿保存中…'
@@ -519,6 +521,11 @@ function continueFrom(job) {
   finalSynced.value = true
   if (detail.parameters?.size) size.value = detail.parameters.size
   if (typeof detail.parameters?.watermark === 'boolean') watermark.value = detail.parameters.watermark
+  if (isVideoJob(detail)) {
+    videoOperation.value = detail.operation || 'text_to_video'
+    videoSeconds.value = detail.parameters?.seconds || '5'
+    videoRefAssetId.value = detail.referenceAssetIds?.[0] || ''
+  }
   markDirty()
   showToast('已带入原提示词，可修改后再次生成', 'success')
 }
@@ -530,7 +537,7 @@ const wfCreate = reactive({ loading: false, starting: false, error: '', workflow
 const wfFormHint = computed(() => workflows.value.find(item => item.key === wfCreate.workflowKey)?.description || '')
 const videoOperationOptions = [
   { value: 'text_to_video', label: '文生视频' },
-  { value: 'image_to_video', label: '图生视频（首帧）· 即将开放' }
+  { value: 'image_to_video', label: '图生视频（首帧）' }
 ]
 const sizeOptions = [
   { value: '1024*1024', label: '1024 × 1024（方形）' },

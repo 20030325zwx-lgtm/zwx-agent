@@ -230,7 +230,7 @@ public class MediaJobScheduler {
         version++;
         ResolvedMediaModel resolved;
         MediaProviderAdapter adapter;
-        java.util.Map<java.util.UUID, byte[]> referenceAssets;
+        java.util.Map<java.util.UUID, MediaProviderAdapter.ReferenceAsset> referenceAssets;
         long attemptNo;
         try {
             resolved = resolvedFromSnapshot(job);
@@ -557,16 +557,20 @@ public class MediaJobScheduler {
                 rs -> { }, scopeType, scopeId);
     }
 
-    /** 参考素材字节解析：素材库存对象直读；单张超过下载上限按失败处理（提交结果由异常路径收敛为 Unknown 前先本地失败）。 */
-    private java.util.Map<java.util.UUID, byte[]> resolveReferenceAssets(java.util.List<java.util.UUID> assetIds) {
+    /** 参考素材解析：字节供图片编辑，短时效外链供只接受 URL 的视频供应商。 */
+    private java.util.Map<java.util.UUID, MediaProviderAdapter.ReferenceAsset> resolveReferenceAssets(
+            java.util.List<java.util.UUID> assetIds) {
         if (assetIds == null || assetIds.isEmpty()) return java.util.Map.of();
-        var result = new java.util.LinkedHashMap<java.util.UUID, byte[]>();
+        var result = new java.util.LinkedHashMap<java.util.UUID, MediaProviderAdapter.ReferenceAsset>();
         for (java.util.UUID assetId : assetIds) {
             var row = jdbcTemplate.queryForMap(
-                    "SELECT object_key, media_type FROM creative_asset WHERE id = ?", assetId);
+                    "SELECT object_key, media_type, mime_type FROM creative_asset WHERE id = ?", assetId);
             String objectKey = String.valueOf(row.get("object_key"));
             try (var in = mediaStorage.open(objectKey)) {
-                result.put(assetId, in.readAllBytes());
+                String externalUrl = mediaStorage.externalReadUrl(objectKey, java.time.Duration.ofMinutes(15))
+                        .orElse(null);
+                result.put(assetId, new MediaProviderAdapter.ReferenceAsset(
+                        in.readAllBytes(), String.valueOf(row.get("mime_type")), externalUrl));
             } catch (Exception exception) {
                 throw new IllegalStateException("参考素材读取失败：" + assetId + "；" + exception.getMessage(), exception);
             }

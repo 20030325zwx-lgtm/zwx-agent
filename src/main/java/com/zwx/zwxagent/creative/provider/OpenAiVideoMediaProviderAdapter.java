@@ -21,8 +21,8 @@ import java.util.List;
  * 错误结构两套并存：网关 {"code","message"} 与上游 {"error":{code,message}}，都要解析。
  * 真实验证记录：sd_2.0_special_720p 出片成功（5s，约 5 分钟，计费 1 次）；
  * sd_2.5_special_1080p 上游报 invalid_model（渠道侧问题）；size 字段未验证。
- * 图生视频：上游要求 JSON + 参考 URL（不接受文件上传），参考 URL 传输字段名未验证——
- * 本版如实拒绝并提示待开放，不猜测字段名（执行计划 V00 约定）。
+ * 图生视频：New API openai_video JSON 协议接受 input_reference URL；素材使用 OSS 短时签名 URL，
+ * 不把登录态或永久公开地址交给供应商。本地存储没有公网 URL 时明确拒绝，不发起供应商请求。
  * 上游无取消协议：cancel 默认 UNSUPPORTED（已提交任务仍可能计费/完成）。
  */
 @Component
@@ -41,6 +41,28 @@ public class OpenAiVideoMediaProviderAdapter implements MediaProviderAdapter {
 
     @Override
     public SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey) {
+        return sendSubmit(model, basePayload(model, input));
+    }
+
+    @Override
+    public SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey,
+                               java.util.Map<java.util.UUID, ReferenceAsset> referenceAssets) {
+        if (referenceAssets == null || referenceAssets.isEmpty()) {
+            return submit(model, input, submissionKey);
+        }
+        ReferenceAsset reference = referenceAssets.values().iterator().next();
+        String externalUrl = reference == null ? null : reference.externalUrl();
+        if (externalUrl == null || externalUrl.isBlank()) {
+            return MediaProviderAdapter.SubmitResult.rejected("REFERENCE_URL_UNAVAILABLE",
+                    "图生视频需要供应商可读取的临时素材链接；当前素材使用本地存储，请启用 OSS 后重试");
+        }
+        var payload = basePayload(model, input);
+        payload.put("input_reference", externalUrl);
+        return sendSubmit(model, payload);
+    }
+
+    private static java.util.LinkedHashMap<String, Object> basePayload(
+            ResolvedMediaModel model, InputSnapshot input) {
         var payload = new java.util.LinkedHashMap<String, Object>();
         payload.put("model", model.modelName());
         payload.put("prompt", input.prompt());
@@ -48,6 +70,10 @@ public class OpenAiVideoMediaProviderAdapter implements MediaProviderAdapter {
         if (seconds != null && !String.valueOf(seconds).isBlank()) {
             payload.put("seconds", String.valueOf(seconds));
         }
+        return payload;
+    }
+
+    private SubmitResult sendSubmit(ResolvedMediaModel model, java.util.Map<String, Object> payload) {
         HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint(model.baseUrl(), "/videos")))
                 .timeout(Duration.ofSeconds(60))
                 .header("Authorization", "Bearer " + model.apiKey())
@@ -62,17 +88,6 @@ public class OpenAiVideoMediaProviderAdapter implements MediaProviderAdapter {
             return MediaProviderAdapter.SubmitResult.unknown(
                     exception.getClass().getSimpleName() + ": " + exception.getMessage());
         }
-    }
-
-    @Override
-    public SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey,
-                               java.util.Map<java.util.UUID, byte[]> referenceAssets) {
-        if (referenceAssets != null && !referenceAssets.isEmpty()) {
-            // 上游（Seedance 插件）要求 JSON + 参考 URL；URL 传输字段名未经真实验证，不猜测计费
-            return MediaProviderAdapter.SubmitResult.rejected("IMAGE_TO_VIDEO_PENDING",
-                    "图生视频需要把首帧素材以公网 URL 交给上游，该传输方式尚未验证，暂未开放；请先使用文生视频");
-        }
-        return submit(model, input, submissionKey);
     }
 
     private MediaProviderAdapter.SubmitResult classifySubmit(HttpResponse<String> response) {

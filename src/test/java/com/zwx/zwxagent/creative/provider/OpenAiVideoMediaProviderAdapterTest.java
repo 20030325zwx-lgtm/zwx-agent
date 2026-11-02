@@ -117,12 +117,28 @@ class OpenAiVideoMediaProviderAdapterTest {
     }
 
     @Test
-    void imageToVideoIsHonestPendingUntilReferenceUrlTransportVerified() {
+    void imageToVideoSendsSignedReferenceUrlInJson() {
+        String signedUrl = "https://assets.example.com/reference.png?signature=short-lived";
         var result = new OpenAiVideoMediaProviderAdapter().submit(model(),
                 input(ParameterSchema.IMAGE_TO_VIDEO, Map.of()), "key-1",
-                Map.of(UUID.randomUUID(), new byte[]{-119, 80, 78, 71, 13, 10, 26, 10}));
+                Map.of(UUID.randomUUID(), new MediaProviderAdapter.ReferenceAsset(
+                        new byte[]{-119, 80, 78, 71, 13, 10, 26, 10}, "image/png", signedUrl)));
+        Assertions.assertEquals(MediaProviderAdapter.SubmitOutcome.ACCEPTED, result.outcome());
+        String body = lastSubmitBody.get();
+        Assertions.assertTrue(body.contains("\"input_reference\":\"" + signedUrl),
+                () -> "缺少首帧临时 URL：" + body);
+    }
+
+    @Test
+    void imageToVideoRejectsLocalReferenceWithoutCallingProvider() {
+        int before = submitCount.get();
+        var result = new OpenAiVideoMediaProviderAdapter().submit(model(),
+                input(ParameterSchema.IMAGE_TO_VIDEO, Map.of()), "key-1",
+                Map.of(UUID.randomUUID(), new MediaProviderAdapter.ReferenceAsset(
+                        new byte[]{-119, 80, 78, 71}, "image/png", null)));
         Assertions.assertEquals(MediaProviderAdapter.SubmitOutcome.REJECTED, result.outcome());
-        Assertions.assertEquals("IMAGE_TO_VIDEO_PENDING", result.errorCode());
+        Assertions.assertEquals("REFERENCE_URL_UNAVAILABLE", result.errorCode());
+        Assertions.assertEquals(before, submitCount.get());
     }
 
     @Test

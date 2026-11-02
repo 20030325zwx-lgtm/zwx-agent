@@ -14,6 +14,10 @@
 - **实测模型**：`sd_2.0_special_720p` 出片成功（5 秒片约 5 分钟，计费 1 次探测 + 1 次全链路）；`sd_2.5_special_1080p` 上游报 `invalid_model`（渠道侧问题，模型已保留启用但绑定切到 720p）；`sd-mini_special_720p` 无可用渠道。分组名「Seedance 视频 (distributor)」。
 - **TODO（未验证项）**：图生视频参考 URL 传输的字段名（上游要求 JSON + 参考 URL，不接受文件上传——本版如实拒绝 `IMAGE_TO_VIDEO_PENDING`，不猜测计费）；`size` 字段（不发送）；音频能力；`_with_video_ref` 变体语义；上游取消（无协议，UNSUPPORTED）。
 
+> 2026-11-02 后续：对照 New API `openai_video` 协议与适配器源码确认 JSON 字段为
+> `input_reference`。创作素材通过 OSS 15 分钟预签名 URL 传递，图生视频入口已开放；
+> 本地存储没有供应商可访问地址时明确返回 `REFERENCE_URL_UNAVAILABLE`，不发起供应商请求。
+
 ## 后端改动
 
 | 模块 | 改动 |

@@ -21,6 +21,8 @@
   - **后端全链路 SUCCEEDED**：创建任务→RUNNING（上游 task_id）→约 4.5 分钟→产物 2.9MB 入素材库（GENERATED/VIDEO）→UI 预览实际播放（1280×720，截图确认）。
   - 过程修复 3 个 bug（均有记录）：① Range 在 @RestController 下 ResponseEntity<?> 通配返回 500；② 播放签名 URL 双 /api 前缀；③ **`CreativeAssetRepository.insert` 缺 width/height/duration_ms 列**（bug-2026-11-01-creative-asset-insert-drops-dimensions.txt，历史上 GENERATED 素材尺寸一直是 null，视频把它暴露了）。
   - 图生视频：上游要求参考 URL 传输（字段名未验证）——适配器如实拒绝 IMAGE_TO_VIDEO_PENDING，UI 标注「即将开放」；size 参数不发送（未验证）。
+
+2026-11-02 后续：New API 当前 `openai_video` 契约确认 JSON 字段为 `input_reference`；现已通过 OSS 预签名 URL 开放首帧图生视频，UI 不再标注「即将开放」。
 - 桌面端两次 dist:mac；最终包含 JSON 适配器与 insert 修复（时间见 release/）。
 
 ## 遗留事项

@@ -185,8 +185,11 @@ class OpenAiImagesMediaProviderAdapterTest {
     void editSubmitsMultipartWithReferenceImages() throws Exception {
         byte[] modelPhoto = PNG_BYTES;
         byte[] garment = new byte[]{-119, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4, 5, 6};
-        var references = java.util.Map.of(java.util.UUID.randomUUID(), modelPhoto,
-                java.util.UUID.randomUUID(), garment);
+        var references = java.util.Map.of(
+                java.util.UUID.randomUUID(),
+                new MediaProviderAdapter.ReferenceAsset(modelPhoto, "image/png", null),
+                java.util.UUID.randomUUID(),
+                new MediaProviderAdapter.ReferenceAsset(garment, "image/png", null));
         var result = adapter().submit(model(),
                 new InputSnapshot("image_edit", "让模特穿上参考的上衣与裤子", Map.of("size", "1024*1024"), List.of()),
                 "sub-edit", references);

@@ -1,11 +1,13 @@
 package com.zwx.zwxagent.creative.service;
 
 import com.zwx.zwxagent.creative.domain.CreativeConflictException;
+import com.zwx.zwxagent.creative.domain.CreativeException;
 import com.zwx.zwxagent.creative.domain.CreativeQuotaException;
 import com.zwx.zwxagent.creative.domain.MediaJobRecord;
 import com.zwx.zwxagent.creative.repository.MediaJobEventRepository;
 import com.zwx.zwxagent.creative.repository.MediaJobRepository;
 import com.zwx.zwxagent.creative.repository.MediaProviderQuotaRepository;
+import com.zwx.zwxagent.platform.settings.ConfigSecretCipher;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import com.zwx.zwxagent.platform.security.Role;
 import jakarta.annotation.Resource;
@@ -45,6 +47,8 @@ class MediaJobServiceTest {
     private static final String TEST_USER = "creative-job-test-user";
     private static final long TEST_PROVIDER_ID = 900001L;
     private static final long TEST_MODEL_ROW_ID = 900001L;
+    private static final long TEST_VIDEO_PROVIDER_ID = 900002L;
+    private static final long TEST_VIDEO_MODEL_ROW_ID = 900002L;
 
     @Resource
     private MediaJobService jobService;
@@ -64,8 +68,13 @@ class MediaJobServiceTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Resource
+    private ConfigSecretCipher secretCipher;
+
     private CurrentActor actor;
     private UUID projectId;
+    private UUID videoProjectId;
+    private UUID videoReferenceAssetId;
     private UUID jobId;
 
     @BeforeAll
@@ -101,6 +110,35 @@ class MediaJobServiceTest {
                 });
         projectId = projectService.create(actor,
                 new CreativeProjectService.CreateProjectRequest("任务校验项目", null)).id();
+        jdbcTemplate.update("""
+                        INSERT INTO model_provider
+                            (id, owner_id, name, protocol, base_url, secret_ciphertext, enabled)
+                        VALUES (?, ?, '测试视频中转站', 'openai-compatible',
+                                'https://video.example.test/v1', ?, TRUE)
+                        ON CONFLICT (id) DO NOTHING
+                        """, TEST_VIDEO_PROVIDER_ID, TEST_USER, secretCipher.encrypt("test-video-key"));
+        jdbcTemplate.update("""
+                        INSERT INTO model_provider_model (id, provider_id, model_id, display_name, enabled)
+                        VALUES (?, ?, 'test-seedance', '测试视频模型', TRUE)
+                        ON CONFLICT (id) DO NOTHING
+                        """, TEST_VIDEO_MODEL_ROW_ID, TEST_VIDEO_PROVIDER_ID);
+        jdbcTemplate.update("""
+                        INSERT INTO model_binding (scope_type, owner_id, purpose, provider_id, model_row_id)
+                        VALUES ('USER', ?, 'video_generation', ?, ?)
+                        ON CONFLICT (scope_type, owner_id, purpose) DO UPDATE
+                        SET provider_id = EXCLUDED.provider_id, model_row_id = EXCLUDED.model_row_id
+                        """, TEST_USER, TEST_VIDEO_PROVIDER_ID, TEST_VIDEO_MODEL_ROW_ID);
+        videoProjectId = projectService.create(actor,
+                new CreativeProjectService.CreateProjectRequest("视频任务校验项目", null, "VIDEO")).id();
+        videoReferenceAssetId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                        INSERT INTO creative_asset
+                            (id, project_id, tenant_id, user_id, origin, media_type, storage_backend,
+                             object_key, mime_type, byte_size, sha256, display_name, status, metadata)
+                        VALUES (?, ?, 'default', ?, 'UPLOAD', 'IMAGE', 'LOCAL', ?, 'image/png',
+                                8, 'test-image-sha256', '首帧.png', 'READY', '{}'::jsonb)
+                        """, videoReferenceAssetId, videoProjectId, TEST_USER,
+                "test/video-reference/" + videoReferenceAssetId + ".png");
     }
 
     @AfterAll
@@ -112,10 +150,16 @@ class MediaJobServiceTest {
         jdbcTemplate.update("DELETE FROM media_job_asset_ref WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM video_batch_item WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job WHERE user_id = ?", TEST_USER);
-        jdbcTemplate.update("DELETE FROM media_model_profile WHERE model_row_id = ?", TEST_MODEL_ROW_ID);
-        jdbcTemplate.update("DELETE FROM model_binding WHERE owner_id = ? AND purpose = 'image_generation'", TEST_USER);
-        jdbcTemplate.update("DELETE FROM model_provider_model WHERE provider_id = ?", TEST_PROVIDER_ID);
-        jdbcTemplate.update("DELETE FROM model_provider WHERE id = ?", TEST_PROVIDER_ID);
+        jdbcTemplate.update("DELETE FROM creative_asset WHERE user_id = ?", TEST_USER);
+        jdbcTemplate.update("DELETE FROM creative_project WHERE user_id = ?", TEST_USER);
+        jdbcTemplate.update("DELETE FROM media_model_profile WHERE model_row_id IN (?, ?)",
+                TEST_MODEL_ROW_ID, TEST_VIDEO_MODEL_ROW_ID);
+        jdbcTemplate.update("DELETE FROM model_binding WHERE owner_id = ? AND purpose IN ('image_generation','video_generation')",
+                TEST_USER);
+        jdbcTemplate.update("DELETE FROM model_provider_model WHERE provider_id IN (?, ?)",
+                TEST_PROVIDER_ID, TEST_VIDEO_PROVIDER_ID);
+        jdbcTemplate.update("DELETE FROM model_provider WHERE id IN (?, ?)",
+                TEST_PROVIDER_ID, TEST_VIDEO_PROVIDER_ID);
         jdbcTemplate.update("DELETE FROM media_provider_quota WHERE scope_id = ?", TEST_USER);
     }
 
@@ -304,5 +348,27 @@ class MediaJobServiceTest {
                 SELECT count(*) FROM media_job_event WHERE job_id = ? AND event_type = 'RETRY_QUEUED'
                 """, Integer.class, created.jobId());
         Assertions.assertEquals(1, retryEvents);
+    }
+
+    @Test
+    @Order(10)
+    void imageToVideoAcceptsPromptAndOneReadyImage() {
+        var missingReference = new MediaJobService.CreateJobRequest(videoProjectId, "image_to_video", null,
+                "让画面动起来", "镜头缓慢推进，人物转头看向镜头", Map.of("seconds", "5"),
+                List.of(), null, null, null);
+        Assertions.assertThrows(CreativeException.class,
+                () -> jobService.create(actor, "key-video-missing-reference", videoProjectId, missingReference));
+
+        var request = new MediaJobService.CreateJobRequest(videoProjectId, "image_to_video", null,
+                "让画面动起来", "镜头缓慢推进，人物转头看向镜头", Map.of("seconds", "5"),
+                List.of(videoReferenceAssetId), null, null, null);
+        var created = jobService.create(actor, "key-image-to-video", videoProjectId, request);
+        var job = jobService.getForOwner(actor, created.jobId());
+
+        Assertions.assertEquals("QUEUED", created.status());
+        Assertions.assertEquals("image_to_video", job.inputSnapshot().operation());
+        Assertions.assertEquals(List.of(videoReferenceAssetId), job.inputSnapshot().referenceAssetIds());
+        Assertions.assertEquals("5", job.inputSnapshot().parameters().get("seconds"));
+        Assertions.assertEquals("openai-video", job.modelSnapshot().adapterKey());
     }
 }

@@ -21,11 +21,11 @@ public interface MediaProviderAdapter {
     SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey);
 
     /**
-     * 带参考图的提交（image_edit）：参考图字节由调用方解析自素材库（仅本人 READY 素材）。
-     * 不支持参考图的适配器沿用三参 submit（DashScope 文生图等）。
+     * 带参考图的提交：字节用于 multipart 图片编辑，externalUrl 用于只接受公网 URL 的视频供应商。
+     * 素材由调用方从本人 READY 素材库解析；不支持参考图的适配器沿用三参 submit。
      */
     default SubmitResult submit(ResolvedMediaModel model, InputSnapshot input, String submissionKey,
-                                java.util.Map<java.util.UUID, byte[]> referenceAssets) {
+                                java.util.Map<java.util.UUID, ReferenceAsset> referenceAssets) {
         return submit(model, input, submissionKey);
     }
 
@@ -51,6 +51,17 @@ public interface MediaProviderAdapter {
     enum QueryState { RUNNING, SUCCEEDED, FAILED, UNKNOWN }
 
     enum CancelOutcome { CONFIRMED, REQUESTED, UNSUPPORTED }
+
+    record ReferenceAsset(byte[] bytes, String mimeType, String externalUrl) {
+        public ReferenceAsset {
+            bytes = bytes == null ? new byte[0] : bytes.clone();
+        }
+
+        @Override
+        public byte[] bytes() {
+            return bytes.clone();
+        }
+    }
 
     record Output(String url, byte[] bytes, String mimeType) {
         public static Output ofUrl(String url) {

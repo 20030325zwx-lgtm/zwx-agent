@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URL;
+import java.time.Duration;
+import java.util.Optional;
 
 /** 云端 OSS 存储：复用知识库的 OssClientProvider（应用内唯一凭据来源）。桶保持私有（设计 §11）。 */
 @Component
@@ -52,6 +54,14 @@ public class OssMediaStorage implements MediaStorage {
     @Override
     public void delete(String objectKey) {
         ossClientProvider.getClient().deleteObject(bucket, objectKey);
+    }
+
+    @Override
+    public Optional<String> externalReadUrl(String objectKey, Duration ttl) {
+        long seconds = Math.max(60, ttl == null ? 900 : ttl.toSeconds());
+        URL url = ossClientProvider.getClient().generatePresignedUrl(
+                bucket, objectKey, java.util.Date.from(java.time.Instant.now().plusSeconds(seconds)));
+        return Optional.of(url.toString());
     }
 
     /** 供“按字节上传”的便捷入口（服务层已读入字节的场景）。 */

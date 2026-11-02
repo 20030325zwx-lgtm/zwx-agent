@@ -63,20 +63,37 @@ public class VideoShotCandidateRepository {
                         """, MAPPER, shotId, tenantId, userId);
     }
 
-    /** 候选 + 关联任务状态（轻量任务关联；无任务的候选任务态为空）。 */
+    /** 候选 + 关联任务状态 + 产物素材摘要（检查器直接显示分辨率/时长，不再只有 assetId）。 */
     public List<CandidateWithJob> listByShotWithJob(String tenantId, String userId, UUID shotId) {
         return jdbcTemplate.query("""
-                        SELECT c.*, j.status AS job_status, j.error_summary AS job_error
+                        SELECT c.*, j.status AS job_status, j.error_summary AS job_error,
+                               a.display_name AS asset_name, a.media_type AS asset_media_type,
+                               a.width AS asset_width, a.height AS asset_height,
+                               a.duration_ms AS asset_duration_ms, a.byte_size AS asset_byte_size
                         FROM video_shot_candidate c
                         LEFT JOIN media_job j ON j.id = c.job_id
+                        LEFT JOIN creative_asset a ON a.id = c.asset_id
                         WHERE c.shot_id = ? AND c.tenant_id = ? AND c.user_id = ?
                         ORDER BY c.created_at DESC
                         """, (rs, rowNum) -> new CandidateWithJob(map(rs, rowNum),
-                rs.getString("job_status"), rs.getString("job_error")),
+                rs.getString("job_status"), rs.getString("job_error"),
+                new CandidateAsset(
+                        rs.getString("asset_name"),
+                        rs.getString("asset_media_type"),
+                        (Integer) rs.getObject("asset_width"),
+                        (Integer) rs.getObject("asset_height"),
+                        rs.getObject("asset_duration_ms") == null ? null : rs.getLong("asset_duration_ms"),
+                        rs.getObject("asset_byte_size") == null ? null : rs.getLong("asset_byte_size"))),
                 shotId, tenantId, userId);
     }
 
-    public record CandidateWithJob(VideoShotCandidateRecord candidate, String jobStatus, String jobError) {
+    /** 候选产物摘要；生成中或失败时没有产物，整个对象为空。 */
+    public record CandidateAsset(String displayName, String mediaType, Integer width, Integer height,
+                                 Long durationMs, Long byteSize) {
+    }
+
+    public record CandidateWithJob(VideoShotCandidateRecord candidate, String jobStatus, String jobError,
+                                   CandidateAsset asset) {
     }
 
     public Optional<VideoShotCandidateRecord> findSelected(String tenantId, String userId, UUID shotId) {

@@ -52,8 +52,9 @@ public class ShotProductionService {
     public record SelectRequest(UUID candidateId, Long expectedVersion) {
     }
 
-    /** 候选视图：候选本体 + 关联任务状态（轻量任务关联，镜头抽屉直接展示）。 */
-    public record CandidateView(VideoShotCandidateRecord candidate, String jobStatus, String jobError) {
+    /** 候选视图：候选本体 + 关联任务状态 + 产物摘要（镜头检查器直接展示分辨率与时长）。 */
+    public record CandidateView(VideoShotCandidateRecord candidate, String jobStatus, String jobError,
+                                VideoShotCandidateRepository.CandidateAsset asset) {
     }
 
     /** 从镜头发起一次生成：候选先建（冻结提交文本），任务幂等键绑定候选 ID。 */
@@ -180,14 +181,14 @@ public class ShotProductionService {
     public List<CandidateView> candidates(CurrentActor actor, UUID projectId, UUID shotId) {
         contentService.getShot(actor, projectId, shotId);
         return candidateRepository.listByShotWithJob(actor.tenantId(), actor.userId(), shotId).stream()
-                .map(row -> new CandidateView(row.candidate(), row.jobStatus(), row.jobError()))
+                .map(row -> new CandidateView(row.candidate(), row.jobStatus(), row.jobError(), row.asset()))
                 .toList();
     }
 
     // ---------------------------------------------------------------- 内部
 
     private CandidateView toView(VideoShotCandidateRecord candidate) {
-        return new CandidateView(candidate, null, null);
+        return new CandidateView(candidate, null, null, null);
     }
 
     private static void assertVersion(VideoShotRecord shot, Long expectedVersion) {

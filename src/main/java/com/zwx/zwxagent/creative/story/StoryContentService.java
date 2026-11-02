@@ -65,8 +65,9 @@ public class StoryContentService {
         Map<UUID, List<VideoShotCandidateRecord>> candidatesByShot =
                 candidateRepository.listByProject(tenantId, userId, projectId).stream()
                         .collect(Collectors.groupingBy(VideoShotCandidateRecord::shotId));
-        var candidateCounts = shots.stream().collect(Collectors.toMap(VideoShotRecord::id,
-                shot -> candidateRepository.countByShot(tenantId, userId, shot.id())));
+        // 候选计数直接从已加载的候选分组统计，避免每个镜头一次 count 查询（N+1）
+        var candidateCounts = candidatesByShot.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().size()));
         return new WorkspaceView(episodes, scenes, shots, candidatesByShot, candidateCounts,
                 resourceRepository.listCharacters(tenantId, userId, projectId),
                 resourceRepository.listLocations(tenantId, userId, projectId),

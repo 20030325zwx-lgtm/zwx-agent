@@ -37,10 +37,8 @@
               placeholder="搜索作品名称或描述"
               @input="scheduleReload"
             />
-            <select v-model="sort" class="cr-input lib-sort" aria-label="排序方式" @change="reload">
-              <option value="updated">最近更新</option>
-              <option value="created">创建时间</option>
-            </select>
+            <DropdownSelect v-model="sort" class="lib-sort" size="sm" :options="sortOptions"
+                            aria-label="排序方式" @change="reload" />
             <div class="lib-view" role="radiogroup" aria-label="视图">
               <button type="button" class="lib-view-btn" :class="{ active: view === 'grid' }"
                       role="radio" :aria-checked="view === 'grid'" title="封面网格" @click="setView('grid')">
@@ -127,6 +125,7 @@ import { LayoutGrid, List, Plus } from 'lucide-vue-next'
 import { createCreativeProject, listCreativeProjects } from '../../api'
 import ProjectCard from '../../components/creative/ProjectCard.vue'
 import ProjectRow from '../../components/creative/ProjectRow.vue'
+import DropdownSelect from '../../components/ui/DropdownSelect.vue'
 import Spinner from '../../components/ui/Spinner.vue'
 
 const PAGE_SIZE = 24
@@ -156,6 +155,10 @@ const kindFilters = [
   { value: 'IMAGE', label: '图片' },
   { value: 'VIDEO', label: '视频' },
   { value: 'NOVEL', label: '小说' }
+]
+const sortOptions = [
+  { value: 'updated', label: '最近更新' },
+  { value: 'created', label: '创建时间' }
 ]
 const kindOptions = [
   { value: 'IMAGE', label: '图片', enabled: true },

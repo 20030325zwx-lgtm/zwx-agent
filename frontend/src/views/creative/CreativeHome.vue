@@ -175,22 +175,15 @@
         <template v-else>
           <label class="cr-field">
             <span class="cr-field-label"><span>工作流</span></span>
-            <select v-model="wfForm.workflowKey" class="cr-input" @change="loadWorkflowInputs(wfForm.workflowKey)">
-              <option value="" disabled>选择工作流</option>
-              <option v-for="wf in workflows" :key="wf.key" :value="wf.key" @click="loadWorkflowInputs(wf.key)">
-                {{ wf.name || wf.key }}（{{ (wf.steps || []).length }} 节点）
-              </option>
-            </select>
+            <DropdownSelect v-model="wfForm.workflowKey" block :options="workflowOptions"
+                            placeholder="选择工作流" aria-label="工作流"
+                            @change="loadWorkflowInputs" />
             <span v-if="selectedWorkflow?.description" class="cr-field-help">{{ selectedWorkflow.description }}</span>
           </label>
           <label class="cr-field">
             <span class="cr-field-label"><span>目标作品</span><span class="count">产物与任务归入该作品</span></span>
-            <select v-model="wfForm.projectId" class="cr-input">
-              <option :value="null" disabled>选择作品</option>
-              <option v-for="project in activeProjects" :key="project.id" :value="project.id">
-                {{ project.name }}
-              </option>
-            </select>
+            <DropdownSelect v-model="wfForm.projectId" block :options="activeProjectOptions"
+                            placeholder="选择作品" aria-label="目标作品" />
           </label>
           <div v-for="field in wfForm.fields" :key="field.key" class="cr-field">
             <span class="cr-field-label">
@@ -234,6 +227,7 @@ import {
 } from '../../api'
 import { formatTime, statusMeta } from './shared'
 import ProjectCard from '../../components/creative/ProjectCard.vue'
+import DropdownSelect from '../../components/ui/DropdownSelect.vue'
 import Spinner from '../../components/ui/Spinner.vue'
 import AssetParamField from '../../components/workflow/AssetParamField.vue'
 import { buildRunForm } from './workflowInputs'
@@ -269,6 +263,13 @@ const workflows = ref([])
 const wfForm = reactive({ workflowKey: '', projectId: null, fields: [], input: {} })
 const activeProjects = computed(() => projects.value.filter(p => p.status === 'ACTIVE'))
 const selectedWorkflow = computed(() => workflows.value.find(wf => wf.key === wfForm.workflowKey))
+const workflowOptions = computed(() => workflows.value.map(wf => ({
+  value: wf.key,
+  label: `${wf.name || wf.key}（${(wf.steps || []).length} 节点）`
+})))
+const activeProjectOptions = computed(() => activeProjects.value.map(project => ({
+  value: project.id, label: project.name
+})))
 
 // 待处理：跨项目聚合（进行中/失败/保存失败/待确认/待选片），不再只统计当前页任务
 const jobCounts = computed(() => ({ active: summary.value?.active || 0 }))

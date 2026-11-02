@@ -38,11 +38,8 @@
 
             <section class="filter-group">
               <h2>类型</h2>
-              <select v-model="mediaType" class="cr-select" @change="reload">
-                <option value="">全部类型</option>
-                <option value="IMAGE">图片</option>
-                <option value="VIDEO">视频</option>
-              </select>
+              <DropdownSelect v-model="mediaType" block :options="mediaTypeOptions"
+                              aria-label="素材类型" @change="reload" />
             </section>
 
             <section class="filter-group">
@@ -61,10 +58,8 @@
 
             <section class="filter-group">
               <h2>项目</h2>
-              <select v-model="projectId" class="cr-select" @change="reload">
-                <option value="">全部项目</option>
-                <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option>
-              </select>
+              <DropdownSelect v-model="projectId" block :options="projectOptions"
+                              aria-label="素材项目" @change="reload" />
             </section>
 
             <label v-if="!trashed" class="filter-check">
@@ -149,6 +144,7 @@ import {
 } from '../../api'
 import { downloadBlob, formatBytes, formatTime, starBurst, useAssetUrls, useVideoUrls } from './shared'
 import AssetCard from '../../components/creative/AssetCard.vue'
+import DropdownSelect from '../../components/ui/DropdownSelect.vue'
 import AssetPreview from './AssetPreview.vue'
 import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
 
@@ -164,6 +160,15 @@ const origin = ref('')
 const businessType = ref('')
 const trashed = ref(false)
 const starred = ref(false)
+const mediaTypeOptions = [
+  { value: '', label: '全部类型' },
+  { value: 'IMAGE', label: '图片' },
+  { value: 'VIDEO', label: '视频' }
+]
+const projectOptions = computed(() => [
+  { value: '', label: '全部项目' },
+  ...projects.value.map(project => ({ value: project.id, label: project.name }))
+])
 const businessOptions = [
   { value: '', label: '全部' },
   { value: 'CHARACTER', label: '角色' },

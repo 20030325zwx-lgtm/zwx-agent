@@ -58,14 +58,8 @@
         <div class="ap-actions">
           <label class="ap-classify">
             <span>分类</span>
-            <select :value="asset.businessType || ''" class="cr-select" @change="onClassify">
-              <option value="">未归类</option>
-              <option value="CHARACTER">角色</option>
-              <option value="LOCATION">地点</option>
-              <option value="PROP">道具</option>
-              <option value="SHOT">镜头</option>
-              <option value="OTHER">其他</option>
-            </select>
+            <DropdownSelect :model-value="asset.businessType || ''" size="sm" :options="businessOptions"
+                            aria-label="素材分类" @change="onClassify" />
           </label>
           <slot name="actions" />
           <a v-if="src" class="cr-ghost" :href="src"
@@ -81,6 +75,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { getCreativeAssetUsage } from '../../api'
 import { formatBytes, formatDuration, formatTime } from './shared'
+import DropdownSelect from '../../components/ui/DropdownSelect.vue'
 
 const props = defineProps({
   asset: { type: Object, required: true },
@@ -90,6 +85,14 @@ const emit = defineEmits(['close', 'classify'])
 
 const isVideo = computed(() => props.asset?.mediaType === 'VIDEO')
 const BUSINESS_LABEL = { CHARACTER: '角色', LOCATION: '地点', PROP: '道具', SHOT: '镜头', OTHER: '其他' }
+const businessOptions = [
+  { value: '', label: '未归类' },
+  { value: 'CHARACTER', label: '角色' },
+  { value: 'LOCATION', label: '地点' },
+  { value: 'PROP', label: '道具' },
+  { value: 'SHOT', label: '镜头' },
+  { value: 'OTHER', label: '其他' }
+]
 const businessLabel = computed(() => BUSINESS_LABEL[props.asset?.businessType] || '未归类')
 
 const usage = reactive({ shots: [], characterRefs: [], locationRefs: [] })
@@ -121,8 +124,8 @@ async function loadUsage() {
   }
 }
 
-function onClassify(event) {
-  emit('classify', event.target.value || null)
+function onClassify(value) {
+  emit('classify', value || null)
 }
 
 onMounted(loadUsage)

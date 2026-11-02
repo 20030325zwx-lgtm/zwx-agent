@@ -65,11 +65,8 @@
             <HoldToConfirm label="删" @confirm="removeNote(note)" />
           </div>
           <div class="sp-card sp-new sp-note-new">
-            <select v-model="newNote.kind" class="cr-select">
-              <option value="FACT">事实</option>
-              <option value="STATE">状态</option>
-              <option value="FORESHADOW">伏笔</option>
-            </select>
+            <DropdownSelect v-model="newNote.kind" size="sm" :options="noteKindOptions"
+                            aria-label="记录类型" />
             <input v-model="newNote.content" class="cr-input" placeholder="内容 *" />
             <input v-model="newNote.sourceLabel" class="cr-input" placeholder="来源（如：第 1 集 / 第 2 场）" />
             <button type="button" class="cr-secondary" :disabled="busy || !newNote.content.trim()"
@@ -91,6 +88,7 @@ import {
   deleteStoryLocation, deleteStoryNote, getStoryWorkspace, updateStoryCharacter,
   updateStoryLocation, updateStoryNote
 } from '../../../api'
+import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 
 const props = defineProps({
@@ -109,6 +107,11 @@ const newLocation = reactive({ name: '', description: '' })
 const newNote = reactive({ kind: 'FACT', content: '', sourceLabel: '' })
 
 const kindLabel = kind => ({ FACT: '事实', STATE: '状态', FORESHADOW: '伏笔' }[kind] || kind)
+const noteKindOptions = [
+  { value: 'FACT', label: '事实' },
+  { value: 'STATE', label: '状态' },
+  { value: 'FORESHADOW', label: '伏笔' }
+]
 
 async function reload() {
   try {

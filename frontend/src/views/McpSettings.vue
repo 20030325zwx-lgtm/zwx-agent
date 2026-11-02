@@ -13,7 +13,7 @@
         <label>名称<input v-model.trim="editing.name" required maxlength="80" placeholder="例如：图片搜索" /></label>
         <label>传输方式<input value="SSE（当前版本支持）" disabled /></label>
         <label>MCP 服务地址<input v-model.trim="editing.endpoint" required type="url" placeholder="https://mcp.example.com/sse" /></label>
-        <label>认证方式<select v-model="editing.authType"><option value="NONE">无需认证</option><option value="BEARER">Bearer Token</option><option value="HEADER">自定义 Header</option></select></label>
+        <label>认证方式<DropdownSelect v-model="editing.authType" size="sm" :options="authTypeOptions" aria-label="认证方式" /></label>
         <label v-if="editing.authType === 'HEADER'">Header 名称<input v-model.trim="editing.authHeaderName" placeholder="例如：X-API-Key" /></label>
         <label v-if="editing.authType !== 'NONE'">{{ editing.hasSecret && !editing.authSecret ? '认证密钥（已保存，留空保持不变）' : '认证密钥' }}<input v-model="editing.authSecret" type="password" autocomplete="new-password" :placeholder="editing.hasSecret ? editing.secretHint : '输入 Token 或 Header 值'" /></label>
         <label v-if="editing.hasSecret && editing.authType !== 'NONE'" class="switch"><input v-model="editing.clearAuthSecret" type="checkbox" /><span aria-hidden="true"></span><em>清除已保存密钥</em></label>
@@ -55,7 +55,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { AlertCircle, Pencil, PlugZap, Plus, Server, Trash2, X } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import DropdownSelect from '../components/ui/DropdownSelect.vue'
 import { createMcpServer, deleteMcpServer, listMcpServers, testMcpServer, updateMcpServer } from '../api'
+
+const authTypeOptions = [
+  { value: 'NONE', label: '无需认证' },
+  { value: 'BEARER', label: 'Bearer Token' },
+  { value: 'HEADER', label: '自定义 Header' }
+]
 
 const servers = ref([]); const loading = ref(true); const saving = ref(false); const testing = ref(null); const editing = ref(null); const formError = ref(''); const testResults = ref({}); const pendingDelete = ref(null)
 const load = async () => { loading.value = true; try { servers.value = await listMcpServers() } finally { loading.value = false } }

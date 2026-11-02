@@ -68,12 +68,8 @@
           </button>
         </div>
         <div class="sb-tools">
-          <select v-model="sceneFilter" class="cr-select sb-scene" aria-label="按场次筛选">
-            <option value="">全部场次</option>
-            <option v-for="scene in scenes" :key="scene.id" :value="scene.id">
-              第 {{ scene.sceneNumber }} 场 {{ scene.title }}
-            </option>
-          </select>
+          <DropdownSelect v-model="sceneFilter" class="sb-scene" size="sm" :options="sceneOptions"
+                          placeholder="全部场次" aria-label="按场次筛选" />
           <button type="button" class="cr-ghost" @click="toggleSelectAll">
             {{ allSelected ? '取消全选' : '全选可生成' }}
           </button>
@@ -110,12 +106,8 @@
         <h2 id="add-shot-title">加镜头</h2>
         <label class="cr-field">
           <span class="cr-field-label"><span>所属场次</span></span>
-          <select v-model="addShotScene" class="cr-input">
-            <option value="" disabled>选择场次</option>
-            <option v-for="scene in scenes" :key="scene.id" :value="scene.id">
-              第 {{ scene.sceneNumber }} 场 {{ scene.title || '' }}
-            </option>
-          </select>
+          <DropdownSelect v-model="addShotScene" block :options="sceneOptions.slice(1)"
+                          placeholder="选择场次" aria-label="所属场次" />
         </label>
         <p v-if="!scenes.length" class="cr-hint">还没有场次，请先在「剧情」页新建场次。</p>
         <div class="cr-dialog-actions">
@@ -138,6 +130,7 @@ import {
 import { PROJECT_CTX } from './composables'
 import { BATCH_ITEM_STATUS_LABEL, BATCH_STATUS_LABEL } from './helpers'
 import ShotCard from '../../../components/creative/project/ShotCard.vue'
+import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 import ShotInspector from '../story/ShotInspector.vue'
 
 const { projectId, story, showToast, route, router, videoUrls, videoUrlFor } = inject(PROJECT_CTX)
@@ -159,6 +152,10 @@ const scenes = computed(() => story.scenes.value)
 const episodes = computed(() => story.episodes.value)
 const progress = computed(() => story.progress.value)
 
+const sceneOptions = computed(() => [
+  { value: '', label: '全部场次' },
+  ...scenes.value.map(scene => ({ value: scene.id, label: `第 ${scene.sceneNumber} 场 ${scene.title || ''}`.trim() }))
+])
 const filters = computed(() => [
   { value: 'all', label: '全部', count: shots.value.length },
   { value: 'pending', label: '待选片', count: progress.value.pendingSelection },

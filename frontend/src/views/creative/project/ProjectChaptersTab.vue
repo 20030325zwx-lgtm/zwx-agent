@@ -115,9 +115,8 @@
         </div>
         <label class="cr-field">
           <span class="cr-field-label"><span>工作流模板</span></span>
-          <select v-model="create.workflowKey" class="cr-input">
-            <option v-for="wf in workflows" :key="wf.key" :value="wf.key">{{ wf.name || wf.key }}</option>
-          </select>
+          <DropdownSelect v-model="create.workflowKey" block :options="workflowOptions"
+                          placeholder="选择工作流模板" aria-label="工作流模板" />
           <span class="cr-field-help">运行会读取作品设定与既往章节，生成正文与概要后存为草稿</span>
         </label>
         <p v-if="create.error" class="cr-error">{{ create.error }}</p>
@@ -143,6 +142,7 @@ import {
 } from '../../../api'
 import { formatTime } from '../shared'
 import { PROJECT_CTX, useWorkflowList } from './composables'
+import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
 
@@ -164,7 +164,9 @@ const suggesting = ref(false)
 const suggestions = ref([])
 const create = reactive({ starting: false, error: '', workflowKey: 'novel-chapter', title: '', plotDirection: '' })
 
-const projectName = computed(() => project.value?.name || '')
+const workflowOptions = computed(() => workflows.value.map(wf => ({
+  value: wf.key, label: wf.name || wf.key
+})))
 
 async function loadChapters() {
   loading.value = true

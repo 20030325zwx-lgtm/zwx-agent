@@ -78,10 +78,7 @@
             </div>
             <div class="field-grid">
               <label>供应商
-                <select v-model="forms[activeModel.key].provider">
-                  <option value="dashscope">DashScope</option>
-                  <option value="openai-compatible">OpenAI 兼容接口</option>
-                </select>
+                <DropdownSelect v-model="forms[activeModel.key].provider" size="sm" :options="providerOptions" aria-label="供应商协议" />
               </label>
               <label>模型名称
                 <input v-model.trim="forms[activeModel.key].modelName" maxlength="128" :placeholder="activeModel.effective.modelName || '例如 qwen-plus'" />
@@ -116,10 +113,7 @@
             </div>
             <div class="field-grid">
               <label>供应商
-                <select v-model="systemForms[activeModel.key].provider">
-                  <option value="dashscope">DashScope</option>
-                  <option value="openai-compatible">OpenAI 兼容接口</option>
-                </select>
+                <DropdownSelect v-model="systemForms[activeModel.key].provider" size="sm" :options="providerOptions" aria-label="供应商协议" />
               </label>
               <label>模型名称
                 <input v-model.trim="systemForms[activeModel.key].modelName" maxlength="128" :placeholder="activeModel.effective.modelName" />
@@ -156,7 +150,13 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+
+const providerOptions = [
+  { value: 'dashscope', label: 'DashScope' },
+  { value: 'openai-compatible', label: 'OpenAI 兼容接口' }
+]
 import { AlertCircle, Bot, CheckCircle2, LockKeyhole } from 'lucide-vue-next'
+import DropdownSelect from '../components/ui/DropdownSelect.vue'
 import {
   listModelSettings,
   resetSystemModelSettings,

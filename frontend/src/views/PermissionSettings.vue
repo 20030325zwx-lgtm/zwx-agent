@@ -30,10 +30,7 @@
           </div>
           <div class="rule-add">
             <input v-model="newPattern" type="text" maxlength="128" placeholder="工具名或模式，如 executeTerminalCommand、mcp:*" @keydown.enter="addRule" />
-            <select v-model="newEffect">
-              <option value="ALLOW">允许</option>
-              <option value="DENY">拒绝</option>
-            </select>
+            <DropdownSelect v-model="newEffect" size="sm" :options="effectOptions" aria-label="规则效果" />
             <button type="button" :disabled="saving || !newPattern.trim()" @click="addRule">添加规则</button>
           </div>
           <div v-if="!rules.length" class="state compact">暂无规则，全部按权限模式默认判定。</div>
@@ -52,7 +49,13 @@
 
 <script setup>
 import { ref } from 'vue'
+
+const effectOptions = [
+  { value: 'ALLOW', label: '允许' },
+  { value: 'DENY', label: '拒绝' }
+]
 import { ShieldCheck } from 'lucide-vue-next'
+import DropdownSelect from '../components/ui/DropdownSelect.vue'
 import { addPermissionRule, deletePermissionRule, getPermissionSettings, savePermissionMode } from '../api'
 
 const modeOptions = [

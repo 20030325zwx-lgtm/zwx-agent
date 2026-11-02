@@ -26,6 +26,12 @@
 - 业务分类批量修改、素材搜索、任务中心专用分组页（UI3 剩余）未做。
 - 智能体融合设计（`docs/design/2026-11-02-creative-agent-integration.md`）已阅读并给出评估，尚未实施。
 
+## 追加：下拉框统一样式
+
+原生 `<select>` 弹层由系统绘制（黑底大字号），CSS 无法覆盖。新增 `components/ui/DropdownSelect.vue`，
+替换创作模块 16 处、设置与工作流编辑器 7 处；知识库表格内 4 处保留。顺带修复快速生成页视频地址
+读不到（改为读 Shell 的 `videoUrls` 缓存）。详见 `docs/bugs/bug-2026-11-02-native-select-popup.txt`。
+
 ## 环境注意事项
 
 - 云库延迟高：单测按分钟计，不要用短超时判定"挂起"。

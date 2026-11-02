@@ -63,12 +63,8 @@
           </div>
           <label class="si-upload">
             <span class="cr-field-help">选择本人视频素材作为候选</span>
-            <select class="cr-select" @change="addUpload($event)">
-              <option value="" selected>选择已有视频…</option>
-              <option v-for="asset in videoAssets" :key="asset.id" :value="asset.id">
-                {{ asset.displayName || asset.id.slice(0, 8) }}
-              </option>
-            </select>
+            <DropdownSelect :model-value="''" :options="videoAssetOptions" block
+                            placeholder="选择已有视频…" aria-label="选择已有视频" @change="addUpload" />
           </label>
         </section>
 
@@ -147,6 +143,7 @@ import {
 } from '../../../api'
 import { formatDuration, useVideoUrls } from '../shared'
 import { CANDIDATE_STATUS_LABEL, SHOT_STATUS_LABEL } from '../project/helpers'
+import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
 
 const props = defineProps({
@@ -193,6 +190,9 @@ const canGenerate = computed(() =>
 const statusLabel = computed(() => SHOT_STATUS_LABEL[status.value] || status.value)
 
 const candidateLabel = candidate => CANDIDATE_STATUS_LABEL[candidate.status] || candidate.status
+const videoAssetOptions = computed(() => videoAssets.value.map(asset => ({
+  value: asset.id, label: asset.displayName || asset.id.slice(0, 8)
+})))
 
 function assetUrl(candidate) {
   if (!candidate.assetId) return ''
@@ -316,9 +316,7 @@ async function removeCandidate(view) {
   }
 }
 
-async function addUpload(event) {
-  const assetId = event.target.value
-  event.target.value = ''
+async function addUpload(assetId) {
   if (!assetId) return
   try {
     await uploadShotCandidate(props.projectId, props.shot.id, assetId)

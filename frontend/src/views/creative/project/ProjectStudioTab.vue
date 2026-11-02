@@ -142,10 +142,8 @@
         <template v-if="isVideoProject">
           <label class="cr-field">
             <span class="cr-field-label"><span>生成方式</span></span>
-            <select v-model="videoOperation" class="cr-select" @change="markDirty">
-              <option value="text_to_video">文生视频</option>
-              <option value="image_to_video">图生视频（首帧）· 即将开放</option>
-            </select>
+            <DropdownSelect v-model="videoOperation" block :options="videoOperationOptions"
+                            aria-label="生成方式" @change="markDirty" />
           </label>
           <label v-if="videoOperation === 'image_to_video'" class="cr-field">
             <span class="cr-field-label"><span>首帧图片</span></span>
@@ -162,13 +160,8 @@
         <template v-else>
           <label class="cr-field">
             <span class="cr-field-label"><span>尺寸</span></span>
-            <select v-model="size" class="cr-select" @change="markDirty">
-              <option value="1024*1024">1024 × 1024（方形）</option>
-              <option value="1280*720">1280 × 720（横版）</option>
-              <option value="720*1280">720 × 1280（竖版）</option>
-              <option value="1152*768">1152 × 768（横版）</option>
-              <option value="768*1152">768 × 1152（竖版）</option>
-            </select>
+            <DropdownSelect v-model="size" block :options="sizeOptions"
+                            aria-label="图片尺寸" @change="markDirty" />
           </label>
           <label v-if="imageProtocol === 'dashscope'" class="panel-switch">
             <ToggleSwitch v-model="watermark" @update:model-value="markDirty" />
@@ -214,12 +207,9 @@
         <template v-else>
           <label class="cr-field">
             <span class="cr-field-label"><span>工作流模板</span></span>
-            <select v-model="wfCreate.workflowKey" class="cr-input" @change="loadWorkflowInputs">
-              <option value="" disabled>选择工作流</option>
-              <option v-for="wf in workflows" :key="wf.key" :value="wf.key">
-                {{ wf.name || wf.key }}（{{ (wf.steps || []).length }} 节点）
-              </option>
-            </select>
+            <DropdownSelect v-model="wfCreate.workflowKey" block :options="workflowOptions"
+                            placeholder="选择工作流" aria-label="工作流模板"
+                            @change="loadWorkflowInputs" />
             <span v-if="wfFormHint" class="cr-field-help">{{ wfFormHint }}</span>
           </label>
           <div v-for="field in wfCreate.fields" :key="field.key" class="cr-field">
@@ -259,7 +249,7 @@ import {
   createCreativeDraft, createCreativeJob, getWorkflowDefinition, listCreativeDrafts, optimizeCreativePrompt,
   startWorkflow, updateCreativeDraft
 } from '../../../api'
-import { formatBytes, formatTime, kindLabel, statusMeta, useVideoUrls } from '../shared'
+import { formatBytes, formatTime, kindLabel, statusMeta } from '../shared'
 import {
   PROMPT_MAX, blockedText, downloadName, isVideoJob, jobOutputs as doneOutputs
 } from './helpers'
@@ -269,11 +259,11 @@ import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
 import ToggleSwitch from '../../../components/ui/ToggleSwitch.vue'
 import AssetParamField from '../../../components/workflow/AssetParamField.vue'
+import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 
 const ctx = inject(PROJECT_CTX)
-const { projectId, project, imageBinding, videoBinding, imageProtocol, jobsStore, showToast, openJob, urls, router } = ctx
+const { projectId, project, imageBinding, videoBinding, imageProtocol, jobsStore, showToast, openJob, urls, videoUrls, router } = ctx
 
-const { videoUrls, videoUrlFor } = useVideoUrls()
 const { workflows, ensureLoaded } = useWorkflowList()
 
 const idea = ref('')
@@ -537,6 +527,20 @@ function continueFrom(job) {
 const wfCreateOpen = ref(false)
 const wfCreate = reactive({ loading: false, starting: false, error: '', workflowKey: '', fields: [], input: {} })
 const wfFormHint = computed(() => workflows.value.find(item => item.key === wfCreate.workflowKey)?.description || '')
+const videoOperationOptions = [
+  { value: 'text_to_video', label: '文生视频' },
+  { value: 'image_to_video', label: '图生视频（首帧）· 即将开放' }
+]
+const sizeOptions = [
+  { value: '1024*1024', label: '1024 × 1024（方形）' },
+  { value: '1280*720', label: '1280 × 720（横版）' },
+  { value: '720*1280', label: '720 × 1280（竖版）' },
+  { value: '1152*768', label: '1152 × 768（横版）' },
+  { value: '768*1152', label: '768 × 1152（竖版）' }
+]
+const workflowOptions = computed(() => workflows.value.map(wf => ({
+  value: wf.key, label: `${wf.name || wf.key}（${(wf.steps || []).length} 节点）`
+})))
 
 async function openWorkflowCreate() {
   wfCreateOpen.value = true

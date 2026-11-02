@@ -29,7 +29,7 @@
       </button>
       <div v-if="desktopApi" class="desktop-api-settings">
         <strong>桌面端服务配置</strong>
-        <label>运行模式<select v-model="desktopSettings.backendMode"><option value="remote">连接已有服务</option><option value="local">启动本机服务</option></select></label>
+        <label>运行模式<DropdownSelect v-model="desktopSettings.backendMode" size="sm" :options="backendModeOptions" aria-label="运行模式" /></label>
         <label>API 服务地址<input v-model="desktopSettings.apiBaseUrl" type="url" placeholder="https://example.com/api" /></label>
         <label>本机后端端口<input v-model.number="desktopSettings.backendPort" type="number" min="1024" max="65535" /></label>
         <label>PostgreSQL JDBC 地址<input v-model="desktopSettings.postgresUrl" type="text" placeholder="jdbc:postgresql://127.0.0.1:5432/zwx_agent" /></label>
@@ -55,6 +55,12 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ChevronRight, Cpu, Database, Settings2, Sparkles } from 'lucide-vue-next'
+
+const backendModeOptions = [
+  { value: 'remote', label: '连接已有服务' },
+  { value: 'local', label: '启动本机服务' }
+]
+import DropdownSelect from './ui/DropdownSelect.vue'
 
 const props = defineProps({
   agentKey: { type: String, required: true },

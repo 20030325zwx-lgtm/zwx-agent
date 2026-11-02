@@ -171,11 +171,7 @@
           <div v-for="(field, index) in editingInputs" :key="index" class="run-input-row">
             <input v-model.trim="field.key" class="wf-input compact ri-key" placeholder="key" maxlength="32" />
             <input v-model.trim="field.label" class="wf-input compact ri-label" placeholder="显示名称" maxlength="20" />
-            <select v-model="field.type" class="wf-input compact ri-type">
-              <option value="text">文本</option>
-              <option value="asset">单张素材</option>
-              <option value="assets">多张素材</option>
-            </select>
+            <DropdownSelect v-model="field.type" class="ri-type" size="sm" block :options="fieldTypeOptions" aria-label="输入类型" />
             <label class="ri-required"><input v-model="field.required" type="checkbox" /> 必填</label>
             <input v-model.trim="field.placeholder" class="wf-input compact" placeholder="占位提示（可选）" maxlength="60" />
             <button type="button" class="ghost-btn mini" @click="editingInputs.splice(index, 1)">删除</button>
@@ -321,12 +317,8 @@
           </p>
           <label class="run-dialog-field">
             <span>目标创作项目（产物归入该项目）</span>
-            <select v-model="runDialog.projectId" class="wf-input compact">
-              <option value="" disabled>选择项目</option>
-              <option v-for="project in runDialogProjects" :key="project.id" :value="project.id">
-                {{ project.name }}
-              </option>
-            </select>
+            <DropdownSelect v-model="runDialog.projectId" block :options="runDialogProjectOptions"
+                            placeholder="选择项目" aria-label="目标创作项目" />
           </label>
         </template>
         <p v-if="runDialog.error" class="run-dialog-error">{{ runDialog.error }}</p>
@@ -354,6 +346,13 @@ import '@vue-flow/core/dist/theme-default.css'
 import AssetParamField from '../components/workflow/AssetParamField.vue'
 import { buildRunForm } from './creative/workflowInputs'
 import Spinner from '../components/ui/Spinner.vue'
+
+const fieldTypeOptions = [
+  { value: 'text', label: '文本' },
+  { value: 'asset', label: '单张素材' },
+  { value: 'assets', label: '多张素材' }
+]
+import DropdownSelect from '../components/ui/DropdownSelect.vue'
 import {
   LONG_PARAM_KEYS, NODE_CATALOG, NODE_GROUPS, bindingExpression, inferEdgeLabel,
   matchBinding, nodeColor, nodeTypeLabel, validateGraphForRun
@@ -930,6 +929,7 @@ async function selectRun(runId) {
 
 const runDialog = reactive({ open: false, projectId: '', values: {}, error: '' })
 const runDialogProjects = ref([])
+const runDialogProjectOptions = computed(() => runDialogProjects.value.map(project => ({ value: project.id, label: project.name })))
 const runErrors = ref([])
 const isAssetKey = key => /AssetIds?$/.test(key)
 

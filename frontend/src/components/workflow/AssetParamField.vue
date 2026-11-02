@@ -6,19 +6,14 @@
     </div>
     <template v-else>
       <div class="asset-row">
-        <select v-model="projectId" class="wf-input compact asset-project" aria-label="素材所在项目"
-                :disabled="projectsLoading">
-          <option v-for="project in projects" :key="project.id" :value="project.id">
-            {{ project.name }}
-          </option>
-        </select>
-        <select v-model="selectedId" class="wf-input compact asset-select" :aria-label="multiple ? '追加素材' : '选择素材'"
-                :disabled="assetsLoading || !projectId">
-          <option value="" disabled>{{ assetsLoading ? '素材加载中…' : '选择素材' }}</option>
-          <option v-for="asset in assets" :key="asset.id" :value="asset.id">
-            {{ asset.displayName || asset.id.slice(0, 8) }}（{{ formatSize(asset.byteSize) }}）
-          </option>
-        </select>
+        <DropdownSelect v-model="projectId" class="asset-project" size="sm" block
+                        :options="projectOptions" :disabled="projectsLoading"
+                        placeholder="选择项目" aria-label="素材所在项目" />
+        <DropdownSelect v-model="selectedId" class="asset-select" size="sm" block
+                        :options="assetOptions"
+                        :placeholder="assetsLoading ? '素材加载中…' : '选择素材'"
+                        :aria-label="multiple ? '追加素材' : '选择素材'"
+                        :disabled="assetsLoading || !projectId" />
       </div>
       <div class="asset-row">
         <button type="button" class="asset-mini-btn" :disabled="uploading" @click="fileInput?.click()">
@@ -40,6 +35,7 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import DropdownSelect from '../ui/DropdownSelect.vue'
 import { listCreativeAssets, listCreativeProjects, uploadCreativeAsset } from '../../api'
 
 const props = defineProps({
@@ -65,6 +61,12 @@ const pickedIds = ref([])
 const uploading = ref(false)
 const uploadError = ref('')
 const fileInput = ref(null)
+
+const projectOptions = computed(() => projects.value.map(project => ({ value: project.id, label: project.name })))
+const assetOptions = computed(() => assets.value.map(asset => ({
+  value: asset.id,
+  label: `${asset.displayName || asset.id.slice(0, 8)}（${formatSize(asset.byteSize)}）`
+})))
 
 const isTemplate = computed(() => (props.modelValue || '').includes('{{'))
 // 多选时把当前值拆成 ID 列表；单选直接是 ID

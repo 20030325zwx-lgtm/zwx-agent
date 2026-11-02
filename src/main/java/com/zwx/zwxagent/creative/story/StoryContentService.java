@@ -375,6 +375,11 @@ public class StoryContentService {
         projectService.get(actor, projectId);
     }
 
+    /** 批次等外部服务的项目归属校验入口。 */
+    public void checkProject(CurrentActor actor, UUID projectId) {
+        requireProject(actor, projectId);
+    }
+
     private VideoEpisodeRecord requireEpisode(CurrentActor actor, UUID projectId, UUID episodeId) {
         var episode = contentRepository.findEpisode(actor.tenantId(), actor.userId(), episodeId)
                 .orElseThrow(() -> new IllegalArgumentException("剧集不存在"));

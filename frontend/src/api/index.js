@@ -415,6 +415,17 @@ export const updateStoryNote = (projectId, noteId, payload) =>
   request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/notes/${noteId}`, payload).then(r => r.data)
 export const deleteStoryNote = (projectId, noteId) =>
   request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/notes/${noteId}`).then(r => r.data)
+// 批次生产（P3）
+export const createStoryBatch = (projectId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/batches`, payload).then(r => r.data)
+export const listStoryBatches = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/batches`).then(r => r.data)
+export const getStoryBatch = (projectId, batchId) =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/batches/${batchId}`).then(r => r.data)
+export const stopStoryBatch = (projectId, batchId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/batches/${batchId}/stop`).then(r => r.data)
+export const retryStoryBatch = (projectId, batchId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/batches/${batchId}/retry-failed`).then(r => r.data)
 export const listCreativeJobs = (params = {}) =>
   request.get('/ai/creative/jobs', { params }).then(response => response.data)
 export const getCreativeJob = jobId =>

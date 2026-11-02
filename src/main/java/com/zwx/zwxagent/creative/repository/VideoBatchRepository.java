@@ -168,6 +168,12 @@ public class VideoBatchRepository {
                         """, success ? "DONE" : "FAILED", candidateId) > 0;
     }
 
+    public Optional<UUID> batchIdOfCandidate(UUID candidateId) {
+        return jdbcTemplate.query(
+                "SELECT batch_id FROM video_batch_item WHERE candidate_id = ? LIMIT 1",
+                (rs, rowNum) -> UUID.fromString(rs.getString("batch_id")), candidateId).stream().findFirst();
+    }
+
     /** 停止：未提交子项 → SKIPPED（在途不动）；返回影响行数供聚合展示。 */
     public int skipPending(UUID batchId) {
         return jdbcTemplate.update("""
@@ -182,6 +188,14 @@ public class VideoBatchRepository {
                         UPDATE video_batch_item SET status = 'PENDING_SUBMIT', error = NULL, updated_at = now()
                         WHERE batch_id = ? AND status = 'FAILED'
                         """, batchId);
+    }
+
+    /** 提交失败退避重试：FAILED → PENDING_SUBMIT 并记录 attempt（仅未达上限时调用）。 */
+    public boolean resetItemForRetry(UUID id, int attempt) {
+        return jdbcTemplate.update("""
+                        UPDATE video_batch_item SET status = 'PENDING_SUBMIT', attempt = ?, updated_at = now()
+                        WHERE id = ? AND status = 'FAILED'
+                        """, attempt, id) > 0;
     }
 
     public boolean deleteItem(UUID id) {

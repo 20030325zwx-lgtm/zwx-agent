@@ -10,6 +10,10 @@
           <SettingsIcon :size="14" /> 设定与连续性
         </button>
         <button type="button" class="cr-secondary" @click="reload"><RefreshCw :size="14" /> 刷新</button>
+        <button type="button" class="cr-primary" :disabled="!selectedShots.size || busy"
+                @click="createBatch">
+          批量生成（{{ selectedShots.size }}）
+        </button>
         <button type="button" class="cr-primary" @click="openEpisodeCreate()"><Plus :size="14" /> 新剧集</button>
       </div>
     </header>
@@ -76,10 +80,15 @@
 
           <table class="sw-shots">
             <thead>
-              <tr><th>镜号</th><th>叙事目的</th><th>动作/表演</th><th>运镜</th><th>状态</th><th>候选</th><th></th></tr>
+              <tr><th></th><th>镜号</th><th>叙事目的</th><th>动作/表演</th><th>运镜</th><th>状态</th><th>候选</th><th></th></tr>
             </thead>
             <tbody>
               <tr v-for="shot in shotsOf(scene.id)" :key="shot.id" class="sw-shot-row">
+                <td>
+                  <input v-if="['DRAFT','READY'].includes(shot.status) && shot.promptText"
+                         type="checkbox" :checked="selectedShots.has(shot.id)"
+                         @change="toggleSelect(shot.id)" />
+                </td>
                 <td>{{ shot.shotNumber }}</td>
                 <td class="sw-td-text">{{ shot.purpose || '—' }}</td>
                 <td class="sw-td-text">{{ shot.action || '—' }}</td>
@@ -170,6 +179,34 @@
       </div>
     </div>
 
+    <!-- 批次进度（P3）：分计数显示，停止=停止未提交项，重试仅针对失败项 -->
+    <section v-if="batches.length" class="sw-batches">
+      <h4>生产批次</h4>
+      <div v-for="view in batchViews" :key="view.batch.id" class="sw-batch">
+        <header class="sw-batch-head">
+          <strong>{{ view.batch.scopeLabel || '批次' }}</strong>
+          <span class="sw-chip" :class="'batch-' + view.batch.status">{{ batchStatusLabel(view.batch.status) }}</span>
+          <span class="cr-field-help">
+            共 {{ view.progress.total }} · 待提交 {{ view.progress.pending }} · 在途 {{ view.progress.inflight }}
+            · 成功 {{ view.progress.done }} · 失败 {{ view.progress.failed }} · 已停止 {{ view.progress.skipped }}
+            （完成 {{ view.progress.donePercent }}%）
+          </span>
+          <span class="sw-scene-actions">
+            <button v-if="['RUNNING','STOPPING'].includes(view.batch.status)" type="button" class="cr-ghost"
+                    @click="stopBatch(view.batch)">停止</button>
+            <button v-if="view.progress.failed > 0" type="button" class="cr-ghost"
+                    @click="retryBatch(view.batch)">重试失败项（{{ view.progress.failed }}）</button>
+          </span>
+        </header>
+        <div class="sw-batch-items">
+          <span v-for="item in view.items" :key="item.item.id" class="sw-chip"
+                :class="'item-' + item.item.status">
+            {{ item.shotLabel }}·{{ itemStatusLabel(item.item.status) }}
+          </span>
+        </div>
+      </div>
+    </section>
+
     <ShotDrawer v-if="drawerShot" :project-id="projectId" :shot="drawerShot"
                 :characters="characters" :locations="locations"
                 @close="drawerShot = null" @changed="reload" />
@@ -182,9 +219,10 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Plus, RefreshCw, Settings as SettingsIcon } from 'lucide-vue-next'
 import {
-  createStoryEpisode, createStoryScene, createStoryShot, confirmStoryEpisode, confirmStoryScene,
-  deleteStoryEpisode, deleteStoryScene, getStoryWorkspace, moveStoryEpisode,
-  optimizeCreativePrompt, updateStoryEpisode, updateStoryScene
+  createStoryBatch, createStoryEpisode, createStoryScene, createStoryShot, confirmStoryEpisode,
+  confirmStoryScene, deleteStoryEpisode, deleteStoryScene, getStoryBatch, getStoryWorkspace,
+  listStoryBatches, moveStoryEpisode, optimizeCreativePrompt, retryStoryBatch, stopStoryBatch,
+  updateStoryEpisode, updateStoryScene
 } from '../../../api'
 import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 import ShotDrawer from './ShotDrawer.vue'
@@ -208,6 +246,9 @@ const drawerShot = ref(null)
 const settingsOpen = ref(false)
 const episodeDialog = ref(null)
 const sceneDialog = ref(null)
+const selectedShots = reactive(new Set())
+const batches = ref([])
+const batchViews = ref([])
 const optimizing = ref(false)
 const optimizeMode = ref('')
 const optimizeResult = ref(null)
@@ -246,16 +287,18 @@ async function reload() {
   } finally {
     loading.value = false
   }
+  loadBatches()
   schedulePoll()
 }
 
 function schedulePoll() {
   window.clearTimeout(pollTimer)
   const active = shots.value.some(shot => shot.status === 'GENERATING')
+    || batchViews.value.some(view => ['RUNNING', 'STOPPING'].includes(view.batch.status))
   if (!active) return
   pollTimer = window.setTimeout(async () => {
     if (document.visibilityState !== 'hidden' && !drawerShot.value) await reload()
-    else schedulePoll()
+    else { await loadBatches(); schedulePoll() }
   }, 3000)
 }
 
@@ -358,6 +401,56 @@ async function removeScene(scene) {
   }
 }
 
+function toggleSelect(shotId) {
+  if (selectedShots.has(shotId)) selectedShots.delete(shotId)
+  else selectedShots.add(shotId)
+}
+
+async function createBatch() {
+  const episode = episodes.value.find(item => shotsOf(item.id).some(shot => selectedShots.has(shot.id)))
+  busy.value = true
+  error.value = ''
+  try {
+    await createStoryBatch(props.projectId, {
+      shotIds: [...selectedShots],
+      scopeLabel: episode ? '第 ' + episode.episodeNumber + ' 集《' + episode.title + '》' : ''
+    })
+    selectedShots.clear()
+    await loadBatches()
+  } catch (exception) {
+    error.value = exception.response?.data?.error || '批次创建失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function loadBatches() {
+  try {
+    batches.value = await listStoryBatches(props.projectId)
+    const views = await Promise.allSettled(
+      batches.value.map(batch => getStoryBatch(props.projectId, batch.id)))
+    batchViews.value = views.map((result, index) =>
+      result.status === 'fulfilled' ? result.value : { batch: batches.value[index], items: [], progress: null })
+      .filter(view => view.progress)
+  } catch (exception) { /* 批次面板加载失败不阻断主区 */ }
+}
+
+async function stopBatch(batch) {
+  try { await stopStoryBatch(props.projectId, batch.id); await loadBatches() } catch (exception) {
+    error.value = exception.response?.data?.error || '停止失败'
+  }
+}
+async function retryBatch(batch) {
+  try { await retryStoryBatch(props.projectId, batch.id); await loadBatches() } catch (exception) {
+    error.value = exception.response?.data?.error || '重试失败'
+  }
+}
+
+const BATCH_STATUS = { RUNNING: '进行中', STOPPING: '停止中', STOPPED: '已停止', COMPLETED: '已完成' }
+const ITEM_STATUS = { PENDING_SUBMIT: '待提交', SUBMITTED: '在途', DONE: '成功', FAILED: '失败', SKIPPED: '已停止' }
+const batchStatusLabel = status => BATCH_STATUS[status] || status
+const itemStatusLabel = status => ITEM_STATUS[status] || status
+
 async function openShotCreate(scene) {
   try {
     const shot = await createStoryShot(props.projectId, scene.id, {})
@@ -429,6 +522,17 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
 
 <style scoped src="../creative.css"></style>
 <style scoped>
+.sw-batches { border: 1px solid var(--wb-border); border-radius: var(--wb-radius); padding: 10px 14px; background: var(--wb-surface); }
+.sw-batches h4 { margin: 0 0 8px; font-size: 12.5px; color: var(--wb-muted); }
+.sw-batch { padding: 6px 0; border-bottom: 1px solid var(--wb-border); }
+.sw-batch:last-child { border-bottom: 0; }
+.sw-batch-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sw-batch-items { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.item-DONE { color: #15803d; }
+.item-FAILED { color: #b45309; }
+.item-SUBMITTED { color: #2563eb; }
+.batch-COMPLETED { color: #15803d; }
+.batch-STOPPED { color: var(--wb-muted); }
 .sw-opt-list { margin: 6px 0 0; padding-left: 16px; font-size: 12px; color: var(--wb-text-2); }
 .sw-sugg { color: #2563eb; }
 .sw-miss { color: #b45309; }

@@ -403,3 +403,48 @@ UI 验收覆盖 1440/1280/1024 宽、窄屏覆盖面板、深浅主题、长标�
 - 文字模型调用上限、租约 TTL、心跳间隔和上下文 token 上限通过实测确定；首版拟采用 120 秒租约、20 秒心跳，外部调用必须有独立超时。
 
 以上待确认项由实施任务解决，不能用猜测替代验收。完成 A+B 后的交付示例是：输入“雨夜车站的悬疑短片”，进入已有项目工作区，看到首集、场次和可编辑镜头草稿，并能继续使用现有生成与选片能力。
+
+## 16. 实施前评估（2026-11-02 追加，基于 `a9f7585`）
+
+### 16.1 已核对成立的两处风险
+
+- `CreativeImageTool.ensureDefaultProject()`（`capability/tools/CreativeImageTool.java:73-78`）确实取"列表首个 ACTIVE 项目"，
+  列表按 `updated_at DESC` 排序，所以会落到最近改过的任意作品。文档要求"由服务端绑定项目"是对的，且必须删除这条回退。
+- `agent_conversation.project_id` 关联的是 `agent_project`（`ProjectWorkspaceService.java:148` 的 join），语义是编程工作区。
+  把创作项目写进去会污染工作区隔离，独立 `creative_agent_session` 表的方向正确。
+
+### 16.2 本批已补上的前置能力
+
+文档写作时（`73d1a48`）"M2 业务分类与完整引用反查未完成"。本批已完成：
+
+- `creative_asset.business_type`（V20，可空=未归类）与回填；
+- `GET /ai/creative/assets/{id}/usage` 跨项目反查镜头候选 + 角色/地点参考；
+- `POST /ai/creative/assets/{id}/restore` 回收站恢复；`GET /ai/creative/jobs/summary` 跨项目待处理聚合。
+
+因此 M1.5 的 A/B 阶段可以直接依赖"素材可归类、可反查"，不必再自建一套引用记录。
+
+### 16.3 范围建议（按风险排序）
+
+1. **A0+A1 先做、单独验收**：请求去重（`clientRequestId` + 参数哈希）、`creative_agent_session/request/plan/artifact`、
+   租约与 epoch、`CreativePlanValidator`、短事务应用。这些是不可逆的地基，先于任何 UI。
+2. **A2 才接首页**：A1 通过 Mock 模型验收前，首页保持手动入口，避免"点一下就真实扣费且不可回溯"。
+3. **B1（视频）优先于 B2（小说大纲）**：视频结构化计划复用 `StoryContentService` 现成写入，收益立现；
+   小说大纲要新增 `creative_novel_outline_item` 且与章节库区分，属于新增领域，放到 B2。
+4. **C/D 不建议与本批同发**：C 需要按对象版本冲突与"建议 vs 已保存"两态，D 需要媒体授权绑定计划 revision/参数范围。
+   现有工具确认是"按工具名允许"，不够支撑"一次授权只放行这批参数与数量"。
+
+### 16.4 与文档不同的两点意见
+
+- **规划模型不必另开绑定**：`ModelCatalogService` 已有对话用途绑定，`planningModelRowId` 可空 + 服务端解析即可；
+  再加一个"创作规划模型"用途会让设置页出现第三个近似选项，收益不明。
+- **`questions` 澄清不宜做成独立状态机分支**：首版只允许"类型冲突"一种澄清，用 `NEEDS_INPUT` + 一个问题足够；
+  文档 §7.1 的状态表已经比首版需要复杂，实施时按最小集实现，其余状态先不建。
+
+### 16.5 前端接入点（已就绪）
+
+`ProjectShell` 已提供 `PROJECT_CTX`（项目、任务、剧情、toast、路由）与右侧检查器空间，助手面板可直接复用：
+- 运行面板挂在 Shell 顶部条下方（`CreativeRunPanel`），
+- 项目内助手与 `ShotInspector` 共用右侧 420px 槽位（标签切换），不必再挤第三列。
+
+验收建议沿用本仓已有做法：Mock 模型跑完整状态机 + 断线恢复；真实规划调用单独一批，记录调用次数；
+媒体生成沿用"最多一次、最低档"的授权约束。

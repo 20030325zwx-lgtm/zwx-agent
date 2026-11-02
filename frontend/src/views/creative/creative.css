@@ -331,3 +331,24 @@
 
 /* 声明式运行表单：必填星号 */
 .cr-field-label .req-star { color: var(--wb-danger, #d64545); font-style: normal; margin-left: 2px; }
+
+/* ---- 项目内分区容器（M1）：Shell 决定宽度，分区只负责滚动与内边距 ---- */
+.tab-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  color: var(--wb-text);
+}
+
+.tab-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wb-space-4);
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--wb-space-6) var(--wb-space-7) var(--wb-space-8);
+}
+
+@media (max-width: 1099px) {
+  .tab-inner { padding: var(--wb-space-4); }
+}

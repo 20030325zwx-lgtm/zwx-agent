@@ -77,13 +77,60 @@ const routes = [
         }
       },
       {
+        // 项目工作区：Shell 持有项目、任务与剧情状态，各分区是子路由（可直接深链）
         path: 'creative/projects/:projectId',
-        name: 'CreativeProject',
-        component: () => import('../views/creative/CreativeProject.vue'),
+        component: () => import('../views/creative/project/ProjectShell.vue'),
         meta: {
           title: '创作台 - Aster',
-          description: '项目内创作：提示词、参数、任务状态与素材。'
-        }
+          description: '项目内创作：剧情、分镜、候选选片、任务与素材。'
+        },
+        children: [
+          {
+            path: '',
+            name: 'CreativeProject',
+            component: () => import('../views/creative/project/ProjectEntry.vue')
+          },
+          {
+            path: 'studio',
+            name: 'CreativeProjectStudio',
+            component: () => import('../views/creative/project/ProjectStudioTab.vue')
+          },
+          {
+            path: 'story',
+            name: 'CreativeProjectStory',
+            component: () => import('../views/creative/project/ProjectStoryTab.vue')
+          },
+          {
+            path: 'storyboard',
+            name: 'CreativeProjectStoryboard',
+            component: () => import('../views/creative/project/ProjectStoryboardTab.vue')
+          },
+          {
+            path: 'settings',
+            name: 'CreativeProjectSettings',
+            component: () => import('../views/creative/project/ProjectSettingsTab.vue')
+          },
+          {
+            path: 'chapters',
+            name: 'CreativeProjectChapters',
+            component: () => import('../views/creative/project/ProjectChaptersTab.vue')
+          },
+          {
+            path: 'workflow',
+            name: 'CreativeProjectWorkflow',
+            component: () => import('../views/creative/project/ProjectWorkflowTab.vue')
+          },
+          {
+            path: 'tasks',
+            name: 'CreativeProjectTasks',
+            component: () => import('../views/creative/project/ProjectTasksTab.vue')
+          },
+          {
+            path: 'assets',
+            name: 'CreativeProjectAssets',
+            component: () => import('../views/creative/project/ProjectAssetsTab.vue')
+          }
+        ]
       },
       {
         path: 'creative/tasks',

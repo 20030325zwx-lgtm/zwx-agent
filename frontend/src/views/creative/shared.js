@@ -162,24 +162,14 @@ export function downloadBlob(url, filename) {
   link.remove()
 }
 
-/** 收藏粒子爆点（微交互批次）：在触发元素中心炸开一圈小粒子；样式在全局 style.css。
+/** 收藏反馈（UI 规范 §11.3）：图标短暂缩放，替代原粒子爆炸；保留签名以兼容既有调用。
  *  入参兼容事件对象或元素（async 处理器里事件 currentTarget 会被置空，推荐先捕获元素再传入）。 */
 export function starBurst(source) {
   const target = source?.currentTarget ?? (source?.getBoundingClientRect ? source : null)
-  if (!target?.getBoundingClientRect) return
-  const rect = target.getBoundingClientRect()
-  const cx = rect.left + rect.width / 2
-  const cy = rect.top + rect.height / 2
-  for (let i = 0; i < 10; i++) {
-    const particle = document.createElement('span')
-    particle.className = 'star-burst-particle'
-    const angle = (Math.PI * 2 * i) / 10 + Math.random() * 0.6
-    const distance = 20 + Math.random() * 16
-    particle.style.left = cx + 'px'
-    particle.style.top = cy + 'px'
-    particle.style.setProperty('--dx', `${Math.cos(angle) * distance}px`)
-    particle.style.setProperty('--dy', `${Math.sin(angle) * distance}px`)
-    document.body.appendChild(particle)
-    setTimeout(() => particle.remove(), 680)
-  }
+  if (!target?.classList) return
+  target.classList.remove('is-burst')
+  // 强制重排，保证连续点击也能重启动画
+  void target.offsetWidth
+  target.classList.add('is-burst')
+  window.setTimeout(() => target.classList.remove('is-burst'), 280)
 }

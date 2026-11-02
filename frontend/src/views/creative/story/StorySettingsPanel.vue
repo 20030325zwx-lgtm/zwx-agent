@@ -1,11 +1,16 @@
 <template>
-  <div class="sp-backdrop" role="dialog" aria-modal="true" @click.self="$emit('close')">
+  <!-- embedded：作为项目「设定」分区内联展示；默认仍是居中弹层 -->
+  <div
+    :class="embedded ? 'sp-embedded' : 'sp-backdrop'"
+    :role="embedded ? null : 'dialog'"
+    :aria-modal="embedded ? null : 'true'"
+    @click.self="embedded ? null : $emit('close')"
+  >
     <div class="sp-panel">
       <header class="sp-head">
         <strong>作品设定与连续性</strong>
-        <button type="button" class="ap-close" aria-label="关闭" @click="$emit('close')">×</button>
+        <button v-if="!embedded" type="button" class="ap-close" aria-label="关闭" @click="$emit('close')">×</button>
       </header>
-
       <div class="sp-body">
         <section class="sp-section">
           <h4>角色（跨集复用；当场服装/伤势/持有物记到连续性）</h4>
@@ -89,7 +94,8 @@ import {
 import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 
 const props = defineProps({
-  projectId: { type: String, required: true }
+  projectId: { type: String, required: true },
+  embedded: { type: Boolean, default: false }
 })
 const emit = defineEmits(['close'])
 
@@ -162,14 +168,16 @@ onMounted(reload)
 <style scoped>
 .sp-backdrop { position: fixed; inset: 0; z-index: 85; display: flex; justify-content: center;
   background: rgba(18, 21, 30, 0.6); padding: 24px; }
+.sp-embedded { display: block; }
+.sp-embedded .sp-panel { width: 100%; max-width: 960px; padding: 0; border: 0; background: transparent; }
 .sp-panel { display: flex; flex-direction: column; width: min(760px, 100%); max-height: 100%;
-  border-radius: 14px; background: var(--wb-surface); padding: 14px 18px; overflow: auto; }
+  border-radius: var(--wb-radius-lg); background: var(--wb-surface); padding: 14px 18px; overflow: auto; }
 .sp-head { display: flex; align-items: center; justify-content: space-between; }
 .ap-close { border: 0; background: transparent; color: var(--wb-muted); font-size: 22px; cursor: pointer; }
-.sp-section h4 { margin: 14px 0 6px; font-size: 12.5px; color: var(--wb-muted); }
-.sp-card { border: 1px solid var(--wb-border); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px;
-  display: flex; flex-direction: column; gap: 6px; }
-.sp-new { background: var(--wb-fill); }
+.sp-section h4 { margin: 14px 0 6px; font-size: var(--wb-fs-caption); color: var(--wb-muted); }
+.sp-card { border: 1px solid var(--wb-border); border-radius: var(--wb-radius); padding: 8px 10px; margin-bottom: 8px;
+  display: flex; flex-direction: column; gap: 6px; background: var(--wb-surface); }
+.sp-new { background: var(--wb-surface-2); }
 .sp-card-head { display: flex; gap: 6px; align-items: center; }
 .sp-name { flex: 1; }
 .sp-note { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
@@ -177,7 +185,7 @@ onMounted(reload)
 .sp-note-fs { width: 120px; }
 .sp-note-src { width: 160px; }
 .sp-note-new { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.note-FACT { color: #15803d; }
-.note-STATE { color: #2563eb; }
-.note-FORESHADOW { color: #b45309; }
+.note-FACT { color: var(--wb-success); }
+.note-STATE { color: var(--wb-info); }
+.note-FORESHADOW { color: var(--wb-warning); }
 </style>

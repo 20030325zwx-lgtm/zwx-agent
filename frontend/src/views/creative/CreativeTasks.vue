@@ -11,18 +11,21 @@
           <router-link to="/creative" class="cr-secondary">返回创作</router-link>
         </header>
 
-        <div class="task-filters">
-          <label class="filter-field">
-            <span>状态</span>
-            <select v-model="status" class="cr-select">
-              <option value="">全部</option>
-              <option v-for="key in statusKeys" :key="key" :value="key">{{ statusMeta(key).label }}</option>
-            </select>
-          </label>
-          <button type="button" class="cr-secondary" :disabled="loading" @click="reload">
-            {{ loading ? '刷新中…' : '刷新' }}
-          </button>
-          <span class="cr-field-help">共 {{ filtered.length }} 条</span>
+        <div class="task-toolbar">
+          <div class="task-chips" role="radiogroup" aria-label="任务状态筛选">
+            <button v-for="option in statusOptions" :key="option.value" type="button"
+                    class="task-chip" :class="{ active: status === option.value }"
+                    role="radio" :aria-checked="status === option.value"
+                    @click="status = option.value">
+              {{ option.label }}<em v-if="option.count">{{ option.count }}</em>
+            </button>
+          </div>
+          <div class="task-actions">
+            <span class="cr-field-help">共 {{ filtered.length }} 条</span>
+            <button type="button" class="cr-secondary" :disabled="loading" @click="reload">
+              {{ loading ? '刷新中…' : '刷新' }}
+            </button>
+          </div>
         </div>
 
         <p v-if="error" class="cr-error">{{ error }}</p>
@@ -109,8 +112,26 @@ const detail = ref(null)
 const busy = ref(false)
 const toast = ref({ text: '', tone: '' })
 
-const statusKeys = ['QUEUED', 'SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED', 'RECONCILING', 'FETCHING', 'INGEST_FAILED', 'SUCCEEDED', 'FAILED', 'CANCELLED']
-const filtered = computed(() => status.value ? jobs.value.filter(job => job.status === status.value) : jobs.value)
+const ACTIVE_GROUPS = ['QUEUED', 'SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED', 'RECONCILING', 'FETCHING', 'INGEST_FAILED']
+const FAILED_GROUPS = ['FAILED', 'INGEST_FAILED', 'RECONCILING']
+
+function inGroup(job, group) {
+  if (group === 'active') return ACTIVE_GROUPS.includes(job.status)
+  if (group === 'failed') return FAILED_GROUPS.includes(job.status)
+  if (group === 'done') return job.status === 'SUCCEEDED'
+  if (group === 'cancelled') return job.status === 'CANCELLED'
+  return true
+}
+
+const statusOptions = computed(() => [
+  { value: '', label: '全部', count: jobs.value.length },
+  { value: 'active', label: '进行中', count: jobs.value.filter(j => inGroup(j, 'active')).length },
+  { value: 'failed', label: '需处理', count: jobs.value.filter(j => inGroup(j, 'failed')).length },
+  { value: 'done', label: '已完成', count: jobs.value.filter(j => inGroup(j, 'done')).length },
+  { value: 'cancelled', label: '已取消', count: jobs.value.filter(j => inGroup(j, 'cancelled')).length }
+])
+
+const filtered = computed(() => jobs.value.filter(job => inGroup(job, status.value)))
 
 function showToast(text, tone = '') {
   toast.value = { text, tone }
@@ -209,30 +230,53 @@ onMounted(async () => {
 <style scoped src="./creative.css"></style>
 
 <style scoped>
-.task-filters {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
+.task-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--wb-space-3); flex-wrap: wrap; }
+.task-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border: 1px solid var(--wb-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wb-text-2);
+  font-size: var(--wb-fs-caption);
+  cursor: pointer;
 }
-.filter-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--wb-muted); }
-.filter-field .cr-select { min-width: 150px; }
+.task-chip em { font-style: normal; color: var(--wb-muted); }
+.task-chip.active { border-color: var(--wb-brand); background: var(--wb-brand-soft); color: var(--wb-brand); }
+.task-chip.active em { color: var(--wb-brand); }
+.task-actions { display: flex; align-items: center; gap: var(--wb-space-3); }
 
 .task-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-compact);
   background: var(--wb-surface);
   border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-lg);
+  border-radius: var(--wb-radius);
   overflow: hidden;
 }
-.task-table th, .task-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--wb-border); }
-.task-table th { color: var(--wb-muted); font-weight: 500; background: var(--wb-fill); }
+.task-table th, .task-table td {
+  padding: 0 12px;
+  height: 44px;
+  text-align: left;
+  border-bottom: 1px solid var(--wb-border);
+  vertical-align: middle;
+}
+.task-table th {
+  height: 40px;
+  color: var(--wb-muted);
+  font-weight: 500;
+  background: var(--wb-surface-2);
+  font-size: var(--wb-fs-caption);
+}
 .task-table tr:last-child td { border-bottom: none; }
-.task-prompt { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-table tbody tr:hover { background: var(--wb-fill); }
+.task-prompt { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-project { color: var(--wb-brand); text-decoration: none; }
-.load-more { display: flex; justify-content: center; padding: 8px 0 24px; }
+.load-more { display: flex; justify-content: center; padding: var(--wb-space-3) 0 var(--wb-space-6); }
 
 .detail-backdrop {
   position: fixed;
@@ -247,12 +291,13 @@ onMounted(async () => {
   height: 100%;
   overflow-y: auto;
   background: var(--wb-surface);
+  color: var(--wb-text);
   border-left: 1px solid var(--wb-border);
-  padding: 18px;
+  padding: var(--wb-space-4) var(--wb-space-5);
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  box-shadow: -16px 0 48px rgb(0 0 0 / 18%);
+  gap: var(--wb-space-4);
+  box-shadow: var(--wb-shadow-lg);
 }
 .detail-head { display: flex; align-items: flex-start; justify-content: space-between; }
 .detail-head h2 { margin: 0; font-size: 16px; }

@@ -19,35 +19,27 @@
       </div>
       <p v-if="assets.length && !filtered.length" class="cr-empty">这个分类下还没有素材。</p>
       <div v-else-if="filtered.length" class="asset-grid">
-        <figure v-for="asset in filtered" :key="asset.id" class="asset-card">
-          <button type="button" class="asset-thumb" :aria-label="`预览 ${asset.displayName}`"
-                  @click="openPreview(asset)">
-            <!-- 视频素材：签名 URL + 原生首帧，不走图片缩略图链路 -->
-            <video v-if="asset.mediaType === 'VIDEO' && videoUrls[asset.id]"
-                   :src="videoUrls[asset.id].url || videoUrls[asset.id]" muted preload="metadata"></video>
-            <img v-else-if="asset.mediaType !== 'VIDEO' && (thumbs[asset.id] || urls[asset.id])"
-                 :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
-            <span v-else class="asset-placeholder">加载中…</span>
-          </button>
-          <figcaption>
-            <span class="asset-name">
-              {{ asset.displayName }}
-              <em class="asset-origin" :class="asset.origin === 'UPLOAD' ? 'up' : 'gen'">
-                {{ asset.origin === 'UPLOAD' ? '上传' : '生成' }}
-              </em>
-            </span>
-            <span class="asset-meta">{{ formatBytes(asset.byteSize) }} · {{ formatTime(asset.createdAt) }}</span>
-            <span class="asset-actions">
-              <button type="button" class="cr-ghost" :aria-pressed="asset.starred"
-                      @click="toggleStar(asset, $event)">{{ asset.starred ? '已收藏' : '收藏' }}</button>
-              <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
-              <button type="button" class="cr-ghost" :class="{ active: compareIds.includes(asset.id) }"
-                      @click="toggleCompare(asset)">{{ compareIds.includes(asset.id) ? '已选对比' : '对比' }}</button>
-              <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFromAsset(asset)">继续创作</button>
-              <HoldToConfirm label="删除" @confirm="removeAsset(asset)" />
-            </span>
-          </figcaption>
-        </figure>
+        <AssetCard
+          v-for="asset in filtered"
+          :key="asset.id"
+          :asset="asset"
+          :preview-url="previewUrl(asset)"
+          :preview-kind="asset.mediaType === 'VIDEO' ? 'video' : 'image'"
+          @open="openPreview(asset)"
+        >
+          <template #overlay>
+            <span v-if="compareIds.includes(asset.id)" class="compare-flag">已选对比</span>
+          </template>
+          <template #actions>
+            <button type="button" class="cr-ghost" :aria-pressed="asset.starred"
+                    @click="toggleStar(asset, $event)">{{ asset.starred ? '已收藏' : '收藏' }}</button>
+            <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
+            <button type="button" class="cr-ghost" :class="{ active: compareIds.includes(asset.id) }"
+                    @click="toggleCompare(asset)">{{ compareIds.includes(asset.id) ? '已选对比' : '对比' }}</button>
+            <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFromAsset(asset)">继续创作</button>
+            <HoldToConfirm label="删除" @confirm="removeAsset(asset)" />
+          </template>
+        </AssetCard>
       </div>
 
       <!-- 对比选定浮条（创作闭环：候选对比 → 人工选定 → 合成） -->
@@ -110,6 +102,7 @@ import {
 } from '../../../api'
 import { downloadBlob, formatBytes, formatTime, starBurst, useAssetUrls, useVideoUrls } from '../shared'
 import { PROJECT_CTX, seedStudio } from './composables'
+import AssetCard from '../../../components/creative/AssetCard.vue'
 import AssetCompare from '../../../components/creative/AssetCompare.vue'
 import AssetPreview from '../AssetPreview.vue'
 import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
@@ -189,6 +182,12 @@ async function removeAsset(asset) {
   } catch (exception) {
     showToast(exception.response?.data?.error || '删除失败', 'error')
   }
+}
+
+function previewUrl(asset) {
+  return asset.mediaType === 'VIDEO'
+    ? (videoUrls[asset.id]?.url || '')
+    : (thumbs[asset.id] || urls[asset.id] || '')
 }
 
 async function openPreview(asset) {
@@ -291,57 +290,20 @@ onMounted(load)
 .asset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  gap: var(--wb-space-3);
 }
-.asset-card {
-  margin: 0;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
-  background: var(--wb-surface);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.asset-thumb { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
-.asset-thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--wb-fill); }
-.asset-thumb video {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  background: var(--wb-media-bg);
-}
-.asset-placeholder {
-  aspect-ratio: 4 / 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--wb-muted);
-  font-size: var(--wb-fs-caption);
-  background: var(--wb-fill);
-}
-.asset-card figcaption { display: flex; flex-direction: column; gap: 4px; padding: 9px 11px; }
-.asset-name {
-  font-size: var(--wb-fs-compact);
-  font-weight: 550;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.asset-meta { font-size: var(--wb-fs-caption); color: var(--wb-muted); }
-.asset-actions { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
-.asset-actions .danger { color: var(--wb-danger); }
-.asset-actions .cr-ghost.active { border-color: var(--wb-brand); color: var(--wb-brand); }
-.asset-origin {
-  font-style: normal;
-  font-size: var(--wb-fs-caption);
-  padding: 1px 6px;
+
+.compare-flag {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 0 7px;
   border-radius: 999px;
-  margin-left: 6px;
-  vertical-align: 1px;
+  font-size: var(--wb-fs-caption);
+  line-height: 18px;
+  background: var(--wb-brand);
+  color: var(--wb-brand-contrast);
 }
-.asset-origin.gen { background: var(--wb-brand-soft); color: var(--wb-brand); }
-.asset-origin.up { background: var(--wb-fill); color: var(--wb-text-2); }
 
 .compare-bar {
   position: sticky;

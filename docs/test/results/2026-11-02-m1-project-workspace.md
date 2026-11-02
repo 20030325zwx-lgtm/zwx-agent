@@ -75,3 +75,25 @@
 
 前端：恢复 `router/index.js` 的项目路由与 5 个旧组件（`CreativeProject.vue`、`StoryWorkspace.vue`、`ShotDrawer.vue` 已删除，需 `git revert`）。
 后端：V19 仅索引，可保留；候选 join 与计数优化可单独回滚。
+
+## 追加：素材库与任务记录的 UI 修正（同日，用户反馈后）
+
+用户反馈「整体 UI 变化不明显」并指出素材库网格错乱（卡片高低不齐、大片留白、按钮换行）。定位与修复见
+`docs/bugs/bug-2026-11-02-asset-grid-ragged.txt`。
+
+| 检查点 | 结果 |
+| --- | --- |
+| 素材库（1440×900，浅色）：17 张卡高度 277–280px 一致、无空白块、操作一行、左侧筛选栏（来源/类型/项目/收藏） | ✅ 截图见下 |
+| 素材库（深色）：文字/边框/筛选栏可读，卡片一致 | ✅ |
+| 项目素材：3 张卡 289px 等高，复用同一 `AssetCard` | ✅ |
+| 任务记录：状态分段筛选（全部 10 / 需处理 2 / 已完成 8 / 进行中 0 / 已取消 0），行高 44px | ✅ |
+| 构建：`npm run build` | ✅ `✓ built in 18.06s` |
+
+截图（会话工件）：
+- 素材库（1440 浅色）：`.../call_00_ET_NErv7p8XXVrpx4zbgchx3617-tool-result-07816f95-98fe-43a0-bf0b-1b78aee40638.png`
+- 素材库（1440 深色）：`.../call_00_QlmT8u2GyRclpbr9QGyM6694-tool-result-bf3ec085-c3ac-4681-99a6-a03309517596.png`
+- 项目素材（1440 浅色）：`.../call_00_DUqwITJBTZCtEfQ11NJo1373-tool-result-9f4c8942-7ebd-49ae-bfae-9122ef8786d3.png`
+- 任务记录（1440 浅色）：`.../call_00_KemD7qx2JkSLor7Xn6vE1981-tool-result-c2eef675-1ec0-4163-b813-e503caccd8ba.png`
+
+未做：素材库的「业务分类（角色/场景/镜头）」「使用位置反查」「回收站」仍缺后端字段与端点（M2 范围）；
+任务中心仍是全局列表（项目内已有分区），跨项目「待处理」聚合未做。

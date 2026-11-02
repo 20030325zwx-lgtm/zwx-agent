@@ -1,90 +1,106 @@
 <template>
   <div class="cr-page">
     <div class="cr-scroll">
-      <div class="cr-inner">
-        <header class="cr-head">
+      <div class="assets-page">
+        <header class="assets-head">
           <div>
             <p class="cr-kicker">AI 创作</p>
             <h1 class="cr-title">素材库</h1>
-            <p class="cr-sub">跨项目的个人素材：生成结果与上传文件（当前为图片）。仅本人可见。</p>
+            <p class="cr-sub">生成结果与上传文件，仅本人可见。按项目、类型和来源筛选。</p>
           </div>
           <router-link to="/creative" class="cr-secondary">返回创作</router-link>
         </header>
 
-        <div class="asset-filters">
-          <label class="filter-field">
-            <span>项目</span>
-            <select v-model="projectId" class="cr-select" @change="reload">
-              <option value="">全部项目</option>
-              <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option>
-            </select>
-          </label>
-          <label class="filter-field">
-            <span>类型</span>
-            <select v-model="mediaType" class="cr-select" @change="reload">
-              <option value="">全部</option>
-              <option value="IMAGE">图片</option>
-            </select>
-          </label>
-          <label class="star-filter">
-            <input v-model="starred" type="checkbox" @change="reload" />
-            <span>只看收藏</span>
-          </label>
-          <div class="origin-filter" role="radiogroup" aria-label="素材来源">
-            <button v-for="option in originOptions" :key="option.value" type="button"
-                    class="origin-chip" :class="{ active: origin === option.value }"
-                    @click="origin = option.value; reload()">{{ option.label }}</button>
-          </div>
-        </div>
+        <div class="assets-layout">
+          <!-- 筛选侧栏：类型 / 来源 / 项目 / 收藏（UI 规范 §8.6） -->
+          <aside class="assets-filters" aria-label="素材筛选">
+            <section class="filter-group">
+              <h2>来源</h2>
+              <button
+                v-for="option in originOptions"
+                :key="option.value"
+                type="button"
+                class="filter-item"
+                :class="{ active: origin === option.value }"
+                @click="origin = option.value; reload()"
+              >
+                {{ option.label }}
+                <em v-if="counts[option.value]">{{ counts[option.value] }}</em>
+              </button>
+            </section>
 
-        <p v-if="error" class="cr-error">{{ error }}</p>
-        <p v-if="!loading && !assets.length" class="cr-empty">
-          还没有素材。生成结果会自动保存到这里；也可以在项目内上传文件。
-        </p>
+            <section class="filter-group">
+              <h2>类型</h2>
+              <select v-model="mediaType" class="cr-select" @change="reload">
+                <option value="">全部类型</option>
+                <option value="IMAGE">图片</option>
+                <option value="VIDEO">视频</option>
+              </select>
+            </section>
 
-        <div v-else class="asset-grid">
-          <figure v-for="asset in assets" :key="asset.id" class="asset-card">
-            <button type="button" class="asset-thumb" :aria-label="`预览 ${asset.displayName}`"
-                    @click="openPreview(asset)">
-              <!-- 视频卡片：签名 URL + 原生首帧（preload=metadata），不走图片缩略图链路 -->
-              <video v-if="asset.mediaType === 'VIDEO' && videoUrls[asset.id]"
-                     :src="videoUrls[asset.id].url || videoUrls[asset.id]" muted preload="metadata"></video>
-              <img v-else-if="asset.mediaType !== 'VIDEO' && (thumbs[asset.id] || urls[asset.id])"
-                   :src="thumbs[asset.id] || urls[asset.id]" :alt="asset.displayName" />
-              <span v-else class="asset-placeholder">加载中…</span>
-            </button>
-            <figcaption>
-              <span class="asset-name">
-                {{ asset.displayName }}
-                <em class="asset-origin" :class="asset.origin === 'UPLOAD' ? 'up' : 'gen'">
-                  {{ asset.origin === 'UPLOAD' ? '上传' : '生成' }}
-                </em>
-              </span>
-              <span class="asset-meta">
-                {{ formatBytes(asset.byteSize) }}
-                <template v-if="asset.width && asset.height"> · {{ asset.width }}×{{ asset.height }}</template>
-                · {{ formatTime(asset.createdAt) }}
-              </span>
-              <span class="asset-actions">
-                <button type="button" class="cr-ghost" :aria-pressed="asset.starred" @click="toggleStar(asset, $event)">
-                  {{ asset.starred ? '已收藏' : '收藏' }}
-                </button>
-                <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
-                <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFrom(asset)">继续创作</button>
-                <HoldToConfirm label="删除" @confirm="remove(asset)" />
-              </span>
-            </figcaption>
-          </figure>
-        </div>
+            <section class="filter-group">
+              <h2>项目</h2>
+              <select v-model="projectId" class="cr-select" @change="reload">
+                <option value="">全部项目</option>
+                <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option>
+              </select>
+            </section>
 
-        <div v-if="nextCursor" class="load-more">
-          <button type="button" class="cr-secondary" :disabled="loading" @click="loadMore">加载更多</button>
+            <label class="filter-check">
+              <input v-model="starred" type="checkbox" @change="reload" />
+              <span>只看收藏</span>
+            </label>
+          </aside>
+
+          <section class="assets-main">
+            <div class="assets-toolbar">
+              <span class="assets-count">
+                {{ loading ? '加载中…' : `${assets.length} 个素材` }}
+                <template v-if="origin || mediaType || projectId || starred"> · 已筛选</template>
+              </span>
+              <button v-if="hasFilters" type="button" class="cr-ghost" @click="clearFilters">清除筛选</button>
+            </div>
+
+            <p v-if="error" class="cr-error">{{ error }}</p>
+            <div v-if="!loading && !assets.length" class="cr-empty">
+              {{ hasFilters ? '当前筛选下没有素材。' : '还没有素材。生成结果会自动保存到这里；也可以在项目内上传文件。' }}
+              <button v-if="hasFilters" type="button" class="cr-ghost" @click="clearFilters">清除筛选</button>
+            </div>
+
+            <div v-else class="asset-grid">
+              <AssetCard
+                v-for="asset in assets"
+                :key="asset.id"
+                :asset="asset"
+                :preview-url="previewUrls[asset.id] || ''"
+                :preview-kind="asset.mediaType === 'VIDEO' ? 'video' : 'image'"
+                @open="openPreview(asset)"
+              >
+                <template #actions>
+                  <button type="button" class="cr-ghost" :aria-pressed="asset.starred"
+                          :title="asset.starred ? '取消收藏' : '收藏'"
+                          @click="toggleStar(asset, $event)">{{ asset.starred ? '已收藏' : '收藏' }}</button>
+                  <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
+                  <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFrom(asset)">继续创作</button>
+                  <HoldToConfirm label="删除" @confirm="remove(asset)" />
+                </template>
+              </AssetCard>
+            </div>
+
+            <div v-if="nextCursor" class="load-more">
+              <button type="button" class="cr-secondary" :disabled="loading" @click="loadMore">
+                {{ loading ? '加载中…' : '加载更多' }}
+              </button>
+            </div>
+          </section>
         </div>
       </div>
     </div>
+
     <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
       <template #actions>
-        <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred" @click="toggleStar(previewAsset, $event); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
+        <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred"
+                @click="toggleStar(previewAsset, $event); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
           {{ previewAsset.starred ? '已收藏' : '收藏' }}
         </button>
         <button v-if="previewAsset.jobId" type="button" class="cr-ghost" @click="continueFrom(previewAsset)">继续创作</button>
@@ -96,12 +112,13 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   deleteCreativeAsset, getCreativeJob, listCreativeAssets, listCreativeProjects, updateCreativeAsset
 } from '../../api'
-import { useAssetUrls, useVideoUrls, downloadBlob, formatBytes, formatTime, starBurst } from './shared'
+import { downloadBlob, formatBytes, formatTime, starBurst, useAssetUrls, useVideoUrls } from './shared'
+import AssetCard from '../../components/creative/AssetCard.vue'
 import AssetPreview from './AssetPreview.vue'
 import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
 
@@ -116,7 +133,7 @@ const mediaType = ref('')
 const origin = ref('')
 const starred = ref(false)
 const originOptions = [
-  { value: '', label: '全部' },
+  { value: '', label: '全部来源' },
   { value: 'UPLOAD', label: '原始素材' },
   { value: 'GENERATED', label: '生成结果' }
 ]
@@ -127,10 +144,30 @@ const loading = ref(false)
 const error = ref('')
 const toast = ref({ text: '', tone: '' })
 
+// 侧栏计数只反映当前已加载页，避免伪造全量统计
+const counts = reactive({ '': 0, UPLOAD: 0, GENERATED: 0 })
+const hasFilters = computed(() => Boolean(origin.value || mediaType.value || projectId.value || starred.value))
+
+// 卡片预览地址集中解析：图片优先缩略图、视频用签名地址
+const previewUrls = computed(() => {
+  const map = {}
+  assets.value.forEach(asset => {
+    if (asset.mediaType === 'VIDEO') map[asset.id] = videoUrls[asset.id]?.url || ''
+    else map[asset.id] = thumbs[asset.id] || urls[asset.id] || ''
+  })
+  return map
+})
+
 function showToast(text, tone = '') {
   toast.value = { text, tone }
   window.clearTimeout(showToast.timer)
   showToast.timer = window.setTimeout(() => { toast.value = { text: '', tone: '' } }, 3200)
+}
+
+function recount() {
+  counts[''] = assets.value.length
+  counts.UPLOAD = assets.value.filter(asset => asset.origin === 'UPLOAD').length
+  counts.GENERATED = assets.value.filter(asset => asset.origin !== 'UPLOAD').length
 }
 
 async function load(cursor = null, append = false) {
@@ -151,6 +188,7 @@ async function load(cursor = null, append = false) {
       if (asset.mediaType === 'VIDEO') videoUrlFor(asset.id)
       else thumbFor(asset.id)
     })
+    recount()
   } catch (exception) {
     error.value = exception.response?.data?.error || `素材加载失败：${exception.message || exception}`
   } finally {
@@ -161,6 +199,14 @@ async function load(cursor = null, append = false) {
 function reload() { load(null, false) }
 function loadMore() { if (nextCursor.value) load(nextCursor.value, true) }
 
+function clearFilters() {
+  origin.value = ''
+  mediaType.value = ''
+  projectId.value = ''
+  starred.value = false
+  reload()
+}
+
 async function toggleStar(asset, event) {
   // 事件对象的 currentTarget 在 await 之后会被置空，必须在同步阶段先捕获
   const burstTarget = event?.currentTarget
@@ -168,8 +214,9 @@ async function toggleStar(asset, event) {
     const updated = await updateCreativeAsset(asset.id, { starred: !asset.starred })
     const index = assets.value.findIndex(item => item.id === asset.id)
     if (index >= 0) assets.value[index] = updated
-    if (updated.starred) starBurst(burstTarget) // 收藏正反馈：炸开一圈小粒子
+    if (updated.starred) starBurst(burstTarget)
     if (starred.value) assets.value = assets.value.filter(item => item.starred)
+    recount()
   } catch (exception) {
     showToast('收藏失败', 'error')
   }
@@ -193,17 +240,17 @@ function downloadAsset(asset) {
 async function continueFrom(asset) {
   try {
     const job = await getCreativeJob(asset.jobId)
-    router.push(`/creative/projects/${job.projectId}`)
+    router.push(`/creative/projects/${job.projectId}?tab=studio`)
   } catch (exception) {
     showToast('原任务信息不可用', 'error')
   }
 }
 
 async function remove(asset) {
-  // 长按确认已在前端按钮上完成
   try {
     await deleteCreativeAsset(asset.id)
     assets.value = assets.value.filter(item => item.id !== asset.id)
+    recount()
     showToast('素材已删除', 'success')
   } catch (exception) {
     showToast(exception.response?.data?.error || '删除失败', 'error')
@@ -222,60 +269,98 @@ onMounted(async () => {
 <style scoped src="./creative.css"></style>
 
 <style scoped>
-.asset-filters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-.filter-field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--wb-muted); }
-.filter-field .cr-select { min-width: 150px; }
-.star-filter { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--wb-text-2); padding-bottom: 9px; }
+.assets-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--wb-space-6) var(--wb-space-7) var(--wb-space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--wb-space-5);
+}
 
-.origin-filter { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-.origin-chip {
-  padding: 4px 12px;
-  border-radius: 999px;
+.assets-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--wb-space-4); }
+
+.assets-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--wb-space-5);
+  align-items: start;
+}
+
+.assets-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wb-space-4);
+  padding: var(--wb-space-3);
   border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
   background: var(--wb-surface);
+  position: sticky;
+  top: 0;
+}
+
+.filter-group { display: flex; flex-direction: column; gap: 4px; }
+.filter-group h2 {
+  margin: 0 0 2px;
+  font-size: var(--wb-fs-caption);
+  font-weight: 500;
   color: var(--wb-muted);
-  font-size: 12px;
+}
+
+.filter-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--wb-radius-sm);
+  background: transparent;
+  color: var(--wb-text-2);
+  font-size: var(--wb-fs-compact);
+  text-align: left;
   cursor: pointer;
 }
-.origin-chip.active {
-  color: var(--wb-brand);
-  border-color: color-mix(in srgb, var(--wb-brand) 40%, transparent);
-  background: var(--wb-brand-soft);
+
+.filter-item:hover { background: var(--wb-fill); color: var(--wb-text); }
+.filter-item.active { background: var(--wb-brand-soft); color: var(--wb-brand); font-weight: 550; }
+.filter-item em { font-style: normal; font-size: var(--wb-fs-caption); color: var(--wb-muted); }
+
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--wb-fs-compact);
+  color: var(--wb-text-2);
+  padding-top: var(--wb-space-2);
+  border-top: 1px solid var(--wb-border);
 }
-.asset-thumb { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
-.asset-thumb img { display: block; width: 100%; }
-.asset-thumb video { display: block; width: 100%; background: #000; aspect-ratio: 16 / 9; object-fit: cover; }
-.asset-origin { font-style: normal; font-size: 10.5px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
-.asset-origin.gen { background: var(--wb-brand-soft); color: var(--wb-brand); }
-.asset-origin.up { background: var(--wb-fill); color: var(--wb-text-2); }
+
+.filter-check input { width: 14px; height: 14px; accent-color: var(--wb-brand); }
+
+.assets-main { display: flex; flex-direction: column; gap: var(--wb-space-3); min-width: 0; }
+
+.assets-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wb-space-3);
+  min-height: 28px;
+}
+
+.assets-count { font-size: var(--wb-fs-compact); color: var(--wb-text-2); }
+
 .asset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  gap: var(--wb-space-3);
 }
-.asset-card {
-  margin: 0;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-lg);
-  background: var(--wb-surface);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+
+.load-more { display: flex; justify-content: center; padding: var(--wb-space-3) 0 var(--wb-space-6); }
+
+@media (max-width: 900px) {
+  .assets-page { padding: var(--wb-space-4); }
+  .assets-layout { grid-template-columns: 1fr; }
+  .assets-filters { position: static; }
 }
-.asset-card img { display: block; width: 100%; height: auto; min-height: 140px; max-height: 320px; object-fit: contain; background: var(--wb-fill); }
-.asset-placeholder {
-  aspect-ratio: 4 / 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--wb-muted);
-  font-size: 12px;
-  background: var(--wb-fill);
-}
-.asset-card figcaption { display: flex; flex-direction: column; gap: 4px; padding: 9px 11px; }
-.asset-name { font-size: 12.5px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.asset-meta { font-size: 11px; color: var(--wb-muted); }
-.asset-actions { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
-.asset-actions .danger { color: var(--wb-danger); }
-.load-more { display: flex; justify-content: center; padding: 8px 0 24px; }
 </style>

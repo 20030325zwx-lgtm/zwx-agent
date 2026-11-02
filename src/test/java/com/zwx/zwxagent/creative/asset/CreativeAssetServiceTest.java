@@ -71,6 +71,10 @@ class CreativeAssetServiceTest {
 
     @AfterAll
     static void cleanUp() {
+        // 外键依赖顺序：event/output/attempt/ref → job；片子相关后置表 → asset/project
+        jdbcTemplate.update("DELETE FROM video_batch_item WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
+        jdbcTemplate.update("DELETE FROM media_job_event WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
+        jdbcTemplate.update("DELETE FROM media_job_output WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job_asset_ref WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job_attempt WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job WHERE user_id = ?", TEST_USER);

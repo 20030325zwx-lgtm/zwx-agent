@@ -88,10 +88,12 @@ class MediaJobSchedulerTest {
 
     @org.junit.jupiter.api.BeforeEach
     void cleanLeftoverJobs() {
-        // 避免前序用例遗留的 RESERVED 任务占满用户/全局额度
+        // 避免前序用例遗留的 RESERVED 任务占满用户/全局额度；按外键依赖顺序清理
+        jdbcTemplate.update("DELETE FROM video_batch_item WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job_event WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job_output WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job_attempt WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
+        jdbcTemplate.update("DELETE FROM media_job_asset_ref WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job WHERE user_id = ?", TEST_USER);
     }
 

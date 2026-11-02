@@ -106,6 +106,11 @@ class MediaJobServiceTest {
     @AfterAll
     void cleanUpTestData() {
         jdbcTemplate.update("DELETE FROM media_job_event WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
+        // 真实调度链会写 attempt/output/asset_ref：清理需按外键依赖顺序，否则残留行导致删除失败
+        jdbcTemplate.update("DELETE FROM media_job_attempt WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
+        jdbcTemplate.update("DELETE FROM media_job_output WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
+        jdbcTemplate.update("DELETE FROM media_job_asset_ref WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
+        jdbcTemplate.update("DELETE FROM video_batch_item WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job WHERE user_id = ?", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_model_profile WHERE model_row_id = ?", TEST_MODEL_ROW_ID);
         jdbcTemplate.update("DELETE FROM model_binding WHERE owner_id = ? AND purpose = 'image_generation'", TEST_USER);

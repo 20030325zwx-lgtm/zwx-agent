@@ -63,6 +63,8 @@ class CreativeAssetServiceTest {
                 new MediaJobRepository(jdbcTemplate),
                 new MediaJobAssetRefRepository(jdbcTemplate),
                 storage,
+                new com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository(jdbcTemplate),
+                new com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository(jdbcTemplate),
                 100L * 1024 * 1024);
         projectService = new com.zwx.zwxagent.creative.service.CreativeProjectService(
                 new CreativeProjectRepository(jdbcTemplate));
@@ -185,7 +187,7 @@ class CreativeAssetServiceTest {
         Assertions.assertThrows(IllegalArgumentException.class, () -> assetService.content(stranger, view.id()));
         Assertions.assertThrows(IllegalArgumentException.class, () -> assetService.delete(stranger, view.id()));
         Assertions.assertThrows(IllegalArgumentException.class, () -> assetService.update(stranger, view.id(),
-                new CreativeAssetService.UpdateAssetRequest("x", null)));
+                new CreativeAssetService.UpdateAssetRequest("x", null, null)));
     }
 
     private static byte[] png(int width, int height) throws Exception {

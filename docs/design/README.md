@@ -1,9 +1,11 @@
 # 设计文档
 
+- [M1.5 智能体与创作模块融合：详细设计](./2026-11-02-creative-agent-integration.md)
 - [Aster AI 创作 UI 视觉与交互设计规范](./2026-11-02-ai-creative-ui-visual-design.md)
 - [Aster AI 创作核心产品规划](./2026-11-02-ai-creative-core-product-plan.md)
 - [Aster AI 创作 UI 视觉与交互设计规范](./2026-11-02-ai-creative-ui-visual-design.md)
 - [M1 短剧项目工作区产品化](./2026-11-02-m1-project-workspace.md)
+- [UI1 + UI3 素材与任务闭环](./2026-11-02-ui1-ui3-assets-tasks.md)
 - [M0 产品外壳收敛：导航、创作首页与作品列表](./2026-11-02-m0-product-shell.md)
 - [视频批次生产 P3 实施记录](./2026-11-02-video-batch-p3.md)
 - [视频创作完善：项目素材、剧集剧情、任务与提示词统一管理（调研方案）](./2026-11-01-video-production-management-research.md)

@@ -1,0 +1,27 @@
+日期：2026-11-02
+主题：跨项目待处理聚合接口 500（media_job 没有 prompt 列）
+
+现象
+- 新增 `GET /ai/creative/jobs/summary` 后，首页与接口都返回 500：
+  `BadSqlGrammarException … column j.original_prompt does not exist`，随后修复 SQL 后又报
+  `ResultSet 中找不到栏位名称 original_prompt`。
+
+影响范围
+- 只影响新加的聚合接口与首页待处理区块；素材、项目、任务列表不受影响。
+
+原因
+- `media_job` 表不存提示词列，提示词在 `input_snapshot` JSONB 里（字段名 `prompt`）。
+- 第一版 SQL 直接选 `j.original_prompt`；改成 `j.input_snapshot ->> 'prompt' AS prompt` 后，
+  RowMapper 仍按旧列名 `original_prompt` 取值，于是第二次仍然 500。
+
+解决方式
+- SQL 取 `input_snapshot ->> 'prompt'`，RowMapper 同步改成 `rs.getString("prompt")`。
+- 两处必须一起改：只改 SQL 会在映射阶段继续报错，且错误信息与第一次不同，容易误判为"没修好"。
+
+验证结果
+- `/api/ai/creative/jobs/summary` 返回 `active 0 / failed 2 / ingestFailed 0 / reconciling 0 / pendingSelection 0`，
+  条目包含项目名与提示词；首页待处理读取同一份数据。
+
+后续注意事项
+- 任务相关的读取统一从 `input_snapshot` 解 JSON，不要再假设有 `prompt`/`original_prompt` 列。
+- 新增接口联调时先看一次原始响应体（status + body），不要只看统计字段是否为空——空对象很容易被当成"没有数据"。

@@ -32,13 +32,25 @@ public class CreativeAssetService {
 
     public record AssetView(UUID id, UUID projectId, UUID jobId, String mediaType, String displayName,
                             boolean starred, String status, long byteSize,
-                            Integer width, Integer height, Long durationMs, Instant createdAt, String origin) {
+                            Integer width, Integer height, Long durationMs, Instant createdAt, String origin,
+                            String businessType) {
     }
 
     public record AssetList(List<AssetView> items, String nextCursor) {
     }
 
-    public record UpdateAssetRequest(String displayName, Boolean starred) {
+    /** 使用位置：镜头候选（执行位置）与角色/地点参考图（业务位置）。 */
+    public record UsageShot(String kind, UUID candidateId, UUID shotId, UUID projectId, String status,
+                            int episodeNumber, String episodeTitle, int sceneNumber, int shotNumber) {
+    }
+
+    public record UsageRef(String entityType, UUID entityId, UUID projectId, String name) {
+    }
+
+    public record AssetUsage(List<UsageShot> shots, List<UsageRef> characterRefs, List<UsageRef> locationRefs) {
+    }
+
+    public record UpdateAssetRequest(String displayName, Boolean starred, String businessType) {
     }
 
     private final CreativeAssetRepository assetRepository;
@@ -46,6 +58,8 @@ public class CreativeAssetService {
     private final MediaJobRepository jobRepository;
     private final MediaJobAssetRefRepository assetRefRepository;
     private final MediaStorage storage;
+    private final com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository candidateRepository;
+    private final com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository resourceRepository;
     private final long videoMaxBytes;
 
     public CreativeAssetService(CreativeAssetRepository assetRepository,
@@ -53,6 +67,8 @@ public class CreativeAssetService {
                                 MediaJobRepository jobRepository,
                                 MediaJobAssetRefRepository assetRefRepository,
                                 MediaStorage storage,
+                                com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository candidateRepository,
+                                com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository resourceRepository,
                                 @org.springframework.beans.factory.annotation.Value(
                                         "${creative.video.upload-max-bytes:104857600}") long videoMaxBytes) {
         this.assetRepository = assetRepository;
@@ -60,6 +76,8 @@ public class CreativeAssetService {
         this.jobRepository = jobRepository;
         this.assetRefRepository = assetRefRepository;
         this.storage = storage;
+        this.candidateRepository = candidateRepository;
+        this.resourceRepository = resourceRepository;
         this.videoMaxBytes = videoMaxBytes > 0 ? videoMaxBytes : DEFAULT_VIDEO_MAX_BYTES;
     }
 
@@ -96,7 +114,7 @@ public class CreativeAssetService {
                 com.zwx.zwxagent.creative.asset.MockAssetIngestService.sha256(bytes),
                 inspection.width(), inspection.height(), null,
                 displayNameOf(filename), false, com.zwx.zwxagent.creative.domain.AssetStatus.PENDING,
-                "{}", Instant.now(), null);
+                null, "{}", Instant.now(), null);
         assetRepository.insert(record);
         try {
             storage.put(objectKey, mimeOf(extension), new ByteArrayInputStream(bytes), bytes.length);
@@ -163,7 +181,7 @@ public class CreativeAssetService {
                 com.zwx.zwxagent.creative.asset.MockAssetIngestService.sha256(bytes),
                 width, height, durationMs,
                 displayNameOf(filename), false, com.zwx.zwxagent.creative.domain.AssetStatus.PENDING,
-                "{}", Instant.now(), null);
+                null, "{}", Instant.now(), null);
         assetRepository.insert(record);
         try {
             storage.put(objectKey, mimeType, new ByteArrayInputStream(bytes), bytes.length);
@@ -212,7 +230,7 @@ public class CreativeAssetService {
                 com.zwx.zwxagent.creative.asset.MockAssetIngestService.sha256(bytes),
                 inspection.width(), inspection.height(), null,
                 displayNameOf(displayName), false, com.zwx.zwxagent.creative.domain.AssetStatus.PENDING,
-                metadataJson, Instant.now(), null);
+                null, metadataJson, Instant.now(), null);
         assetRepository.insert(record);
         try {
             putThumbnailBestEffort(objectKey, bytes);
@@ -309,6 +327,10 @@ public class CreativeAssetService {
         if (!assetRepository.updateDisplay(assetId, displayName, starred)) {
             throw new IllegalStateException("素材更新失败");
         }
+        if (request != null && request.businessType() != null) {
+            var type = com.zwx.zwxagent.creative.domain.AssetBusinessType.parse(request.businessType());
+            assetRepository.updateBusinessType(assetId, type == null ? null : type.name());
+        }
         return toView(assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId).orElseThrow());
     }
 
@@ -323,12 +345,14 @@ public class CreativeAssetService {
     }
 
     public AssetList list(CurrentActor actor, UUID projectId, String mediaType, boolean starred,
-                          String origin, String cursor, Integer limit) {
+                          String origin, String businessType, boolean trashed, String cursor, Integer limit) {
         int size = limit == null || limit <= 0 ? 20 : Math.min(limit, 100);
         var decoded = decodeCursor(cursor);
+        var type = com.zwx.zwxagent.creative.domain.AssetBusinessType.parse(businessType);
         List<com.zwx.zwxagent.creative.domain.CreativeAssetRecord> records =
                 assetRepository.listForOwner(actor.tenantId(), actor.userId(), projectId,
-                        mediaType, starred, origin, decoded.createdAt(), decoded.id(), size + 1);
+                        mediaType, starred, origin, type == null ? null : type.name(), trashed,
+                        decoded.createdAt(), decoded.id(), size + 1);
         List<AssetView> items = records.stream().limit(size)
                 .map(CreativeAssetService::toView).toList();
         String nextCursor = null;
@@ -337,6 +361,34 @@ public class CreativeAssetService {
             nextCursor = last.createdAt().toEpochMilli() + ":" + last.id();
         }
         return new AssetList(items, nextCursor);
+    }
+
+    /** 回收站恢复（BR14 的逆操作）：只有已软删除的素材可以恢复。 */
+    public AssetView restore(CurrentActor actor, UUID assetId) {
+        var asset = requireOwned(actor, assetId);
+        if (asset.status() != com.zwx.zwxagent.creative.domain.AssetStatus.DELETED) {
+            throw new IllegalArgumentException("素材不在回收站");
+        }
+        if (!assetRepository.restore(assetId)) {
+            throw new IllegalStateException("恢复失败，请刷新后重试");
+        }
+        return toView(assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId).orElseThrow());
+    }
+
+    /** 使用位置反查：素材被哪些镜头候选、角色/地点参考引用；跨项目。 */
+    public AssetUsage usage(CurrentActor actor, UUID assetId) {
+        requireOwned(actor, assetId);
+        List<UsageShot> shots = candidateRepository
+                .listUsageByAsset(actor.tenantId(), actor.userId(), assetId).stream()
+                .map(row -> new UsageShot("SHOT", row.candidateId(), row.shotId(), row.projectId(), row.status(),
+                        row.episodeNumber(), row.episodeTitle(), row.sceneNumber(), row.shotNumber()))
+                .toList();
+        List<UsageRef> refs = resourceRepository.listRefsByAsset(actor.tenantId(), actor.userId(), assetId).stream()
+                .map(row -> new UsageRef(row.entityType(), row.entityId(), row.projectId(), row.name()))
+                .toList();
+        List<UsageRef> characterRefs = refs.stream().filter(ref -> "CHARACTER".equals(ref.entityType())).toList();
+        List<UsageRef> locationRefs = refs.stream().filter(ref -> "LOCATION".equals(ref.entityType())).toList();
+        return new AssetUsage(shots, characterRefs, locationRefs);
     }
 
     private CreativeAssetRecord requireOwned(CurrentActor actor, UUID assetId) {
@@ -373,6 +425,7 @@ public class CreativeAssetService {
     private static AssetView toView(CreativeAssetRecord record) {
         return new AssetView(record.id(), record.projectId(), record.sourceJobId(), record.mediaType(), record.displayName(),
                 record.starred(), record.status().name(), record.byteSize(),
-                record.width(), record.height(), record.durationMs(), record.createdAt(), record.origin().name());
+                record.width(), record.height(), record.durationMs(), record.createdAt(), record.origin().name(),
+                record.businessType());
     }
 }

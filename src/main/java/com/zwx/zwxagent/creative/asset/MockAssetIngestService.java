@@ -48,7 +48,7 @@ public class MockAssetIngestService implements AssetIngestService {
                     mimeType, bytes.length, sha256,
                     null, null, null,
                     "生成图片", false, AssetStatus.READY,
-                    "{}", Instant.now(), null));
+                    null, "{}", Instant.now(), null));
         }
         outputRepository.markDone(slot.id(), sha256, (long) bytes.length);
     }

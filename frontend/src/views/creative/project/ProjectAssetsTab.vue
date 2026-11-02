@@ -80,7 +80,8 @@
       </div>
     </div>
 
-    <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
+    <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc"
+                  @close="previewAsset = null" @classify="classify">
       <template #actions>
         <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred"
                 @click="toggleStar(previewAsset, $event); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
@@ -172,6 +173,19 @@ async function toggleStar(asset, event) {
 
 function downloadAsset(asset) {
   urlFor(asset.id).then(url => downloadBlob(url, `${asset.displayName || asset.id}.png`))
+}
+
+async function classify(value) {
+  if (!previewAsset.value) return
+  try {
+    const updated = await updateCreativeAsset(previewAsset.value.id, { businessType: value })
+    const index = assets.value.findIndex(item => item.id === updated.id)
+    if (index >= 0) assets.value[index] = updated
+    previewAsset.value = { ...previewAsset.value, businessType: updated.businessType }
+    showToast('分类已更新', 'success')
+  } catch (exception) {
+    showToast(exception.response?.data?.error || '分类更新失败', 'error')
+  }
 }
 
 async function removeAsset(asset) {

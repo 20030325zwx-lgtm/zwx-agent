@@ -10,5 +10,5 @@ public record CreativeAssetRecord(UUID id, UUID projectId, String tenantId, Stri
                                   String mimeType, long byteSize, String sha256,
                                   Integer width, Integer height, Long durationMs,
                                   String displayName, boolean starred, AssetStatus status,
-                                  String metadataJson, Instant createdAt, Instant deletedAt) {
+                                  String businessType, String metadataJson, Instant createdAt, Instant deletedAt) {
 }

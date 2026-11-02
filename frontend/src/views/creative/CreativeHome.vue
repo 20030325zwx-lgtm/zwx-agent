@@ -95,6 +95,9 @@
               <span class="home-count" :class="{ 'is-warn': uncertainCount > 0 }">
                 <em>{{ uncertainCount }}</em> 结果待确认
               </span>
+              <span class="home-count" :class="{ 'is-warn': pendingSelection > 0 }">
+                <em>{{ pendingSelection }}</em> 待选片
+              </span>
             </div>
             <p v-if="!pendingJobs.length" class="cr-hint">
               没有需要处理的任务。生成中或失败的镜头会出现在这里。
@@ -103,7 +106,7 @@
               <li v-for="job in pendingJobs" :key="job.jobId" class="home-job">
                 <span class="cr-status" :class="statusMeta(job.status).tone">{{ statusMeta(job.status).label }}</span>
                 <span class="home-job-text">
-                  <strong>{{ projectName(job.projectId) }}</strong>
+                  <strong>{{ job.projectName || projectName(job.projectId) }}</strong>
                   · {{ job.prompt ? truncate(job.prompt, 40) : '生成任务' }}
                 </span>
                 <span class="home-job-time">{{ formatTime(job.createdAt) }}</span>
@@ -226,8 +229,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlertCircle, Images, Plus, Workflow } from 'lucide-vue-next'
 import {
-  createCreativeDraft, createCreativeProject, getCreativeHealth, getWorkflowDefinition,
-  listCreativeJobs, listCreativeProjects, listModelCatalog, listWorkflows, startWorkflow
+  createCreativeDraft, createCreativeProject, getCreativeHealth, getCreativeSummary, getWorkflowDefinition,
+  listCreativeProjects, listModelCatalog, listWorkflows, startWorkflow
 } from '../../api'
 import { formatTime, statusMeta } from './shared'
 import ProjectCard from '../../components/creative/ProjectCard.vue'
@@ -237,7 +240,7 @@ import { buildRunForm } from './workflowInputs'
 
 const router = useRouter()
 const projects = ref([])
-const recentJobs = ref([])
+const summary = ref(null)
 const health = ref(null)
 const loading = ref(true)
 const loadError = ref('')
@@ -267,18 +270,12 @@ const wfForm = reactive({ workflowKey: '', projectId: null, fields: [], input: {
 const activeProjects = computed(() => projects.value.filter(p => p.status === 'ACTIVE'))
 const selectedWorkflow = computed(() => workflows.value.find(wf => wf.key === wfForm.workflowKey))
 
-// 待处理：健康接口给在途总量，任务列表给可点开的条目（失败优先，其次结果待确认）
-const jobCounts = computed(() => {
-  const jobs = health.value?.jobs || {}
-  return { active: jobs.active || 0 }
-})
-const failedJobs = computed(() => recentJobs.value
-  .filter(job => job.status === 'FAILED' || job.status === 'INGEST_FAILED'))
-const uncertainJobs = computed(() => recentJobs.value
-  .filter(job => job.status === 'RECONCILING'))
-const pendingJobs = computed(() => [...failedJobs.value, ...uncertainJobs.value].slice(0, 5))
-const failedCount = computed(() => failedJobs.value.length)
-const uncertainCount = computed(() => uncertainJobs.value.length)
+// 待处理：跨项目聚合（进行中/失败/保存失败/待确认/待选片），不再只统计当前页任务
+const jobCounts = computed(() => ({ active: summary.value?.active || 0 }))
+const pendingJobs = computed(() => (summary.value?.items || []).slice(0, 5))
+const failedCount = computed(() => (summary.value?.failed || 0) + (summary.value?.ingestFailed || 0))
+const uncertainCount = computed(() => summary.value?.reconciling || 0)
+const pendingSelection = computed(() => summary.value?.pendingSelection || 0)
 
 function projectName(projectId) {
   return projects.value.find(project => project.id === projectId)?.name || '未归档任务'
@@ -412,9 +409,9 @@ async function startWorkflowRun() {
 async function load() {
   loading.value = true
   loadError.value = ''
-  const [projectResult, jobResult, catalogResult, healthResult] = await Promise.allSettled([
+  const [projectResult, summaryResult, catalogResult, healthResult] = await Promise.allSettled([
     listCreativeProjects({ limit: 6 }),
-    listCreativeJobs({ limit: 20 }),
+    getCreativeSummary(),
     listModelCatalog(),
     getCreativeHealth()
   ])
@@ -423,7 +420,7 @@ async function load() {
   } else {
     loadError.value = '作品加载失败，请确认后端服务可用'
   }
-  if (jobResult.status === 'fulfilled') recentJobs.value = jobResult.value.items || []
+  if (summaryResult.status === 'fulfilled') summary.value = summaryResult.value
   if (catalogResult.status === 'fulfilled') {
     imageBinding.value = catalogResult.value.userBindings?.image_generation
       || catalogResult.value.systemBindings?.image_generation || null
@@ -441,18 +438,22 @@ onMounted(load)
 <style scoped>
 .home-head { align-items: flex-start; }
 
+/* 首屏只让主输入抢注意力：其余分区仍是整栏宽度 */
+
 .home-compose {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 16px 12px;
+  /* UI 规范 §8.1：主输入 680-760px，高度 120-152px，不做营销 Hero */
+  width: min(760px, 100%);
+  padding: var(--wb-space-3) var(--wb-space-4) var(--wb-space-3);
   border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-lg);
+  border-radius: var(--wb-radius);
   background: var(--wb-surface);
 }
 
 .home-idea {
-  min-height: 76px;
+  min-height: 104px;
   border: 0;
   padding: 2px 0;
   background: transparent;

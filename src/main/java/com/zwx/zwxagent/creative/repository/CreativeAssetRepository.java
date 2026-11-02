@@ -31,7 +31,7 @@ public class CreativeAssetRepository {
     private static final String SELECT = """
             SELECT id, project_id, tenant_id, user_id, source_job_id, output_index, origin, media_type,
                    storage_backend, object_key, mime_type, byte_size, sha256, width, height, duration_ms,
-                   display_name, starred, status, metadata, created_at, deleted_at
+                   display_name, starred, status, business_type, metadata, created_at, deleted_at
             FROM creative_asset
             """;
 
@@ -78,11 +78,13 @@ public class CreativeAssetRepository {
                 MAPPER, id, tenantId, userId).stream().findFirst();
     }
 
-    /** 列表：类型/收藏/项目筛选 + 游标分页；不返回已软删除项。 */
+    /** 列表：类型/收藏/项目/业务分类筛选 + 游标分页；trashed=true 时只返回回收站（已软删除）项。 */
     public List<CreativeAssetRecord> listForOwner(String tenantId, String userId, UUID projectId,
                                                   String mediaType, boolean starred, String origin,
+                                                  String businessType, boolean trashed,
                                                   Instant cursorCreatedAt, UUID cursorId, int limit) {
-        StringBuilder where = new StringBuilder(" WHERE tenant_id = ? AND user_id = ? AND status <> 'DELETED'");
+        StringBuilder where = new StringBuilder(" WHERE tenant_id = ? AND user_id = ? AND status "
+                + (trashed ? "= 'DELETED'" : "<> 'DELETED'"));
         java.util.List<Object> args = new java.util.ArrayList<>();
         args.add(tenantId);
         args.add(userId);
@@ -105,6 +107,10 @@ public class CreativeAssetRepository {
                 where.append(" AND origin = ?");
                 args.add(origin);
             }
+        }
+        if (businessType != null && !businessType.isBlank()) {
+            where.append(" AND business_type = ?");
+            args.add(businessType);
         }
         if (cursorCreatedAt != null && cursorId != null) {
             where.append(" AND (created_at, id) < (?, ?)");
@@ -130,6 +136,21 @@ public class CreativeAssetRepository {
                         WHERE id = ? AND status <> 'DELETED'
                         """,
                 displayName, starred, id) > 0;
+    }
+
+    /** 业务分类（V20）：传 null 表示清除分类（回到「未归类」）。 */
+    public boolean updateBusinessType(UUID id, String businessType) {
+        return jdbcTemplate.update(
+                "UPDATE creative_asset SET business_type = ? WHERE id = ? AND status <> 'DELETED'",
+                businessType, id) > 0;
+    }
+
+    /** 从回收站恢复：软删除的素材回到 READY，不重新探测文件。 */
+    public boolean restore(UUID id) {
+        return jdbcTemplate.update("""
+                        UPDATE creative_asset SET status = 'READY', deleted_at = NULL
+                        WHERE id = ? AND status = 'DELETED'
+                        """, id) > 0;
     }
 
     public boolean softDelete(UUID id) {
@@ -161,6 +182,7 @@ public class CreativeAssetRepository {
                 rs.getString("display_name"),
                 rs.getBoolean("starred"),
                 AssetStatus.valueOf(rs.getString("status")),
+                rs.getString("business_type"),
                 rs.getString("metadata"),
                 toInstant(rs.getTimestamp("created_at")),
                 toInstant(rs.getTimestamp("deleted_at")));

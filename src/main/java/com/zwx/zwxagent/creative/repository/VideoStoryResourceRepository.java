@@ -190,6 +190,27 @@ public class VideoStoryResourceRepository {
                 (rs, rowNum) -> UUID.fromString(rs.getString("asset_id")), entityType, entityId);
     }
 
+    /** 素材反查（跨项目）：这张图被哪些角色/地点当作参考图。 */
+    public List<AssetRefUsage> listRefsByAsset(String tenantId, String userId, UUID assetId) {
+        return jdbcTemplate.query("""
+                        SELECT r.entity_type, r.entity_id, r.project_id,
+                               COALESCE(ch.name, loc.name) AS entity_name
+                        FROM video_asset_ref r
+                        LEFT JOIN video_character ch ON r.entity_type = 'CHARACTER' AND ch.id = r.entity_id
+                        LEFT JOIN video_location loc ON r.entity_type = 'LOCATION' AND loc.id = r.entity_id
+                        WHERE r.tenant_id = ? AND r.user_id = ? AND r.asset_id = ?
+                        ORDER BY r.created_at ASC
+                        """, (rs, rowNum) -> new AssetRefUsage(
+                rs.getString("entity_type"),
+                UUID.fromString(rs.getString("entity_id")),
+                UUID.fromString(rs.getString("project_id")),
+                rs.getString("entity_name")),
+                tenantId, userId, assetId);
+    }
+
+    public record AssetRefUsage(String entityType, UUID entityId, UUID projectId, String name) {
+    }
+
     // ---------------------------------------------------------------- mappers
 
     private static VideoCharacterRecord mapCharacter(ResultSet rs, int rowNum) throws SQLException {

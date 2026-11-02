@@ -221,6 +221,34 @@ public class VideoShotCandidateRepository {
                 projectId, tenantId, userId, assetId);
     }
 
+    /** 素材反查（跨项目）：素材库详情用，不需要先知道项目。 */
+    public List<AssetUsageRow> listUsageByAsset(String tenantId, String userId, UUID assetId) {
+        return jdbcTemplate.query("""
+                        SELECT c.id AS candidate_id, c.shot_id, c.project_id, c.status,
+                               sh.shot_number, sc.scene_number, e.episode_number, e.title AS episode_title
+                        FROM video_shot_candidate c
+                        JOIN video_shot sh ON sh.id = c.shot_id
+                        JOIN video_scene sc ON sc.id = sh.scene_id
+                        JOIN video_episode e ON e.id = sc.episode_id
+                        WHERE c.tenant_id = ? AND c.user_id = ? AND c.asset_id = ?
+                        ORDER BY c.created_at DESC
+                        """, (rs, rowNum) -> new AssetUsageRow(
+                UUID.fromString(rs.getString("candidate_id")),
+                UUID.fromString(rs.getString("shot_id")),
+                UUID.fromString(rs.getString("project_id")),
+                rs.getString("status"),
+                rs.getInt("episode_number"),
+                rs.getString("episode_title"),
+                rs.getInt("scene_number"),
+                rs.getInt("shot_number")),
+                tenantId, userId, assetId);
+    }
+
+    public record AssetUsageRow(UUID candidateId, UUID shotId, UUID projectId, String status,
+                                int episodeNumber, String episodeTitle,
+                                int sceneNumber, int shotNumber) {
+    }
+
     public record CandidateUsageView(UUID candidateId, UUID shotId, String status,
                                      int episodeNumber, String episodeTitle,
                                      int sceneNumber, int shotNumber) {

@@ -38,12 +38,15 @@ public class CreativeJobController {
 
     private final MediaJobService jobService;
     private final MediaJobOutputRepository outputRepository;
+    private final com.zwx.zwxagent.creative.service.CreativeSummaryService summaryService;
     private final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public CreativeJobController(MediaJobService jobService,
-                                 MediaJobOutputRepository outputRepository) {
+                                 MediaJobOutputRepository outputRepository,
+                                 com.zwx.zwxagent.creative.service.CreativeSummaryService summaryService) {
         this.jobService = jobService;
         this.outputRepository = outputRepository;
+        this.summaryService = summaryService;
     }
 
     public record CreateJobBody(UUID projectId, String operation, Long modelRowId,
@@ -72,6 +75,12 @@ public class CreativeJobController {
                 .status(result.reused() ? HttpStatus.OK : HttpStatus.ACCEPTED)
                 .body(Map.of("jobId", result.jobId().toString(), "status", result.status(),
                         "reused", result.reused(), "version", result.version()));
+    }
+
+    /** 跨项目待处理聚合：进行中 / 失败 / 保存失败 / 结果待确认 / 待选片 + 最近失败条目。 */
+    @GetMapping("/summary")
+    public com.zwx.zwxagent.creative.service.CreativeSummaryService.Summary summary(CurrentActor actor) {
+        return summaryService.summary(actor);
     }
 
     @GetMapping

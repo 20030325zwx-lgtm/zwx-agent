@@ -36,7 +36,7 @@ public class CreativeAssetController {
         this.playbackSignatures = playbackSignatures;
     }
 
-    public record UpdateAssetBody(String displayName, Boolean starred) {
+    public record UpdateAssetBody(String displayName, Boolean starred, String businessType) {
     }
 
     @PostMapping("/uploads")
@@ -66,9 +66,11 @@ public class CreativeAssetController {
                                                @RequestParam(required = false) String mediaType,
                                                @RequestParam(required = false) String origin,
                                                @RequestParam(defaultValue = "false") boolean starred,
+                                               @RequestParam(required = false) String businessType,
+                                               @RequestParam(defaultValue = "false") boolean trashed,
                                                @RequestParam(required = false) String cursor,
                                                @RequestParam(required = false) Integer limit) {
-        return assetService.list(actor, projectId, mediaType, starred, origin, cursor, limit);
+        return assetService.list(actor, projectId, mediaType, starred, origin, businessType, trashed, cursor, limit);
     }
 
     @GetMapping("/{assetId}/thumbnail")
@@ -188,7 +190,23 @@ public class CreativeAssetController {
                                                  @RequestBody UpdateAssetBody body) {
         return assetService.update(actor, assetId, new CreativeAssetService.UpdateAssetRequest(
                 body == null ? null : body.displayName(),
-                body == null ? null : body.starred()));
+                body == null ? null : body.starred(),
+                body == null ? null : body.businessType()));
+    }
+
+    /** 回收站恢复：素材从 DELETED 回到 READY，不重新生成也不移动对象。 */
+    @PostMapping("/{assetId}/restore")
+    public CreativeAssetService.AssetView restore(CurrentActor actor, @PathVariable UUID assetId) {
+        return assetService.restore(actor, assetId);
+    }
+
+    /**
+     * 素材使用位置反查（跨项目）：镜头候选 + 角色/地点参考图。
+     * 素材库徽标与详情用它回答"这张图现在被谁用着"，删除前也能看到引用。
+     */
+    @GetMapping("/{assetId}/usage")
+    public CreativeAssetService.AssetUsage usage(CurrentActor actor, @PathVariable UUID assetId) {
+        return assetService.usage(actor, assetId);
     }
 
     @DeleteMapping("/{assetId}")

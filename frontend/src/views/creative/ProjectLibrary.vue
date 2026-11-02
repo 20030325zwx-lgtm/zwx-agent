@@ -41,6 +41,16 @@
               <option value="updated">最近更新</option>
               <option value="created">创建时间</option>
             </select>
+            <div class="lib-view" role="radiogroup" aria-label="视图">
+              <button type="button" class="lib-view-btn" :class="{ active: view === 'grid' }"
+                      role="radio" :aria-checked="view === 'grid'" title="封面网格" @click="setView('grid')">
+                <LayoutGrid :size="15" />
+              </button>
+              <button type="button" class="lib-view-btn" :class="{ active: view === 'list' }"
+                      role="radio" :aria-checked="view === 'list'" title="紧凑列表" @click="setView('list')">
+                <List :size="15" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -55,8 +65,11 @@
           </div>
         </div>
         <template v-else>
-          <div class="lib-grid">
+          <div v-if="view === 'grid'" class="lib-grid">
             <ProjectCard v-for="project in items" :key="project.id" :project="project" />
+          </div>
+          <div v-else class="lib-list">
+            <ProjectRow v-for="project in items" :key="project.id" :project="project" />
           </div>
           <div class="lib-foot">
             <button v-if="nextCursor" type="button" class="cr-secondary" :disabled="loadingMore"
@@ -110,9 +123,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus } from 'lucide-vue-next'
+import { LayoutGrid, List, Plus } from 'lucide-vue-next'
 import { createCreativeProject, listCreativeProjects } from '../../api'
 import ProjectCard from '../../components/creative/ProjectCard.vue'
+import ProjectRow from '../../components/creative/ProjectRow.vue'
 import Spinner from '../../components/ui/Spinner.vue'
 
 const PAGE_SIZE = 24
@@ -122,6 +136,13 @@ const nextCursor = ref(null)
 const kind = ref('')
 const keyword = ref('')
 const sort = ref('updated')
+const VIEW_KEY = 'aster.creative.works.view'
+const view = ref(localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid')
+
+function setView(next) {
+  view.value = next
+  try { localStorage.setItem(VIEW_KEY, next) } catch (error) { /* 隐私模式下忽略 */ }
+}
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref('')
@@ -274,8 +295,29 @@ onBeforeUnmount(() => window.clearTimeout(debounceTimer))
 .lib-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
-  gap: 12px;
+  gap: var(--wb-space-3);
 }
+
+.lib-list {
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  background: var(--wb-surface);
+  overflow: hidden;
+}
+
+.lib-view { display: flex; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-sm); overflow: hidden; }
+.lib-view-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--wb-muted);
+  cursor: pointer;
+}
+.lib-view-btn:hover { background: var(--wb-fill); color: var(--wb-text); }
+.lib-view-btn.active { background: var(--wb-brand-soft); color: var(--wb-brand); }
 
 .lib-foot {
   display: flex;

@@ -11,6 +11,13 @@
           <router-link to="/creative" class="cr-secondary">返回创作</router-link>
         </header>
 
+        <div class="assets-tabs" role="tablist" aria-label="素材视图">
+          <button type="button" class="assets-tab" :class="{ active: !trashed }"
+                  role="tab" :aria-selected="!trashed" @click="switchTrashed(false)">全部素材</button>
+          <button type="button" class="assets-tab" :class="{ active: trashed }"
+                  role="tab" :aria-selected="trashed" @click="switchTrashed(true)">回收站</button>
+        </div>
+
         <div class="assets-layout">
           <!-- 筛选侧栏：类型 / 来源 / 项目 / 收藏（UI 规范 §8.6） -->
           <aside class="assets-filters" aria-label="素材筛选">
@@ -39,6 +46,20 @@
             </section>
 
             <section class="filter-group">
+              <h2>业务分类</h2>
+              <button
+                v-for="option in businessOptions"
+                :key="option.value"
+                type="button"
+                class="filter-item"
+                :class="{ active: businessType === option.value }"
+                @click="businessType = option.value; reload()"
+              >
+                {{ option.label }}
+              </button>
+            </section>
+
+            <section class="filter-group">
               <h2>项目</h2>
               <select v-model="projectId" class="cr-select" @change="reload">
                 <option value="">全部项目</option>
@@ -46,7 +67,7 @@
               </select>
             </section>
 
-            <label class="filter-check">
+            <label v-if="!trashed" class="filter-check">
               <input v-model="starred" type="checkbox" @change="reload" />
               <span>只看收藏</span>
             </label>
@@ -63,7 +84,8 @@
 
             <p v-if="error" class="cr-error">{{ error }}</p>
             <div v-if="!loading && !assets.length" class="cr-empty">
-              {{ hasFilters ? '当前筛选下没有素材。' : '还没有素材。生成结果会自动保存到这里；也可以在项目内上传文件。' }}
+              {{ trashed ? '回收站是空的。删除的素材会先到这里，可恢复。'
+                : (hasFilters ? '当前筛选下没有素材。' : '还没有素材。生成结果会自动保存到这里；也可以在项目内上传文件。') }}
               <button v-if="hasFilters" type="button" class="cr-ghost" @click="clearFilters">清除筛选</button>
             </div>
 
@@ -73,16 +95,22 @@
                 :key="asset.id"
                 :asset="asset"
                 :preview-url="previewUrls[asset.id] || ''"
-                :preview-kind="asset.mediaType === 'VIDEO' ? 'video' : 'image'"
-                @open="openPreview(asset)"
+                :preview-kind="trashed ? '' : (asset.mediaType === 'VIDEO' ? 'video' : 'image')"
+                :placeholder="trashed ? '已删除' : '加载中…'"
+                @open="trashed ? null : openPreview(asset)"
               >
                 <template #actions>
-                  <button type="button" class="cr-ghost" :aria-pressed="asset.starred"
-                          :title="asset.starred ? '取消收藏' : '收藏'"
-                          @click="toggleStar(asset, $event)">{{ asset.starred ? '已收藏' : '收藏' }}</button>
-                  <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
-                  <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFrom(asset)">继续创作</button>
-                  <HoldToConfirm label="删除" @confirm="remove(asset)" />
+                  <template v-if="trashed">
+                    <button type="button" class="cr-ghost" @click="restore(asset)">恢复</button>
+                  </template>
+                  <template v-else>
+                    <button type="button" class="cr-ghost" :aria-pressed="asset.starred"
+                            :title="asset.starred ? '取消收藏' : '收藏'"
+                            @click="toggleStar(asset, $event)">{{ asset.starred ? '已收藏' : '收藏' }}</button>
+                    <button type="button" class="cr-ghost" @click="downloadAsset(asset)">下载</button>
+                    <button v-if="asset.jobId" type="button" class="cr-ghost" @click="continueFrom(asset)">继续创作</button>
+                    <HoldToConfirm label="删除" @confirm="remove(asset)" />
+                  </template>
                 </template>
               </AssetCard>
             </div>
@@ -97,7 +125,8 @@
       </div>
     </div>
 
-    <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc" @close="previewAsset = null">
+    <AssetPreview v-if="previewAsset" :asset="previewAsset" :src="previewSrc"
+                  @close="previewAsset = null" @classify="classify">
       <template #actions>
         <button type="button" class="cr-ghost" :aria-pressed="previewAsset.starred"
                 @click="toggleStar(previewAsset, $event); previewAsset = { ...previewAsset, starred: !previewAsset.starred }">
@@ -115,7 +144,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  deleteCreativeAsset, getCreativeJob, listCreativeAssets, listCreativeProjects, updateCreativeAsset
+  deleteCreativeAsset, getCreativeJob, listCreativeAssets, listCreativeProjects, restoreCreativeAsset,
+  updateCreativeAsset
 } from '../../api'
 import { downloadBlob, formatBytes, formatTime, starBurst, useAssetUrls, useVideoUrls } from './shared'
 import AssetCard from '../../components/creative/AssetCard.vue'
@@ -131,7 +161,17 @@ const projects = ref([])
 const projectId = ref('')
 const mediaType = ref('')
 const origin = ref('')
+const businessType = ref('')
+const trashed = ref(false)
 const starred = ref(false)
+const businessOptions = [
+  { value: '', label: '全部' },
+  { value: 'CHARACTER', label: '角色' },
+  { value: 'LOCATION', label: '地点' },
+  { value: 'PROP', label: '道具' },
+  { value: 'SHOT', label: '镜头' },
+  { value: 'OTHER', label: '其他' }
+]
 const originOptions = [
   { value: '', label: '全部来源' },
   { value: 'UPLOAD', label: '原始素材' },
@@ -146,7 +186,8 @@ const toast = ref({ text: '', tone: '' })
 
 // 侧栏计数只反映当前已加载页，避免伪造全量统计
 const counts = reactive({ '': 0, UPLOAD: 0, GENERATED: 0 })
-const hasFilters = computed(() => Boolean(origin.value || mediaType.value || projectId.value || starred.value))
+const hasFilters = computed(() => Boolean(origin.value || mediaType.value || businessType.value
+  || projectId.value || starred.value))
 
 // 卡片预览地址集中解析：图片优先缩略图、视频用签名地址
 const previewUrls = computed(() => {
@@ -178,16 +219,20 @@ async function load(cursor = null, append = false) {
       projectId: projectId.value || undefined,
       mediaType: mediaType.value || undefined,
       origin: origin.value || undefined,
+      businessType: businessType.value || undefined,
+      trashed: trashed.value || undefined,
       starred: starred.value ? true : undefined,
       cursor: cursor || undefined,
       limit: 60
     })
     assets.value = append ? [...assets.value, ...(data.items || [])] : (data.items || [])
     nextCursor.value = data.nextCursor
-    assets.value.forEach(asset => {
-      if (asset.mediaType === 'VIDEO') videoUrlFor(asset.id)
-      else thumbFor(asset.id)
-    })
+    if (!trashed.value) {
+      assets.value.forEach(asset => {
+        if (asset.mediaType === 'VIDEO') videoUrlFor(asset.id)
+        else thumbFor(asset.id)
+      })
+    }
     recount()
   } catch (exception) {
     error.value = exception.response?.data?.error || `素材加载失败：${exception.message || exception}`
@@ -202,9 +247,39 @@ function loadMore() { if (nextCursor.value) load(nextCursor.value, true) }
 function clearFilters() {
   origin.value = ''
   mediaType.value = ''
+  businessType.value = ''
   projectId.value = ''
   starred.value = false
   reload()
+}
+
+function switchTrashed(next) {
+  trashed.value = next
+  reload()
+}
+
+async function restore(asset) {
+  try {
+    await restoreCreativeAsset(asset.id)
+    assets.value = assets.value.filter(item => item.id !== asset.id)
+    recount()
+    showToast('已恢复到素材库', 'success')
+  } catch (exception) {
+    showToast(exception.response?.data?.error || '恢复失败', 'error')
+  }
+}
+
+async function classify(value) {
+  if (!previewAsset.value) return
+  try {
+    const updated = await updateCreativeAsset(previewAsset.value.id, { businessType: value })
+    const index = assets.value.findIndex(item => item.id === updated.id)
+    if (index >= 0) assets.value[index] = updated
+    previewAsset.value = { ...previewAsset.value, businessType: updated.businessType }
+    showToast('分类已更新', 'success')
+  } catch (exception) {
+    showToast(exception.response?.data?.error || '分类更新失败', 'error')
+  }
 }
 
 async function toggleStar(asset, event) {
@@ -279,6 +354,20 @@ onMounted(async () => {
 }
 
 .assets-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--wb-space-4); }
+
+.assets-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--wb-border); }
+.assets-tab {
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--wb-text-2);
+  font-size: var(--wb-fs-compact);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.assets-tab:hover { color: var(--wb-text); }
+.assets-tab.active { color: var(--wb-brand); border-bottom-color: var(--wb-brand); font-weight: 550; }
 
 .assets-layout {
   display: grid;
@@ -360,7 +449,21 @@ onMounted(async () => {
 
 @media (max-width: 900px) {
   .assets-page { padding: var(--wb-space-4); }
-  .assets-layout { grid-template-columns: 1fr; }
+  .assets-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--wb-border); }
+.assets-tab {
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--wb-text-2);
+  font-size: var(--wb-fs-compact);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.assets-tab:hover { color: var(--wb-text); }
+.assets-tab.active { color: var(--wb-brand); border-bottom-color: var(--wb-brand); font-weight: 550; }
+
+.assets-layout { grid-template-columns: 1fr; }
   .assets-filters { position: static; }
 }
 </style>

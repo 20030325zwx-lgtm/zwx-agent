@@ -3,7 +3,7 @@
     <button type="button" class="ac-media" :aria-label="`预览 ${asset.displayName}`" @click="$emit('open')">
       <video v-if="previewKind === 'video' && previewUrl" :src="previewUrl" muted preload="metadata"></video>
       <img v-else-if="previewUrl" :src="previewUrl" :alt="asset.displayName" />
-      <span v-else class="ac-placeholder">加载中…</span>
+      <span v-else class="ac-placeholder">{{ placeholder }}</span>
       <slot name="overlay" />
     </button>
     <figcaption class="ac-body">
@@ -30,7 +30,9 @@ defineProps({
   asset: { type: Object, required: true },
   // 媒体地址由父级统一解析：缩略图走 blob，视频走签名播放地址
   previewUrl: { type: String, default: '' },
-  previewKind: { type: String, default: '' }
+  previewKind: { type: String, default: '' },
+  // 回收站里的素材不取媒体地址，用中性占位而不是一直「加载中」
+  placeholder: { type: String, default: '加载中…' }
 })
 defineEmits(['open'])
 </script>

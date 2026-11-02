@@ -89,7 +89,7 @@ public class StorageAssetIngestService implements AssetIngestService {
                     contentType, bytes.length, sha256,
                     width, height, durationMs,
                     displayName, false, AssetStatus.READY,
-                    "{}", Instant.now(), null));
+                    null, "{}", Instant.now(), null));
         }
         outputRepository.markDone(slot.id(), sha256, (long) bytes.length);
     }

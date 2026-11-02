@@ -446,6 +446,7 @@ export const resumeCreativeJobIngest = jobId =>
 export const listCreativeJobEvents = (jobId, afterSeq = 0) =>
   request.get(`/ai/creative/jobs/${encodeURIComponent(jobId)}/events`, { params: { afterSeq } })
     .then(response => response.data)
+// 素材列表：支持 projectId/mediaType/origin/starred/businessType/trashed
 export const listCreativeAssets = (params = {}) =>
   request.get('/ai/creative/assets', { params }).then(response => response.data)
 export const uploadCreativeAsset = (projectId, file) => {
@@ -471,6 +472,15 @@ export const getCreativeAssetPlaybackUrl = assetId =>
       if (data?.url?.startsWith('/')) data.url = API_BASE_URL + data.url
       return data
     })
+// 素材使用位置（跨项目）：镜头候选 + 角色/地点参考图
+export const getCreativeAssetUsage = assetId =>
+  request.get(`/ai/creative/assets/${encodeURIComponent(assetId)}/usage`).then(r => r.data)
+// 回收站恢复：DELETED → READY，不重新生成
+export const restoreCreativeAsset = assetId =>
+  request.post(`/ai/creative/assets/${encodeURIComponent(assetId)}/restore`).then(r => r.data)
+// 跨项目待处理聚合：进行中/失败/保存失败/结果待确认/待选片 + 最近失败条目
+export const getCreativeSummary = () =>
+  request.get('/ai/creative/jobs/summary').then(r => r.data)
 export const updateCreativeAsset = (assetId, payload) =>
   request.patch(`/ai/creative/assets/${encodeURIComponent(assetId)}`, payload).then(response => response.data)
 export const deleteCreativeAsset = assetId =>

@@ -1,0 +1,32 @@
+日期：2026-11-02
+主题：项目分镜页镜头卡整块不渲染（候选字段口径不一致）
+
+现象
+- 新项目工作区「分镜」分区进入后，镜头卡区域空白：筛选栏显示「全部 3」，但一张卡都不出现；
+  部分情况下出现卡片但状态标签为空、封面永远显示「未生成」。
+- 浏览器控制台只有 Vue 的 "Unhandled error during execution of component update" 与
+  "Cannot read properties of null (reading 'type')"，没有指向具体字段。
+
+影响范围
+- 仅 M1 新分镜页（ProjectStoryboardTab + ShotCard）。剧情页、检查器、批次、任务不受影响。
+- 后端接口本身正常，问题在前端读取结构。
+
+原因
+- `GET /story/workspace` 的 `candidatesByShot` 是**扁平候选记录**（字段 `id/assetId/status/...` 直接在顶层），
+  而 `GET /story/shots/{id}/candidates` 返回的是 `CandidateView`（`{candidate: {...}, jobStatus, jobError, asset}`）。
+- 分镜页按 `item.candidate.assetId` / `item.candidate.status` 读取扁平记录，`item.candidate` 为 undefined，
+  computed 抛错；因为错误发生在 v-for 的子组件挂载过程中，Vue 只留下一条与具体字段无关的告警，
+  DOM 上表现为整块网格缺失，排查成本高。
+
+解决方式
+- 分镜页与镜头卡统一按扁平记录读取（`item.status`、`item.assetId`），并在两处加注释说明两种结构的区别；
+  检查器继续使用 CandidateView（来自候选端点），保持 job 状态与素材摘要。
+- 预览媒体地址改由分镜页统一解析（`videoUrlFor`），不再在每张卡里各自调用媒体钩子。
+
+验证结果
+- 分镜页 3 个镜头全部渲染：2 张真实候选视频帧 + 1 张未生成占位，状态为「已选定/已选定/可生成」，
+  已采用徽标 2 个；筛选「待选片」为空态、「全部」恢复 3 张。
+
+后续注意事项
+- 任何消费 `workspace` 的地方都按扁平候选记录处理；需要 job 状态或素材摘要时再调用候选端点。
+- 渲染期异常容易被 Vue 的 v-for 吞掉，新增卡片类组件后应先确认「数量与数据一致」，不要只看有没有报错。

@@ -2,6 +2,7 @@ package com.zwx.zwxagent.agent.execution;
 
 import com.zwx.zwxagent.chat.conversation.AgentConversationService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,6 +22,9 @@ public class AgentRunRecoveryJob {
     private final AgentConversationService conversationService;
     private final java.util.concurrent.atomic.AtomicBoolean recovering = new java.util.concurrent.atomic.AtomicBoolean();
 
+    @Value("${app.local.scheduling.agent-run-recovery-enabled:true}")
+    private boolean agentRunRecoveryEnabled;
+
     public AgentRunRecoveryJob(AgentRunService agentRunService, AgentConversationService conversationService) {
         this.agentRunService = agentRunService;
         this.conversationService = conversationService;
@@ -29,6 +33,7 @@ public class AgentRunRecoveryJob {
     @EventListener(ApplicationReadyEvent.class)
     @Scheduled(fixedDelay = 15_000)
     public void recoverOrphanedRuns() {
+        if (!agentRunRecoveryEnabled) return;
         if (!recovering.compareAndSet(false, true)) return;
         try {
             recover();

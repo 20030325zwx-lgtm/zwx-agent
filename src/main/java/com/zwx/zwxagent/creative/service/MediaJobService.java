@@ -429,8 +429,8 @@ public class MediaJobService {
      * VIDEO 项目允许视频操作与关键帧图像操作（剧情关键帧复用生图/改图链路）；
      * NOVEL/COMIC 在对应能力落地前不允许提交任何生成任务。
      */
-    static boolean operationAllowedForKind(com.zwx.zwxagent.creative.domain.CreativeKind kind,
-                                           String operation) {
+    public static boolean operationAllowedForKind(com.zwx.zwxagent.creative.domain.CreativeKind kind,
+                                                  String operation) {
         boolean imageOperation = CreativeDraftService.OPERATION_TEXT_TO_IMAGE.equals(operation)
                 || OPERATION_IMAGE_EDIT.equals(operation);
         boolean videoOperation = ParameterSchema.TEXT_TO_VIDEO.equals(operation)

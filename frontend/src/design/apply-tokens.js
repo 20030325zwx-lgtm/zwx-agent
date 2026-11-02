@@ -3,6 +3,20 @@ import { THEMES } from './tokens'
 
 const STORAGE_KEY = 'aster-theme-mode'
 const VALID = ['light', 'dark', 'system']
+const MOTION_KEY = 'aster-reduce-motion'
+
+// 应用内「减少动态效果」（redesign §7.4）：关闭空间飞行、回弹、自动预览，保留即时状态淡入。
+// 三态存储：null=跟随系统，'true'/'false'=用户显式选择（覆盖系统偏好）。
+function readReduceMotion() {
+  try {
+    const stored = localStorage.getItem(MOTION_KEY)
+    if (stored === 'true') return true
+    if (stored === 'false') return false
+  } catch (error) { /* 隐私模式忽略 */ }
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+export const reduceMotion = ref(readReduceMotion())
 
 function readStored() {
   try {
@@ -28,6 +42,7 @@ watchEffect(() => {
 
   const root = document.documentElement
   root.dataset.wbTheme = effective
+  root.dataset.crMotion = reduceMotion.value ? 'reduced' : 'full'
   for (const [name, value] of Object.entries(THEMES[effective].css)) {
     root.style.setProperty(name, value)
   }
@@ -44,4 +59,9 @@ if (typeof matchMedia === 'function') {
 
 export function setThemeMode(mode) {
   if (VALID.includes(mode)) themeMode.value = mode
+}
+
+export function setReduceMotion(value) {
+  reduceMotion.value = Boolean(value)
+  try { localStorage.setItem(MOTION_KEY, String(Boolean(value))) } catch (error) { /* 忽略 */ }
 }

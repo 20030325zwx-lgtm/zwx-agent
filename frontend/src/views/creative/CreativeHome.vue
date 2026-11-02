@@ -5,14 +5,15 @@
         <header class="cr-head home-head">
           <div>
             <p class="cr-kicker">AI 创作</p>
-            <h1 class="cr-title">想做点什么？</h1>
-            <p class="cr-sub">写一句想法，选一种创作类型，进入作品工作区继续细化。作品、任务与素材都在服务端，离开页面也能找回。</p>
+            <h1 class="cr-title">把想法变成下一幅画面。</h1>
+            <p class="cr-sub">写一句想法，或从素材、技能开始；作品、任务与素材都在服务端，离开页面也能找回。</p>
           </div>
           <button type="button" class="cr-secondary" @click="openCreate">
             <Plus :size="15" /> 新建作品
           </button>
         </header>
 
+        <!-- 输入台（redesign §5.1）：准备阶段叫「进入创作台」，真正提交生成才叫「生成」 -->
         <section class="home-compose">
           <textarea
             v-model.trim="idea"
@@ -20,8 +21,8 @@
             rows="3"
             maxlength="500"
             placeholder="例如：雨夜车站，一个女孩把怀表交给陌生人，然后列车进站"
-            @keydown.ctrl.enter="startFromIdea"
-            @keydown.meta.enter="startFromIdea"
+            @keydown.ctrl.enter="startFromComposer"
+            @keydown.meta.enter="startFromComposer"
           />
           <div class="home-compose-foot">
             <div class="home-kind" role="radiogroup" aria-label="创作类型">
@@ -39,16 +40,46 @@
                 {{ option.label }}
                 <em v-if="!option.enabled">规划中</em>
               </button>
+              <span class="home-skill-slot">
+                <DropdownSelect v-model="composeSkill" class="home-skill" size="sm"
+                                :options="skillOptions" placeholder="可选技能"
+                                aria-label="可选技能" />
+              </span>
             </div>
             <div class="home-compose-actions">
-              <span class="home-compose-hint">创建作品不会计费，生成时才会调用模型</span>
-              <button type="button" class="cr-primary" :disabled="!idea || starting" @click="startFromIdea">
-                <Spinner v-if="starting" /> {{ starting ? '创建中…' : '开始创作' }}
+              <span class="home-compose-hint">先进入创作台准备；确认后才会生成计费</span>
+              <button type="button" class="cr-primary" :disabled="!idea || starting" @click="startFromComposer">
+                <Spinner v-if="starting" /> {{ starting ? '创建中…' : '进入创作台' }}
               </button>
             </div>
           </div>
           <p v-if="startError" class="cr-error">{{ startError }}</p>
         </section>
+
+        <!-- 四种起点（redesign §5.1）：想法 / 素材 / 技能 / 最近创作 -->
+        <nav class="home-starts" aria-label="创作起点">
+          <button type="button" class="home-start" @click="focusComposer">
+            <PenLine :size="16" />
+            <strong>写一句想法</strong>
+            <span>从空白输入台开始</span>
+          </button>
+          <router-link to="/creative/assets" class="home-start">
+            <Images :size="16" />
+            <strong>从素材开始</strong>
+            <span>挑选已有图片或视频</span>
+          </router-link>
+          <router-link to="/creative/skills" class="home-start">
+            <Sparkles :size="16" />
+            <strong>使用技能</strong>
+            <span>浏览创作方法目录</span>
+          </router-link>
+          <a v-if="recentProject" class="home-start" :href="`/creative/projects/${recentProject.id}`"
+             @click.prevent="goProject(recentProject)">
+            <History :size="16" />
+            <strong>继续最近创作</strong>
+            <span>{{ recentProject.name }}</span>
+          </a>
+        </nav>
 
         <div v-if="bindingChecked && !imageBinding" class="cr-banner">
           <AlertCircle :size="18" />
@@ -61,8 +92,8 @@
 
         <section>
           <div class="cr-section-head">
-            <h2>最近作品</h2>
-            <router-link to="/creative/works">全部作品</router-link>
+            <h2>最近创作</h2>
+            <router-link to="/creative/library">我的创作</router-link>
           </div>
           <p v-if="loading" class="cr-hint">加载中…</p>
           <p v-else-if="loadError" class="cr-error">{{ loadError }}</p>
@@ -81,8 +112,8 @@
 
         <section>
           <div class="cr-section-head">
-            <h2>待处理</h2>
-            <router-link to="/creative/tasks">任务记录</router-link>
+            <h2>生成活动</h2>
+            <router-link to="/creative/tasks">全部生成记录</router-link>
           </div>
           <div class="home-pending">
             <div class="home-pending-counts">
@@ -120,8 +151,8 @@
           <button type="button" class="home-link" @click="openWorkflowCreate">
             <Workflow :size="14" /> 从工作流创建
           </button>
-          <router-link to="/creative/assets" class="home-link">
-            <Images :size="14" /> 素材库
+          <router-link to="/creative/skills" class="home-link">
+            <Sparkles :size="14" /> 技能库
           </router-link>
         </p>
       </div>
@@ -218,12 +249,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertCircle, Images, Plus, Workflow } from 'lucide-vue-next'
+import { AlertCircle, History, Images, PenLine, Plus, Sparkles, Workflow } from 'lucide-vue-next'
 import {
   createCreativeDraft, createCreativeProject, getCreativeHealth, getCreativeSummary, getWorkflowDefinition,
-  listCreativeProjects, listModelCatalog, listWorkflows, startWorkflow
+  listCreativeProjects, listCreativeSkills, listModelCatalog, listWorkflows, startWorkflow
 } from '../../api'
 import { formatTime, statusMeta } from './shared'
 import ProjectCard from '../../components/creative/ProjectCard.vue'
@@ -240,8 +271,67 @@ const loading = ref(true)
 const loadError = ref('')
 const idea = ref('')
 const composeKind = ref('IMAGE')
+const composeSkill = ref('')
+const skills = ref([])
 const starting = ref(false)
 const startError = ref('')
+// 本地草稿（redesign §5.1）：输入先本地即时保存，刷新可恢复；提交时才创建项目
+const COMPOSER_KEY = 'aster.creative.composer'
+const recentProject = computed(() => projects.value[0] || null)
+const skillOptions = computed(() => [
+  { value: '', label: '可选技能' },
+  ...skills.value.filter(skill => skill.compat === 'READY')
+    .map(skill => ({ value: skill.slug, label: skill.name }))
+])
+
+function restoreDraft() {
+  try {
+    const raw = localStorage.getItem(COMPOSER_KEY)
+    if (!raw) return
+    const draft = JSON.parse(raw)
+    if (typeof draft.idea === 'string') idea.value = draft.idea
+    if (draft.kind && kindOptions.some(option => option.value === draft.kind && option.enabled)) {
+      composeKind.value = draft.kind
+    }
+    if (typeof draft.skill === 'string') composeSkill.value = draft.skill
+  } catch (error) { /* 草稿损坏按空处理 */ }
+}
+
+function persistDraft() {
+  try {
+    localStorage.setItem(COMPOSER_KEY, JSON.stringify({
+      idea: idea.value, kind: composeKind.value, skill: composeSkill.value
+    }))
+  } catch (error) { /* 隐私模式忽略 */ }
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(COMPOSER_KEY) } catch (error) { /* 忽略 */ }
+}
+
+// 技能库「使用」经 sessionStorage 交接（不把提示词放 URL）
+function readHandoff() {
+  try {
+    const raw = sessionStorage.getItem('aster.creative.handoff')
+    if (!raw) return
+    sessionStorage.removeItem('aster.creative.handoff')
+    const handoff = JSON.parse(raw)
+    if (handoff.skill) composeSkill.value = handoff.skill
+    if (typeof handoff.prompt === 'string' && handoff.prompt && !idea.value) idea.value = handoff.prompt
+    if (handoff.kind) composeKind.value = handoff.kind
+    persistDraft()
+  } catch (error) { /* 忽略 */ }
+}
+
+function focusComposer() {
+  document.querySelector('.home-idea')?.focus()
+}
+
+function goProject(project) {
+  router.push(`/creative/projects/${project.id}`)
+}
+
+watch([idea, composeKind, composeSkill], persistDraft)
 const createOpen = ref(false)
 const creating = ref(false)
 const createError = ref('')
@@ -298,12 +388,16 @@ function showToast(text, tone = '') {
   showToast.timer = window.setTimeout(() => { toast.text = '' }, 3200)
 }
 
-/** 想法直接起项目：名称取首行前 30 字，完整想法进描述；图片项目顺带写入草稿，进入即可继续编辑。 */
-async function startFromIdea() {
+/**
+ * 输入台起步（redesign §5.1）：创建项目不计费；提示词随草稿/交接带入创作台。
+ * 选了技能时经 sessionStorage 交接给创作台（stage 6 消费），技能名可进 URL（非隐私）。
+ */
+async function startFromComposer() {
   if (!idea.value || starting.value) return
   starting.value = true
   startError.value = ''
   const text = idea.value
+  const skill = composeSkill.value
   try {
     const project = await createCreativeProject({
       name: text.split('\n')[0].slice(0, 30) || '未命名作品',
@@ -315,6 +409,14 @@ async function startFromIdea() {
       await createCreativeDraft(project.id, {
         operation: 'text_to_image', originalPrompt: text, effectivePrompt: text
       }).catch(() => null)
+    }
+    clearDraft()
+    if (skill) {
+      try { sessionStorage.setItem('aster.creative.handoff', JSON.stringify({
+        skill, prompt: composeKind.value === 'IMAGE' ? '' : text, kind: composeKind.value
+      })) } catch (error) { /* 忽略 */ }
+      router.push(`/creative/projects/${project.id}?tab=studio&skill=${encodeURIComponent(skill)}`)
+      return
     }
     router.push(`/creative/projects/${project.id}`)
   } catch (error) {
@@ -410,11 +512,12 @@ async function startWorkflowRun() {
 async function load() {
   loading.value = true
   loadError.value = ''
-  const [projectResult, summaryResult, catalogResult, healthResult] = await Promise.allSettled([
+  const [projectResult, summaryResult, catalogResult, healthResult, skillResult] = await Promise.allSettled([
     listCreativeProjects({ limit: 6 }),
     getCreativeSummary(),
     listModelCatalog(),
-    getCreativeHealth()
+    getCreativeHealth(),
+    listCreativeSkills()
   ])
   if (projectResult.status === 'fulfilled') {
     projects.value = projectResult.value.items || []
@@ -427,6 +530,9 @@ async function load() {
       || catalogResult.value.systemBindings?.image_generation || null
   }
   if (healthResult.status === 'fulfilled') health.value = healthResult.value
+  if (skillResult.status === 'fulfilled') skills.value = skillResult.value.items || []
+  restoreDraft()
+  readHandoff()
   bindingChecked.value = true
   loading.value = false
 }
@@ -518,6 +624,43 @@ onMounted(load)
 .home-compose-hint {
   font-size: 11.5px;
   color: var(--wb-muted);
+}
+
+/* 输入台内的可选技能 */
+.home-skill-slot { display: inline-flex; }
+.home-skill { width: 150px; }
+
+/* 四种起点（redesign §5.1）：写想法 / 素材 / 技能 / 最近创作 */
+.home-starts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.home-start {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--cr-radius-ctl, 10px);
+  background: var(--wb-surface);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+}
+
+.home-start:hover { border-color: var(--wb-border-strong); }
+.home-start strong { font-size: 13px; font-weight: 600; color: var(--wb-text); display: flex; align-items: center; gap: 7px; }
+.home-start span {
+  font-size: 12px;
+  color: var(--wb-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .home-works {

@@ -90,6 +90,20 @@ public class CreativeJobController {
                                     @RequestParam(defaultValue = "20") int limit) {
         List<MediaJobRecord> jobs = jobService.list(actor, projectId, cursor, limit);
         List<Map<String, Object>> items = jobs.stream().map(this::summary).toList();
+        // 作品聚合视图（redesign §5.2）：批量附带产物计数与首个产物，一次 IN 查询
+        if (!jobs.isEmpty()) {
+            Map<UUID, List<com.zwx.zwxagent.creative.domain.MediaJobOutputRecord>> byJob = new LinkedHashMap<>();
+            for (var output : outputRepository.findByJobIn(jobs.stream().map(MediaJobRecord::id).toList())) {
+                byJob.computeIfAbsent(output.jobId(), key -> new ArrayList<>()).add(output);
+            }
+            for (Map<String, Object> item : items) {
+                List<com.zwx.zwxagent.creative.domain.MediaJobOutputRecord> outputs =
+                        byJob.getOrDefault(UUID.fromString(String.valueOf(item.get("jobId"))), List.of());
+                item.put("outputCount", outputs.size());
+                item.put("firstAssetId", outputs.isEmpty() ? null
+                        : String.valueOf(outputs.get(0).assetId()));
+            }
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("items", items);
         body.put("nextCursor", jobs.size() < Math.max(1, Math.min(limit, 100)) || jobs.isEmpty()

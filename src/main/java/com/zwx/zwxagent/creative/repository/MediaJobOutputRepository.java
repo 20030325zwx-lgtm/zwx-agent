@@ -53,6 +53,18 @@ public class MediaJobOutputRepository {
                 MAPPER, jobId);
     }
 
+    /** 批量取一页任务的产物（我的创作「作品」聚合视图用）：单次 IN 查询，避免列表页 N+1。 */
+    public List<MediaJobOutputRecord> findByJobIn(List<UUID> jobIds) {
+        if (jobIds == null || jobIds.isEmpty()) return List.of();
+        String placeholders = String.join(",", java.util.Collections.nCopies(jobIds.size(), "?"));
+        return jdbcTemplate.query("""
+                        SELECT id, job_id, output_index, asset_id, ingest_state, storage_backend,
+                               object_key, sha256, byte_size, last_error, created_at, updated_at
+                        FROM media_job_output WHERE job_id IN (%s) ORDER BY job_id, output_index
+                        """.formatted(placeholders),
+                MAPPER, jobIds.toArray());
+    }
+
     public Optional<MediaJobOutputRecord> findByAsset(UUID assetId) {
         return jdbcTemplate.query("""
                         SELECT id, job_id, output_index, asset_id, ingest_state, storage_backend,

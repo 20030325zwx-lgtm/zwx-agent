@@ -5,8 +5,8 @@
         <header class="cr-head">
           <div>
             <p class="cr-kicker">AI 创作</p>
-            <h1 class="cr-title">任务记录</h1>
-            <p class="cr-sub">全部创作任务（当前开放图片生成）。状态来自服务端，刷新或重启后可继续查看。</p>
+            <h1 class="cr-title">生成记录</h1>
+            <p class="cr-sub">全部生成任务（图片与视频）。状态来自服务端，刷新或重启后可继续查看。</p>
           </div>
           <router-link to="/creative" class="cr-secondary">返回创作</router-link>
         </header>

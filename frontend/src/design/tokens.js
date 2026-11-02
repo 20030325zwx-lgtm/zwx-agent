@@ -4,6 +4,13 @@
 // 克制、媒体优先、媒体舞台单独配色，页面背景不使用径向渐变。
 
 export const PALETTE = {
+  // 创作体验重设计（docs/design/2026-11-02-creative-experience-redesign.md §4.1）：
+  // 「安静的编辑部 + 沉浸式创作台」——静暖灰底、石墨主按钮、鸢尾紫强调。
+  // 候选值实施时需完成 WCAG 对比度验证（正文 ≥4.5:1，控件边界 ≥3:1）。
+  iris: '#6654C7',
+  irisDark: '#B8ACFF',
+  ink: '#25252A',
+  inkDark: '#ECECE7',
   brand: '#2563EB',
   brandHover: '#1D4ED8',
   brandActive: '#1E40AF',
@@ -46,6 +53,55 @@ const SPACE = {
 
 // CSS 变量按语义分层：bg（页面底）/ surface（卡片）/ raise（悬浮）/ fill（内嵌填充）/
 // border / text / muted / soft（彩色弱底）。深浅两套同步维护。
+// --cr-* 为创作体验新语义层（redesign §4.1）：与 --wb-* 并行渐进迁移，不删旧变量。
+const CR_LIGHT = {
+  '--cr-page-bg': '#F6F5F2',
+  '--cr-surface': '#FFFFFF',
+  '--cr-surface-2': '#EEEDE9',
+  '--cr-text': '#202124',
+  '--cr-text-2': '#62646A',
+  '--cr-accent': PALETTE.iris,
+  '--cr-accent-soft': 'rgba(102, 84, 199, 0.1)',
+  '--cr-border': '#E4E3DF',
+  '--cr-btn-bg': PALETTE.ink,
+  '--cr-btn-fg': '#FFFFFF',
+  '--cr-media-stage': '#101113',
+  '--cr-radius-ctl': '10px',
+  '--cr-radius-media': '14px',
+  '--cr-radius-composer': '20px',
+  '--cr-radius-pop': '16px'
+}
+
+const CR_DARK = {
+  '--cr-page-bg': '#151617',
+  '--cr-surface': '#202123',
+  '--cr-surface-2': '#292B2E',
+  '--cr-text': '#F0F0EE',
+  '--cr-text-2': '#AAAEB5',
+  '--cr-accent': PALETTE.irisDark,
+  '--cr-accent-soft': 'rgba(184, 172, 255, 0.14)',
+  '--cr-border': '#35373B',
+  '--cr-btn-bg': PALETTE.inkDark,
+  '--cr-btn-fg': '#17181A',
+  '--cr-media-stage': '#0B0C0D',
+  '--cr-radius-ctl': '10px',
+  '--cr-radius-media': '14px',
+  '--cr-radius-composer': '20px',
+  '--cr-radius-pop': '16px'
+}
+
+// 动效时间 token（redesign §7.1）：统一时长与缓动；退出用 exit 曲线。
+// 弹簧参数（stiffness 380/damping 34）按组件调校，不进全局 token。
+const CR_MOTION = {
+  '--cr-dur-instant': '90ms',
+  '--cr-dur-fast': '140ms',
+  '--cr-dur-normal': '220ms',
+  '--cr-dur-spatial': '320ms',
+  '--cr-dur-showcase': '420ms',
+  '--cr-ease': 'cubic-bezier(0.22, 1, 0.36, 1)',
+  '--cr-ease-exit': 'cubic-bezier(0.4, 0, 1, 1)'
+}
+
 export const THEMES = {
   light: {
     css: {
@@ -85,7 +141,9 @@ export const THEMES = {
       '--wb-focus-ring': PALETTE.brand,
       '--wb-scrollbar': 'rgba(60, 60, 80, 0.28)',
       ...TYPE,
-      ...SPACE
+      ...SPACE,
+      ...CR_LIGHT,
+      ...CR_MOTION
     },
     antd: {
       token: {
@@ -143,7 +201,9 @@ export const THEMES = {
       '--wb-focus-ring': '#6B93FF',
       '--wb-scrollbar': 'rgba(255, 255, 255, 0.22)',
       ...TYPE,
-      ...SPACE
+      ...SPACE,
+      ...CR_DARK,
+      ...CR_MOTION
     },
     antd: {
       token: {

@@ -481,6 +481,21 @@ export const restoreCreativeAsset = assetId =>
 // 跨项目待处理聚合：进行中/失败/保存失败/结果待确认/待选片 + 最近失败条目
 export const getCreativeSummary = () =>
   request.get('/ai/creative/jobs/summary').then(r => r.data)
+
+// 创作 Skill（skill 设计 §8.4）：目录/详情/运行；方案生成不计费，确认后才创建媒体任务
+export const listCreativeSkills = (params = {}) =>
+  request.get('/ai/creative/skills', { params }).then(r => r.data)
+export const getCreativeSkill = slug =>
+  request.get(`/ai/creative/skills/${encodeURIComponent(slug)}`).then(r => r.data)
+export const createCreativeSkillRun = (projectId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/skill-runs`, payload)
+    .then(r => r.data)
+export const getCreativeSkillRun = runId =>
+  request.get(`/ai/creative/skill-runs/${encodeURIComponent(runId)}`).then(r => r.data)
+export const retryCreativeSkillPlan = runId =>
+  request.post(`/ai/creative/skill-runs/${encodeURIComponent(runId)}/retry-plan`).then(r => r.data)
+export const confirmCreativeSkillRun = (runId, payload) =>
+  request.post(`/ai/creative/skill-runs/${encodeURIComponent(runId)}/confirm`, payload).then(r => r.data)
 export const updateCreativeAsset = (assetId, payload) =>
   request.patch(`/ai/creative/assets/${encodeURIComponent(assetId)}`, payload).then(response => response.data)
 export const deleteCreativeAsset = assetId =>

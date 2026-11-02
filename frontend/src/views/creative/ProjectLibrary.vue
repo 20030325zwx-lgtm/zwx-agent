@@ -4,16 +4,28 @@
       <div class="cr-inner">
         <header class="cr-head">
           <div>
-            <p class="cr-kicker">作品</p>
-            <h1 class="cr-title">全部作品</h1>
-            <p class="cr-sub">按类型筛选、搜索标题或描述；默认按最近更新排序，封面取自该作品最新的真实产物。</p>
+            <p class="cr-kicker">我的创作</p>
+            <h1 class="cr-title">我的创作</h1>
+            <p class="cr-sub">项目是持续创作的容器，作品是值得回看的产出。两个视图都能找回上下文。</p>
           </div>
           <button type="button" class="cr-primary" @click="openCreate">
             <Plus :size="15" /> 新建作品
           </button>
         </header>
 
-        <div class="lib-filters">
+        <!-- 项目 / 作品双视图（redesign §5.2）：作品视图基于现有成功产物聚合，不新增媒体存储 -->
+        <div class="lib-scope" role="tablist" aria-label="视图切换">
+          <button type="button" role="tab" class="lib-scope-btn" :class="{ active: scope === 'projects' }"
+                  :aria-selected="scope === 'projects'" @click="setScope('projects')">
+            项目
+          </button>
+          <button type="button" role="tab" class="lib-scope-btn" :class="{ active: scope === 'works' }"
+                  :aria-selected="scope === 'works'" @click="setScope('works')">
+            作品
+          </button>
+        </div>
+
+        <div v-if="scope === 'projects'" class="lib-filters">
           <div class="lib-kinds" role="radiogroup" aria-label="作品类型">
             <button
               v-for="option in kindFilters"
@@ -52,30 +64,64 @@
           </div>
         </div>
 
-        <p v-if="loading && !items.length" class="cr-hint">加载中…</p>
-        <p v-else-if="error" class="cr-error">{{ error }}</p>
-        <div v-else-if="!items.length" class="cr-empty lib-empty">
-          <strong>{{ emptyTitle }}</strong>
-          <p>{{ emptyHint }}</p>
-          <div class="lib-empty-actions">
-            <button type="button" class="cr-primary" @click="openCreate">新建作品</button>
-            <router-link to="/creative" class="cr-secondary">回到创作首页</router-link>
+        <template v-if="scope === 'projects'">
+          <p v-if="loading && !items.length" class="cr-hint">加载中…</p>
+          <p v-else-if="error" class="cr-error">{{ error }}</p>
+          <div v-else-if="!items.length" class="cr-empty lib-empty">
+            <strong>{{ emptyTitle }}</strong>
+            <p>{{ emptyHint }}</p>
+            <div class="lib-empty-actions">
+              <button type="button" class="cr-primary" @click="openCreate">新建作品</button>
+              <router-link to="/creative" class="cr-secondary">回到创作首页</router-link>
+            </div>
           </div>
-        </div>
+          <template v-else>
+            <div v-if="view === 'grid'" class="lib-grid">
+              <ProjectCard v-for="project in items" :key="project.id" :project="project" />
+            </div>
+            <div v-else class="lib-list">
+              <ProjectRow v-for="project in items" :key="project.id" :project="project" />
+            </div>
+            <div class="lib-foot">
+              <button v-if="nextCursor" type="button" class="cr-secondary" :disabled="loadingMore"
+                      @click="loadMore">
+                <Spinner v-if="loadingMore" /> {{ loadingMore ? '加载中…' : '加载更多' }}
+              </button>
+              <span v-else class="lib-count">共 {{ items.length }} 个项目</span>
+            </div>
+          </template>
+        </template>
+
+        <!-- 作品视图：成功产出的聚合投影；点击回原项目任务，上下文不丢（redesign §5.2） -->
         <template v-else>
-          <div v-if="view === 'grid'" class="lib-grid">
-            <ProjectCard v-for="project in items" :key="project.id" :project="project" />
+          <p v-if="worksLoading && !works.length" class="cr-hint">加载中…</p>
+          <p v-else-if="worksError" class="cr-error">{{ worksError }}</p>
+          <div v-else-if="!works.length" class="cr-empty lib-empty">
+            <strong>还没有作品</strong>
+            <p>生成成功的图片与视频会出现在这里；项目仍在「项目」视图。</p>
+            <router-link to="/creative" class="cr-primary">去创作</router-link>
           </div>
-          <div v-else class="lib-list">
-            <ProjectRow v-for="project in items" :key="project.id" :project="project" />
-          </div>
-          <div class="lib-foot">
-            <button v-if="nextCursor" type="button" class="cr-secondary" :disabled="loadingMore"
-                    @click="loadMore">
-              <Spinner v-if="loadingMore" /> {{ loadingMore ? '加载中…' : '加载更多' }}
-            </button>
-            <span v-else class="lib-count">共 {{ items.length }} 个作品</span>
-          </div>
+          <template v-else>
+            <div class="lib-grid">
+              <article v-for="work in works" :key="work.jobId" class="work-card" tabindex="0"
+                       role="link" :aria-label="`打开作品：${work.title}`"
+                       @click="openWork(work)" @keydown.enter="openWork(work)">
+                <div class="work-thumb">
+                  <video v-if="work.mediaType === 'VIDEO' && workVideo(work)"
+                         :src="workVideo(work)" preload="metadata" muted></video>
+                  <img v-else-if="workThumb(work)" :src="workThumb(work)" :alt="work.title" loading="lazy" />
+                  <div v-else class="work-thumb-placeholder">{{ work.mediaType === 'VIDEO' ? '视频' : '图片' }}</div>
+                </div>
+                <div class="work-meta">
+                  <strong class="work-title">{{ work.title }}</strong>
+                  <span class="work-sub">{{ work.projectName }} · {{ work.outputCount }} 个版本 · {{ formatTime(work.createdAt) }}</span>
+                </div>
+              </article>
+            </div>
+            <div class="lib-foot">
+              <span class="lib-count">共 {{ works.length }} 组产出（按任务聚合）</span>
+            </div>
+          </template>
         </template>
       </div>
     </div>
@@ -122,7 +168,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { LayoutGrid, List, Plus } from 'lucide-vue-next'
-import { createCreativeProject, listCreativeProjects } from '../../api'
+import { createCreativeProject, listCreativeJobs, listCreativeProjects } from '../../api'
+import { formatTime, useAssetUrls, useVideoUrls } from './shared'
 import ProjectCard from '../../components/creative/ProjectCard.vue'
 import ProjectRow from '../../components/creative/ProjectRow.vue'
 import DropdownSelect from '../../components/ui/DropdownSelect.vue'
@@ -135,6 +182,77 @@ const nextCursor = ref(null)
 const kind = ref('')
 const keyword = ref('')
 const sort = ref('updated')
+
+// 项目 / 作品双视图（redesign §5.2）：作品 = 成功任务产出的聚合投影
+const SCOPE_KEY = 'aster.creative.library.scope'
+const scope = ref(localStorage.getItem(SCOPE_KEY) === 'works' ? 'works' : 'projects')
+const works = ref([])
+const worksLoading = ref(false)
+const worksError = ref('')
+const worksLoaded = ref(false)
+const assetUrls = useAssetUrls()
+const videoUrls = useVideoUrls()
+
+function setScope(next) {
+  scope.value = next
+  try { localStorage.setItem(SCOPE_KEY, next) } catch (error) { /* 忽略 */ }
+  if (next === 'works') loadWorks()
+}
+
+async function loadWorks() {
+  if (worksLoaded.value || worksLoading.value) return
+  worksLoading.value = true
+  worksError.value = ''
+  try {
+    const [jobsData] = await Promise.all([
+      listCreativeJobs({ limit: 40 }),
+      items.value.length ? Promise.resolve() : listCreativeProjects({ limit: 50 }).then(data => {
+        items.value = data.items || []
+      }).catch(() => null)
+    ])
+    const projectNameOf = id => items.value.find(project => project.id === id)?.name || '未命名项目'
+    works.value = (jobsData.items || [])
+      .filter(job => job.status === 'SUCCEEDED' && (job.outputCount || 0) > 0)
+      .map(job => {
+        const mediaType = String(job.operation || '').endsWith('video') ? 'VIDEO' : 'IMAGE'
+        const item = {
+          jobId: job.jobId,
+          projectId: job.projectId,
+          projectName: projectNameOf(job.projectId),
+          title: job.prompt ? truncateTitle(job.prompt, 40) : '生成作品',
+          outputCount: job.outputCount || 0,
+          createdAt: job.createdAt,
+          mediaType,
+          firstAssetId: job.firstAssetId || ''
+        }
+        if (mediaType === 'VIDEO') videoUrls.videoUrlFor(item.firstAssetId)
+        else assetUrls.thumbFor(item.firstAssetId)
+        return item
+      })
+    worksLoaded.value = true
+  } catch (exception) {
+    worksError.value = exception.response?.data?.error || '作品加载失败，请确认后端服务可用'
+  } finally {
+    worksLoading.value = false
+  }
+}
+
+function truncateTitle(text, max) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim()
+  return value.length > max ? `${value.slice(0, max)}…` : value
+}
+
+function workThumb(work) {
+  return assetUrls.thumbs[work.firstAssetId] || ''
+}
+
+function workVideo(work) {
+  return videoUrls.videoUrls[work.firstAssetId]?.url || ''
+}
+
+function openWork(work) {
+  router.push(`/creative/projects/${work.projectId}?tab=tasks&jobId=${work.jobId}`)
+}
 const VIEW_KEY = 'aster.creative.works.view'
 const view = ref(localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid')
 
@@ -243,13 +361,93 @@ async function create() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  reload()
+  if (scope.value === 'works') loadWorks()
+})
 onBeforeUnmount(() => window.clearTimeout(debounceTimer))
 </script>
 
 <style scoped src="./creative.css"></style>
 
 <style scoped>
+/* 项目 / 作品切换（redesign §5.2）：分段控件，选中底片平移 */
+.lib-scope {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  background: var(--wb-fill);
+  width: fit-content;
+}
+
+.lib-scope-btn {
+  padding: 5px 16px;
+  border: 0;
+  border-radius: calc(var(--wb-radius) - 3px);
+  background: transparent;
+  color: var(--wb-text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+}
+
+.lib-scope-btn.active {
+  background: var(--wb-surface);
+  color: var(--wb-text);
+  font-weight: 600;
+}
+
+.work-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--cr-radius-media, 14px);
+  background: var(--wb-surface);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), transform var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+}
+
+.work-card:hover { border-color: var(--wb-border-strong); transform: translateY(-1px); }
+
+.work-thumb {
+  aspect-ratio: 4 / 3;
+  background: var(--cr-media-stage, #101113);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.work-thumb img,
+.work-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.work-thumb-placeholder { color: rgba(255, 255, 255, 0.5); font-size: 12px; }
+
+.work-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px 12px;
+}
+
+.work-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wb-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-sub { font-size: 11.5px; color: var(--wb-muted); }
+
 .lib-filters {
   display: flex;
   align-items: center;

@@ -139,6 +139,57 @@
         </label>
       </div>
 
+      <!-- 技能方案（skill 设计 §5.3）：方案生成不计费，确认后才提交媒体任务 -->
+      <div class="panel-block skill-block">
+        <div class="model-line">
+          <span class="cr-field-help">使用技能（可选）</span>
+          <router-link to="/creative/skills" class="inline-link">技能库</router-link>
+        </div>
+        <DropdownSelect v-model="skillSlug" block :options="skillOptions"
+                        placeholder="选择技能生成方案" aria-label="选择技能" />
+        <button type="button" class="cr-secondary" :disabled="!skillSlug || skillBusy || !idea.trim()"
+                @click="generatePlan">
+          <Spinner v-if="skillBusy" /> <Sparkles v-else :size="14" />
+          {{ skillBusy ? '生成方案中…' : '生成方案' }}
+        </button>
+        <span class="cr-field-help">技能按当前想法产出可编辑方案；确认后才会生成，原文保留。</span>
+
+        <p v-if="skillError" class="cr-error">{{ skillError }}</p>
+
+        <div v-if="skillRun && skillRun.planStatus === 'PENDING_CONFIRM'" class="suggestion skill-plan">
+          <div class="suggestion-head">
+            <strong>技能方案</strong>
+            <span class="cr-field-help">{{ skillRun.skillName }}</span>
+          </div>
+          <p v-if="planSummary" class="suggestion-text">{{ planSummary }}</p>
+          <textarea v-model="planPrompt" class="cr-textarea" rows="4" maxlength="8000"
+                    aria-label="方案提示词（可编辑）" />
+          <p v-for="warning in planWarnings" :key="warning" class="cr-field-help skill-warning">注意：{{ warning }}</p>
+          <p v-for="item in planMissing" :key="item" class="cr-field-help skill-warning">待补：{{ item }}</p>
+          <div class="suggestion-actions">
+            <button v-if="skillRun.mediaOperation" type="button" class="cr-primary"
+                    :disabled="skillConfirming || !planPrompt.trim()" @click="confirmPlan">
+              <Spinner v-if="skillConfirming" /> {{ skillConfirming ? '提交中…' : '确认并生成' }}
+            </button>
+            <button v-else type="button" class="cr-primary" :disabled="!planPrompt.trim()"
+                    @click="adoptPlanText">采用到输入台</button>
+            <button type="button" class="cr-ghost" @click="dismissPlan">放弃</button>
+          </div>
+          <p class="cr-field-help">原提示词始终保留；方案确认后按现有任务语义执行（可原位重试与恢复）。</p>
+        </div>
+
+        <div v-else-if="skillRun && skillRun.planStatus === 'FAILED'" class="skill-plan-failed">
+          <p class="cr-error">方案生成失败：{{ skillRun.failReason || '未知原因' }}</p>
+          <button type="button" class="cr-secondary" :disabled="skillBusy" @click="retryPlan">
+            <Spinner v-if="skillBusy" /> 重试方案
+          </button>
+        </div>
+
+        <p v-else-if="skillRun && skillRun.planStatus === 'CONFIRMED'" class="cr-field-help">
+          方案已确认{{ skillRun.job ? `，任务${statusMeta(skillRun.job.status).label}` : '' }}；结果见左侧生成记录。
+        </p>
+      </div>
+
       <div class="panel-block">
         <template v-if="isVideoProject">
           <label class="cr-field">
@@ -248,8 +299,9 @@
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { AlertCircle, ImagePlus, Sparkles, Workflow } from 'lucide-vue-next'
 import {
-  createCreativeDraft, createCreativeJob, getWorkflowDefinition, listCreativeDrafts, optimizeCreativePrompt,
-  startWorkflow, updateCreativeDraft
+  confirmCreativeSkillRun, createCreativeDraft, createCreativeJob, createCreativeSkillRun,
+  getWorkflowDefinition, listCreativeDrafts, listCreativeSkills, optimizeCreativePrompt,
+  retryCreativeSkillPlan, startWorkflow, updateCreativeDraft
 } from '../../../api'
 import { formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta } from '../shared'
 import {
@@ -295,6 +347,136 @@ const jobs = computed(() => jobsStore.jobs.value)
 const busyJob = computed(() => jobsStore.busyJob.value)
 const isVideoProject = computed(() => project.value?.kind === 'VIDEO')
 const canOptimize = computed(() => (idea.value.trim() || effective.value.trim()).length > 0)
+
+// ---------------------------------------------------------------- 技能方案（skill 设计 §5.3/§6.1）
+const skills = ref([])
+const skillSlug = ref('')
+const skillRun = ref(null)
+const skillBusy = ref(false)
+const skillConfirming = ref(false)
+const skillError = ref('')
+const planPrompt = ref('')
+
+const skillOptions = computed(() => [
+  { value: '', label: '选择技能（可选）' },
+  ...skills.value.filter(skill => skill.compat === 'READY')
+    .map(skill => ({ value: skill.slug, label: skill.name }))
+])
+const selectedSkill = computed(() => skills.value.find(skill => skill.slug === skillSlug.value) || null)
+const planSummary = computed(() => skillRun.value?.plan?.summary || '')
+const planWarnings = computed(() => skillRun.value?.plan?.warnings || [])
+const planMissing = computed(() => skillRun.value?.plan?.missing || [])
+
+async function loadSkills() {
+  try {
+    const data = await listCreativeSkills()
+    skills.value = data.items || []
+  } catch (exception) { /* 技能列表失败不阻塞创作台 */ }
+}
+
+/** 技能库/首页经 query + sessionStorage 交接：进入创作台自动选中技能并带入想法。 */
+function consumeHandoff() {
+  const query = router.currentRoute.value.query
+  const routeSkill = typeof query.skill === 'string' ? query.skill : ''
+  let handoff = null
+  try {
+    const raw = sessionStorage.getItem('aster.creative.handoff')
+    if (raw) {
+      sessionStorage.removeItem('aster.creative.handoff')
+      handoff = JSON.parse(raw)
+    }
+  } catch (exception) { /* 忽略 */ }
+  const skill = routeSkill || handoff?.skill || ''
+  if (skill) skillSlug.value = skill
+  if (handoff?.prompt && !idea.value.trim()) {
+    idea.value = handoff.prompt
+    effective.value = handoff.prompt
+    finalSynced.value = true
+    markDirty()
+  }
+  if (skill && idea.value.trim()) {
+    // 想法与技能都已就绪：直接生成方案，少一次点击
+    generatePlan()
+  }
+}
+
+/** 媒体操作从技能能力推导；挂在运行对象上，避免用户随后切换下拉造成误判。 */
+function withMediaOperation(run) {
+  if (!run) return run
+  const caps = skills.value.find(skill => skill.slug === run.slug)?.requiredCapabilities || []
+  run.mediaOperation = caps.includes('IMAGE_TO_VIDEO') ? 'image_to_video'
+    : caps.includes('TEXT_TO_VIDEO') ? 'text_to_video' : null
+  return run
+}
+
+async function generatePlan() {
+  const prompt = idea.value.trim()
+  if (!skillSlug.value || !prompt || skillBusy.value) return
+  skillBusy.value = true
+  skillError.value = ''
+  try {
+    const caps = selectedSkill.value?.requiredCapabilities || []
+    const bindings = caps.includes('IMAGE_TO_VIDEO') && videoRefAssetId.value
+      ? [{ assetId: videoRefAssetId.value, role: 'FIRST_FRAME' }]
+      : []
+    skillRun.value = withMediaOperation(await createCreativeSkillRun(projectId.value, {
+      slug: skillSlug.value, prompt, bindings
+    }))
+    planPrompt.value = skillRun.value?.plan?.prompt || ''
+  } catch (exception) {
+    skillError.value = exception.response?.data?.error || '方案生成失败，可重试或直接使用原文'
+  } finally {
+    skillBusy.value = false
+  }
+}
+
+async function retryPlan() {
+  if (!skillRun.value || skillBusy.value) return
+  skillBusy.value = true
+  skillError.value = ''
+  try {
+    skillRun.value = withMediaOperation(await retryCreativeSkillPlan(skillRun.value.runId))
+    planPrompt.value = skillRun.value?.plan?.prompt || ''
+  } catch (exception) {
+    skillError.value = exception.response?.data?.error || '方案重试失败'
+  } finally {
+    skillBusy.value = false
+  }
+}
+
+/** 确认执行：服务端按 run 派生幂等键创建媒体任务，双击/重传不会重复计费。 */
+async function confirmPlan() {
+  if (!skillRun.value || skillConfirming.value) return
+  skillConfirming.value = true
+  skillError.value = ''
+  try {
+    skillRun.value = await confirmCreativeSkillRun(skillRun.value.runId, {
+      effectivePrompt: planPrompt.value.trim(),
+      parameters: isVideoProject.value ? { seconds: videoSeconds.value } : {}
+    })
+    showToast(skillRun.value?.job ? '任务已受理，正在生成' : '方案已确认', 'success')
+    await jobsStore.load()
+  } catch (exception) {
+    skillError.value = exception.response?.data?.error || '确认失败，请稍后重试'
+  } finally {
+    skillConfirming.value = false
+  }
+}
+
+/** 纯方案技能（如剧本转分镜）：把方案文本带入输入台，由用户决定下一步。 */
+function adoptPlanText() {
+  idea.value = planPrompt.value
+  effective.value = planPrompt.value
+  finalSynced.value = true
+  markDirty()
+  dismissPlan()
+  showToast('方案已带入输入台，原文仍保留', 'success')
+}
+
+function dismissPlan() {
+  skillRun.value = null
+  planPrompt.value = ''
+}
 const activeBindingName = computed(() => {
   const binding = isVideoProject.value ? videoBinding.value : imageBinding.value
   return binding ? `${binding.providerName} / ${binding.modelName}` : '未配置'
@@ -600,8 +782,10 @@ async function startProjectWorkflow() {
 }
 
 onMounted(async () => {
+  loadSkills()
   await loadDrafts()
   applySeed()
+  consumeHandoff()
 })
 
 onBeforeUnmount(() => {
@@ -727,6 +911,12 @@ onBeforeUnmount(() => {
 .suggestion-head strong { font-size: var(--wb-fs-compact); }
 .suggestion-text { margin: 0; font-size: var(--wb-fs-compact); line-height: 1.62; color: var(--wb-text); }
 .suggestion-actions { display: flex; gap: var(--wb-space-2); }
+
+.skill-block { border-top: 1px solid var(--wb-border); padding-top: var(--wb-space-3); }
+.skill-warning { color: var(--wb-warning); margin: 0; }
+.skill-plan textarea { margin-top: 6px; }
+.skill-plan-failed { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.skill-plan-failed .cr-error { margin: 0; }
 
 .panel-switch { display: flex; align-items: center; gap: var(--wb-space-2); font-size: var(--wb-fs-compact); color: var(--wb-text-2); }
 .model-line, .save-line {

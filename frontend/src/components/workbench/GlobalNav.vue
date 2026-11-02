@@ -11,6 +11,22 @@
       <span class="wb-nav-label">收起导航</span>
     </button>
 
+    <!-- 生成活动（redesign §3.1）：全局顶部入口，执行中显示数量，异常显示可操作提示 -->
+    <button
+      type="button"
+      class="wb-activity"
+      :class="{ 'has-attention': attentionCount > 0 }"
+      :title="activityTitle"
+      @click="activityOpen = true"
+    >
+      <Activity :size="17" :stroke-width="1.9" />
+      <span class="wb-nav-label">生成活动</span>
+      <em v-if="activeCount > 0" class="wb-activity-count">{{ activeCount }}</em>
+      <em v-else-if="attentionCount > 0" class="wb-activity-dot" aria-label="有待处理事件" />
+    </button>
+
+    <ActivityDrawer v-if="activityOpen" @close="activityOpen = false" />
+
     <div class="wb-nav-items">
       <router-link
         v-for="item in primaryItems"
@@ -50,6 +66,16 @@
         <component :is="themeIcon" :size="18" :stroke-width="1.9" />
         <span class="wb-nav-label">{{ themeShort }}</span>
       </button>
+      <button
+        class="wb-nav-item"
+        type="button"
+        :title="motionTitle"
+        :aria-pressed="reduceMotion"
+        @click="toggleReduceMotion"
+      >
+        <component :is="motionIcon" :size="18" :stroke-width="1.9" />
+        <span class="wb-nav-label">{{ motionShort }}</span>
+      </button>
       <router-link to="/settings/model" class="wb-nav-item" title="设置" aria-label="设置">
         <Settings :size="19" :stroke-width="1.9" />
         <span class="wb-nav-label">设置</span>
@@ -67,13 +93,32 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
-  PanelLeftClose, PanelLeftOpen, Workflow, Palette, FolderOpen, Images, ListChecks
+  PanelLeftClose, PanelLeftOpen, Workflow, Palette, FolderOpen, Images, Sparkles,
+  Activity, ZapOff, Zap
 } from 'lucide-vue-next'
 import AsterMark from '../AsterMark.vue'
-import { resolvedTheme, themeMode, setThemeMode } from '../../design/apply-tokens'
+import ActivityDrawer from '../creative/ActivityDrawer.vue'
+import { resolvedTheme, themeMode, setThemeMode, reduceMotion, setReduceMotion } from '../../design/apply-tokens'
+import { useCreativeActivity } from '../../views/creative/activity'
 import { getCurrentUser } from '../../api/auth'
 
 const route = useRoute()
+const { activeCount, attentionCount } = useCreativeActivity()
+const activityOpen = ref(false)
+const activityTitle = computed(() => (
+  attentionCount.value > 0
+    ? `生成活动：${attentionCount.value} 项需要处理`
+    : activeCount.value > 0 ? `生成活动：${activeCount.value} 项进行中` : '生成活动'
+))
+
+const motionIcon = computed(() => (reduceMotion.value ? ZapOff : Zap))
+const motionShort = computed(() => (reduceMotion.value ? '动效已减少' : '减少动效'))
+const motionTitle = computed(() => (reduceMotion.value
+  ? '减少动态效果：已开启（点击恢复）'
+  : '减少动态效果：关闭（点击开启）'))
+function toggleReduceMotion() {
+  setReduceMotion(!reduceMotion.value)
+}
 
 const COLLAPSE_KEY = 'aster.nav.collapsed'
 const NARROW_BREAKPOINT = 900
@@ -91,12 +136,13 @@ function handleViewportChange() {
 onMounted(() => window.addEventListener('resize', handleViewportChange))
 onBeforeUnmount(() => window.removeEventListener('resize', handleViewportChange))
 
-// 一级导航只挂已上线能力，不做空占位入口：创作主线常驻，系统模块收进「更多」。
+// 一级导航（redesign §3.1）：创作 / 我的创作 / 素材库 / 技能 4 项；
+// 任务页退为「全部生成记录」深层入口（活动抽屉可直达），系统模块收进「更多」。
 const primaryItems = [
-  { to: '/creative', label: '创作', icon: Palette, match: ['/creative'] },
-  { to: '/creative/works', label: '作品', icon: FolderOpen, match: ['/creative/works'] },
-  { to: '/creative/assets', label: '素材', icon: Images, match: ['/creative/assets'] },
-  { to: '/creative/tasks', label: '任务', icon: ListChecks, match: ['/creative/tasks'] }
+  { to: '/creative', label: '创作', icon: Palette, match: ['/creative', '/creative/projects'] },
+  { to: '/creative/library', label: '我的创作', icon: FolderOpen, match: ['/creative/library', '/creative/works'] },
+  { to: '/creative/assets', label: '素材库', icon: Images, match: ['/creative/assets'] },
+  { to: '/creative/skills', label: '技能', icon: Sparkles, match: ['/creative/skills'] }
 ]
 const secondaryItems = [
   { to: '/workflows', label: '工作流', icon: Workflow, match: ['/workflows'] },
@@ -224,6 +270,58 @@ function cycleTheme() {
   background: var(--wb-fill);
   color: var(--wb-text);
 }
+
+/* 生成活动入口（redesign §3.1）：执行中数量 / 待处理提示点 */
+.wb-activity {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 2px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--wb-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+}
+
+.wb-activity:hover { background: var(--wb-fill); color: var(--wb-text); }
+
+.wb-activity.has-attention { color: var(--wb-warning); }
+
+.wb-activity-count {
+  font-style: normal;
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--wb-brand-soft);
+  color: var(--wb-brand);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.wb-activity.has-attention .wb-activity-count { background: rgba(161, 92, 0, 0.14); color: var(--wb-warning); }
+
+.wb-activity-dot {
+  font-style: normal;
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wb-warning);
+}
+
+.wb-nav.collapsed .wb-activity { justify-content: center; padding: 7px 0; }
+.wb-nav.collapsed .wb-activity .wb-activity-count,
+.wb-nav.collapsed .wb-activity .wb-activity-dot { position: absolute; top: 3px; right: 5px; margin: 0; }
 
 .wb-nav.collapsed .wb-collapse {
   justify-content: center;

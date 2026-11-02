@@ -9,3 +9,15 @@
   outline: 2px solid var(--wb-brand, #2E6BE6);
   outline-offset: 2px;
 }
+
+/* 减少动态效果（redesign §7.4）：保留状态可见性，砍掉位移/缩放/飞行。
+   统一由 html[data-cr-motion] 驱动（apply-tokens.js 模块加载即写入，
+   合并系统 prefers-reduced-motion 与应用内三态开关），避免双源打架。 */
+html[data-cr-motion='reduced'] *,
+html[data-cr-motion='reduced'] *::before,
+html[data-cr-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

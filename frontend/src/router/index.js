@@ -68,12 +68,27 @@ const routes = [
         }
       },
       {
-        path: 'creative/works',
-        name: 'CreativeWorks',
+        // 我的创作（redesign §3.1/§5.2）：项目 + 作品双视图；旧 /creative/works 永久重定向，历史链接不失效
+        path: 'creative/library',
+        name: 'CreativeLibrary',
         component: () => import('../views/creative/ProjectLibrary.vue'),
         meta: {
-          title: '作品 - Aster',
-          description: '全部作品的筛选、搜索与最近更新。'
+          title: '我的创作 - Aster',
+          description: '项目与作品：按类型筛选、搜索、找回创作上下文。'
+        }
+      },
+      {
+        path: 'creative/works',
+        redirect: '/creative/library'
+      },
+      {
+        // 技能库（skill 设计 §5.1）：面向创作者的技能目录，管理配置仍在 /settings/skill
+        path: 'creative/skills',
+        name: 'CreativeSkills',
+        component: () => import('../views/creative/skills/CreativeSkills.vue'),
+        meta: {
+          title: '技能库 - Aster',
+          description: '找到适合这次创作的方法：浏览、了解输入输出，在创作台使用。'
         }
       },
       {
@@ -133,22 +148,23 @@ const routes = [
         ]
       },
       {
+        // 「全部生成记录」深层入口（redesign §3.1）：活动抽屉直达；历史链接不失效
         path: 'creative/tasks',
         name: 'CreativeTasks',
         component: () => import('../views/creative/CreativeTasks.vue'),
-        meta: { title: '创作任务 - Aster', description: '查看全部图片生成任务与状态。' }
+        meta: { title: '生成记录 - Aster', description: '全部生成任务的状态、失败原因与恢复动作。' }
       },
       {
         path: 'creative/tasks/:jobId',
         name: 'CreativeTaskDetail',
         component: () => import('../views/creative/CreativeTasks.vue'),
-        meta: { title: '任务详情 - Aster', description: '图片生成任务详情与可用操作。' }
+        meta: { title: '生成记录详情 - Aster', description: '生成任务详情与可用操作。' }
       },
       {
         path: 'creative/assets',
         name: 'CreativeAssets',
         component: () => import('../views/creative/CreativeAssets.vue'),
-        meta: { title: '创作素材 - Aster', description: '跨项目的个人图片素材库。' }
+        meta: { title: '素材库 - Aster', description: '跨项目的创作素材资源台：浏览、筛选与引用。' }
       },
       {
         path: 'knowledge-admin',

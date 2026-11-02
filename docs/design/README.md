@@ -1,5 +1,8 @@
 # 设计文档
 
+- [Aster AI 创作核心产品规划](./2026-11-02-ai-creative-core-product-plan.md)
+- [M0 产品外壳收敛：导航、创作首页与作品列表](./2026-11-02-m0-product-shell.md)
+- [视频批次生产 P3 实施记录](./2026-11-02-video-batch-p3.md)
 - [视频创作完善：项目素材、剧集剧情、任务与提示词统一管理（调研方案）](./2026-11-01-video-production-management-research.md)
 
 - [AI 创作模块：业务实施细则与执行台账](./2026-10-29-ai-creative-implementation.md)

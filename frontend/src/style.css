@@ -4,34 +4,35 @@
     "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
 
   /* Materials & fills */
-  --sk-bg: #edf3ff;
+  /* 基础色已中性化（UI 规范 §5）：旧页面仍消费 --sk-*，但不再带蓝色底调 */
+  --sk-bg: #f7f7f8;
   --sk-surface: #ffffff;
   --sk-material: rgba(255, 255, 255, 0.76);
   --sk-material-strong: rgba(255, 255, 255, 0.94);
-  --sk-fill: #f1f5fb;
-  --sk-fill-strong: #e3ecfb;
+  --sk-fill: #f0f1f3;
+  --sk-fill-strong: #e9ebef;
 
-  /* Labels & separators (Apple semantic colors) */
-  --sk-label: #17213a;
-  --sk-label-2: #60708e;
-  --sk-label-3: #96a4bd;
-  --sk-separator: #dce5f4;
-  --sk-separator-strong: #c5d2e7;
+  /* Labels & separators */
+  --sk-label: #18191c;
+  --sk-label-2: #5e626b;
+  --sk-label-3: #8d919a;
+  --sk-separator: #e3e4e7;
+  --sk-separator-strong: #cdcfd4;
 
   /* System colors */
   --sk-blue: #2563eb;
-  --sk-green: #34c759;
-  --sk-red: #ff3b30;
-  --sk-orange: #ff9500;
+  --sk-green: #16803c;
+  --sk-red: #c9364f;
+  --sk-orange: #a15c00;
 
   /* Shape & depth */
-  --sk-radius-sm: 8px;
-  --sk-radius: 10px;
-  --sk-radius-lg: 14px;
-  --sk-radius-xl: 18px;
-  --sk-shadow-card: 0 1px 2px rgba(31, 61, 117, 0.04), 0 10px 28px rgba(36, 72, 138, 0.08);
-  --sk-shadow-raised: 0 3px 9px rgba(26, 61, 122, 0.08), 0 22px 50px rgba(33, 73, 141, 0.12);
-  --sk-shadow-pop: 0 10px 28px rgba(30, 63, 119, 0.15), 0 26px 70px rgba(34, 70, 132, 0.18);
+  --sk-radius-sm: 6px;
+  --sk-radius: 8px;
+  --sk-radius-lg: 10px;
+  --sk-radius-xl: 12px;
+  --sk-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --sk-shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --sk-shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.18);
   --sk-blur: saturate(180%) blur(20px);
 
   /* Theme hooks — overridden at runtime by AgentSettingsMenu */
@@ -55,10 +56,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background:
-    radial-gradient(56rem 40rem at -8% -12%, rgba(102, 137, 255, 0.32), transparent 68%),
-    radial-gradient(46rem 36rem at 106% 12%, rgba(157, 210, 255, 0.46), transparent 66%),
-    var(--sk-bg);
+  /* 页面背景保持中性（UI 规范 §5.1）：不再使用径向渐变，媒体本身提供色彩 */
+  background: var(--sk-bg);
 }
 
 button, textarea, input, select { font-family: inherit; }
@@ -81,19 +80,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 #app { width: 100%; min-height: 100vh; }
 
-/* 收藏粒子爆点（微交互批次）：starBurst() 动态创建，必须是非 scoped 全局样式 */
-.star-burst-particle {
-  position: fixed;
-  z-index: 999;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  pointer-events: none;
-  background: #f5a623;
-  box-shadow: 0 0 6px rgba(245, 166, 35, 0.8);
-  animation: star-burst 0.6s ease-out forwards;
+/* 收藏反馈（UI 规范 §11.3）：用图标短暂缩放替代粒子爆炸，必须是非 scoped 全局样式 */
+.is-burst {
+  animation: star-pop 0.26s ease-out;
 }
-@keyframes star-burst {
-  from { transform: translate(0, 0) scale(1); opacity: 1; }
-  to { transform: translate(var(--dx), var(--dy)) scale(0.3); opacity: 0; }
+
+@keyframes star-pop {
+  0% { transform: scale(0.86); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-burst { animation: none; }
 }

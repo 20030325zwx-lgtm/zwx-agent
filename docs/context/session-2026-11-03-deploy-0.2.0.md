@@ -29,3 +29,9 @@
 - 服务器登录密码出现在截图中，建议尽快在腾讯云控制台重置；`.env`/`globe.conf` 保持 600。
 - 访问地址：http://1.13.152.215:8080（无域名未备案，走 IP:8080）。
 - 回滚：`.env.bak-0.1.0` + 0.1.0 镜像仍在服务器上；DB 备份已做。
+
+## 0.2.1（2026-11-03 追加）
+
+- 首页首屏留白修复（见 docs/bugs/bug-2026-11-03-home-composer-blank-area.txt）后发布：仅前端变更。
+- 服务器 `/opt/aster/.env` `IMAGE_TAG=0.2.1`；backend/image-mcp/document-mcp 由 0.2.0 重打 tag（同镜像位），旧 `.env.bak-0.2.0` 保留。
+- 线上主包 `index-CqTzPpfJ.js`；域名 200、后端 health OK。

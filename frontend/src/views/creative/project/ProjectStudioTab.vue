@@ -595,6 +595,7 @@ function referenceEvidence(job) {
   if (job.providerTaskId) return '供应商已受理，素材已随请求发送'
   if (job.status === 'SUBMITTING') return '正在连同生成请求发送'
   if (job.status === 'QUEUED') return '已固化到任务输入，等待发送'
+  if (job.status === 'SUCCEEDED') return '已随请求发送给供应商（任务已完成）'
   return '已保存在任务输入快照中'
 }
 

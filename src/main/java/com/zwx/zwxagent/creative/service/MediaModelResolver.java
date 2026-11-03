@@ -26,6 +26,7 @@ public class MediaModelResolver {
     public static final String ADAPTER_DASHSCOPE_TEXT2IMAGE = "dashscope-text2image";
     public static final String ADAPTER_OPENAI_IMAGES = "openai-images";
     public static final String ADAPTER_OPENAI_VIDEO = "openai-video";
+    public static final String ADAPTER_LK_MEDIA = "lk-media";
     private static final String OPERATION_TEXT_TO_IMAGE = ParameterSchema.IMAGE_GENERATION;
     private static final java.util.Set<String> VIDEO_OPERATIONS =
             java.util.Set.of(ParameterSchema.TEXT_TO_VIDEO, ParameterSchema.IMAGE_TO_VIDEO);
@@ -98,18 +99,22 @@ public class MediaModelResolver {
         java.util.Map<String, Boolean> operations;
         String primaryOperation;
         if (video) {
-            // 视频用途当前只有 OpenAI Sora 兼容（New API 中转站）适配器；DashScope 暂无视频契约
+            // 视频用途：OpenAI Sora 兼容（/v1/videos）或 lk888 平台异步媒体协议（/media/generate）。
+            // lk888 明确不提供 /v1/videos 端点；按其网关提示用 gk-video-* 模型名区分（2026-11-03 探测）。
             if (!"openai-compatible".equalsIgnoreCase(protocol)) {
                 throw CreativeException.modelNotConfigured(
                         "该模型没有可用的视频生成适配器：" + binding.config().provider() + "/"
                                 + binding.config().modelName());
             }
-            adapterKey = ADAPTER_OPENAI_VIDEO;
+            boolean lkMedia = binding.config().modelName() != null
+                    && binding.config().modelName().toLowerCase(java.util.Locale.ROOT).startsWith("gk-video");
+            adapterKey = lkMedia ? ADAPTER_LK_MEDIA : ADAPTER_OPENAI_VIDEO;
             schema = ParameterSchema.openAiVideo();
-            // KKAI 上 sd_* 模型是否真走 /v1/videos 未做真实调用验证，不标 VERIFIED（V00 记录见实施文档）
+            // 两者都未经本项目真实出片验证：不标 VERIFIED（lk888 图生视频契约也未核实，只开文生视频）
             verification = VerificationStatus.UNVERIFIED;
-            operations = java.util.Map.of(ParameterSchema.TEXT_TO_VIDEO, true,
-                    ParameterSchema.IMAGE_TO_VIDEO, true);
+            operations = lkMedia
+                    ? java.util.Map.of(ParameterSchema.TEXT_TO_VIDEO, true, ParameterSchema.IMAGE_TO_VIDEO, false)
+                    : java.util.Map.of(ParameterSchema.TEXT_TO_VIDEO, true, ParameterSchema.IMAGE_TO_VIDEO, true);
             primaryOperation = ParameterSchema.TEXT_TO_VIDEO;
         } else {
             operations = java.util.Map.of(OPERATION_TEXT_TO_IMAGE, true);

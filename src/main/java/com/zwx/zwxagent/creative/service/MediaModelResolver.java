@@ -112,10 +112,11 @@ public class MediaModelResolver {
             schema = ParameterSchema.openAiVideo();
             // 两者都未经本项目真实出片验证：不标 VERIFIED（lk888 图生视频契约也未核实，只开文生视频）
             verification = VerificationStatus.UNVERIFIED;
+            // lk888 的 gk-video-3.5 仅支持图生视频（首帧必填）；其余网关维持文生/图生皆可
             operations = lkMedia
-                    ? java.util.Map.of(ParameterSchema.TEXT_TO_VIDEO, true, ParameterSchema.IMAGE_TO_VIDEO, false)
+                    ? java.util.Map.of(ParameterSchema.TEXT_TO_VIDEO, false, ParameterSchema.IMAGE_TO_VIDEO, true)
                     : java.util.Map.of(ParameterSchema.TEXT_TO_VIDEO, true, ParameterSchema.IMAGE_TO_VIDEO, true);
-            primaryOperation = ParameterSchema.TEXT_TO_VIDEO;
+            primaryOperation = lkMedia ? ParameterSchema.IMAGE_TO_VIDEO : ParameterSchema.TEXT_TO_VIDEO;
         } else {
             operations = java.util.Map.of(OPERATION_TEXT_TO_IMAGE, true);
             switch (protocol.toLowerCase()) {

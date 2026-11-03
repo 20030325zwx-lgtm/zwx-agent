@@ -338,7 +338,7 @@ import { AlertCircle, Image as ImageIcon, ImagePlus, Sparkles, Workflow } from '
 import { motion, useReducedMotion } from 'motion-v'
 import {
   confirmCreativeSkillRun, confirmCreativeSkillShots, createCreativeDraft, createCreativeJob,
-  createCreativeSkillRun, getCreativeSkillRun, getWorkflowDefinition, listCreativeDrafts,
+  createCreativeSkillRun, getCreativeHealth, getCreativeSkillRun, getWorkflowDefinition, listCreativeDrafts,
   listCreativeSkills, optimizeCreativePrompt, retryCreativeSkillPlan, startWorkflow, updateCreativeDraft
 } from '../../../api'
 import { formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta } from '../shared'
@@ -796,10 +796,14 @@ function continueFrom(job) {
 const wfCreateOpen = ref(false)
 const wfCreate = reactive({ loading: false, starting: false, error: '', workflowKey: '', fields: [], input: {} })
 const wfFormHint = computed(() => workflows.value.find(item => item.key === wfCreate.workflowKey)?.description || '')
-const videoOperationOptions = [
-  { value: 'text_to_video', label: '文生视频' },
-  { value: 'image_to_video', label: '图生视频（首帧）' }
-]
+// 视频模型支持的操作由服务端 health 给出（例如 lk888 gk-video 仅图生视频）；加载前保持两项，避免闪动
+const videoOps = ref({ text_to_video: true, image_to_video: true })
+const videoOperationOptions = computed(() => {
+  const options = []
+  if (videoOps.value.text_to_video !== false) options.push({ value: 'text_to_video', label: '文生视频' })
+  if (videoOps.value.image_to_video !== false) options.push({ value: 'image_to_video', label: '图生视频（首帧）' })
+  return options.length ? options : [{ value: 'text_to_video', label: '文生视频' }]
+})
 const sizeOptions = [
   { value: '1024*1024', label: '1024 × 1024（方形）' },
   { value: '1280*720', label: '1280 × 720（横版）' },
@@ -862,10 +866,28 @@ async function startProjectWorkflow() {
 
 onMounted(async () => {
   loadSkills()
+  loadVideoCapabilities()
   await loadDrafts()
   applySeed()
   consumeHandoff()
 })
+
+/** 按绑定模型能力收敛生成方式：不支持的操作不出现在下拉里，当前值不支持时自动切到可用项。 */
+async function loadVideoCapabilities() {
+  try {
+    const health = await getCreativeHealth()
+    const operations = health?.videoOperations
+    if (!operations) return
+    videoOps.value = operations
+    if (operations[videoOperation.value] === false) {
+      const fallback = Object.keys(operations).find(key => operations[key])
+      if (fallback) {
+        videoOperation.value = fallback
+        markDirty()
+      }
+    }
+  } catch (exception) { /* health 不可用时不改变默认选项 */ }
+}
 
 onBeforeUnmount(() => {
   window.clearTimeout(saveTimer)

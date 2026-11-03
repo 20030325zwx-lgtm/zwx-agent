@@ -23,6 +23,7 @@ public class CreativeHealthController {
     private final JdbcTemplate jdbcTemplate;
     private final ModelCatalogService catalogService;
     private final MediaStorage storage;
+    private final com.zwx.zwxagent.creative.service.MediaModelResolver mediaModelResolver;
 
     @Value("${creative.submissions-enabled:true}")
     private boolean submissionsEnabled;
@@ -30,10 +31,12 @@ public class CreativeHealthController {
     private boolean schedulerEnabled;
 
     public CreativeHealthController(JdbcTemplate jdbcTemplate, ModelCatalogService catalogService,
-                                    MediaStorage storage) {
+                                    MediaStorage storage,
+                                    com.zwx.zwxagent.creative.service.MediaModelResolver mediaModelResolver) {
         this.jdbcTemplate = jdbcTemplate;
         this.catalogService = catalogService;
         this.storage = storage;
+        this.mediaModelResolver = mediaModelResolver;
     }
 
     @GetMapping("/health")
@@ -49,9 +52,29 @@ public class CreativeHealthController {
             imageModelBound = false;
         }
         body.put("imageModelBound", imageModelBound);
+        body.put("videoOperations", videoOperations(actor));
         body.put("database", databaseReachable());
         body.put("jobs", jobCounts(actor));
         return body;
+    }
+
+    /**
+     * 当前绑定的视频模型支持哪些操作（如 lk888 gk-video 仅图生视频）。
+     * 只返回布尔、不回退其它模型；解析失败按不支持处理，避免 UI 出现点了才被拒的选项。
+     */
+    private Map<String, Boolean> videoOperations(CurrentActor actor) {
+        Map<String, Boolean> operations = new LinkedHashMap<>();
+        for (String operation : java.util.List.of("text_to_video", "image_to_video")) {
+            boolean supported;
+            try {
+                mediaModelResolver.resolve(actor.userId(), null, operation);
+                supported = true;
+            } catch (Exception exception) {
+                supported = false;
+            }
+            operations.put(operation, supported);
+        }
+        return operations;
     }
 
     private boolean databaseReachable() {

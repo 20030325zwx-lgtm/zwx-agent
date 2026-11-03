@@ -76,6 +76,12 @@
           <div v-if="detailJob.error"><dt>错误</dt><dd class="cr-error">{{ detailJob.error }}</dd></div>
           <div v-if="detailJob.blockedReason"><dt>说明</dt><dd>{{ blockedText(detailJob.blockedReason) }}</dd></div>
         </dl>
+        <ReferenceAssetStrip v-if="detailJob.referenceAssetIds?.length"
+                             :asset-ids="detailJob.referenceAssetIds"
+                             :label="detailJob.operation === 'image_to_video' ? '首帧素材' : '参考素材'"
+                             :evidence="detailJob.providerTaskId
+                               ? '供应商已受理，素材已随请求发送'
+                               : '已保存在任务输入快照中'" />
         <div v-if="detailJob.outputs?.length" class="detail-outputs">
           <h3>产物</h3>
           <div v-for="output in detailJob.outputs" :key="output.assetId" class="detail-output">
@@ -123,6 +129,7 @@ import { blockedText, isVideoJob, sourceLabel } from './helpers'
 import { PROJECT_CTX, useProjectJobs, useStoryWorkspace } from './composables'
 import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
+import ReferenceAssetStrip from '../../../components/creative/ReferenceAssetStrip.vue'
 
 const TAB_KEYS = new Set(['studio', 'story', 'storyboard', 'settings', 'chapters', 'workflow', 'tasks', 'assets'])
 

@@ -5,13 +5,25 @@
       <button type="button" class="asset-mini-btn" @click="switchToManual">改为手动选择/上传</button>
     </div>
     <template v-else>
+      <div v-if="!multiple && modelValue" class="asset-selected">
+        <img v-if="selectedPreview" :src="selectedPreview" alt="已引用素材缩略图" />
+        <div v-else class="asset-selected-placeholder">图</div>
+        <div class="asset-selected-copy">
+          <strong>{{ selectedAsset?.displayName || '已引用素材' }}</strong>
+          <span v-if="selectedLoading">正在确认素材…</span>
+          <span v-else-if="selectedAsset?.status === 'READY'">已引用 · {{ selectedAsset.width && selectedAsset.height
+            ? `${selectedAsset.width} × ${selectedAsset.height}` : formatSize(selectedAsset.byteSize) }}</span>
+          <span v-else class="asset-error">素材信息不可用，请重新选择</span>
+        </div>
+        <button type="button" class="asset-remove" aria-label="移除已引用素材" @click="clearSingle">×</button>
+      </div>
       <div class="asset-row">
         <DropdownSelect v-model="projectId" class="asset-project" size="sm" block
                         :options="projectOptions" :disabled="projectsLoading"
                         placeholder="选择项目" aria-label="素材所在项目" />
         <DropdownSelect v-model="selectedId" class="asset-select" size="sm" block
                         :options="assetOptions"
-                        :placeholder="assetsLoading ? '素材加载中…' : '选择素材'"
+                        :placeholder="assetsLoading ? '素材加载中…' : (modelValue ? '更换素材' : '选择素材')"
                         :aria-label="multiple ? '追加素材' : '选择素材'"
                         :disabled="assetsLoading || !projectId" />
       </div>
@@ -34,9 +46,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DropdownSelect from '../ui/DropdownSelect.vue'
-import { listCreativeAssets, listCreativeProjects, uploadCreativeAsset } from '../../api'
+import {
+  getCreativeAsset, getCreativeAssetThumbnail, listCreativeAssets, listCreativeProjects, uploadCreativeAsset
+} from '../../api'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -61,19 +75,29 @@ const pickedIds = ref([])
 const uploading = ref(false)
 const uploadError = ref('')
 const fileInput = ref(null)
+const selectedAsset = ref(null)
+const selectedPreview = ref('')
+const selectedLoading = ref(false)
+let selectedRequest = 0
 
 const projectOptions = computed(() => projects.value.map(project => ({ value: project.id, label: project.name })))
-const assetOptions = computed(() => assets.value.map(asset => ({
-  value: asset.id,
-  label: `${asset.displayName || asset.id.slice(0, 8)}（${formatSize(asset.byteSize)}）`
-})))
+const assetOptions = computed(() => {
+  const visible = [...assets.value]
+  if (selectedAsset.value && !visible.some(asset => asset.id === selectedAsset.value.id)) {
+    visible.unshift(selectedAsset.value)
+  }
+  return visible.map(asset => ({
+    value: asset.id,
+    label: `${asset.displayName || asset.id.slice(0, 8)}（${formatSize(asset.byteSize)}）`
+  }))
+})
 
 const isTemplate = computed(() => (props.modelValue || '').includes('{{'))
 // 多选时把当前值拆成 ID 列表；单选直接是 ID
 const parsedIds = computed(() => {
   const value = props.modelValue || ''
   if (!value || value.includes('{{')) return []
-  return value.split(/[,,\s]+/).map(item => item.trim()).filter(Boolean)
+  return value.split(/[,，\s]+/).map(item => item.trim()).filter(Boolean)
 })
 
 watch(parsedIds, ids => {
@@ -82,8 +106,31 @@ watch(parsedIds, ids => {
 
 // 单选：外部值变化时回显（如父级预填/上传后刷新）
 watch(() => props.modelValue, value => {
-  if (!props.multiple && value && !value.includes('{{')) {
-    selectedId.value = value
+  if (!props.multiple && !(value || '').includes('{{')) selectedId.value = value || ''
+}, { immediate: true })
+
+watch(() => props.modelValue, async value => {
+  const requestId = ++selectedRequest
+  if (props.multiple || !value || value.includes('{{')) {
+    selectedAsset.value = null
+    selectedLoading.value = false
+    releaseSelectedPreview()
+    return
+  }
+  selectedLoading.value = true
+  try {
+    const [asset, thumbnail] = await Promise.all([
+      getCreativeAsset(value),
+      getCreativeAssetThumbnail(value).catch(() => null)
+    ])
+    if (requestId !== selectedRequest) return
+    selectedAsset.value = asset
+    releaseSelectedPreview()
+    if (thumbnail) selectedPreview.value = URL.createObjectURL(thumbnail)
+  } catch (error) {
+    if (requestId === selectedRequest) selectedAsset.value = null
+  } finally {
+    if (requestId === selectedRequest) selectedLoading.value = false
   }
 }, { immediate: true })
 
@@ -93,6 +140,16 @@ function switchToManual() {
 
 function emitSingle(id) {
   emit('update:modelValue', id || '')
+}
+
+function clearSingle() {
+  selectedId.value = ''
+  emitSingle('')
+}
+
+function releaseSelectedPreview() {
+  if (selectedPreview.value) URL.revokeObjectURL(selectedPreview.value)
+  selectedPreview.value = ''
 }
 
 function emitMultiple() {
@@ -178,10 +235,28 @@ onMounted(async () => {
     projectsLoading.value = false
   }
 })
+
+onBeforeUnmount(releaseSelectedPreview)
 </script>
 
 <style scoped>
 .asset-field { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.asset-selected {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 24px;
+  gap: 9px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--wb-border-strong, #c5cbd8);
+  border-radius: var(--wb-radius-sm, 8px);
+  background: var(--wb-fill, #f5f5f4);
+}
+.asset-selected img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; background: #e5e7eb; }
+.asset-selected-placeholder { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 6px; background: #e5e7eb; color: #737373; font-size: 12px; }
+.asset-selected-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.asset-selected-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.asset-selected-copy span { color: var(--wb-muted, #737373); font-size: 11.5px; }
+.asset-remove { border: 0; background: transparent; color: var(--wb-muted, #737373); font-size: 18px; cursor: pointer; }
 .asset-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .asset-project, .asset-select {
   min-width: 0;

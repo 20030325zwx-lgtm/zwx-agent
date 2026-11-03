@@ -71,6 +71,12 @@
           <div v-if="detail.providerTaskId"><dt>供应商任务</dt><dd class="mono">{{ detail.providerTaskId }}</dd></div>
           <div v-if="detail.error"><dt>错误</dt><dd class="cr-error">{{ detail.error }}</dd></div>
         </dl>
+        <ReferenceAssetStrip v-if="detail.referenceAssetIds?.length"
+                             :asset-ids="detail.referenceAssetIds"
+                             :label="detail.operation === 'image_to_video' ? '首帧素材' : '参考素材'"
+                             :evidence="detail.providerTaskId
+                               ? '供应商已受理，素材已随请求发送'
+                               : '已保存在任务输入快照中'" />
         <div class="detail-actions">
           <HoldToConfirm v-if="['QUEUED','RUNNING'].includes(detail.status)" label="取消任务"
                          :disabled="busy" @confirm="cancel" />
@@ -100,6 +106,7 @@ import {
 import { formatTime, retryNeedsRiskAcknowledgement, statusMeta } from './shared'
 import HoldToConfirm from '../../components/ui/HoldToConfirm.vue'
 import Spinner from '../../components/ui/Spinner.vue'
+import ReferenceAssetStrip from '../../components/creative/ReferenceAssetStrip.vue'
 
 const route = useRoute()
 const router = useRouter()

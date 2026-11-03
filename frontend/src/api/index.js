@@ -449,6 +449,8 @@ export const listCreativeJobEvents = (jobId, afterSeq = 0) =>
 // 素材列表：支持 projectId/mediaType/origin/starred/businessType/trashed
 export const listCreativeAssets = (params = {}) =>
   request.get('/ai/creative/assets', { params }).then(response => response.data)
+export const getCreativeAsset = assetId =>
+  request.get(`/ai/creative/assets/${encodeURIComponent(assetId)}`).then(response => response.data)
 export const uploadCreativeAsset = (projectId, file, onProgress) => {
   const form = new FormData()
   form.append('projectId', projectId)

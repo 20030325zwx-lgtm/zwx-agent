@@ -38,6 +38,10 @@
         </div>
         <p class="job-card-hint">{{ statusMeta(job.status).hint }}</p>
         <p v-if="job.prompt" class="job-card-prompt">「{{ job.prompt }}」</p>
+        <ReferenceAssetStrip v-if="job.referenceAssetIds?.length"
+                             :asset-ids="job.referenceAssetIds"
+                             :label="job.operation === 'image_to_video' ? '首帧素材' : '参考素材'"
+                             :evidence="referenceEvidence(job)" />
 
         <div v-if="jobOutputs(job).length" class="job-images">
           <motion.figure v-for="output in jobOutputs(job)" :key="output.assetId" class="job-image"
@@ -348,6 +352,7 @@ import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
 import ToggleSwitch from '../../../components/ui/ToggleSwitch.vue'
 import AssetParamField from '../../../components/workflow/AssetParamField.vue'
+import ReferenceAssetStrip from '../../../components/creative/ReferenceAssetStrip.vue'
 import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 
 const ctx = inject(PROJECT_CTX)
@@ -584,6 +589,13 @@ function jobOutputs(job) {
 
 function videoUrlOf(assetId) {
   return videoUrls[assetId]?.url || ''
+}
+
+function referenceEvidence(job) {
+  if (job.providerTaskId) return '供应商已受理，素材已随请求发送'
+  if (job.status === 'SUBMITTING') return '正在连同生成请求发送'
+  if (job.status === 'QUEUED') return '已固化到任务输入，等待发送'
+  return '已保存在任务输入快照中'
 }
 
 async function loadDrafts() {

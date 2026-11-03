@@ -74,6 +74,11 @@ public class CreativeAssetController {
         return assetService.list(actor, projectId, mediaType, starred, origin, businessType, trashed, q, cursor, limit);
     }
 
+    @GetMapping("/{assetId}")
+    public CreativeAssetService.AssetView get(CurrentActor actor, @PathVariable UUID assetId) {
+        return assetService.get(actor, assetId);
+    }
+
     @GetMapping("/{assetId}/thumbnail")
     public ResponseEntity<byte[]> thumbnail(CurrentActor actor, @PathVariable UUID assetId) {
         byte[] bytes = assetService.thumbnail(actor, assetId);

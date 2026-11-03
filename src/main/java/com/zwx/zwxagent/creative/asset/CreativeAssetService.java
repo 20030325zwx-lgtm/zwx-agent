@@ -53,6 +53,11 @@ public class CreativeAssetService {
     public record UpdateAssetRequest(String displayName, Boolean starred, String businessType) {
     }
 
+    /** 按归属读取素材摘要，供跨项目引用回显；不暴露对象存储路径。 */
+    public AssetView get(CurrentActor actor, UUID assetId) {
+        return toView(requireOwned(actor, assetId));
+    }
+
     private final CreativeAssetRepository assetRepository;
     private final CreativeProjectRepository projectRepository;
     private final MediaJobRepository jobRepository;

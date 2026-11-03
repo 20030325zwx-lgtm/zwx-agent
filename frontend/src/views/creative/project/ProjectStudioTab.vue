@@ -253,45 +253,28 @@
           <Workflow :size="15" /> 用工作流创作
         </button>
       </div>
-    </aside>
 
-    <!-- 底部输入台（redesign §5.5）：提示词占整行，模型/保存状态与提交动作收在下方工具栏 -->
-    <footer class="st-composer" aria-label="创作输入台">
-      <div class="composer-main">
-        <label class="composer-idea">
-          <span class="cr-field-help">想法</span>
-          <textarea v-model="idea" class="cr-textarea composer-textarea" rows="2" maxlength="8000"
-                    placeholder="描述主体、场景、风格…（可先在右侧优化）"
-                    @input="markDirty" />
+      <!-- 提交区（固定在右侧栏底部）：模型选择 + 草稿状态 + 生成 -->
+      <div class="panel-actions">
+        <label class="cr-field">
+          <span class="cr-field-label"><span>{{ isVideoProject ? '视频模型' : '图片模型' }}</span></span>
+          <DropdownSelect v-model="selectedModelRowId" block size="sm" :options="modelOptions"
+                          aria-label="模型"
+                          :placeholder="modelOptions.length ? '选择模型' : '未配置模型'" />
         </label>
-        <div class="composer-side">
-          <div class="save-line">
-            <span>{{ saveStateText }}</span>
-            <button v-if="conflict" type="button" class="inline-link" @click="resolveConflict">另存为新草稿</button>
-          </div>
-          <div v-if="isVideoProject && videoOperation === 'image_to_video' && videoRefAssetId"
-               class="composer-ref" :title="`首帧素材 ${videoRefAssetId.slice(0, 8)}…`">
-            <ImageIcon :size="14" />
-            <span>首帧已选</span>
-          </div>
-          <p v-if="submitError" class="cr-error">{{ submitError }}</p>
-
-          <!-- 右侧动作组：模型选择 + 生成（redesign §5.1 输入台「模型与少量常用规格」） -->
-          <div class="composer-actions">
-            <span class="composer-model-label">{{ isVideoProject ? '视频模型' : '图片模型' }}</span>
-            <DropdownSelect v-model="selectedModelRowId" class="composer-model" size="sm"
-                            :options="modelOptions" aria-label="模型"
-                            :placeholder="modelOptions.length ? '选择模型' : '未配置模型'" />
-            <button type="button" class="cr-primary generate-btn"
-                    :disabled="!canGenerate || generating" @click="generate">
-              <Spinner v-if="generating" />
-              <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : (isVideoProject ? '生成视频' : '生成图片') }}
-            </button>
-          </div>
-          <p v-if="project && project.status !== 'ACTIVE'" class="cr-field-help">项目已归档，不能发起新任务。</p>
+        <div class="save-line">
+          <span>{{ saveStateText }}</span>
+          <button v-if="conflict" type="button" class="inline-link" @click="resolveConflict">另存为新草稿</button>
         </div>
+        <p v-if="submitError" class="cr-error">{{ submitError }}</p>
+        <button type="button" class="cr-primary generate-btn"
+                :disabled="!canGenerate || generating" @click="generate">
+          <Spinner v-if="generating" />
+          <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : (isVideoProject ? '生成视频' : '生成图片') }}
+        </button>
+        <p v-if="project && project.status !== 'ACTIVE'" class="cr-field-help">项目已归档，不能发起新任务。</p>
       </div>
-    </footer>
+    </aside>
 
     <!-- 用工作流创作：产物归入本项目，发起后跳到工作流分区 -->
     <div v-if="wfCreateOpen" class="cr-dialog-backdrop" @click.self="wfCreateOpen = false">
@@ -338,7 +321,7 @@
 
 <script setup>
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { AlertCircle, Image as ImageIcon, ImagePlus, Sparkles, Workflow } from 'lucide-vue-next'
+import { AlertCircle, ImagePlus, Sparkles, Workflow } from 'lucide-vue-next'
 import { motion, useReducedMotion } from 'motion-v'
 import {
   confirmCreativeSkillRun, confirmCreativeSkillShots, createCreativeDraft, createCreativeJob,
@@ -927,17 +910,15 @@ onBeforeUnmount(() => {
 <style scoped src="../creative.css"></style>
 
 <style scoped>
-/* 沉浸式创作台（redesign §5.5）：中央结果舞台 + 底部输入台 + 按需参数侧栏 */
+/* 创作台（redesign §5.5 调整版）：中央结果舞台 + 右侧参数/提交栏（模型与生成都在右栏） */
 .st-body {
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
-  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .st-results {
-  grid-area: 1 / 1 / 2 / 2;
   min-width: 0;
   overflow-y: auto;
   padding: var(--wb-space-4) var(--wb-space-5);
@@ -946,92 +927,22 @@ onBeforeUnmount(() => {
   gap: var(--wb-space-3);
 }
 
-/* 底部输入台：稳定常驻；提示词与提交动作始终可见 */
-.st-composer {
-  grid-area: 2 / 1 / 3 / 2;
+/* 提交区：固定在右侧参数栏底部，模型/草稿状态/生成始终可见 */
+.panel-actions {
+  position: sticky;
+  bottom: calc(-1 * var(--wb-space-4));
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wb-space-2);
+  padding: var(--wb-space-3) 0 var(--wb-space-1);
+  background: var(--wb-surface);
   border-top: 1px solid var(--wb-border);
-  background: var(--cr-surface, var(--wb-surface));
-  padding: var(--wb-space-3) var(--wb-space-5);
-  /* 保证盖在结果舞台之上，任何缩放/滚动下都不透出下层内容 */
-  position: relative;
-  z-index: 3;
 }
 
-.composer-main {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+.panel-actions .save-line { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--wb-muted); }
+.panel-actions .generate-btn { justify-content: center; padding: 10px 14px; }
 
-.composer-idea {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* 权重高于公共 .cr-textarea（min-height:96px），避免加载顺序把输入框撑高顶出视口；
-   66px ≈ 3 行正文，避免固定高度切半行文字 */
-.st-composer .composer-textarea {
-  min-height: 66px;
-  max-height: 132px;
-  height: 66px;
-  resize: none;
-  line-height: 1.5;
-}
-
-.composer-ref {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  padding: 3px 9px;
-  border: 1px solid var(--wb-border);
-  border-radius: 999px;
-  background: var(--wb-brand-soft);
-  color: var(--wb-brand);
-  font-size: 11.5px;
-}
-
-/* 下方工具栏：左侧草稿状态/首帧，右侧模型选择 + 生成按钮一组 */
-.composer-side {
-  display: flex;
-  align-items: center;
-  gap: var(--wb-space-3);
-  flex-wrap: wrap;
-}
-
-.composer-side .save-line {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  white-space: nowrap;
-  color: var(--wb-muted);
-}
-
-.composer-side .cr-error { margin: 0; font-size: 11.5px; }
-
-.composer-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.composer-model-label {
-  font-size: 11.5px;
-  color: var(--wb-muted);
-  white-space: nowrap;
-}
-
-.composer-model { width: 236px; }
-
-.composer-actions .generate-btn {
-  justify-content: center;
-  padding: 8px 18px;
-  min-width: 152px;
-}
 .job-card {
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius);
@@ -1084,7 +995,6 @@ onBeforeUnmount(() => {
 }
 
 .st-panel {
-  grid-area: 1 / 2 / 3 / 3;
   border-left: 1px solid var(--wb-border);
   background: var(--wb-surface);
   overflow-y: auto;
@@ -1171,7 +1081,8 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .st-body { display: flex; flex-direction: column; overflow-y: auto; }
   .st-results { overflow: visible; }
-  .st-composer { order: -1; border-top: 0; border-bottom: 1px solid var(--wb-border); position: sticky; top: 0; z-index: 5; }
   .st-panel { border-left: none; border-top: 1px solid var(--wb-border); overflow: visible; }
+  /* 窄屏右栏折到结果下方时，提交区不再吸底，避免遮住内容 */
+  .panel-actions { position: static; margin-top: var(--wb-space-3); }
 }
 </style>

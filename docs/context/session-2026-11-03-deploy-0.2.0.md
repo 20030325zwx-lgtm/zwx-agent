@@ -15,6 +15,14 @@
 - `creative_skill` 10 行（9 系统 + 1 测试导入），服务器后端启动种子正常。
 - 注意：`SELECT max(version)` 对 varchar 版本列会得到字典序 '9'，需按 installed_rank 查。
 
+## 域名切换（2026-11-03 追加）
+
+- 域名 **https://www.zhuwenxuan.online** 已可用：CDN（解析 28.0.1.205/206）→ 源站 1.13.152.215，Nginx 代理（`/opt/aster/nginx/nginx.conf`）80→443 跳转、ACME webroot、`/resume/` → resume 站。证书 SAN 仅 `www.zhuwenxuan.online`，有效期至 2027-01-25。
+- 已把 `/opt/aster/.env` 的 `PUBLIC_BASE_URL` 从 `http://1.13.152.215:8080` 改为 `https://www.zhuwenxuan.online`（该变量供 browser-mcp 等使用，browser-mcp 未启用）。
+- 实测：`https://www.zhuwenxuan.online/` 200、`/api/health` 200、登录页正常；线上 `index-BIghRQYm.js` 与本地 dist 一致（无 CDN 旧缓存）。
+- 顶点域 `zhuwenxuan.online` 无 A 记录（未解析）；如需裸域需在 DNS/CDN 侧添加并补 Nginx server 块/证书 SAN。
+- 待办：证书续期方式未在服务器上找到 certbot 二进制，**需确认现有证书的签发/续期渠道**，避免 2027-01-25 过期；CDN 对 SSE（`/jobs/{id}/events/stream`）是否缓冲未验证，若不透传需依赖轮询事件接口。
+
 ## 遗留/注意事项
 
 - **双 worker**：服务器后端与本地开发后端共用同一库，都会消费 media job。版本已统一（旧 worker 问题消除），但本地跑开发服务时任务会被两边抢；长期应给本地开发配置独立库或禁用调度。

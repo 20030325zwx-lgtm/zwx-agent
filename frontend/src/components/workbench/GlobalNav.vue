@@ -66,16 +66,6 @@
         <component :is="themeIcon" :size="18" :stroke-width="1.9" />
         <span class="wb-nav-label">{{ themeShort }}</span>
       </button>
-      <button
-        class="wb-nav-item"
-        type="button"
-        :title="motionTitle"
-        :aria-pressed="reduceMotion"
-        @click="toggleReduceMotion"
-      >
-        <component :is="motionIcon" :size="18" :stroke-width="1.9" />
-        <span class="wb-nav-label">{{ motionShort }}</span>
-      </button>
       <router-link to="/settings/model" class="wb-nav-item" title="设置" aria-label="设置">
         <Settings :size="19" :stroke-width="1.9" />
         <span class="wb-nav-label">设置</span>
@@ -94,11 +84,11 @@ import { useRoute } from 'vue-router'
 import {
   Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
   PanelLeftClose, PanelLeftOpen, Workflow, Palette, FolderOpen, Images, Sparkles,
-  Activity, ZapOff, Zap
+  Activity
 } from 'lucide-vue-next'
 import AsterMark from '../AsterMark.vue'
 import ActivityDrawer from '../creative/ActivityDrawer.vue'
-import { resolvedTheme, themeMode, setThemeMode, reduceMotion, setReduceMotion } from '../../design/apply-tokens'
+import { resolvedTheme, themeMode, setThemeMode } from '../../design/apply-tokens'
 import { useCreativeActivity } from '../../views/creative/activity'
 import { getCurrentUser } from '../../api/auth'
 
@@ -110,15 +100,6 @@ const activityTitle = computed(() => (
     ? `生成活动：${attentionCount.value} 项需要处理`
     : activeCount.value > 0 ? `生成活动：${activeCount.value} 项进行中` : '生成活动'
 ))
-
-const motionIcon = computed(() => (reduceMotion.value ? ZapOff : Zap))
-const motionShort = computed(() => (reduceMotion.value ? '动效已减少' : '减少动效'))
-const motionTitle = computed(() => (reduceMotion.value
-  ? '减少动态效果：已开启（点击恢复）'
-  : '减少动态效果：关闭（点击开启）'))
-function toggleReduceMotion() {
-  setReduceMotion(!reduceMotion.value)
-}
 
 const COLLAPSE_KEY = 'aster.nav.collapsed'
 const NARROW_BREAKPOINT = 900

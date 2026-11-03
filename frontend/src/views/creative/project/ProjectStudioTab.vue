@@ -924,6 +924,9 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--wb-border);
   background: var(--cr-surface, var(--wb-surface));
   padding: var(--wb-space-3) var(--wb-space-5);
+  /* 保证盖在结果舞台之上，任何缩放/滚动下都不透出下层内容 */
+  position: relative;
+  z-index: 3;
 }
 
 .composer-main {
@@ -940,10 +943,14 @@ onBeforeUnmount(() => {
   gap: 2px;
 }
 
-.composer-textarea {
-  min-height: 44px;
-  max-height: 120px;
+/* 权重高于公共 .cr-textarea（min-height:96px），避免加载顺序把输入框撑高顶出视口；
+   66px ≈ 3 行正文，避免固定高度切半行文字 */
+.st-composer .composer-textarea {
+  min-height: 66px;
+  max-height: 132px;
+  height: 66px;
   resize: none;
+  line-height: 1.5;
 }
 
 .composer-ref {
@@ -1101,9 +1108,20 @@ onBeforeUnmount(() => {
 .job-image img { display: block; width: 100%; height: auto; max-height: 480px; object-fit: contain; }
 .job-image:has(video) { width: min(560px, 100%); }
 
-@media (max-width: 1080px) {
+@media (max-width: 1180px) {
   .st-body { grid-template-columns: minmax(0, 1fr) 320px; }
   .composer-side { flex-basis: 200px; }
+  /* 宽度不足时把模型/提交区折到提示词下方，避免输入框被压到 200px 以内 */
+  .composer-main { flex-wrap: wrap; }
+  .composer-side {
+    flex: 1 1 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--wb-space-3);
+  }
+  .composer-side .model-line,
+  .composer-side .save-line { flex: 0 0 auto; }
+  .composer-side .generate-btn { margin-left: auto; min-width: 148px; flex: 0 0 auto; }
 }
 
 @media (max-width: 900px) {

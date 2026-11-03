@@ -35,3 +35,10 @@
 - 首页首屏留白修复（见 docs/bugs/bug-2026-11-03-home-composer-blank-area.txt）后发布：仅前端变更。
 - 服务器 `/opt/aster/.env` `IMAGE_TAG=0.2.1`；backend/image-mcp/document-mcp 由 0.2.0 重打 tag（同镜像位），旧 `.env.bak-0.2.0` 保留。
 - 线上主包 `index-CqTzPpfJ.js`；域名 200、后端 health OK。
+
+## 0.2.2 / 0.2.3（2026-11-03 追加：新登录页）
+
+- 登录页重做：左侧 Pexels 免费许可紫色墨流视频（15432220，压缩为 1280×720/30fps/7.9MB，`frontend/public/media/login-bg.mp4` + 海报帧），右侧品牌登录卡（WELCOME BACK / 进入创作现场 / 登录-注册页签 / 图标输入框 / 密码可见切换 / 石墨主按钮）；≤960px 隐藏视频；尊重「减少动态效果」。
+- 发布 0.2.2（仅前端），随后发现并修复安全问题并发布 0.2.3：
+  **登录页把 .env.local 里的生产管理员密码打进了公开 JS 分块**（详见 docs/bugs/bug-2026-11-03-login-secret-bundle.txt）。0.2.3 起预填仅限开发模式，线上分块已确认无密码字符串。
+- 待办：轮换 `/home/globe.conf` 的 app.security.admin-password 并重启 backend；旧密码视为泄露。

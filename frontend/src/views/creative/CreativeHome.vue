@@ -2,6 +2,8 @@
   <div class="cr-page">
     <div class="cr-scroll">
       <div class="cr-inner">
+        <!-- 首屏单元（redesign §5.1）：输入台 + 四种起点并排，填满宽屏空间；窄屏回落为堆叠 -->
+        <div class="home-hero">
         <header class="cr-head home-head">
           <div>
             <p class="cr-kicker">AI 创作</p>
@@ -87,6 +89,7 @@
             <span>{{ recentProject.name }}</span>
           </a>
         </nav>
+        </div>
 
         <div v-if="bindingChecked && !imageBinding" class="cr-banner">
           <AlertCircle :size="18" />
@@ -678,11 +681,29 @@ onMounted(load)
 }
 .home-firstframe-clear:hover { background: rgba(0, 0, 0, 0.08); }
 
+/* 首屏单元：输入台（760px 上限）+ 四种起点侧栏；宽屏不再留白 */
+.home-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 760px) minmax(240px, 1fr);
+  gap: var(--wb-space-4) var(--wb-space-5);
+  align-items: start;
+}
+
+.home-hero .home-head { grid-column: 1 / -1; }
+
 /* 四种起点（redesign §5.1）：写想法 / 素材 / 技能 / 最近创作 */
 .home-starts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+}
+
+@media (max-width: 1180px) {
+  .home-hero { grid-template-columns: minmax(0, 1fr); }
+  .home-starts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
 }
 
 .home-start {

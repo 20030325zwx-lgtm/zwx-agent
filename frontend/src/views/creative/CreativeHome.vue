@@ -2,56 +2,74 @@
   <div class="cr-page">
     <div class="cr-scroll">
       <div class="cr-inner">
-        <!-- 首屏单元（redesign §5.1）：输入台 + 四种起点并排，填满宽屏空间；窄屏回落为堆叠 -->
-        <div class="home-hero">
-        <header class="cr-head home-head">
-          <div>
-            <p class="cr-kicker">AI 创作</p>
-            <h1 class="cr-title">把想法变成下一幅画面。</h1>
-            <p class="cr-sub">写一句想法，或从素材、技能开始；作品、任务与素材都在服务端，离开页面也能找回。</p>
+        <!-- 首屏（参考幻映创作页语言）：标题 + 胶囊分段 + 白色大输入卡 + 快捷起点 -->
+        <header class="home-head">
+          <div class="home-head-text">
+            <h1 class="home-title">和 Aster 聊聊创作想法</h1>
+            <p class="home-sub">从一个画面、一个角色或一句话开始。</p>
           </div>
-          <button type="button" class="cr-secondary" @click="openCreate">
-            <Plus :size="15" /> 新建作品
-          </button>
+          <div class="home-head-actions">
+            <router-link to="/creative/tasks" class="home-history">
+              <History :size="15" /> 生成记录
+            </router-link>
+            <button type="button" class="cr-secondary" @click="openCreate">
+              <Plus :size="15" /> 新建作品
+            </button>
+          </div>
         </header>
 
-        <!-- 输入台（redesign §5.1）：准备阶段叫「进入创作台」，真正提交生成才叫「生成」 -->
+        <div class="home-seg" role="tablist" aria-label="创作类型">
+          <button
+            v-for="option in kindOptions"
+            :key="option.value"
+            type="button"
+            role="tab"
+            class="home-seg-item"
+            :class="{ active: composeKind === option.value }"
+            :aria-selected="composeKind === option.value"
+            :disabled="!option.enabled"
+            @click="composeKind = option.value"
+          >
+            <component :is="option.icon" :size="15" />
+            {{ option.label }}
+            <em v-if="!option.enabled">规划中</em>
+          </button>
+        </div>
+
+        <!-- 输入卡：准备阶段叫「进入创作台」，真正提交生成才叫「生成」 -->
         <section class="home-compose">
           <textarea
             v-model.trim="idea"
             class="cr-textarea home-idea"
             rows="3"
             maxlength="500"
-            placeholder="例如：雨夜车站，一个女孩把怀表交给陌生人，然后列车进站"
+            placeholder="输入你的镜头、画面或故事。也可以添加参考图开始创作"
             @keydown.ctrl.enter="startFromComposer"
             @keydown.meta.enter="startFromComposer"
           />
-          <div class="home-compose-foot">
-            <div class="home-kind" role="radiogroup" aria-label="创作类型">
-              <button
-                v-for="option in kindOptions"
-                :key="option.value"
-                type="button"
-                class="home-kind-chip"
-                :class="{ selected: composeKind === option.value }"
-                :disabled="!option.enabled"
-                role="radio"
-                :aria-checked="composeKind === option.value"
-                @click="composeKind = option.value"
-              >
-                {{ option.label }}
-                <em v-if="!option.enabled">规划中</em>
-              </button>
-              <span class="home-skill-slot">
-                <DropdownSelect v-model="composeSkill" class="home-skill" size="sm"
-                                :options="skillOptions" placeholder="可选技能"
-                                aria-label="可选技能" />
-              </span>
-            </div>
-            <div class="home-compose-actions">
-              <span class="home-compose-hint">先进入创作台准备；确认后才会生成计费</span>
-              <button type="button" class="cr-primary" :disabled="!idea || starting" @click="startFromComposer">
-                <Spinner v-if="starting" /> {{ starting ? '创建中…' : '进入创作台' }}
+          <div class="home-tools">
+            <button type="button" class="home-tool" @click="goAssets">
+              <Plus :size="14" /> 参考素材
+            </button>
+            <DropdownSelect v-model="composeSkill" class="home-tool-select" size="sm"
+                            :options="skillOptions" placeholder="技能" aria-label="技能" />
+            <template v-if="composeKind !== 'NOVEL'">
+              <DropdownSelect v-model="modelRowId" class="home-tool-select home-tool-model" size="sm"
+                              :options="modelOptions" placeholder="模型" aria-label="模型" />
+              <DropdownSelect v-if="composeKind === 'IMAGE'" v-model="composeSize" class="home-tool-select"
+                              size="sm" :options="sizeOptions" aria-label="尺寸" />
+              <div v-else class="home-tool-duration">
+                <Clock :size="14" />
+                <input v-model="composeSeconds" class="home-tool-input" maxlength="2" inputmode="numeric"
+                       aria-label="时长（秒）" />
+                <span>秒</span>
+              </div>
+            </template>
+            <div class="home-tools-right">
+              <button type="button" class="home-submit" :disabled="!idea || starting" @click="startFromComposer">
+                <Spinner v-if="starting" />
+                <ArrowUp v-else :size="15" />
+                {{ starting ? '创建中…' : '进入创作台' }}
               </button>
             </div>
           </div>
@@ -65,31 +83,38 @@
           <p v-if="startError" class="cr-error">{{ startError }}</p>
         </section>
 
-        <!-- 四种起点（redesign §5.1）：想法 / 素材 / 技能 / 最近创作 -->
+        <!-- 快捷起点：一行四条，无卡片边框（参考页语言） -->
         <nav class="home-starts" aria-label="创作起点">
           <button type="button" class="home-start" @click="focusComposer">
-            <PenLine :size="16" />
-            <strong>写一句想法</strong>
-            <span>从空白输入台开始</span>
+            <span class="home-start-icon"><PenLine :size="17" /></span>
+            <span class="home-start-text">
+              <strong>写一句想法</strong>
+              <em>从空白输入台开始</em>
+            </span>
           </button>
           <router-link to="/creative/assets" class="home-start">
-            <Images :size="16" />
-            <strong>从素材开始</strong>
-            <span>挑选已有图片或视频</span>
+            <span class="home-start-icon"><Images :size="17" /></span>
+            <span class="home-start-text">
+              <strong>从素材开始</strong>
+              <em>挑选已有图片或视频</em>
+            </span>
           </router-link>
           <router-link to="/creative/skills" class="home-start">
-            <Sparkles :size="16" />
-            <strong>使用技能</strong>
-            <span>浏览创作方法目录</span>
+            <span class="home-start-icon"><Sparkles :size="17" /></span>
+            <span class="home-start-text">
+              <strong>使用技能</strong>
+              <em>浏览创作方法目录</em>
+            </span>
           </router-link>
           <a v-if="recentProject" class="home-start" :href="`/creative/projects/${recentProject.id}`"
              @click.prevent="goProject(recentProject)">
-            <History :size="16" />
-            <strong>继续最近创作</strong>
-            <span>{{ recentProject.name }}</span>
+            <span class="home-start-icon"><History :size="17" /></span>
+            <span class="home-start-text">
+              <strong>继续最近创作</strong>
+              <em>{{ recentProject.name }}</em>
+            </span>
           </a>
         </nav>
-        </div>
 
         <div v-if="bindingChecked && !imageBinding" class="cr-banner">
           <AlertCircle :size="18" />
@@ -261,7 +286,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertCircle, History, ImagePlay, Images, PenLine, Plus, Sparkles, Workflow, X } from 'lucide-vue-next'
+import {
+  AlertCircle, ArrowUp, BookOpen, Clapperboard, Clock, History, Image as ImageIcon, ImagePlay,
+  Images, PanelsTopLeft, PenLine, Plus, Sparkles, Workflow, X
+} from 'lucide-vue-next'
 import {
   createCreativeDraft, createCreativeProject, getCreativeHealth, getCreativeSummary, getWorkflowDefinition,
   listCreativeProjects, listCreativeSkills, listModelCatalog, listWorkflows, startWorkflow
@@ -306,13 +334,22 @@ function restoreDraft() {
     }
     if (typeof draft.skill === 'string') composeSkill.value = draft.skill
     if (typeof draft.firstFrame === 'string' && draft.firstFrame) firstFrameId.value = draft.firstFrame
+    if (draft.modelRowId) modelRowId.value = draft.modelRowId
+    if (typeof draft.size === 'string' && draft.size) composeSize.value = draft.size
+    if (typeof draft.seconds === 'string' && draft.seconds) composeSeconds.value = draft.seconds
   } catch (error) { /* 草稿损坏按空处理 */ }
 }
 
 function persistDraft() {
   try {
     localStorage.setItem(COMPOSER_KEY, JSON.stringify({
-      idea: idea.value, kind: composeKind.value, skill: composeSkill.value, firstFrame: firstFrameId.value
+      idea: idea.value,
+      kind: composeKind.value,
+      skill: composeSkill.value,
+      firstFrame: firstFrameId.value,
+      modelRowId: modelRowId.value,
+      size: composeSize.value,
+      seconds: composeSeconds.value
     }))
   } catch (error) { /* 隐私模式忽略 */ }
 }
@@ -353,19 +390,63 @@ function goProject(project) {
   router.push(`/creative/projects/${project.id}`)
 }
 
-watch([idea, composeKind, composeSkill, firstFrameId], persistDraft)
+/** 「参考素材」：到素材库挑选后用「引用到创作台」带回输入台（真实路径，不做假按钮）。 */
+function goAssets() {
+  persistDraft()
+  router.push('/creative/assets')
+}
 const createOpen = ref(false)
 const creating = ref(false)
 const createError = ref('')
 const form = reactive({ name: '', description: '', kind: 'IMAGE' })
 const kindOptions = [
-  { value: 'IMAGE', label: '图片', enabled: true },
-  { value: 'VIDEO', label: '视频', enabled: true },
-  { value: 'NOVEL', label: '小说', enabled: true },
-  { value: 'COMIC', label: '漫画', enabled: false }
+  { value: 'IMAGE', label: '图片', enabled: true, icon: ImageIcon },
+  { value: 'VIDEO', label: '视频', enabled: true, icon: Clapperboard },
+  { value: 'NOVEL', label: '小说', enabled: true, icon: BookOpen },
+  { value: 'COMIC', label: '漫画', enabled: false, icon: PanelsTopLeft }
 ]
 const imageBinding = ref(null)
 const bindingChecked = ref(false)
+
+// 输入卡内联参数（参考创作页语言）：模型 / 尺寸 / 时长
+const catalog = ref(null)
+const modelRowId = ref(null)
+const composeSize = ref('1024*1024')
+const composeSeconds = ref('5')
+const sizeOptions = [
+  { value: '1024*1024', label: '1:1 方形' },
+  { value: '1280*720', label: '16:9 横版' },
+  { value: '720*1280', label: '9:16 竖版' },
+  { value: '1152*768', label: '3:2 横版' },
+  { value: '768*1152', label: '2:3 竖版' }
+]
+const modelOptions = computed(() => {
+  if (!catalog.value || composeKind.value === 'NOVEL') return []
+  const capability = composeKind.value === 'VIDEO' ? 'video_generation' : 'image_generation'
+  const rows = []
+  for (const provider of catalog.value.providers || []) {
+    if (provider.enabled === false) continue
+    for (const model of provider.models || []) {
+      if (model.enabled === false) continue
+      if (!(model.capabilities || []).includes(capability)) continue
+      rows.push({ value: model.id, label: `${provider.name} / ${model.displayName || model.modelId}` })
+    }
+  }
+  return rows
+})
+
+function syncDefaultModel() {
+  // 已选模型对当前类型仍有效就保留（草稿/交接带入的选择不被覆盖）
+  const rows = modelOptions.value
+  if (modelRowId.value && rows.some(row => row.value === modelRowId.value)) return
+  const capability = composeKind.value === 'VIDEO' ? 'video_generation' : 'image_generation'
+  const binding = catalog.value?.userBindings?.[capability] || catalog.value?.systemBindings?.[capability]
+  modelRowId.value = binding?.modelRowId || rows[0]?.value || null
+}
+watch(composeKind, syncDefaultModel)
+
+// 草稿自动保存：所有被持久化的字段声明完成后再注册（watch 会立即读取源）
+watch([idea, composeKind, composeSkill, firstFrameId, modelRowId, composeSize, composeSeconds], persistDraft)
 const toast = reactive({ text: '', tone: '' })
 const wfOpen = ref(false)
 const wfLoading = ref(false)
@@ -437,7 +518,10 @@ async function startFromComposer() {
     if (skill) handoff.skill = skill
     if (composeKind.value !== 'IMAGE') handoff.prompt = text
     if (firstFrameId.value) handoff.firstFrame = firstFrameId.value
-    if (skill || firstFrameId.value) {
+    if (modelRowId.value) handoff.modelRowId = modelRowId.value
+    if (composeKind.value === 'IMAGE') handoff.size = composeSize.value
+    if (composeKind.value === 'VIDEO') handoff.seconds = composeSeconds.value
+    if (skill || firstFrameId.value || handoff.modelRowId) {
       try { sessionStorage.setItem('aster.creative.handoff', JSON.stringify(handoff)) } catch (error) { /* 忽略 */ }
       const query = skill ? `?tab=studio&skill=${encodeURIComponent(skill)}` : '?tab=studio'
       router.push(`/creative/projects/${project.id}${query}`)
@@ -551,8 +635,10 @@ async function load() {
   }
   if (summaryResult.status === 'fulfilled') summary.value = summaryResult.value
   if (catalogResult.status === 'fulfilled') {
+    catalog.value = catalogResult.value
     imageBinding.value = catalogResult.value.userBindings?.image_generation
       || catalogResult.value.systemBindings?.image_generation || null
+    syncDefaultModel()
   }
   if (healthResult.status === 'fulfilled') health.value = healthResult.value
   if (skillResult.status === 'fulfilled') skills.value = skillResult.value.items || []
@@ -568,92 +654,184 @@ onMounted(load)
 <style scoped src="./creative.css"></style>
 
 <style scoped>
-.home-head { align-items: flex-start; }
+/* ================= 创作首页视觉语言（参考幻映创作页） ================= */
 
-/* 首屏只让主输入抢注意力：其余分区仍是整栏宽度 */
+.cr-page { background: var(--cr-page-bg, var(--wb-bg)); }
+.cr-inner { gap: var(--wb-space-7); }
 
+.cr-section-head h2 { font-size: 18px; letter-spacing: -0.01em; }
+
+.home-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--wb-space-4);
+  padding-top: var(--wb-space-6);
+}
+
+.home-title {
+  margin: 0;
+  font-size: clamp(26px, 2.4vw, 32px);
+  line-height: 1.25;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: var(--cr-text, var(--wb-text));
+}
+
+.home-sub {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--cr-text-2, var(--wb-text-2));
+}
+
+.home-head-actions { display: flex; align-items: center; gap: var(--wb-space-2); }
+
+.home-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: var(--cr-text-2, var(--wb-text-2));
+  font-size: 13px;
+  text-decoration: none;
+  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+}
+.home-history:hover { background: var(--cr-surface-2, var(--wb-fill)); color: var(--cr-text, var(--wb-text)); }
+
+/* 胶囊分段：容器浅底，选中项白底浮起 */
+.home-seg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: fit-content;
+  margin: var(--wb-space-5) auto var(--wb-space-4);
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--cr-surface-2, var(--wb-fill));
+}
+
+.home-seg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cr-text-2, var(--wb-text-2));
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), box-shadow var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+}
+.home-seg-item:hover { color: var(--cr-text, var(--wb-text)); }
+.home-seg-item.active {
+  background: var(--cr-surface, #fff);
+  color: var(--cr-text, var(--wb-text));
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(20, 18, 24, 0.08), 0 1px 1px rgba(20, 18, 24, 0.04);
+}
+.home-seg-item em { font-style: normal; font-size: 10.5px; color: var(--cr-text-2, var(--wb-muted)); }
+.home-seg-item:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* 输入卡：白色大圆角 + 极轻阴影，工具栏内联 */
 .home-compose {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* UI 规范 §8.1：主输入 680-760px，高度 120-152px，不做营销 Hero */
-  width: min(760px, 100%);
-  padding: var(--wb-space-3) var(--wb-space-4) var(--wb-space-3);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
-  background: var(--wb-surface);
+  width: min(880px, 100%);
+  margin: 0 auto;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--cr-border, var(--wb-border));
+  border-radius: var(--cr-radius-composer, 20px);
+  background: var(--cr-surface, var(--wb-surface));
+  box-shadow: 0 10px 30px rgba(20, 18, 24, 0.05), 0 1px 2px rgba(20, 18, 24, 0.04);
 }
 
 .home-idea {
-  min-height: 104px;
+  min-height: 108px;
   border: 0;
-  padding: 2px 0;
+  padding: 4px 2px;
   background: transparent;
-  font-size: 14px;
-  line-height: 1.6;
-  resize: vertical;
+  color: var(--cr-text, var(--wb-text));
+  font-size: 15px;
+  line-height: 1.7;
+  resize: none;
 }
-
 .home-idea:focus { outline: none; }
+.home-idea::placeholder { color: color-mix(in srgb, var(--cr-text-2, #62646A) 62%, transparent); }
 
-.home-compose-foot {
+.home-tools {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
-  border-top: 1px solid var(--wb-border);
   padding-top: 10px;
+  border-top: 1px solid var(--cr-border, var(--wb-border));
 }
 
-.home-kind {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.home-kind-chip {
+.home-tool {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 11px;
-  border: 1px solid var(--wb-border);
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--cr-border, var(--wb-border));
   border-radius: 999px;
   background: transparent;
-  color: var(--wb-text-2);
-  font-size: 12px;
+  color: var(--cr-text-2, var(--wb-text-2));
+  font-size: 12.5px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
 }
+.home-tool:hover { border-color: var(--cr-text-2, var(--wb-border-strong)); color: var(--cr-text, var(--wb-text)); }
 
-.home-kind-chip em {
-  font-style: normal;
-  font-size: 10.5px;
-  color: var(--wb-muted);
-}
+.home-tool-select { width: 132px; }
+.home-tool-model { width: 200px; }
 
-.home-kind-chip.selected {
-  border-color: var(--wb-brand);
-  background: var(--wb-brand-soft);
-  color: var(--wb-brand);
-}
-
-.home-kind-chip:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.home-compose-actions {
-  display: flex;
+.home-tool-duration {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--cr-border, var(--wb-border));
+  border-radius: 999px;
+  color: var(--cr-text-2, var(--wb-text-2));
+  font-size: 12.5px;
+}
+.home-tool-input {
+  width: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--cr-text, var(--wb-text));
+  font-size: 12.5px;
+  text-align: center;
+  outline: none;
 }
 
-.home-compose-hint {
-  font-size: 11.5px;
-  color: var(--wb-muted);
-}
+.home-tools-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
-/* 输入台内的可选技能 */
-.home-skill-slot { display: inline-flex; }
-.home-skill { width: 150px; }
+.home-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--cr-btn-bg, #25252A);
+  color: var(--cr-btn-fg, #fff);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--cr-dur-fast, 140ms) var(--cr-ease, ease), transform var(--cr-dur-instant, 90ms) var(--cr-ease, ease);
+}
+.home-submit:hover:not(:disabled) { opacity: 0.92; }
+.home-submit:active:not(:disabled) { transform: scale(0.985); }
+.home-submit:disabled { opacity: 0.42; cursor: not-allowed; }
 
 /* 首帧交接 chip：素材库「用作首帧」进入后的可见状态 */
 .home-firstframe {
@@ -661,10 +839,10 @@ onMounted(load)
   align-items: center;
   gap: 6px;
   padding: 4px 6px 4px 10px;
-  border: 1px solid var(--wb-border);
+  border: 1px solid var(--cr-border, var(--wb-border));
   border-radius: 999px;
-  background: var(--wb-brand-soft);
-  color: var(--wb-brand);
+  background: var(--cr-accent-soft, var(--wb-brand-soft));
+  color: var(--cr-accent, var(--wb-brand));
   font-size: 12px;
   width: fit-content;
 }
@@ -681,51 +859,49 @@ onMounted(load)
 }
 .home-firstframe-clear:hover { background: rgba(0, 0, 0, 0.08); }
 
-/* 首屏单元：输入台（760px 上限）+ 四种起点侧栏；宽屏不再留白 */
-.home-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 760px) minmax(240px, 1fr);
-  gap: var(--wb-space-4) var(--wb-space-5);
-  align-items: start;
-}
-
-.home-hero .home-head { grid-column: 1 / -1; }
-
-/* 四种起点（redesign §5.1）：写想法 / 素材 / 技能 / 最近创作 */
+/* 快捷起点：一行四条，无卡片边框 */
 .home-starts {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-@media (max-width: 1180px) {
-  .home-hero { grid-template-columns: minmax(0, 1fr); }
-  .home-starts {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 6px;
+  width: min(880px, 100%);
+  margin: var(--wb-space-4) auto 0;
 }
 
 .home-start {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
+  align-items: center;
+  gap: 12px;
   padding: 12px 14px;
-  border: 1px solid var(--wb-border);
+  border: 0;
   border-radius: var(--cr-radius-ctl, 10px);
-  background: var(--wb-surface);
+  background: transparent;
   color: inherit;
   text-decoration: none;
+  text-align: left;
   cursor: pointer;
-  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+}
+.home-start:hover { background: var(--cr-surface-2, var(--wb-fill)); }
+
+.home-start-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 10px;
+  background: var(--cr-surface, var(--wb-surface));
+  border: 1px solid var(--cr-border, var(--wb-border));
+  color: var(--cr-text-2, var(--wb-text-2));
 }
 
-.home-start:hover { border-color: var(--wb-border-strong); }
-.home-start strong { font-size: 13px; font-weight: 600; color: var(--wb-text); display: flex; align-items: center; gap: 7px; }
-.home-start span {
+.home-start-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.home-start-text strong { font-size: 13.5px; font-weight: 600; color: var(--cr-text, var(--wb-text)); }
+.home-start-text em {
+  font-style: normal;
   font-size: 12px;
-  color: var(--wb-muted);
+  color: var(--cr-text-2, var(--wb-text-2));
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -859,6 +1035,18 @@ onMounted(load)
 .kind-option span { font-size: 11px; color: var(--wb-muted); }
 .kind-option.selected { border-color: var(--wb-brand); box-shadow: 0 0 0 2px var(--wb-brand-soft); }
 .kind-option:disabled { opacity: 0.55; cursor: not-allowed; }
+
+@media (max-width: 640px) {
+  .home-head { flex-direction: column; align-items: flex-start; }
+  .home-seg { width: 100%; overflow-x: auto; justify-content: flex-start; }
+  .home-seg-item { padding: 8px 14px; white-space: nowrap; }
+  .home-compose { padding: 14px 14px 12px; }
+  .home-tool-select { width: 120px; }
+  .home-tool-model { width: 170px; }
+  .home-tools-right { margin-left: 0; width: 100%; }
+  .home-submit { width: 100%; }
+  .home-starts { grid-template-columns: 1fr; }
+}
 
 @media (max-width: 720px) {
   .home-compose-foot { align-items: flex-start; }

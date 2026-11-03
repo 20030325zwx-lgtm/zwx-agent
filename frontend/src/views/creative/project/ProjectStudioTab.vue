@@ -457,6 +457,10 @@ function consumeHandoff() {
     videoRefAssetId.value = handoff.firstFrame
     markDirty()
   }
+  // 首页输入卡带入的模型与规格
+  if (handoff?.modelRowId) selectedModelRowId.value = handoff.modelRowId
+  if (handoff?.size) size.value = handoff.size
+  if (handoff?.seconds) videoSeconds.value = handoff.seconds
   if (handoff?.prompt && !idea.value.trim()) {
     idea.value = handoff.prompt
     effective.value = handoff.prompt
@@ -812,8 +816,10 @@ async function loadModelOptions() {
     }
     modelOptions.value = rows
     const binding = catalog.userBindings?.[capability] || catalog.systemBindings?.[capability]
-    if (binding?.modelRowId) selectedModelRowId.value = binding.modelRowId
-    else if (rows.length) selectedModelRowId.value = rows[0].value
+    if (!selectedModelRowId.value) {
+      if (binding?.modelRowId) selectedModelRowId.value = binding.modelRowId
+      else if (rows.length) selectedModelRowId.value = rows[0].value
+    }
   } catch (exception) { /* 目录不可用时回退到绑定模型（不传 modelRowId） */ }
 }
 const sizeOptions = [

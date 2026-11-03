@@ -255,7 +255,7 @@
       </div>
     </aside>
 
-    <!-- 底部输入台（redesign §5.5）：稳定常驻，结果是主角；提交语义不变 -->
+    <!-- 底部输入台（redesign §5.5）：提示词占整行，模型/保存状态与提交动作收在下方工具栏 -->
     <footer class="st-composer" aria-label="创作输入台">
       <div class="composer-main">
         <label class="composer-idea">
@@ -264,15 +264,15 @@
                     placeholder="描述主体、场景、风格…（可先在右侧优化）"
                     @input="markDirty" />
         </label>
-        <div v-if="isVideoProject && videoOperation === 'image_to_video' && videoRefAssetId"
-             class="composer-ref" :title="`首帧素材 ${videoRefAssetId.slice(0, 8)}…`">
-          <ImageIcon :size="14" />
-          <span>首帧已选</span>
-        </div>
         <div class="composer-side">
+          <div v-if="isVideoProject && videoOperation === 'image_to_video' && videoRefAssetId"
+               class="composer-ref" :title="`首帧素材 ${videoRefAssetId.slice(0, 8)}…`">
+            <ImageIcon :size="14" />
+            <span>首帧已选</span>
+          </div>
           <div class="model-line">
             <span class="cr-field-help">{{ isVideoProject ? '视频模型' : '图片模型' }}</span>
-            <span class="model-name">{{ activeBindingName }}</span>
+            <span class="model-name" :title="activeBindingName">{{ activeBindingName }}</span>
           </div>
           <div class="save-line">
             <span>{{ saveStateText }}</span>
@@ -931,12 +931,11 @@ onBeforeUnmount(() => {
 
 .composer-main {
   display: flex;
-  align-items: flex-end;
-  gap: var(--wb-space-3);
+  flex-direction: column;
+  gap: 6px;
 }
 
 .composer-idea {
-  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -958,24 +957,50 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  padding: 5px 10px;
+  padding: 3px 9px;
   border: 1px solid var(--wb-border);
   border-radius: 999px;
   background: var(--wb-brand-soft);
   color: var(--wb-brand);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
+/* 下方工具栏：模型（只读信息）+ 草稿状态 + 首帧 chip + 提交按钮 */
 .composer-side {
-  flex: 0 0 262px;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: var(--wb-space-3);
+  flex-wrap: wrap;
 }
 
-.composer-side .model-line span:first-child { white-space: nowrap; }
-.composer-side .generate-btn { justify-content: center; padding: 9px 14px; }
+.composer-side .model-line,
+.composer-side .save-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
 
+.composer-side .model-name {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+  color: var(--wb-text);
+}
+
+.composer-side .save-line { color: var(--wb-muted); }
+
+.composer-side .cr-error { margin: 0; font-size: 11.5px; }
+
+.composer-side .generate-btn {
+  margin-left: auto;
+  justify-content: center;
+  padding: 8px 18px;
+  min-width: 152px;
+}
 .job-card {
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius);
@@ -1110,26 +1135,12 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1180px) {
   .st-body { grid-template-columns: minmax(0, 1fr) 320px; }
-  .composer-side { flex-basis: 200px; }
-  /* 宽度不足时把模型/提交区折到提示词下方，避免输入框被压到 200px 以内 */
-  .composer-main { flex-wrap: wrap; }
-  .composer-side {
-    flex: 1 1 100%;
-    flex-direction: row;
-    align-items: center;
-    gap: var(--wb-space-3);
-  }
-  .composer-side .model-line,
-  .composer-side .save-line { flex: 0 0 auto; }
-  .composer-side .generate-btn { margin-left: auto; min-width: 148px; flex: 0 0 auto; }
 }
 
 @media (max-width: 900px) {
   .st-body { display: flex; flex-direction: column; overflow-y: auto; }
   .st-results { overflow: visible; }
   .st-composer { order: -1; border-top: 0; border-bottom: 1px solid var(--wb-border); position: sticky; top: 0; z-index: 5; }
-  .composer-main { flex-direction: column; align-items: stretch; }
-  .composer-side { flex-basis: auto; }
   .st-panel { border-left: none; border-top: 1px solid var(--wb-border); overflow: visible; }
 }
 </style>

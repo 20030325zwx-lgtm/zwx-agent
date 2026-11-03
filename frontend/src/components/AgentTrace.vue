@@ -107,43 +107,51 @@ const durationOf = activityIndex => {
   margin-left: -6px;
   padding: 3px 8px 3px 6px;
   background: transparent;
-  color: var(--sk-label-2);
+  color: var(--wb-text-2);
   font-size: 12.5px;
-  font-weight: 650;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
 }
 
-.trace-toggle:hover { background: var(--sk-fill); }
-.trace-count { color: var(--sk-label-3); font-weight: 500; }
-.trace-toggle.working { color: var(--zwx-primary); }
+.trace-toggle:hover { background: var(--wb-fill); }
+.trace-count { color: var(--wb-muted); font-weight: 450; }
+.trace-toggle.working { color: var(--wb-brand); }
 .trace-toggle.warn { color: #b45309; }
 .trace-toggle.error { color: #b91c1c; }
 
-.trace-chevron { color: var(--sk-label-3); transition: transform 0.15s ease; }
+.trace-chevron { color: var(--wb-muted); transition: transform 0.15s ease; }
 .trace-chevron.rotated { transform: rotate(180deg); }
 
 .status-live {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--zwx-primary);
+  background: var(--wb-brand);
   animation: trace-blink 1.05s ease-in-out infinite;
 }
 
-.trace-steps { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+/* DeepSeek「已深度思考」式：展开后是一块浅灰面板，步骤行不再悬浮散排 */
+.trace-steps {
+  display: grid;
+  gap: 1px;
+  margin: 4px 0 2px;
+  padding: 7px 10px;
+  list-style: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--wb-fill) 55%, transparent);
+}
 
 .step-line {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: calc(100% + 12px);
-  margin-left: -6px;
+  width: 100%;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   padding: 3px 6px;
   background: transparent;
-  color: var(--sk-label-3);
+  color: var(--wb-muted);
   font-size: 12.5px;
   line-height: 1.55;
   text-align: left;
@@ -151,9 +159,9 @@ const durationOf = activityIndex => {
 }
 
 .step-line.has-detail { cursor: pointer; }
-.step-line:hover { background: var(--sk-fill); color: var(--sk-label-2); }
+.step-line:hover { background: var(--wb-surface); color: var(--wb-text-2); }
 .step-icon { flex: 0 0 auto; }
-.step-agent { flex: 0 0 auto; font-weight: 650; }
+.step-agent { flex: 0 0 auto; font-weight: 600; }
 .step-dot { flex: 0 0 auto; }
 .step-summary { min-width: 0; }
 .step-duration { flex: 0 0 auto; }
@@ -164,8 +172,8 @@ const durationOf = activityIndex => {
   margin: 2px 0 5px;
   padding: 8px 10px;
   border-radius: 9px;
-  background: var(--sk-fill);
-  color: var(--sk-label-2);
+  background: var(--wb-surface);
+  color: var(--wb-text-2);
   font: 11px/1.55 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap;
   word-break: break-word;

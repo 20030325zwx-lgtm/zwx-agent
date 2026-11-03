@@ -25,17 +25,17 @@
         <button v-if="attachmentsEnabled" class="tool-button" type="button" data-tooltip="上传图片（可多选）" aria-label="上传图片，可多选" @click="fileInput?.click()">
           <Paperclip :size="17" />
         </button>
-        <button v-if="webSearchAvailable" class="tool-button" :class="{ active: webSearch }" type="button"
-          :data-tooltip="webSearch ? '联网搜索：已开启，点击关闭' : '联网搜索：已关闭，点击开启'"
+        <button v-if="webSearchAvailable" class="tool-button pill-toggle" :class="{ active: webSearch }" type="button"
           :aria-label="webSearch ? '联网搜索已开启，点击关闭' : '联网搜索已关闭，点击开启'"
           :aria-pressed="webSearch" @click="webSearch = !webSearch">
-          <Globe2 :size="17" />
+          <Globe2 :size="15" />
+          <span class="pill-label">联网搜索</span>
         </button>
-        <button v-if="knowledgeSearchAvailable" class="tool-button" :class="{ active: knowledgeSearch }" type="button"
-          :data-tooltip="knowledgeSearch ? '知识库检索：已开启，点击关闭' : '知识库检索：已关闭，点击开启'"
+        <button v-if="knowledgeSearchAvailable" class="tool-button pill-toggle" :class="{ active: knowledgeSearch }" type="button"
           :aria-label="knowledgeSearch ? '知识库检索已开启，点击关闭' : '知识库检索已关闭，点击开启'"
           :aria-pressed="knowledgeSearch" @click="knowledgeSearch = !knowledgeSearch">
-          <BookOpenCheck :size="17" />
+          <BookOpenCheck :size="15" />
+          <span class="pill-label">知识库</span>
         </button>
         <div v-if="permissionModes.length" ref="modeMenuRef" class="chip-anchor">
           <button type="button" class="chip permission-chip" :class="[`mode-${permissionMode.toLowerCase()}`, { open: modeMenuOpen }]"
@@ -248,20 +248,18 @@ defineExpose({ fill, submit, focus })
 
 .composer-card {
   border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-lg);
-  background: color-mix(in srgb, var(--wb-surface) 96%, transparent);
-  box-shadow: var(--wb-shadow-md);
-  backdrop-filter: var(--sk-blur);
-  -webkit-backdrop-filter: var(--sk-blur);
+  border-radius: 24px;
+  background: var(--wb-surface);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .composer-card:focus-within {
-  border-color: var(--wb-brand);
-  box-shadow: 0 0 0 3px var(--wb-brand-soft), var(--wb-shadow-md);
+  border-color: var(--wb-border-strong);
+  box-shadow: 0 0 0 3px var(--wb-brand-soft);
 }
 
-.composer-card.busy { border-color: color-mix(in srgb, var(--wb-brand) 28%, transparent); }
+.composer-card.busy { border-color: color-mix(in srgb, var(--wb-brand) 30%, transparent); }
 
 .composer-input-row { display: flex; padding: 14px 16px 4px; }
 
@@ -301,6 +299,22 @@ defineExpose({ fill, submit, focus })
 .tool-button:hover { background: var(--wb-fill); color: var(--wb-text); }
 .tool-button.active { background: var(--wb-brand-soft); color: var(--wb-brand); }
 
+/* DeepSeek 式带文字 pill 开关：联网搜索 / 知识库 */
+.pill-toggle {
+  display: inline-flex;
+  width: auto;
+  gap: 5px;
+  border: 1px solid var(--wb-border);
+  padding: 0 12px;
+}
+
+.pill-toggle.active {
+  border-color: color-mix(in srgb, var(--wb-brand) 34%, transparent);
+  background: var(--wb-brand-soft);
+}
+
+.pill-label { font-size: 12px; font-weight: 550; white-space: nowrap; }
+
 .chip-anchor { position: relative; display: inline-flex; }
 
 .chip {
@@ -308,9 +322,9 @@ defineExpose({ fill, submit, focus })
   height: 30px;
   align-items: center;
   gap: 5px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 0 7px;
+  border: 1px solid var(--wb-border);
+  border-radius: 999px;
+  padding: 0 10px;
   background: transparent;
   color: var(--wb-text-2);
   font-size: 11.5px;
@@ -421,12 +435,11 @@ defineExpose({ fill, submit, focus })
 }
 
 .send-button {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--wb-brand) 86%, #ffffff), var(--wb-brand));
-  color: var(--wb-brand-contrast);
-  box-shadow: 0 4px 10px var(--wb-brand-soft);
+  background: var(--wb-text);
+  color: var(--wb-surface);
 }
 
-.send-button:hover:not(:disabled) { filter: brightness(1.06); }
+.send-button:hover:not(:disabled) { opacity: 0.88; }
 .send-button:active:not(:disabled) { transform: scale(0.94); }
 .send-button:disabled { background: var(--wb-fill); color: var(--wb-muted); box-shadow: none; cursor: default; }
 

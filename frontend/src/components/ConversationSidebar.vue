@@ -297,14 +297,15 @@ watch(() => props.workspaceCreating, creating => {
 <style scoped>
 .conversation-sidebar {
   display: flex;
-  width: 284px;
-  flex: 0 0 284px;
+  width: 280px;
+  flex: 0 0 280px;
   height: 100%;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
   border-right: 1px solid var(--wb-border);
-  background: var(--wb-surface);
+  /* DeepSeek 式分区：侧栏浅灰、对话区纯白 */
+  background: var(--wb-bg);
   color: var(--wb-text);
 }
 
@@ -353,13 +354,13 @@ watch(() => props.workspaceCreating, creating => {
   gap: 7px;
   margin: 4px 10px 4px;
   border: 1px solid transparent;
-  border-radius: var(--wb-radius-sm);
+  border-radius: 10px;
   padding: 0 8px;
   background: var(--wb-fill);
   color: var(--wb-muted);
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.search-box.active { border-color: var(--wb-brand); background: var(--wb-surface); }
+.search-box.active { border-color: var(--wb-border-strong); background: var(--wb-surface); }
 .search-box input { min-width: 0; flex: 1; border: 0; outline: none; background: transparent; color: var(--wb-text); font-size: 12px; }
 .search-box input::placeholder { color: var(--wb-muted); }
 .search-hint {
@@ -429,18 +430,18 @@ watch(() => props.workspaceCreating, creating => {
 
 .group-items { margin-top: 1px; }
 
-.task-row { position: relative; display: flex; align-items: center; border-radius: var(--wb-radius-sm); }
+.task-row { position: relative; display: flex; align-items: center; border-radius: 10px; }
 .task-row:hover { background: var(--wb-fill); }
-.task-row.active { background: var(--wb-brand-soft); }
+.task-row.active { background: color-mix(in srgb, var(--wb-brand) 12%, var(--wb-surface)); }
 .task-item {
   display: flex;
-  height: 32px;
+  height: 34px;
   min-width: 0;
   flex: 1;
   align-items: center;
   gap: 8px;
   border: 0;
-  border-radius: var(--wb-radius-sm);
+  border-radius: 10px;
   padding: 0 8px 0 24px;
   background: transparent;
   color: var(--wb-text-2);

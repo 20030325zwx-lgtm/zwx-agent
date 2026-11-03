@@ -135,8 +135,8 @@
           :placeholder="inputPlaceholder" @keydown.enter.exact.prevent="sendMessage" @paste="pasteImages"></textarea>
         <div class="input-actions">
           <button v-if="attachmentsEnabled" class="tool-button" type="button" title="上传图片" aria-label="上传图片" @click="fileInput?.click()"><Paperclip :size="18" /></button>
-          <button v-if="webSearchAvailable" class="tool-button web-search-toggle" :class="{ active: webSearch }" type="button" :aria-pressed="webSearch" :title="webSearch ? '本轮允许联网搜索' : '本轮不联网搜索'" aria-label="联网搜索" @click="webSearch = !webSearch"><Globe2 :size="18" /></button>
-          <button v-if="knowledgeSearchAvailable" class="tool-button knowledge-search-toggle" :class="{ active: knowledgeSearch }" type="button" :aria-pressed="knowledgeSearch" :title="knowledgeSearch ? '本轮先检索知识库' : '本轮不检索知识库'" aria-label="检索知识库" @click="knowledgeSearch = !knowledgeSearch"><BookOpenCheck :size="18" /></button>
+          <button v-if="webSearchAvailable" class="tool-button web-search-toggle" :class="{ active: webSearch }" type="button" :aria-pressed="webSearch" :title="webSearch ? '本轮允许联网搜索' : '本轮不联网搜索'" aria-label="联网搜索" @click="webSearch = !webSearch"><Globe2 :size="15" /><span class="pill-label">联网搜索</span></button>
+          <button v-if="knowledgeSearchAvailable" class="tool-button knowledge-search-toggle" :class="{ active: knowledgeSearch }" type="button" :aria-pressed="knowledgeSearch" :title="knowledgeSearch ? '本轮先检索知识库' : '本轮不检索知识库'" aria-label="检索知识库" @click="knowledgeSearch = !knowledgeSearch"><BookOpenCheck :size="15" /><span class="pill-label">知识库</span></button>
           <span class="input-hint">{{ connectionStatus === 'connecting' ? '正在生成，可随时停止' : 'Enter 发送' }}</span>
           <button v-if="connectionStatus === 'connecting'" class="stop-button" type="button" title="停止生成" aria-label="停止生成" @click="emit('stop-generation')">
             <Square :size="15" fill="currentColor" />
@@ -372,14 +372,15 @@ onBeforeUnmount(() => {
   min-height: 0;
   height: 100%;
   flex-direction: column;
-  background: linear-gradient(180deg, rgba(247, 250, 255, 0.82), rgba(255, 255, 255, 0.96) 34%);
+  /* DeepSeek 风格：页面本身就是画布，容器不再自带渐变底 */
+  background: transparent;
 }
 
 .chat-messages {
   position: absolute;
   inset: 0 0 150px;
   overflow-y: auto;
-  padding: 40px max(28px, calc((100% - 880px) / 2));
+  padding: 26px max(28px, calc((100% - 760px) / 2)) 32px;
 }
 
 .chat-no-input .chat-messages { inset: 0; padding-bottom: 24px; }
@@ -396,21 +397,20 @@ onBeforeUnmount(() => {
 
 .empty-brand {
   display: grid;
-  width: 62px;
-  height: 62px;
+  width: 60px;
+  height: 60px;
   place-items: center;
   overflow: hidden;
-  border-radius: 14px;
-  background: linear-gradient(145deg, #eff5ff, #dce9ff);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--wb-brand) 10%, var(--wb-surface));
   color: var(--wb-brand);
   font-size: 32px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), var(--wb-shadow-md);
 }
 
 .empty-state h2 {
-  margin: 22px 0 8px;
-  font-size: 28px;
-  font-weight: 800;
+  margin: 20px 0 8px;
+  font-size: 26px;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
 
@@ -430,27 +430,25 @@ onBeforeUnmount(() => {
 }
 
 .suggestion-list button:hover {
-  border-color: transparent;
-  box-shadow: var(--wb-shadow-md);
-  transform: translateY(-1px);
-  color: var(--wb-brand);
+  border-color: var(--wb-border-strong);
+  background: var(--wb-surface-2);
 }
 
-/* ── 消息布局（iMessage 风格；参考 ZCode：消息不展示头像） ─────────────────────── */
-.message-wrapper { display: flex; align-items: flex-start; margin-bottom: 26px; }
-.message-wrapper.user { justify-content: flex-end; margin-bottom: 46px; }
+/* ── 消息布局（DeepSeek 风格：回答全宽正文、提问浅蓝气泡；不展示头像） ─────────── */
+.message-wrapper { display: flex; align-items: flex-start; margin-bottom: 30px; }
+.message-wrapper.user { justify-content: flex-end; margin-bottom: 40px; }
 
-.message { min-width: 0; max-width: min(690px, 100%); color: var(--wb-text); }
-.ai-message { padding: 3px 2px; }
+.message { min-width: 0; max-width: 100%; color: var(--wb-text); }
+.ai-message { padding: 2px 0; }
 
-/* 用户气泡：主题色渐变（iMessage 蓝，随主题联动） */
+/* 用户气泡：品牌色浅底 + 深色文字（随主题联动，深色主题下为暗蓝底） */
 .user-message {
   position: relative;
-  border-radius: 14px 14px 4px 14px;
+  max-width: min(78%, 560px);
+  border-radius: 18px;
   padding: 11px 16px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--wb-brand) 88%, #ffffff), var(--wb-brand));
-  color: #fff;
-  box-shadow: 0 5px 14px var(--wb-brand-soft);
+  background: color-mix(in srgb, var(--wb-brand) 11%, var(--wb-surface));
+  color: var(--wb-text);
 }
 
 .user-message::after {
@@ -472,7 +470,7 @@ onBeforeUnmount(() => {
   resize: none;
   overflow: hidden;
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.7);
+  border-bottom: 1px solid color-mix(in srgb, var(--wb-text) 26%, transparent);
   outline: 0;
   padding: 0 0 4px;
   background: transparent;
@@ -780,27 +778,27 @@ onBeforeUnmount(() => {
 .trace-popover strong { color: var(--wb-text); }
 .trace-entry:hover .trace-popover, .trace-entry:focus-within .trace-popover { display: block; }
 
-/* ── 输入区：Messages 风格输入条 ────────────────────── */
+/* ── 输入区：DeepSeek 风格大圆角输入台 ──────────────── */
 .chat-input-container {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
-  padding: 14px max(24px, calc((100% - 880px) / 2)) 16px;
-  background: linear-gradient(180deg, rgba(242, 242, 247, 0), var(--wb-bg) 32%);
+  padding: 14px max(24px, calc((100% - 760px) / 2)) 18px;
+  background: linear-gradient(180deg, rgba(242, 242, 247, 0), var(--wb-bg) 36%);
 }
 
 .chat-input {
   position: relative;
   border: 1px solid var(--wb-border);
-  border-radius: 22px;
+  border-radius: 24px;
   background: var(--wb-surface);
-  box-shadow: var(--wb-shadow-lg);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
 }
 
 .chat-input:focus-within {
-  border-color: var(--wb-brand-soft);
-  box-shadow: 0 0 0 3px var(--wb-brand-soft), var(--wb-shadow-lg);
+  border-color: var(--wb-border-strong);
+  box-shadow: 0 0 0 3px var(--wb-brand-soft);
 }
 
 .file-input { display: none; }
@@ -850,7 +848,22 @@ onBeforeUnmount(() => {
 
 .tool-button:hover { background: var(--wb-fill); color: var(--wb-text); }
 
-.web-search-toggle.active, .knowledge-search-toggle.active { background: var(--wb-brand-soft); color: var(--wb-brand); }
+/* DeepSeek 式带文字 pill 开关：联网搜索 / 知识库 */
+.web-search-toggle, .knowledge-search-toggle {
+  display: inline-flex;
+  width: auto;
+  gap: 5px;
+  border: 1px solid var(--wb-border);
+  padding: 0 12px;
+}
+
+.web-search-toggle.active, .knowledge-search-toggle.active {
+  border-color: color-mix(in srgb, var(--wb-brand) 34%, transparent);
+  background: var(--wb-brand-soft);
+  color: var(--wb-brand);
+}
+
+.pill-label { font-size: 12px; font-weight: 550; white-space: nowrap; }
 
 .input-hint { margin-right: auto; color: var(--wb-muted); font-size: 12px; }
 
@@ -862,15 +875,14 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: 50%;
   padding: 0;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--wb-brand) 88%, #ffffff), var(--wb-brand));
-  color: #fff;
+  background: var(--wb-text);
+  color: var(--wb-surface);
   font-size: 18px;
   font-weight: 700;
   line-height: 1;
-  box-shadow: 0 3px 8px var(--wb-brand-soft);
 }
 
-.send-button:hover:not(:disabled) { filter: brightness(1.06); }
+.send-button:hover:not(:disabled) { opacity: 0.88; }
 .send-button:active:not(:disabled) { transform: scale(0.94); }
 .send-button:disabled { background: var(--wb-fill-hover); color: var(--wb-muted); box-shadow: none; }
 

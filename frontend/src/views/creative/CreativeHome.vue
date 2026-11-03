@@ -80,6 +80,13 @@
               <X :size="12" />
             </button>
           </div>
+          <div v-if="refImageIds" class="home-firstframe">
+            <Images :size="14" />
+            <span>已选参考素材</span>
+            <button type="button" class="home-firstframe-clear" aria-label="移除参考素材" @click="clearRefImage">
+              <X :size="12" />
+            </button>
+          </div>
           <p v-if="startError" class="cr-error">{{ startError }}</p>
         </section>
 
@@ -311,6 +318,8 @@ const idea = ref('')
 const composeKind = ref('IMAGE')
 const composeSkill = ref('')
 const firstFrameId = ref('')
+// 图片参考素材（image_edit），来自素材库「引用到创作台」
+const refImageIds = ref('')
 const skills = ref([])
 const starting = ref(false)
 const startError = ref('')
@@ -334,6 +343,7 @@ function restoreDraft() {
     }
     if (typeof draft.skill === 'string') composeSkill.value = draft.skill
     if (typeof draft.firstFrame === 'string' && draft.firstFrame) firstFrameId.value = draft.firstFrame
+    if (typeof draft.refImage === 'string' && draft.refImage) refImageIds.value = draft.refImage
     if (draft.modelRowId) modelRowId.value = draft.modelRowId
     if (typeof draft.size === 'string' && draft.size) composeSize.value = draft.size
     if (typeof draft.seconds === 'string' && draft.seconds) composeSeconds.value = draft.seconds
@@ -347,6 +357,7 @@ function persistDraft() {
       kind: composeKind.value,
       skill: composeSkill.value,
       firstFrame: firstFrameId.value,
+      refImage: refImageIds.value,
       modelRowId: modelRowId.value,
       size: composeSize.value,
       seconds: composeSeconds.value
@@ -368,10 +379,14 @@ function readHandoff() {
     if (handoff.skill) composeSkill.value = handoff.skill
     if (typeof handoff.prompt === 'string' && handoff.prompt && !idea.value) idea.value = handoff.prompt
     if (handoff.kind) composeKind.value = handoff.kind
-    // 从素材库带过来的首帧（redesign §5.4 大预览主动作）
+    // 从素材库带过来的首帧/参考素材
     if (handoff.firstFrame) {
       firstFrameId.value = handoff.firstFrame
       composeKind.value = 'VIDEO'
+    }
+    if (handoff.refImage) {
+      refImageIds.value = handoff.refImage
+      composeKind.value = 'IMAGE'
     }
     persistDraft()
   } catch (error) { /* 忽略 */ }
@@ -379,6 +394,11 @@ function readHandoff() {
 
 function clearFirstFrame() {
   firstFrameId.value = ''
+  persistDraft()
+}
+
+function clearRefImage() {
+  refImageIds.value = ''
   persistDraft()
 }
 
@@ -446,7 +466,7 @@ function syncDefaultModel() {
 watch(composeKind, syncDefaultModel)
 
 // 草稿自动保存：所有被持久化的字段声明完成后再注册（watch 会立即读取源）
-watch([idea, composeKind, composeSkill, firstFrameId, modelRowId, composeSize, composeSeconds], persistDraft)
+watch([idea, composeKind, composeSkill, firstFrameId, refImageIds, modelRowId, composeSize, composeSeconds], persistDraft)
 const toast = reactive({ text: '', tone: '' })
 const wfOpen = ref(false)
 const wfLoading = ref(false)
@@ -518,6 +538,7 @@ async function startFromComposer() {
     if (skill) handoff.skill = skill
     if (composeKind.value !== 'IMAGE') handoff.prompt = text
     if (firstFrameId.value) handoff.firstFrame = firstFrameId.value
+    if (refImageIds.value) handoff.refImage = refImageIds.value
     if (modelRowId.value) handoff.modelRowId = modelRowId.value
     if (composeKind.value === 'IMAGE') handoff.size = composeSize.value
     if (composeKind.value === 'VIDEO') handoff.seconds = composeSeconds.value

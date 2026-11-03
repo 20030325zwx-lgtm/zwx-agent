@@ -235,6 +235,13 @@
         </template>
         <template v-else>
           <label class="cr-field">
+            <span class="cr-field-label"><span>参考素材（可选，最多 3 张）</span></span>
+            <AssetParamField :model-value="imageRefIds" multiple media-type="IMAGE"
+                             :default-project-id="projectId"
+                             @update:model-value="value => imageRefIds = value" />
+            <span class="cr-field-help">选择参考图后按「参考图编辑」生成；不选则按文字直接生成。</span>
+          </label>
+          <label class="cr-field">
             <span class="cr-field-label"><span>尺寸</span></span>
             <DropdownSelect v-model="size" block :options="sizeOptions"
                             aria-label="图片尺寸" @change="markDirty" />
@@ -360,6 +367,11 @@ const watermark = ref(false)
 const videoOperation = ref('text_to_video')
 const videoSeconds = ref('5')
 const videoRefAssetId = ref('')
+// 图片参考素材（image_edit）：1–3 张；为空时按文生图提交
+const imageRefIds = ref('')
+const imageRefList = computed(() => imageRefIds.value
+  .split(/[,，\s]+/).map(item => item.trim()).filter(Boolean).slice(0, 3))
+const imageOperation = computed(() => (imageRefList.value.length ? 'image_edit' : 'text_to_image'))
 
 const draft = ref(null)
 const saveState = ref('idle')
@@ -461,6 +473,8 @@ function consumeHandoff() {
   if (handoff?.modelRowId) selectedModelRowId.value = handoff.modelRowId
   if (handoff?.size) size.value = handoff.size
   if (handoff?.seconds) videoSeconds.value = handoff.seconds
+  // 素材库/首页带入的图片参考素材（image_edit）
+  if (handoff?.refImage) imageRefIds.value = handoff.refImage
   if (handoff?.prompt && !idea.value.trim()) {
     idea.value = handoff.prompt
     effective.value = handoff.prompt
@@ -721,12 +735,13 @@ async function generate() {
       : {
           projectId: projectId.value,
           modelRowId: selectedModelRowId.value || undefined,
-          operation: 'text_to_image',
+          operation: imageOperation.value,
           originalPrompt: idea.value.trim(),
           effectivePrompt: prompt,
-          parameters: imageProtocol.value === 'dashscope'
+          parameters: imageProtocol.value === 'dashscope' && imageOperation.value !== 'image_edit'
             ? { size: size.value, watermark: watermark.value }
-            : { size: size.value }
+            : { size: size.value },
+          referenceAssetIds: imageRefList.value
         }
     const result = await createCreativeJob(pendingKey, payload)
     pendingKey = null

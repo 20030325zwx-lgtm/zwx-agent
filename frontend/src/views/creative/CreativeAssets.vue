@@ -491,12 +491,17 @@ async function downloadSelected() {
 }
 
 /** 引用到创作台（redesign §6 从素材继续创作）：选择素材→带入输入台→编辑→确认生成。 */
+/** 引用到创作台（redesign §6 从素材继续创作）：图片作为参考素材（image_edit），
+ *  视频素材目前不能作为生成参考，如实提示而不是假装可用。 */
 async function referenceSelected() {
   if (selectionCount.value !== 1) return
   const asset = assets.value.find(item => item.id === [...selectedIds][0])
   if (!asset) return
-  const handoff = { kind: 'VIDEO' }
-  if (asset.mediaType === 'IMAGE') handoff.firstFrame = asset.id
+  if (asset.mediaType !== 'IMAGE') {
+    showToast('视频素材暂不能作为生成参考；可在视频项目里用作首帧', 'error')
+    return
+  }
+  const handoff = { kind: 'IMAGE', refImage: asset.id }
   try {
     if (asset.sourceJobId) {
       const job = await getCreativeJob(asset.sourceJobId)

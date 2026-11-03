@@ -24,8 +24,8 @@
       </div>
       <div v-if="multiple && pickedIds.length" class="asset-chips">
         <span v-for="id in pickedIds" :key="id" class="asset-chip">
-          {{ nameOf(id) || id.slice(0, 8) }}
-          <button type="button" :aria-label="`移除 ${nameOf(id) || id.slice(0, 8)}`" @click="removeId(id)">×</button>
+          {{ nameOf(id) || '已选素材' }}
+          <button type="button" :aria-label="`移除 ${nameOf(id) || '已选素材'}`" @click="removeId(id)">×</button>
         </span>
       </div>
       <input ref="fileInput" type="file" :accept="acceptTypes" hidden @change="upload" />

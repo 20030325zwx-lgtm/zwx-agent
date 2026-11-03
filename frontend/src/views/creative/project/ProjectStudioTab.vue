@@ -25,9 +25,11 @@
         <router-link to="/settings/model" class="cr-banner-link">去配置</router-link>
       </div>
 
-      <p v-if="!jobs.length && !jobsStore.loading.value" class="cr-empty">
-        还没有生成记录。在下方输入想法，点击「{{ isVideoProject ? '生成视频' : '生成图片' }}」；结果会在这里出现。
-      </p>
+      <div v-if="!jobs.length && !jobsStore.loading.value" class="stage-empty">
+        <span class="stage-empty-icon"><Sparkles :size="20" /></span>
+        <strong>还没有生成记录</strong>
+        <p>在右侧写下想法，选择模型后点击「{{ isVideoProject ? '生成视频' : '生成图片' }}」；结果会出现在这里。</p>
+      </div>
 
       <article v-for="job in jobs" :key="job.jobId" class="job-card">
         <div class="job-card-head">
@@ -1074,11 +1076,144 @@ onBeforeUnmount(() => {
 .job-image img { display: block; width: 100%; height: auto; max-height: 480px; object-fit: contain; }
 .job-image:has(video) { width: min(560px, 100%); }
 
-@media (max-width: 1180px) {
-  .st-body { grid-template-columns: minmax(0, 1fr) 320px; }
+/* ================= 视觉升级（redesign §4）：暖灰底、媒体优先、石墨主按钮 ================= */
+
+.st-body { background: var(--cr-page-bg, var(--wb-bg)); }
+
+.st-results {
+  padding: var(--wb-space-6) var(--wb-space-7) var(--wb-space-8);
+  gap: var(--wb-space-4);
 }
 
-@media (max-width: 900px) {
+/* 空态：有主次的排版，而不是一行灰字 */
+.stage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: auto 0;
+  padding: 72px 24px;
+  text-align: center;
+  border: 1px dashed var(--cr-border, var(--wb-border));
+  border-radius: var(--cr-radius-media, 14px);
+  background: color-mix(in srgb, var(--cr-surface, #fff) 62%, transparent);
+}
+.stage-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 6px;
+  border-radius: 14px;
+  background: var(--cr-accent-soft, var(--wb-brand-soft));
+  color: var(--cr-accent, var(--wb-brand));
+}
+.stage-empty strong { font-size: 15px; font-weight: 600; color: var(--cr-text, var(--wb-text)); }
+.stage-empty p {
+  margin: 0;
+  max-width: 360px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--cr-text-2, var(--wb-text-2));
+}
+
+/* 轮次卡：无重边框、大圆角、留白分组；媒体是第一眼信息 */
+.st-results .job-card {
+  gap: var(--wb-space-3);
+  padding: var(--wb-space-4) var(--wb-space-4) var(--wb-space-3);
+  border: 1px solid var(--cr-border, var(--wb-border));
+  border-radius: var(--cr-radius-media, 14px);
+  background: var(--cr-surface, var(--wb-surface));
+  box-shadow: 0 1px 2px rgba(20, 18, 24, 0.03);
+  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+}
+.st-results .job-card:hover {
+  border-color: color-mix(in srgb, var(--cr-text-2, #62646A) 26%, var(--cr-border, #E4E3DF));
+}
+
+.st-results .job-card-time { font-size: 11.5px; color: var(--cr-text-2, var(--wb-muted)); }
+.st-results .job-card-hint { font-size: 12px; color: var(--cr-text-2, var(--wb-text-2)); }
+.st-results .job-card-prompt {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--cr-text-2, var(--wb-text-2));
+  -webkit-line-clamp: 2;
+}
+
+.st-results .job-images { gap: var(--wb-space-3); }
+.st-results .job-image {
+  width: min(420px, 100%);
+  border: 0;
+  border-radius: var(--cr-radius-media, 14px);
+  background: var(--cr-media-stage, var(--wb-media-bg));
+}
+.st-results .job-image img { max-height: 460px; }
+.st-results .job-image-actions {
+  padding: 8px 12px;
+  color: var(--cr-text-2, var(--wb-muted));
+  background: var(--cr-media-stage, var(--wb-media-bg));
+}
+.st-results .job-image-actions :deep(.cr-ghost) { color: rgba(255, 255, 255, 0.82); }
+.st-results .job-image-actions :deep(.cr-ghost:hover) { color: #fff; background: rgba(255, 255, 255, 0.1); }
+
+.st-results .job-card-actions { gap: var(--wb-space-2); padding-top: 2px; }
+.st-results .job-card-actions :deep(.cr-ghost) { font-size: 12px; color: var(--cr-text-2, var(--wb-text-2)); }
+.st-results .job-card-actions :deep(.cr-secondary) { font-size: 12px; }
+
+/* 右侧参数栏：分区用细线分隔，输入填充底色 */
+.st-panel {
+  padding: var(--wb-space-5);
+  gap: var(--wb-space-4);
+  border-left: 1px solid var(--cr-border, var(--wb-border));
+  background: var(--cr-surface, var(--wb-surface));
+}
+.st-panel .panel-block {
+  gap: var(--wb-space-3);
+  padding-bottom: var(--wb-space-4);
+  border-bottom: 1px solid var(--cr-border, var(--wb-border));
+}
+.st-panel .panel-block:last-of-type { padding-bottom: 0; border-bottom: 0; }
+.st-panel .cr-field-label { font-size: 12px; color: var(--cr-text-2, var(--wb-text-2)); }
+.st-panel .cr-textarea,
+.st-panel .cr-input {
+  border: 1px solid transparent;
+  border-radius: var(--cr-radius-ctl, 10px);
+  background: var(--cr-surface-2, var(--wb-fill));
+}
+.st-panel .cr-textarea:focus,
+.st-panel .cr-input:focus {
+  background: var(--cr-surface, #fff);
+  border-color: var(--cr-accent, var(--wb-brand));
+  box-shadow: 0 0 0 3px var(--cr-accent-soft, var(--wb-brand-soft));
+}
+.st-panel .model-line .model-name { color: var(--cr-text, var(--wb-text)); }
+
+/* 提交区：石墨主按钮（一个区域一个主要动作） */
+.panel-actions {
+  gap: var(--wb-space-3);
+  padding: var(--wb-space-4) 0 var(--wb-space-1);
+  border-top: 1px solid var(--cr-border, var(--wb-border));
+  background: var(--cr-surface, var(--wb-surface));
+}
+.panel-actions .cr-field-label { font-size: 12px; color: var(--cr-text-2, var(--wb-text-2)); }
+.panel-actions .generate-btn {
+  height: 44px;
+  border-radius: var(--cr-radius-ctl, 10px);
+  background: var(--cr-btn-bg, #25252A);
+  color: var(--cr-btn-fg, #fff);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: none;
+  transition: opacity var(--cr-dur-fast, 140ms) var(--cr-ease, ease),
+    transform var(--cr-dur-instant, 90ms) var(--cr-ease, ease);
+}
+.panel-actions .generate-btn:hover:not(:disabled) { opacity: 0.92; }
+.panel-actions .generate-btn:active:not(:disabled) { transform: scale(0.985); }
+.panel-actions .generate-btn:disabled { opacity: 0.45; }
+
+@media (max-width: 1180px) {
+  .st-body { grid-template-columns: minmax(0, 1fr) 320px; }
+}@media (max-width: 900px) {
   .st-body { display: flex; flex-direction: column; overflow-y: auto; }
   .st-results { overflow: visible; }
   .st-panel { border-left: none; border-top: 1px solid var(--wb-border); overflow: visible; }

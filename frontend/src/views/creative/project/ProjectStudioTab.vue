@@ -265,25 +265,29 @@
                     @input="markDirty" />
         </label>
         <div class="composer-side">
+          <div class="save-line">
+            <span>{{ saveStateText }}</span>
+            <button v-if="conflict" type="button" class="inline-link" @click="resolveConflict">另存为新草稿</button>
+          </div>
           <div v-if="isVideoProject && videoOperation === 'image_to_video' && videoRefAssetId"
                class="composer-ref" :title="`首帧素材 ${videoRefAssetId.slice(0, 8)}…`">
             <ImageIcon :size="14" />
             <span>首帧已选</span>
           </div>
-          <div class="model-line">
-            <span class="cr-field-help">{{ isVideoProject ? '视频模型' : '图片模型' }}</span>
-            <span class="model-name" :title="activeBindingName">{{ activeBindingName }}</span>
-          </div>
-          <div class="save-line">
-            <span>{{ saveStateText }}</span>
-            <button v-if="conflict" type="button" class="inline-link" @click="resolveConflict">另存为新草稿</button>
-          </div>
           <p v-if="submitError" class="cr-error">{{ submitError }}</p>
-          <button type="button" class="cr-primary generate-btn"
-                  :disabled="!canGenerate || generating" @click="generate">
-            <Spinner v-if="generating" />
-            <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : (isVideoProject ? '生成视频' : '生成图片') }}
-          </button>
+
+          <!-- 右侧动作组：模型选择 + 生成（redesign §5.1 输入台「模型与少量常用规格」） -->
+          <div class="composer-actions">
+            <span class="composer-model-label">{{ isVideoProject ? '视频模型' : '图片模型' }}</span>
+            <DropdownSelect v-model="selectedModelRowId" class="composer-model" size="sm"
+                            :options="modelOptions" aria-label="模型"
+                            :placeholder="modelOptions.length ? '选择模型' : '未配置模型'" />
+            <button type="button" class="cr-primary generate-btn"
+                    :disabled="!canGenerate || generating" @click="generate">
+              <Spinner v-if="generating" />
+              <ImagePlus v-else :size="16" /> {{ generating ? '提交中…' : (isVideoProject ? '生成视频' : '生成图片') }}
+            </button>
+          </div>
           <p v-if="project && project.status !== 'ACTIVE'" class="cr-field-help">项目已归档，不能发起新任务。</p>
         </div>
       </div>
@@ -339,7 +343,8 @@ import { motion, useReducedMotion } from 'motion-v'
 import {
   confirmCreativeSkillRun, confirmCreativeSkillShots, createCreativeDraft, createCreativeJob,
   createCreativeSkillRun, getCreativeHealth, getCreativeSkillRun, getWorkflowDefinition, listCreativeDrafts,
-  listCreativeSkills, optimizeCreativePrompt, retryCreativeSkillPlan, startWorkflow, updateCreativeDraft
+  listCreativeSkills, listModelCatalog, optimizeCreativePrompt, retryCreativeSkillPlan, startWorkflow,
+  updateCreativeDraft
 } from '../../../api'
 import { formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta } from '../shared'
 import {
@@ -556,10 +561,6 @@ function dismissPlan() {
   skillRun.value = null
   planPrompt.value = ''
 }
-const activeBindingName = computed(() => {
-  const binding = isVideoProject.value ? videoBinding.value : imageBinding.value
-  return binding ? `${binding.providerName} / ${binding.modelName}` : '未配置'
-})
 const canGenerate = computed(() => project.value?.status === 'ACTIVE'
   && (isVideoProject.value
     ? !!videoBinding.value
@@ -719,6 +720,7 @@ async function generate() {
     const payload = isVideoProject.value
       ? {
           projectId: projectId.value,
+          modelRowId: selectedModelRowId.value || undefined,
           operation: videoOperation.value,
           originalPrompt: idea.value.trim(),
           effectivePrompt: prompt,
@@ -729,6 +731,7 @@ async function generate() {
         }
       : {
           projectId: projectId.value,
+          modelRowId: selectedModelRowId.value || undefined,
           operation: 'text_to_image',
           originalPrompt: idea.value.trim(),
           effectivePrompt: prompt,
@@ -804,6 +807,30 @@ const videoOperationOptions = computed(() => {
   if (videoOps.value.image_to_video !== false) options.push({ value: 'image_to_video', label: '图生视频（首帧）' })
   return options.length ? options : [{ value: 'text_to_video', label: '文生视频' }]
 })
+
+// 模型选择：只列出与项目类型匹配、已启用的模型；默认取当前绑定
+const modelOptions = ref([])
+const selectedModelRowId = ref(null)
+
+async function loadModelOptions() {
+  try {
+    const catalog = await listModelCatalog()
+    const capability = isVideoProject.value ? 'video_generation' : 'image_generation'
+    const rows = []
+    for (const provider of catalog.providers || []) {
+      if (provider.enabled === false) continue
+      for (const model of provider.models || []) {
+        if (model.enabled === false) continue
+        if (!(model.capabilities || []).includes(capability)) continue
+        rows.push({ value: model.id, label: `${provider.name} / ${model.displayName || model.modelId}` })
+      }
+    }
+    modelOptions.value = rows
+    const binding = catalog.userBindings?.[capability] || catalog.systemBindings?.[capability]
+    if (binding?.modelRowId) selectedModelRowId.value = binding.modelRowId
+    else if (rows.length) selectedModelRowId.value = rows[0].value
+  } catch (exception) { /* 目录不可用时回退到绑定模型（不传 modelRowId） */ }
+}
 const sizeOptions = [
   { value: '1024*1024', label: '1024 × 1024（方形）' },
   { value: '1280*720', label: '1280 × 720（横版）' },
@@ -867,6 +894,7 @@ async function startProjectWorkflow() {
 onMounted(async () => {
   loadSkills()
   loadVideoCapabilities()
+  loadModelOptions()
   await loadDrafts()
   applySeed()
   consumeHandoff()
@@ -965,7 +993,7 @@ onBeforeUnmount(() => {
   font-size: 11.5px;
 }
 
-/* 下方工具栏：模型（只读信息）+ 草稿状态 + 首帧 chip + 提交按钮 */
+/* 下方工具栏：左侧草稿状态/首帧，右侧模型选择 + 生成按钮一组 */
 .composer-side {
   display: flex;
   align-items: center;
@@ -973,30 +1001,33 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
-.composer-side .model-line,
 .composer-side .save-line {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 11.5px;
   white-space: nowrap;
+  color: var(--wb-muted);
 }
-
-.composer-side .model-name {
-  max-width: 300px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 550;
-  color: var(--wb-text);
-}
-
-.composer-side .save-line { color: var(--wb-muted); }
 
 .composer-side .cr-error { margin: 0; font-size: 11.5px; }
 
-.composer-side .generate-btn {
+.composer-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-model-label {
+  font-size: 11.5px;
+  color: var(--wb-muted);
+  white-space: nowrap;
+}
+
+.composer-model { width: 236px; }
+
+.composer-actions .generate-btn {
   justify-content: center;
   padding: 8px 18px;
   min-width: 152px;

@@ -663,9 +663,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .assets-page {
-  max-width: 1440px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: var(--wb-space-6) var(--wb-space-7) var(--wb-space-8);
+  padding: 12px var(--wb-space-7) var(--wb-space-8);
   display: flex;
   flex-direction: column;
   gap: var(--wb-space-4);
@@ -698,16 +698,22 @@ onBeforeUnmount(() => {
 
 .assets-kind { display: flex; gap: 4px; }
 .assets-chip {
-  padding: 5px 12px;
-  border: 1px solid var(--wb-border);
+  padding: 6px 14px;
+  border: 1px solid var(--cr-border, var(--wb-border));
   border-radius: 999px;
   background: transparent;
-  color: var(--wb-text-2);
+  color: var(--cr-text-2, var(--wb-text-2));
   font-size: 12.5px;
   cursor: pointer;
-  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), background var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
 }
-.assets-chip.active { border-color: var(--wb-brand); background: var(--wb-brand-soft); color: var(--wb-brand); }
+.assets-chip.active {
+  border-color: var(--cr-border, var(--wb-border));
+  background: var(--cr-surface, #fff);
+  color: var(--cr-text, var(--wb-text));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(20, 18, 24, 0.06);
+}
 
 .assets-view { display: flex; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-sm); overflow: hidden; }
 .assets-view-btn {

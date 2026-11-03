@@ -375,28 +375,29 @@ onBeforeUnmount(() => window.clearTimeout(debounceTimer))
 .lib-scope {
   display: inline-flex;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
-  background: var(--wb-fill);
+  padding: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--cr-surface-2, var(--wb-fill));
   width: fit-content;
 }
 
 .lib-scope-btn {
-  padding: 5px 16px;
+  padding: 7px 20px;
   border: 0;
-  border-radius: calc(var(--wb-radius) - 3px);
+  border-radius: 999px;
   background: transparent;
-  color: var(--wb-text-2);
-  font-size: 12.5px;
+  color: var(--cr-text-2, var(--wb-text-2));
+  font-size: 13px;
   cursor: pointer;
-  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), box-shadow var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
 }
 
 .lib-scope-btn.active {
-  background: var(--wb-surface);
-  color: var(--wb-text);
+  background: var(--cr-surface, #fff);
+  color: var(--cr-text, var(--wb-text));
   font-weight: 600;
+  box-shadow: 0 1px 3px rgba(20, 18, 24, 0.08), 0 1px 1px rgba(20, 18, 24, 0.04);
 }
 
 .work-card {
@@ -463,20 +464,22 @@ onBeforeUnmount(() => window.clearTimeout(debounceTimer))
 }
 
 .lib-chip {
-  padding: 5px 12px;
-  border: 1px solid var(--wb-border);
+  padding: 6px 14px;
+  border: 1px solid var(--cr-border, var(--wb-border));
   border-radius: 999px;
   background: transparent;
-  color: var(--wb-text-2);
+  color: var(--cr-text-2, var(--wb-text-2));
   font-size: 12.5px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease), background var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
 }
 
 .lib-chip.selected {
-  border-color: var(--wb-brand);
-  background: var(--wb-brand-soft);
-  color: var(--wb-brand);
+  border-color: var(--cr-border, var(--wb-border));
+  background: var(--cr-surface, #fff);
+  color: var(--cr-text, var(--wb-text));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(20, 18, 24, 0.06);
 }
 
 .lib-tools {
@@ -496,12 +499,12 @@ onBeforeUnmount(() => window.clearTimeout(debounceTimer))
 .lib-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
-  gap: var(--wb-space-3);
+  gap: var(--wb-space-4);
 }
 
 .lib-list {
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
+  border: 1px solid var(--cr-border, var(--wb-border));
+  border-radius: var(--cr-radius-media, 14px);
   background: var(--wb-surface);
   overflow: hidden;
 }

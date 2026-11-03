@@ -56,23 +56,24 @@ watch(() => [props.project.coverAssetId, props.project.coverMediaType], ([assetI
 .pc-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-lg);
-  background: var(--wb-surface);
-  color: var(--wb-text);
+  border: 1px solid var(--cr-border, var(--wb-border));
+  border-radius: var(--cr-radius-media, 14px);
+  background: var(--cr-surface, var(--wb-surface));
+  color: var(--cr-text, var(--wb-text));
   text-decoration: none;
   overflow: hidden;
-  transition: border-color 0.15s, transform 0.15s;
+  box-shadow: 0 1px 2px rgba(20, 18, 24, 0.03);
+  transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
 }
 
 .pc-card:hover {
-  border-color: color-mix(in srgb, var(--wb-brand) 45%, var(--wb-border));
+  border-color: color-mix(in srgb, var(--cr-text-2, #62646A) 26%, var(--cr-border, #E4E3DF));
 }
 
 .pc-cover {
   position: relative;
-  aspect-ratio: 16 / 9;
-  background: var(--wb-fill);
+  aspect-ratio: 4 / 3;
+  background: var(--cr-media-stage, var(--wb-media-bg));
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -119,12 +120,13 @@ watch(() => [props.project.coverAssetId, props.project.coverMediaType], ([assetI
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 11px 13px 13px;
+  padding: 12px 14px 14px;
 }
 
 .pc-name {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
+  color: var(--cr-text, var(--wb-text));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -132,8 +134,8 @@ watch(() => [props.project.coverAssetId, props.project.coverMediaType], ([assetI
 
 .pc-desc {
   margin: 0;
-  font-size: 12px;
-  color: var(--wb-muted);
+  font-size: 12.5px;
+  color: var(--cr-text-2, var(--wb-text-2));
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;

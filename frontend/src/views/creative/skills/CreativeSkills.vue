@@ -343,14 +343,15 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 15px 16px;
-  border: 1px solid var(--wb-border);
+  padding: 16px;
+  border: 1px solid var(--cr-border, var(--wb-border));
   border-radius: var(--cr-radius-media, 14px);
-  background: var(--wb-surface);
+  background: var(--cr-surface, var(--wb-surface));
+  box-shadow: 0 1px 2px rgba(20, 18, 24, 0.03);
   transition: border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
 }
 
-.sk-card:hover { border-color: var(--wb-border-strong); }
+.sk-card:hover { border-color: color-mix(in srgb, var(--cr-text-2, #62646A) 26%, var(--cr-border, #E4E3DF)); }
 .sk-card.is-missing { opacity: 0.82; }
 
 .sk-card-head {

@@ -244,11 +244,19 @@ onMounted(async () => {
   cursor: pointer;
 }
 .task-chip em { font-style: normal; color: var(--wb-muted); }
-.task-chip.active { border-color: var(--wb-brand); background: var(--wb-brand-soft); color: var(--wb-brand); }
-.task-chip.active em { color: var(--wb-brand); }
+.task-chip.active {
+  border-color: var(--cr-border, var(--wb-border));
+  background: var(--cr-surface, #fff);
+  color: var(--cr-text, var(--wb-text));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(20, 18, 24, 0.06);
+}
+.task-chip.active em { color: var(--cr-text-2, var(--wb-text-2)); }
 .task-actions { display: flex; align-items: center; gap: var(--wb-space-3); }
 
 .task-table {
+  background: var(--cr-surface, var(--wb-surface));
+  border-radius: var(--cr-radius-media, 14px);
   width: 100%;
   border-collapse: collapse;
   font-size: var(--wb-fs-compact);

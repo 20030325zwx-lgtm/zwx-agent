@@ -352,3 +352,128 @@
 @media (max-width: 1099px) {
   .tab-inner { padding: var(--wb-space-4); }
 }
+
+/* ================= 创作体验视觉层 v2（对齐参考风格：暖灰画布 / 白面 / 石墨主按钮） ================= */
+
+.cr-page {
+  background: var(--cr-page-bg, var(--wb-bg));
+  color: var(--cr-text, var(--wb-text));
+}
+
+.cr-inner {
+  max-width: 1200px;
+  padding: 12px 40px 56px;
+  gap: var(--wb-space-6);
+}
+
+.cr-kicker { font-size: 11.5px; letter-spacing: 0.16em; color: var(--cr-text-2, var(--wb-muted)); }
+
+.cr-title {
+  font-size: clamp(24px, 2.2vw, 30px);
+  line-height: 1.25;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: var(--cr-text, var(--wb-text));
+}
+
+.cr-sub { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--cr-text-2, var(--wb-text-2)); }
+
+.cr-section-head { margin-bottom: 12px; }
+.cr-section-head h2 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+.cr-section-head a { font-size: 13px; color: var(--cr-text-2, var(--wb-text-2)); }
+.cr-section-head a:hover { color: var(--cr-text, var(--wb-text)); }
+
+/* 按钮：一个区域一个主要动作，主按钮石墨色 */
+.cr-primary,
+.cr-secondary,
+.cr-ghost,
+.cr-danger-btn {
+  border-radius: var(--cr-radius-ctl, 10px);
+  padding: 9px 16px;
+  font-size: 13px;
+  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease),
+    border-color var(--cr-dur-fast, 140ms) var(--cr-ease, ease),
+    opacity var(--cr-dur-fast, 140ms) var(--cr-ease, ease),
+    transform var(--cr-dur-instant, 90ms) var(--cr-ease, ease);
+}
+
+.cr-primary {
+  background: var(--cr-btn-bg, #25252A);
+  color: var(--cr-btn-fg, #fff);
+  border-color: transparent;
+}
+.cr-primary:hover:not(:disabled) { opacity: 0.92; }
+.cr-primary:active:not(:disabled) { transform: scale(0.985); }
+
+.cr-secondary {
+  background: var(--cr-surface, var(--wb-surface));
+  border-color: var(--cr-border, var(--wb-border));
+  color: var(--cr-text, var(--wb-text));
+}
+.cr-secondary:hover:not(:disabled) { background: var(--cr-surface-2, var(--wb-fill)); }
+.cr-secondary:active:not(:disabled) { transform: scale(0.985); }
+
+.cr-ghost { color: var(--cr-text-2, var(--wb-text-2)); }
+.cr-ghost:hover { background: var(--cr-surface-2, var(--wb-fill)); color: var(--cr-text, var(--wb-text)); }
+
+.cr-input,
+.cr-textarea,
+.cr-select {
+  border: 1px solid var(--cr-border, var(--wb-border));
+  border-radius: var(--cr-radius-ctl, 10px);
+  background: var(--cr-surface, var(--wb-surface));
+  color: var(--cr-text, var(--wb-text));
+}
+.cr-input:focus,
+.cr-textarea:focus,
+.cr-select:focus {
+  border-color: var(--cr-accent, var(--wb-brand));
+  box-shadow: 0 0 0 3px var(--cr-accent-soft, var(--wb-brand-soft));
+}
+.cr-field-label { font-size: 12px; font-weight: 600; color: var(--cr-text-2, var(--wb-text-2)); }
+.cr-field-help { color: var(--cr-text-2, var(--wb-muted)); }
+
+.cr-card {
+  border: 1px solid var(--cr-border, var(--wb-border));
+  border-radius: var(--cr-radius-media, 14px);
+  background: var(--cr-surface, var(--wb-surface));
+  box-shadow: 0 1px 2px rgba(20, 18, 24, 0.03);
+}
+.cr-card:hover { border-color: color-mix(in srgb, var(--cr-text-2, #62646A) 26%, var(--cr-border, #E4E3DF)); transform: none; }
+.cr-card-name { font-size: 14px; font-weight: 600; color: var(--cr-text, var(--wb-text)); }
+.cr-card-desc { color: var(--cr-text-2, var(--wb-text-2)); }
+.cr-card-time { color: var(--cr-text-2, var(--wb-muted)); }
+
+.cr-empty {
+  padding: 56px 24px;
+  border: 1px dashed var(--cr-border, var(--wb-border));
+  border-radius: var(--cr-radius-media, 14px);
+  background: color-mix(in srgb, var(--cr-surface, #fff) 62%, transparent);
+  color: var(--cr-text-2, var(--wb-text-2));
+  font-size: 13px;
+}
+
+.cr-banner {
+  border: 1px solid var(--cr-border, var(--wb-border));
+  border-left: 3px solid var(--wb-warning);
+  border-radius: var(--cr-radius-ctl, 10px);
+  background: var(--cr-surface, var(--wb-surface));
+}
+
+.cr-dialog {
+  border-radius: var(--cr-radius-pop, 16px);
+  border: 1px solid var(--cr-border, var(--wb-border));
+  box-shadow: 0 24px 64px rgba(20, 18, 24, 0.18);
+}
+.cr-dialog h2 { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+
+.cr-toast {
+  border-radius: var(--cr-radius-ctl, 10px);
+  box-shadow: 0 12px 32px rgba(20, 18, 24, 0.16);
+}
+
+.cr-hint { color: var(--cr-text-2, var(--wb-muted)); }
+
+.cr-status { border-color: var(--cr-border, var(--wb-border)); color: var(--cr-text-2, var(--wb-text-2)); }
+
+.tab-inner { max-width: 1200px; padding: var(--wb-space-6) var(--wb-space-7) var(--wb-space-8); }

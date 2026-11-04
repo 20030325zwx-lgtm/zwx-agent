@@ -29,7 +29,7 @@ public class CreativeCanvasService {
     private static final int MAX_EDGES = 120;
     private static final int MAX_JSON_CHARS = 1_000_000;
     private static final Set<String> NODE_TYPES = Set.of(
-            "asset_input", "text_input", "image_generate", "image_edit", "video_generate");
+            "start", "asset_input", "text_input", "image_generate", "image_edit", "video_generate");
     private static final Set<String> GENERATION_TYPES = Set.of(
             "image_generate", "image_edit", "video_generate");
 
@@ -98,7 +98,8 @@ public class CreativeCanvasService {
 
     public ValidationView validateRun(CurrentActor actor, UUID projectId, RunRequest request) {
         CanvasView canvas = requireRevision(actor, projectId, request);
-        PreparedGraph prepared = prepareGraph(canvas.graph(), normalizeScope(request.scope()), request.nodeId());
+        String scope = normalizeScope(request.scope());
+        PreparedGraph prepared = prepareGraph(withVerifiedParents(actor, projectId, canvas.graph(), scope, request.nodeId()), scope, request.nodeId());
         validateAssets(actor, prepared.literalAssetIds());
         List<String> warnings = prepared.nodeIds().size() > 6
                 ? List.of("本次将生成 " + prepared.nodeIds().size() + " 个媒体节点，请确认模型费用") : List.of();
@@ -113,7 +114,7 @@ public class CreativeCanvasService {
         }
         CanvasView canvas = requireRevision(actor, projectId, request);
         String scope = normalizeScope(request.scope());
-        PreparedGraph prepared = prepareGraph(canvas.graph(), scope, request.nodeId());
+        PreparedGraph prepared = prepareGraph(withVerifiedParents(actor, projectId, canvas.graph(), scope, request.nodeId()), scope, request.nodeId());
         validateAssets(actor, prepared.literalAssetIds());
 
         UUID canvasRunId = UUID.randomUUID();
@@ -217,18 +218,36 @@ public class CreativeCanvasService {
     }
 
     static PreparedGraph prepareGraph(JsonNode graph, String scope, String selectedNodeId) {
+        validate(new SaveRequest(graph, null, 0L), new ObjectMapper());
         Map<String, JsonNode> nodes = new LinkedHashMap<>();
         graph.path("nodes").forEach(node -> nodes.put(node.path("id").asText(), node));
         List<JsonNode> edges = new ArrayList<>();
         graph.path("edges").forEach(edges::add);
         Set<String> included = includedNodes(nodes, edges, scope, selectedNodeId);
+        String startId = nodes.values().stream().filter(node -> "start".equals(node.path("type").asText()))
+                .findFirst().orElseThrow().path("id").asText();
+        Set<String> reachable = new LinkedHashSet<>(Set.of(startId));
+        boolean changed;
+        do {
+            changed = false;
+            for (JsonNode edge : edges) if (reachable.contains(edge.path("source").asText())) {
+                changed |= reachable.add(edge.path("target").asText());
+            }
+        } while (changed);
+        if (!reachable.containsAll(included)) throw new IllegalArgumentException("请先将运行节点连接到开始节点所在流程");
+        Set<String> executionIds = ancestorClosure(included, edges);
         List<WorkflowService.GraphNodeDef> workflowNodes = new ArrayList<>();
         Set<UUID> literalAssets = new LinkedHashSet<>();
 
-        for (String id : included) {
+        for (String id : executionIds) {
             JsonNode node = nodes.get(id);
             JsonNode data = node.path("data");
             String type = node.path("type").asText();
+            if (!included.contains(id)) {
+                workflowNodes.add(new WorkflowService.GraphNodeDef(id, "start".equals(type) ? "start" : "canvas_input",
+                        label(node), Map.of(), node.path("position").path("x").asDouble(), node.path("position").path("y").asDouble()));
+                continue;
+            }
             String prompt = effectivePrompt(id, nodes, edges, new HashSet<>());
             if (prompt.isBlank()) throw new IllegalArgumentException("节点「" + label(node) + "」缺少提示词");
             if (prompt.length() > ParameterSchema.MODEL_PROMPT_MAX) {
@@ -245,7 +264,7 @@ public class CreativeCanvasService {
                 JsonNode parent = nodes.get(parentId);
                 if (parent == null) continue;
                 String parentType = parent.path("type").asText();
-                if (isTextEdge(edge, parentType)) continue;
+                if (isTextEdge(edge, parentType) || isFlowEdge(edge, parentType)) continue;
                 if ("asset_input".equals(parentType)) {
                     addAssetIds(parent.path("data").path("assetIds"), references, literalAssets);
                 } else if (GENERATION_TYPES.contains(parentType)) {
@@ -284,8 +303,8 @@ public class CreativeCanvasService {
         }
 
         List<WorkflowService.GraphEdgeDef> workflowEdges = edges.stream()
-                .filter(edge -> included.contains(edge.path("source").asText())
-                        && included.contains(edge.path("target").asText()))
+                .filter(edge -> executionIds.contains(edge.path("source").asText())
+                        && executionIds.contains(edge.path("target").asText()))
                 .map(edge -> new WorkflowService.GraphEdgeDef(edge.path("source").asText(), edge.path("target").asText()))
                 .distinct()
                 .toList();
@@ -308,15 +327,19 @@ public class CreativeCanvasService {
         included.add(selectedNodeId);
         if ("from_here".equals(scope)) {
             ArrayDeque<String> queue = new ArrayDeque<>();
+            Set<String> visited = new HashSet<>();
             queue.add(selectedNodeId);
             while (!queue.isEmpty()) {
                 String current = queue.remove();
+                if (!visited.add(current)) continue;
                 for (JsonNode edge : edges) {
                     if (!current.equals(edge.path("source").asText())) continue;
                     String target = edge.path("target").asText();
                     JsonNode targetNode = nodes.get(target);
-                    if (targetNode != null && GENERATION_TYPES.contains(targetNode.path("type").asText())
-                            && included.add(target)) queue.add(target);
+                    if (targetNode != null) {
+                        queue.add(target);
+                        if (GENERATION_TYPES.contains(targetNode.path("type").asText())) included.add(target);
+                    }
                 }
             }
         }
@@ -326,6 +349,65 @@ public class CreativeCanvasService {
     private static boolean isTextEdge(JsonNode edge, String sourceType) {
         String handle = edge.path("sourceHandle").asText("");
         return "text-out".equals(handle) || (handle.isBlank() && "text_input".equals(sourceType));
+    }
+
+    private static boolean isFlowEdge(JsonNode edge, String sourceType) {
+        return "flow-out".equals(edge.path("sourceHandle").asText()) || "start".equals(sourceType);
+    }
+
+    private static Set<String> ancestorClosure(Set<String> selected, List<JsonNode> edges) {
+        Set<String> result = new LinkedHashSet<>(selected);
+        ArrayDeque<String> pending = new ArrayDeque<>(selected);
+        while (!pending.isEmpty()) {
+            String id = pending.remove();
+            for (JsonNode edge : edges) if (id.equals(edge.path("target").asText())) {
+                String parent = edge.path("source").asText();
+                if (result.add(parent)) pending.add(parent);
+            }
+        }
+        return result;
+    }
+
+    static Set<String> requiredExternalParents(JsonNode graph, String scope, String selectedNodeId) {
+        Map<String, JsonNode> nodes = new LinkedHashMap<>();
+        graph.path("nodes").forEach(node -> nodes.put(node.path("id").asText(), node));
+        List<JsonNode> edges = new ArrayList<>();
+        graph.path("edges").forEach(edges::add);
+        Set<String> included = includedNodes(nodes, edges, scope, selectedNodeId);
+        Set<String> parents = ancestorClosure(included, edges);
+        parents.removeAll(included);
+        parents.removeIf(id -> !GENERATION_TYPES.contains(nodes.get(id).path("type").asText()));
+        return parents;
+    }
+
+    static void requireCompletedParent(String name, String status) {
+        if (!"SUCCEEDED".equals(status)) {
+            throw new IllegalArgumentException("请等待上级「" + name + "」成功完成后再执行（当前：" + status + "）");
+        }
+    }
+
+    // Trust persisted executions, never the status/selectedAssetId submitted in the browser draft.
+    private JsonNode withVerifiedParents(CurrentActor actor, UUID projectId, JsonNode graph, String scope, String nodeId) {
+        validate(new SaveRequest(graph, null, 0L), mapper);
+        JsonNode verified = graph.deepCopy();
+        for (String parent : requiredExternalParents(graph, scope, nodeId)) {
+            List<Map<String, Object>> rows = jdbc.queryForList("""
+                    SELECT step->>'status' AS status, step->>'output' AS output
+                    FROM creative_canvas_run c JOIN workflow_run w ON w.id = c.workflow_run_id
+                    CROSS JOIN LATERAL jsonb_array_elements(w.steps) AS step
+                    WHERE c.project_id = ? AND c.tenant_id = ? AND c.user_id = ? AND step->>'key' = ?
+                      AND EXISTS (SELECT 1 FROM jsonb_array_elements(w.graph_snapshot->'nodes') AS n
+                        WHERE n->>'key' = ? AND n->>'type' IN ('media_image_generate','media_image_edit','media_video_generate'))
+                    ORDER BY c.created_at DESC LIMIT 1
+                    """, projectId, actor.tenantId(), actor.userId(), parent, parent);
+            JsonNode original = null;
+            for (JsonNode node : verified.path("nodes")) if (parent.equals(node.path("id").asText())) original = node;
+            requireCompletedParent(label(original), rows.isEmpty() ? "未运行" : String.valueOf(rows.getFirst().get("status")));
+            String output = String.valueOf(rows.getFirst().get("output"));
+            String assetId = output == null || output.isBlank() ? "" : read(output).path("assetId").asText("");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) original).withObject("/data").put("selectedAssetId", assetId);
+        }
+        return verified;
     }
 
     private static String effectivePrompt(String id, Map<String, JsonNode> nodes,
@@ -395,6 +477,9 @@ public class CreativeCanvasService {
             if (!NODE_TYPES.contains(type)) throw new IllegalArgumentException("不支持的画布节点类型：" + type);
             types.put(id, type);
         }
+        if (types.values().stream().filter("start"::equals).count() != 1) {
+            throw new IllegalArgumentException("画布必须保留一个开始节点");
+        }
         Map<String, List<String>> outgoing = new HashMap<>();
         Map<String, Integer> indegree = new HashMap<>();
         ids.forEach(id -> indegree.put(id, 0));
@@ -404,19 +489,25 @@ public class CreativeCanvasService {
             if (!ids.contains(source) || !ids.contains(target) || source.equals(target)) {
                 throw new IllegalArgumentException("连线引用了不存在的节点");
             }
-            if (!GENERATION_TYPES.contains(types.get(target))) {
+            if ("start".equals(types.get(target))) throw new IllegalArgumentException("开始节点不能有上级节点");
+            boolean flowEdge = isFlowEdge(edge, types.get(source));
+            if (!flowEdge && !GENERATION_TYPES.contains(types.get(target))) {
                 throw new IllegalArgumentException("连线目标必须是生成节点");
             }
             boolean textEdge = isTextEdge(edge, types.get(source));
             String sourceHandle = edge.path("sourceHandle").asText("");
             String targetHandle = edge.path("targetHandle").asText("");
-            if ((!sourceHandle.isBlank() && !sourceHandle.equals(textEdge ? "text-out" : "media-out"))
+            if (flowEdge) {
+                if (!"flow-out".equals(sourceHandle) || !"flow-in".equals(targetHandle)) {
+                    throw new IllegalArgumentException("执行端口只能连接执行输入");
+                }
+            } else if ((!sourceHandle.isBlank() && !sourceHandle.equals(textEdge ? "text-out" : "media-out"))
                     || (!targetHandle.isBlank() && !targetHandle.equals(textEdge ? "text-in" : "image-in"))
                     || (textEdge && "asset_input".equals(types.get(source)))
                     || (!textEdge && "text_input".equals(types.get(source)))) {
                 throw new IllegalArgumentException("连线端口类型不匹配：提示词连接紫色端口，图片连接绿色端口");
             }
-            if (!textEdge && "video_generate".equals(types.get(source))) {
+            if (!flowEdge && !textEdge && "video_generate".equals(types.get(source))) {
                 throw new IllegalArgumentException("当前版本不支持把视频结果作为模型输入");
             }
             outgoing.computeIfAbsent(source, ignored -> new ArrayList<>()).add(target);

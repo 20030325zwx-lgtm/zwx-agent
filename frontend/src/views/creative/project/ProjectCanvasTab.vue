@@ -13,7 +13,7 @@
         <select v-model="runScope" class="run-scope" aria-label="运行范围"><option value="node">当前节点</option><option value="from_here">从此继续</option><option value="all">整条流程</option></select>
         <button v-if="activeCanvasRun && ['RUNNING', 'WAITING_EXTERNAL', 'WAITING_SELECTION'].includes(activeCanvasRun.run?.status)"
                 class="canvas-tool" type="button" :disabled="busyNode" @click="cancelRun">停止</button>
-        <button class="canvas-run" type="button" :disabled="busyNode || (runScope === 'all' ? !nodes.some(isGenerationNode) : !canRun)" @click="runCanvas(runScope)">
+        <button class="canvas-run" type="button" :title="runBlockedReason" :disabled="busyNode || !!runBlockedReason || (runScope === 'all' ? !nodes.some(isGenerationNode) : !canRun)" @click="runCanvas(runScope)">
           <Spinner v-if="busyNode" /><Play v-else :size="14" />{{ busyNode ? '提交中' : runScopeLabel }}
         </button>
       </div>
@@ -24,14 +24,18 @@
       <aside class="canvas-inspector" v-if="selectedNode && inspectorOpen" aria-label="节点编辑器">
         <div class="inspector-heading">
           <div class="inspector-type"><span class="inspector-dot" :class="`kind-${selectedNode.type}`" />{{ typeLabel(selectedNode.type) }}</div>
-          <div class="inspector-heading-actions"><button class="canvas-icon" type="button" title="删除节点" @click="removeSelected"><Trash2 :size="14" /></button><button class="canvas-icon" type="button" title="收起编辑器" @click="inspectorOpen = false"><X :size="14" /></button></div>
+          <div class="inspector-heading-actions"><button v-if="selectedNode.type !== 'start'" class="canvas-icon" type="button" title="删除节点" @click="removeSelected"><Trash2 :size="14" /></button><button class="canvas-icon" type="button" title="收起编辑器" @click="inspectorOpen = false"><X :size="14" /></button></div>
         </div>
         <label class="inspector-field">
           <span>节点名称</span>
           <input v-model="selectedNode.data.label" maxlength="48" @input="markChanged" />
         </label>
 
-        <template v-if="selectedNode.type === 'text_input'">
+        <template v-if="selectedNode.type === 'start'">
+          <p class="inspector-note">开始节点只标记流程起点，不调用模型、不产生素材。将执行输出连接到后续节点。每个节点必须等待全部上级成功完成。</p>
+          <button class="canvas-tool" type="button" @click="runScope = 'all'">选择运行整条流程</button>
+        </template>
+        <template v-else-if="selectedNode.type === 'text_input'">
           <label class="inspector-field"><span>文本内容</span>
             <textarea v-model="selectedNode.data.text" rows="8" placeholder="写下场景、角色或需要传给下游的内容" @input="markChanged" />
           </label>
@@ -54,8 +58,9 @@
           <section v-if="incomingBindings.length" class="upstream-section" aria-label="上游输入">
             <div class="inspector-section-head"><span>已连接的输入</span><span>{{ incomingBindings.length }} 条连接</span></div>
             <div v-for="binding in incomingBindings" :key="binding.edge.id" class="upstream-item">
-              <header><span :class="'input-dot ' + binding.kind" /><strong>{{ binding.source.data.label }}</strong><small>{{ binding.kind === 'text' ? '提示词' : '图片' }}</small><button type="button" :aria-label="'断开 ' + binding.source.data.label" @click="disconnect(binding.edge.id)"><X :size="12" /></button></header>
+              <header><span :class="'input-dot ' + binding.kind" /><strong>{{ binding.source.data.label }}</strong><small>{{ binding.kind === 'flow' ? '执行顺序' : binding.kind === 'text' ? '提示词' : '图片' }}</small><button type="button" :aria-label="'断开 ' + binding.source.data.label" @click="disconnect(binding.edge.id)"><X :size="12" /></button></header>
               <p v-if="binding.kind === 'text'">{{ binding.text || '上游尚未填写内容' }}</p>
+              <p v-else-if="binding.kind === 'flow'">仅控制执行顺序，不传递提示词或素材</p>
               <p v-else>{{ binding.assets.length ? binding.assets.map(assetName).join('、') : '上游生成并选定结果后，将自动读取' }}</p>
             </div>
           </section>
@@ -108,6 +113,7 @@
           </div>
         </div>
         <p v-if="actionError" class="inspector-error">{{ actionError }}</p>
+        <p v-if="runBlockedReason" class="inspector-note" role="status">{{ runBlockedReason }}</p>
       </aside>
 
       <main class="canvas-stage" ref="stageRef" aria-label="无限创作画布">
@@ -119,7 +125,7 @@
           <Background pattern-color="#cdd2df" :gap="22" :size="1" />
           <Controls position="bottom-right" :show-fit-view="false" :show-interactive="false" />
         </VueFlow>
-        <div class="canvas-guide"><span class="guide-dot" />拖动端口连线 · 紫色传提示词，绿色传图片 · 双击连线可断开</div>
+        <div class="canvas-guide"><span class="guide-dot" />蓝色控制执行 · 紫色传提示词 · 绿色传图片 · 下游等待全部上级完成</div>
         <div class="node-palette" role="toolbar" aria-label="添加节点">
           <span>添加节点</span>
           <button type="button" title="添加素材节点" @click="addNode('asset_input')"><ImagePlus :size="17" />素材</button>
@@ -143,7 +149,7 @@ import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
-import { connectionKind, connectionError, effectivePrompt, normalizeConnection, isGenerationNode } from './canvasGraph'
+import { connectionKind, connectionError, effectivePrompt, normalizeConnection, isGenerationNode, ensureStart, dependencyIssue } from './canvasGraph'
 import { Controls } from '@vue-flow/controls'
 import { AlertCircle, Check, Clapperboard, FileText, Film, Image, ImagePlus, Play, Plus, PanelLeft, Scan, Sparkles, Trash2, Undo2, Upload, WandSparkles, X } from 'lucide-vue-next'
 import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
@@ -193,7 +199,7 @@ let dirtyAgain = false
 let savePromise = null
 let hydrating = false
 const { setViewport } = useVueFlow()
-const nodeTypes = Object.fromEntries(['asset_input', 'text_input', 'image_generate', 'image_edit', 'video_generate'].map(type => [type, markRaw(CanvasGraphNode)]))
+const nodeTypes = Object.fromEntries(['start', 'asset_input', 'text_input', 'image_generate', 'image_edit', 'video_generate'].map(type => [type, markRaw(CanvasGraphNode)]))
 
 const selectedNode = computed(() => nodes.value.find(node => node.id === selectedId.value) || null)
 const modelOptionsFor = type => {
@@ -221,10 +227,11 @@ const nodeOutputs = computed(() => selectedNode.value?.data.candidates?.length
   : (selectedNode.value?.data.outputAssetIds || []).map(assetId => ({ assetId, mediaType: 'IMAGE' })))
 const canRun = computed(() => selectedNode.value && isGenerationNode(selectedNode.value)
   && !!effectiveNodePrompt.value.trim() && !!selectedNode.value.data.modelRowId)
+const runBlockedReason = computed(() => dependencyIssue(selectedId.value, nodes.value, edges.value, runScope.value))
 
 
 
-function typeLabel(type) { return ({ asset_input: '素材输入', text_input: '文本输入', image_generate: '图片生成', image_edit: '图片编辑', video_generate: '视频生成' })[type] || '节点' }
+function typeLabel(type) { return ({ start: '开始', asset_input: '素材输入', text_input: '文本输入', image_generate: '图片生成', image_edit: '图片编辑', video_generate: '视频生成' })[type] || '节点' }
 function statusLabel(status) { return ({ PENDING: '等待运行', QUEUED: '排队中', SUBMITTING: '提交中', RUNNING: '生成中', WAITING_EXTERNAL: '等待模型结果', WAITING_SELECTION: '请选择一个候选结果', RECONCILING: '确认提交结果', FETCHING: '保存结果', INGEST_FAILED: '保存失败', SUCCEEDED: '已完成', SKIPPED: '已跳过', FAILED: '失败', CANCELLED: '已取消' })[status] || '待生成' }
 function statusTone(status) { return status === 'SUCCEEDED' ? 'success' : ['FAILED', 'INGEST_FAILED'].includes(status) ? 'error' : ['RUNNING', 'SUBMITTING', 'FETCHING', 'WAITING_EXTERNAL', 'WAITING_SELECTION'].includes(status) ? 'working' : '' }
 function assetName(id) { return assets.value.find(asset => asset.id === id)?.displayName || id }
@@ -343,6 +350,7 @@ function disconnect(edgeId) {
   markChanged()
 }
 function removeSelected() {
+  if (selectedNode.value?.type === 'start') return
   undoStack.value.push(JSON.stringify(graphSnapshot()))
   const id = selectedId.value
   nodes.value = nodes.value.filter(node => node.id !== id)
@@ -439,6 +447,8 @@ async function cancelRun() {
 
 async function runCanvas(scope) {
   if (busyNode.value || (scope !== 'all' && !canRun.value)) return
+  const issue = dependencyIssue(selectedId.value, nodes.value, edges.value, scope)
+  if (issue) { actionError.value = issue; return }
   busyNode.value = true
   actionError.value = ''
   try {
@@ -570,18 +580,26 @@ function createInitialGraph(kind, handoff) {
     extras.push(asset)
     edges.value = [{ id: crypto.randomUUID(), source: asset.id, target: node.id, sourceHandle: 'media-out', targetHandle: 'image-in', label: kind === 'VIDEO' ? '首帧' : '参考图' }]
   }
-  nodes.value = [...extras, node]
+  const graph = ensureStart({ nodes: [...extras, node], edges: edges.value })
+  nodes.value = graph.nodes
+  edges.value = graph.edges
   selectedId.value = node.id
 }
 async function loadCanvas() {
   hydrating = true
+  let upgraded = false
   try {
     const data = await getCreativeCanvas(projectId.value)
     revision.value = data.revision
     viewport.value = data.viewport || { x: 0, y: 0, zoom: 1 }
     const savedNodes = data.graph?.nodes || []
     edges.value = (data.graph?.edges || []).map(edge => normalizeConnection(edge, savedNodes))
-    if (savedNodes.length) nodes.value = savedNodes
+    if (savedNodes.length) {
+      upgraded = !savedNodes.some(node => node.type === 'start')
+      const graph = ensureStart({ nodes: savedNodes, edges: edges.value })
+      nodes.value = graph.nodes
+      edges.value = graph.edges
+    }
     else {
       let handoff = null
       try { handoff = JSON.parse(sessionStorage.getItem('aster.creative.handoff') || 'null') } catch { handoff = null }
@@ -602,7 +620,7 @@ async function loadCanvas() {
     const latest = runs.find(item => ['RUNNING', 'WAITING_EXTERNAL', 'WAITING_SELECTION'].includes(item.run?.status)) || runs[0]
     if (latest) await applyCanvasRun(latest)
   } catch { /* 旧数据库尚未迁移时仍允许编辑草稿 */ }
-  if (!revision.value) { await nextTick(); fitView(); markChanged() }
+  if (!revision.value || upgraded) { await nextTick(); fitView(); markChanged() }
   nodes.value.forEach(node => { node.selected = node.id === selectedId.value })
   schedulePoll()
 }
@@ -702,6 +720,7 @@ watch(() => activeCanvasRun.value?.run?.status, schedulePoll)
 .upstream-item p { margin: 7px 0 0; line-height: 1.55; font-size: 10px; color: var(--wb-text-2); max-height: 90px; overflow: auto; white-space: pre-wrap; }
 .input-dot { width: 6px; height: 6px; border-radius: 50%; background: #56a793; }
 .input-dot.text { background: #9a80cc; }
+.input-dot.flow { background: #6877bd; }
 .effective-prompt { font-size: 10px; color: var(--wb-muted); margin: 10px 0 16px; }
 .effective-prompt summary { cursor: pointer; }
 .effective-prompt p { white-space: pre-wrap; max-height: 140px; overflow: auto; line-height: 1.65; }

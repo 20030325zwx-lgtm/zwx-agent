@@ -22,6 +22,10 @@ const fs = require('node:fs')
     { id: 'video-1', type: 'video_generate', position: { x: 720, y: 0 }, data: { label: '镜头动画', prompt: '镜头缓缓推进，海浪轻轻涌动。', modelRowId: 9, seconds: 5, status: 'IDLE' } }
   ], edges: [] } }
   let submitted = null
+  let runStatus = 'RUNNING'
+  const mockRun = () => ({ id: 'test-run', run: { status: runStatus === 'RUNNING' ? 'WAITING_EXTERNAL' : 'SUCCEEDED', steps: [
+    { key: 'image-1', status: runStatus, output: '' }
+  ] }, candidates: [] })
   await context.route('**/api/**', async route => {
     const req = route.request(), url = new URL(req.url()), pathname = url.pathname
     if (!pathname.startsWith('/api/')) return route.continue()
@@ -35,9 +39,10 @@ const fs = require('node:fs')
       data = draft
     } else if (pathname.endsWith('/canvas/validate')) data = { executableNodes: 1, warnings: [] }
     else if (pathname.endsWith('/canvas/runs')) {
-      if (req.method() === 'POST') { submitted = req.postDataJSON(); data = { id: 'test-run', run: { status: 'SUCCEEDED', steps: [] }, candidates: [] } }
-      else data = []
-    } else if (pathname.endsWith('/projects/' + projectId)) data = { id: projectId, name: '海边日落 · 创作画布', kind: 'VIDEO', status: 'ACTIVE' }
+      if (req.method() === 'POST') { submitted = req.postDataJSON(); data = mockRun() }
+      else data = submitted ? [mockRun()] : []
+    } else if (pathname.endsWith('/canvas/runs/test-run')) data = mockRun()
+    else if (pathname.endsWith('/projects/' + projectId)) data = { id: projectId, name: '海边日落 · 创作画布', kind: 'VIDEO', status: 'ACTIVE' }
     else if (pathname.endsWith('/jobs') || pathname.endsWith('/assets')) data = { items: [] }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) })
   })
@@ -48,6 +53,12 @@ const fs = require('node:fs')
     await page.locator('.graph-card').first().waitFor()
     await page.getByTitle('适应画布', { exact: true }).click()
     console.log('Canvas mounted')
+    assert.equal(await page.locator('.graph-card.kind-start').count(), 1)
+    await page.locator('.graph-card.kind-start .card-head').click()
+    assert.equal(await page.getByTitle('删除节点', { exact: true }).count(), 0)
+    assert.equal(await page.locator('.canvas-inspector textarea').count(), 0)
+    const baseEdges = await page.locator('.vue-flow__edge').count()
+    assert.equal(baseEdges, 3, 'legacy roots connect to start')
     async function connect(source, sourcePort, target, targetPort) {
       const a = await page.locator(`[data-id="${source}"] [data-handleid="${sourcePort}"]`).boundingBox()
       const b = await page.locator(`[data-id="${target}"] [data-handleid="${targetPort}"]`).boundingBox()
@@ -57,40 +68,50 @@ const fs = require('node:fs')
       await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 24 })
       await page.mouse.up()
     }
+    await page.locator('[data-id="image-1"] .card-head').click()
+    await page.getByRole('button', { name: '断开 开始', exact: true }).click()
+    assert.equal(await page.locator('.vue-flow__edge').count(), baseEdges - 1)
+    await connect('canvas-start', 'flow-out', 'image-1', 'flow-in')
+    await page.waitForFunction(count => document.querySelectorAll('.vue-flow__edge').length === count, baseEdges)
     await connect('text-1', 'text-out', 'image-1', 'text-in')
     console.log('Dragged first text connection')
-    await page.waitForFunction(() => document.querySelectorAll('.vue-flow__edge').length === 1)
+    await page.waitForFunction(count => document.querySelectorAll('.vue-flow__edge').length === count, baseEdges + 1)
     assert.match(await page.locator('[aria-label="上游输入"]').innerText(), /日落时分的海边/)
     assert.equal(await page.locator('.canvas-run').isEnabled(), true, 'upstream-only prompt should enable generation')
     await page.locator('.canvas-run').click()
     await page.waitForFunction(() => document.querySelector('.canvas-run')?.textContent.includes('生成当前节点'))
     assert.equal(submitted?.nodeId, 'image-1')
     await connect('image-1', 'media-out', 'video-1', 'image-in')
-    await page.waitForFunction(() => document.querySelectorAll('.vue-flow__edge').length === 2)
+    await page.waitForFunction(count => document.querySelectorAll('.vue-flow__edge').length === count, baseEdges + 2)
+    assert.equal(await page.locator('.canvas-run').isDisabled(), true, 'running parent must block downstream')
+    assert.match(await page.locator('.canvas-run').getAttribute('title'), /上级/)
     assert.match(await page.locator('[aria-label="上游输入"]').innerText(), /上游生成并选定结果后/)
     await connect('image-1', 'text-out', 'video-1', 'text-in')
-    await page.waitForFunction(() => document.querySelectorAll('.vue-flow__edge').length === 3)
+    await page.waitForFunction(count => document.querySelectorAll('.vue-flow__edge').length === count, baseEdges + 3)
+    runStatus = 'SUCCEEDED'
+    await page.waitForFunction(() => !document.querySelector('.canvas-run').disabled)
     await connect('video-1', 'text-out', 'image-1', 'text-in')
     assert.match(await page.locator('.canvas-notice').innerText(), /循环/)
-    assert.equal(await page.locator('.vue-flow__edge').count(), 3)
+    assert.equal(await page.locator('.vue-flow__edge').count(), baseEdges + 3)
     await page.getByLabel('关闭提示', { exact: true }).click()
     await page.locator('[data-id="video-1"] .card-head').click()
     await page.locator('.effective-prompt summary').click()
     assert.match(await page.locator('.effective-prompt p').innerText(), /日落时分.*海边[\s\S]*镜头缓缓/)
     await page.waitForFunction(() => document.querySelector('.canvas-save')?.textContent.includes('已保存'))
-    assert.equal(draft.graph.edges.length, 3)
+    assert.equal(draft.graph.edges.length, baseEdges + 3)
     assert.ok(draft.graph.edges.every(edge => edge.sourceHandle && edge.targetHandle))
     await page.reload()
-    await page.waitForFunction(() => document.querySelectorAll('.vue-flow__edge').length === 3)
+    await page.waitForFunction(count => document.querySelectorAll('.vue-flow__edge').length === count, baseEdges + 3)
+    assert.equal(await page.locator('.graph-card.kind-start').count(), 1)
     await page.locator('[data-id="video-1"] .card-head').click()
     await page.locator('.effective-prompt summary').click()
     const layout = await page.locator('.canvas-stage').boundingBox()
     const main = await page.locator('.wb-content').boundingBox()
     assert.ok(layout.width > 1200 && Math.abs(layout.x - main.x) < 2 && Math.abs(layout.width - main.width) < 2, JSON.stringify(layout))
     await page.getByRole('button', { name: '断开 生成首帧', exact: true }).last().click()
-    assert.equal(await page.locator('.vue-flow__edge').count(), 2)
+    assert.equal(await page.locator('.vue-flow__edge').count(), baseEdges + 2)
     await page.getByTitle('撤销', { exact: true }).click()
-    assert.equal(await page.locator('.vue-flow__edge').count(), 3)
+    assert.equal(await page.locator('.vue-flow__edge').count(), baseEdges + 3)
     const before = draft.graph.nodes.find(node => node.id === 'text-1').position.y
     const head = await page.locator('[data-id="text-1"] .card-head').boundingBox()
     await page.mouse.move(head.x + 60, head.y + 20)
@@ -106,7 +127,7 @@ const fs = require('node:fs')
     await page.screenshot({ path: path.join(out, 'canvas-compact.png'), fullPage: true })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
     assert.deepEqual(errors, [])
-    console.log(JSON.stringify({ passed: true, checks: ['drag text/image links', 'upstream-only generation', 'recursive prompt preview', 'cycle rejection', 'save and reload', 'disconnect and undo', 'drag node and persist', 'central layout', 'compact viewport'], edges: draft.graph.edges, screenshots: out }, null, 2))
+    console.log(JSON.stringify({ passed: true, checks: ['single protected default start', 'drag flow/text/image links', 'unfinished parent blocks execution', 'completed parent unblocks execution', 'upstream-only generation', 'recursive prompt preview', 'cycle rejection', 'save and reload', 'disconnect and undo', 'drag node and persist', 'central layout', 'compact viewport'], edges: draft.graph.edges, screenshots: out }, null, 2))
   } catch (error) {
     await page.screenshot({ path: path.join(out, 'failure.png'), fullPage: true })
     console.error('Page errors:', errors)

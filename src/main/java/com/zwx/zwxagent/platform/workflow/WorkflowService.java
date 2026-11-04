@@ -56,7 +56,7 @@ import java.util.regex.Pattern;
 public class WorkflowService {
 
     public static final Set<String> NODE_TYPES = Set.of(
-            "start", "search_image", "image_understand", "llm_text", "web_search", "poster_render",
+            "start", "canvas_input", "search_image", "image_understand", "llm_text", "web_search", "poster_render",
             "image_generate", "media_image_generate", "media_image_edit", "media_video_generate",
             "http_request", "db_query", "text_template", "file_export",
             "novel_context", "novel_chapter_save");
@@ -791,6 +791,19 @@ public class WorkflowService {
                     // FAILED：失败范围语义下不阻断运行的分支失败，续跑时不自动重跑（重试走任务级操作）
                     continue;
                 }
+                if (context.input().containsKey("canvasRunId") && !allParentsSucceeded(context.graph(), node.key(), context.steps())) {
+                    Set<String> parents = context.graph().edges().stream().filter(edge -> node.key().equals(edge.to()))
+                            .map(GraphEdgeDef::from).collect(java.util.stream.Collectors.toSet());
+                    boolean failed = context.steps().stream().anyMatch(step -> parents.contains(step.key())
+                            && Set.of("FAILED", "CANCELLED", "SKIPPED").contains(step.status()));
+                    if (failed) {
+                        updateStep(context, new StepState(node.key(), node.name(), "SKIPPED", "上级未成功完成", "", null, Instant.now()));
+                        continue;
+                    }
+                    updateStep(context, new StepState(node.key(), node.name(), "PENDING", "等待全部上级成功完成", "", null, null));
+                    markWaiting(context.id(), node.key());
+                    return;
+                }
                 StepState running = new StepState(node.key(), node.name(), "RUNNING", "", "",
                         Instant.now(), null);
                 updateStep(context, running);
@@ -815,12 +828,21 @@ public class WorkflowService {
                     throw exception;
                 }
             }
-            finishRun(context.id(), "SUCCEEDED", context.artifacts(), null);
+            boolean blocked = context.input().containsKey("canvasRunId") && context.steps().stream()
+                    .anyMatch(step -> Set.of("FAILED", "CANCELLED", "SKIPPED").contains(step.status()));
+            finishRun(context.id(), blocked ? "FAILED" : "SUCCEEDED", context.artifacts(), blocked ? "存在未成功完成的上级节点" : null);
         } catch (Exception exception) {
             log.warn("工作流运行失败：runId={}", context.id(), exception);
             markPendingSkipped(context);
             finishRun(context.id(), "FAILED", context.artifacts(), truncate(exception.getMessage(), 400));
         }
+    }
+
+    static boolean allParentsSucceeded(WorkflowGraph graph, String nodeKey, List<StepState> steps) {
+        Map<String, String> states = new HashMap<>();
+        steps.forEach(step -> states.put(step.key(), step.status()));
+        return graph.edges() == null || graph.edges().stream().filter(edge -> nodeKey.equals(edge.to()))
+                .allMatch(edge -> "SUCCEEDED".equals(states.get(edge.from())));
     }
 
     /** 运行进入外部等待；只有 RUNNING 能写入，避免与恢复器竞争。 */
@@ -857,6 +879,7 @@ public class WorkflowService {
             case "poster_render" -> renderPoster(context, node.key(), text(params.get("image")),
                     text(params.get("imageAssetId")), text(params.get("copy")));
             case "start" -> new NodeResult(toJson(context.input()), "开始");
+            case "canvas_input" -> new NodeResult("", "输入就绪");
             case "http_request" -> httpRequest(context, params);
             case "db_query" -> dbQuery(text(params.get("sql")));
             case "media_image_generate" -> startMediaImageTask(context, node, params);

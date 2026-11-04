@@ -5,16 +5,21 @@
       <div><small>{{ typeLabel }}</small><strong>{{ data.label || typeLabel }}</strong></div>
       <span v-if="data.status && data.status !== 'IDLE'" class="state-badge" :class="{ failed: data.status === 'FAILED' }">{{ statusLabel }}</span>
     </header>
+    <div class="execution-row"><span v-if="type !== 'start'">等待全部上级</span><span v-else>流程起点</span><span>执行</span></div>
+    <Handle v-if="type !== 'start'" id="flow-in" type="target" :position="Position.Left" class="port port-flow" :style="{ top: '76px' }" :aria-label="data.label + ' 执行输入'" />
+    <Handle id="flow-out" type="source" :position="Position.Right" class="port port-flow" :style="{ top: '76px' }" :aria-label="data.label + ' 执行输出'" />
+    <template v-if="type !== 'start'">
     <div class="port-row">
       <span v-if="generation">提示词输入</span><span v-else>{{ type === 'text_input' ? '文本内容' : '项目素材' }}</span>
       <span v-if="type !== 'asset_input'">提示词输出</span><span v-else>素材输出</span>
     </div>
-    <Handle v-if="generation" id="text-in" type="target" :position="Position.Left" class="port port-text" :style="{ top: '82px' }" :aria-label="data.label + ' 提示词输入'" />
-    <Handle v-if="type !== 'asset_input'" id="text-out" type="source" :position="Position.Right" class="port port-text" :style="{ top: '82px' }" :aria-label="data.label + ' 提示词输出'" />
-    <Handle v-else id="media-out" type="source" :position="Position.Right" class="port port-media" :style="{ top: '82px' }" :aria-label="data.label + ' 素材输出'" />
+    <Handle v-if="generation" id="text-in" type="target" :position="Position.Left" class="port port-text" :style="{ top: '106px' }" :aria-label="data.label + ' 提示词输入'" />
+    <Handle v-if="type !== 'asset_input'" id="text-out" type="source" :position="Position.Right" class="port port-text" :style="{ top: '106px' }" :aria-label="data.label + ' 提示词输出'" />
+    <Handle v-else id="media-out" type="source" :position="Position.Right" class="port port-media" :style="{ top: '106px' }" :aria-label="data.label + ' 素材输出'" />
     <div v-if="generation" class="port-row media-row"><span>{{ type === 'video_generate' ? '首帧输入' : '参考图输入' }}</span><span>{{ type === 'video_generate' ? '视频结果' : '图片输出' }}</span></div>
-    <Handle v-if="generation" id="image-in" type="target" :position="Position.Left" class="port port-media" :style="{ top: '112px' }" :aria-label="data.label + ' 图片输入'" />
-    <Handle v-if="generation && type !== 'video_generate'" id="media-out" type="source" :position="Position.Right" class="port port-media" :style="{ top: '112px' }" :aria-label="data.label + ' 图片输出'" />
+    <Handle v-if="generation" id="image-in" type="target" :position="Position.Left" class="port port-media" :style="{ top: '136px' }" :aria-label="data.label + ' 图片输入'" />
+    <Handle v-if="generation && type !== 'video_generate'" id="media-out" type="source" :position="Position.Right" class="port port-media" :style="{ top: '136px' }" :aria-label="data.label + ' 图片输出'" />
+    </template>
     <p class="card-prompt">{{ summary }}</p>
     <div v-if="generation || type === 'asset_input'" class="card-preview">
       <img v-if="previewUrl && mediaType !== 'VIDEO'" :src="previewUrl" alt="节点素材预览" />
@@ -23,7 +28,7 @@
     </div>
     <footer>
       <span v-if="generation">{{ presentation?.modelName(data.modelRowId) || '尚未选择模型' }}</span>
-      <span v-else>{{ type === 'asset_input' ? (data.assetIds || []).length + ' 个素材' : '连接到下一节点的提示词输入' }}</span>
+      <span v-else>{{ type === 'start' ? '不调用模型 · 不产生素材' : type === 'asset_input' ? (data.assetIds || []).length + ' 个素材' : '连接到下一节点的提示词输入' }}</span>
       <span v-if="data.candidates?.length" class="candidate-count">{{ data.candidates.length }} 个候选</span>
     </footer>
   </article>
@@ -32,13 +37,13 @@
 <script setup>
 import { computed, inject } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
-import { Clapperboard, FileText, Image, ImagePlus, WandSparkles } from 'lucide-vue-next'
+import { Clapperboard, FileText, Image, ImagePlus, WandSparkles, Play } from 'lucide-vue-next'
 const props = defineProps({ id: String, type: String, data: Object, selected: Boolean })
 const presentation = inject('canvasPresentation', null)
 const generation = computed(() => ['image_generate', 'image_edit', 'video_generate'].includes(props.type))
-const typeLabel = computed(() => ({ asset_input: '素材', text_input: '文本', image_generate: '图片生成', image_edit: '图片编辑', video_generate: '视频生成' })[props.type])
-const typeIcon = computed(() => ({ asset_input: ImagePlus, text_input: FileText, image_generate: Image, image_edit: WandSparkles, video_generate: Clapperboard })[props.type])
-const summary = computed(() => props.type === 'text_input' ? props.data.text || '写下要传给下游的内容…'
+const typeLabel = computed(() => ({ start: '流程起点', asset_input: '素材', text_input: '文本', image_generate: '图片生成', image_edit: '图片编辑', video_generate: '视频生成' })[props.type])
+const typeIcon = computed(() => ({ start: Play, asset_input: ImagePlus, text_input: FileText, image_generate: Image, image_edit: WandSparkles, video_generate: Clapperboard })[props.type])
+const summary = computed(() => props.type === 'start' ? '从这里开始。下游节点将在全部上级完成后依次执行。' : props.type === 'text_input' ? props.data.text || '写下要传给下游的内容…'
   : props.type === 'asset_input' ? (props.data.assetIds || []).map(id => presentation?.assetName(id) || id).join('、') || '图片、视频均可保存到节点'
   : presentation?.prompt(props.id) || '选中节点，在左侧填写提示词…')
 const previewId = computed(() => props.data.selectedAssetId || props.data.assetIds?.[0])
@@ -50,6 +55,7 @@ const statusLabel = computed(() => ({ PENDING: '等待', QUEUED: '排队', RUNNI
 <style scoped>
 .graph-card { width: 268px; position: relative; box-sizing: border-box; border: 1px solid var(--wb-border, #e3e6ed); border-radius: 12px; background: var(--wb-surface, #fff); color: var(--wb-text, #232735); box-shadow: 0 3px 12px rgb(25 35 60 / 5%); }
 .graph-card.active { border-color: #6674e8; box-shadow: 0 0 0 3px rgb(102 116 232 / 10%), 0 6px 20px rgb(25 35 60 / 7%); }
+.graph-card.kind-start { width: 180px; }
 .card-head { display: flex; align-items: center; gap: 9px; padding: 13px 14px; height: 62px; box-sizing: border-box; border-bottom: 1px solid var(--wb-border); }
 .card-head div { flex: 1; min-width: 0; }
 .card-head small { display: block; font-size: 9px; color: var(--wb-muted, #7b8190); margin-bottom: 2px; }
@@ -62,6 +68,9 @@ const statusLabel = computed(() => ({ PENDING: '等待', QUEUED: '排队', RUNNI
 .state-badge.failed { color: #cd4b61; }
 .port-row { height: 30px; padding: 0 14px; display: flex; justify-content: space-between; align-items: center; color: #8d80ad; font-size: 9px; }
 .port-row:first-of-type { margin-top: 5px; }
+.execution-row { height: 29px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; font-size: 9px; color: #6877bd; }
+.port-flow { color: #6877bd; background: #6877bd; }
+.kind-start .type-mark { background: #edf1fc; color: #6877bd; }
 .media-row { color: #599285; }
 .port.vue-flow__handle { width: 12px; height: 12px; min-width: 12px; min-height: 12px; border: 3px solid var(--wb-surface, #fff); border-radius: 50%; box-shadow: 0 0 0 1px currentColor; cursor: crosshair; z-index: 4; }
 .port-text { color: #9a80cc; background: #9a80cc; }

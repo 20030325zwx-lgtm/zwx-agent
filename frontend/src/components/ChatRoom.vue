@@ -43,6 +43,7 @@
               <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ msg.thinking || '正在思考...' }}
             </div>
           </div>
+          <DeliverableCard v-if="!msg.isUser && msg.deliverables?.length" :files="msg.deliverables" />
           <RunSummaryCard v-if="!msg.isUser && msg.runSummary" :summary="msg.runSummary" />
           <ChangeSummaryCard v-if="!msg.isUser && msg.changeSummary" :summary="msg.changeSummary"
             @open="path => emit('open-code', { tab: 'diff', path })" />
@@ -169,6 +170,7 @@ import { marked } from 'marked'
 import AgentTrace from './AgentTrace.vue'
 import CitationPreview from './CitationPreview.vue'
 import ChangeSummaryCard from './workspace/ChangeSummaryCard.vue'
+import DeliverableCard from './workspace/DeliverableCard.vue'
 import RunSummaryCard from './workspace/RunSummaryCard.vue'
 import AsterAvatar from './AsterAvatar.vue'
 import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square } from 'lucide-vue-next'

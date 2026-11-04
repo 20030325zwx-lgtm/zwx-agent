@@ -156,10 +156,11 @@ const themeTitle = computed(() => {
 })
 
 // 最长前缀命中：/creative/works、/creative/assets 各自独立高亮，不重复点亮「创作」
+// 外部链接项（评测台/数据中台）没有 match，跳过即可
 const activePath = computed(() => {
   let best = ''
   for (const item of items) {
-    for (const path of item.match) {
+    for (const path of item.match || []) {
       if ((route.path === path || route.path.startsWith(`${path}/`)) && path.length > best.length) {
         best = path
       }
@@ -169,7 +170,7 @@ const activePath = computed(() => {
 })
 
 function isActive(item) {
-  return item.match.includes(activePath.value)
+  return (item.match || []).includes(activePath.value)
 }
 
 function cycleTheme() {

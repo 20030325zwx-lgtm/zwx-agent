@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: aster-artifact-mcp-server
+  profiles:
+    active: sse
+server:
+  port: 8130
+artifact:
+  # 与 backend 共享的产物目录（compose 里挂同一个卷）
+  output-root: ${ARTIFACT_OUTPUT_ROOT:/artifacts}
+  max-bytes: ${ARTIFACT_MAX_BYTES:52428800}
+  timeout-seconds: ${ARTIFACT_TIMEOUT_SECONDS:120}

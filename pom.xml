@@ -208,6 +208,12 @@
             <version>9.1.0</version>
             <scope>test</scope>
         </dependency>
+        <!-- Excel 生成（P1 内置版；P2 计划迁移到 services/artifact-mcp） -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
         <dependency>
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>

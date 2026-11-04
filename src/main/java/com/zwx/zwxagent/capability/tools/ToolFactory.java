@@ -127,6 +127,7 @@ public class ToolFactory {
             tools.add(new ResourceDownloadTool(urlAccessPolicy, sandbox, workDir, maxDownloadBytes));
         }
         tools.add(new PDFGenerationTool(sandbox, workDir));
+        tools.add(new SpreadsheetGenerationTool(sandbox, workDir));
         tools.add(new CurrentTimeTool());
         if (userId != null && !userId.isBlank()) {
             tools.add(new CreativeImageTool(tenantId, userId, runId, mediaJobService, creativeProjectService));

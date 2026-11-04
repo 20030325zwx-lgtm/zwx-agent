@@ -1,0 +1,9 @@
+日期：2026-11-04
+问题现象：升级到 6b48454 后，除 /login 外所有页面（/workbench、/creative、/super-agent 等）白屏，#app 为空。
+影响范围：全部带导航布局的页面；移动端/桌面端一致，生产构建同样受影响。
+原因：GlobalNav.vue 新增了两个外部链接项（评测台 /eval/、数据中台 /data/，external: true），它们没有 match 字段；
+activePath 计算属性遍历 `items`（含 secondaryItems）时执行 `for (const path of item.match)`，遇到 undefined 抛 TypeError，
+整个布局组件 setup 失败 → 路由页面无法渲染。登录页不经过布局组件，所以只有它正常。
+解决方式：`for (const path of item.match || [])`、`isActive(item)` 改为 `(item.match || []).includes(...)`，外部项跳过高亮计算。
+验证结果：3001 临时 dev 上 /workbench、/creative、/super-agent 均正常渲染（appLen 28k），导航高亮不变，外部链接正常。
+后续注意事项：给导航项加「外部链接」这类可选字段时，凡是遍历 items 的派生逻辑都要容忍字段缺失；新增导航项后至少看一眼控制台。

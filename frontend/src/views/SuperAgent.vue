@@ -469,6 +469,27 @@ const summarizeDiff = diff => {
     files: files.slice(0, 5)
   }
 }
+// 交付物：任务工作区里「本轮窗口内」生成的文件（产物卡片）。白名单过滤掉中间稿/日志。
+const DELIVERABLE_EXTS = new Set([
+  'md', 'markdown', 'txt', 'csv', 'tsv', 'json', 'html', 'xlsx', 'docx', 'pptx',
+  'pdf', 'zip', 'png', 'jpg', 'jpeg', 'webp', 'svg'
+])
+const summarizeDeliverables = (files, run) => {
+  const entries = Array.isArray(files) ? files : []
+  if (!entries.length || !run?.createdAt) return null
+  const start = Date.parse(run.createdAt) - 5000
+  if (!Number.isFinite(start)) return null
+  const finished = Date.parse(run.updatedAt || '')
+  const end = Number.isFinite(finished) ? finished + 60000 : start + 30 * 60 * 1000
+  const picked = entries.filter(file => {
+    const at = Date.parse(file.modifiedAt)
+    if (!Number.isFinite(at) || at < start || at > end) return false
+    const ext = String(file.path || '').split('.').pop().toLowerCase()
+    return DELIVERABLE_EXTS.has(ext)
+  })
+  if (!picked.length) return null
+  return picked.slice(0, 8).map(file => ({ path: file.path, size: file.size, url: file.url || '' }))
+}
 // 注意：diff 是工作区「当前未提交改动」，不是本轮产出的快照，卡片文案不与 run 归因绑定
 const annotateRunArtifacts = async conversationId => {
   if (!conversationId || chatId.value !== conversationId) return
@@ -486,6 +507,10 @@ const annotateRunArtifacts = async conversationId => {
     } catch (error) {
       console.error('Unable to load run tool summary:', error)
     }
+  }
+  if (activeRun.value?.id && !answer.deliverables) {
+    const deliverables = summarizeDeliverables(workspaceFiles.value, activeRun.value)
+    if (deliverables) answer.deliverables = deliverables
   }
   if (conversation?.projectId && !answer.changeSummary) {
     try {

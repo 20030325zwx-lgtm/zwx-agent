@@ -24,6 +24,7 @@ public final class ToolRiskCatalog {
             // 交付物写入
             Map.entry("writeFile", ToolRisk.WRITE),
             Map.entry("generatePDF", ToolRisk.WRITE),
+            Map.entry("generateSpreadsheet", ToolRisk.WRITE),
             // 执行/修改类
             Map.entry("applyProjectPatch", ToolRisk.EXECUTE),
             Map.entry("runProjectTask", ToolRisk.EXECUTE),

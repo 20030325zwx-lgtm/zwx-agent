@@ -52,13 +52,18 @@ public final class IdempotentToolCallback implements ToolCallback {
     public String call(String input) {
         String toolName = toolName();
         String workerKey = ToolCallWorkerContext.current();
-        AgentToolCallLedgerService.Decision decision = workerKey == null
-                ? ledger.begin(runId, toolName, input)
-                : ledger.begin(runId, workerKey, toolName, input);
+        String invocationKey = ToolCallWorkerContext.nextInvocationKey();
+        AgentToolCallLedgerService.Decision decision = invocationKey == null
+                ? workerKey == null
+                    ? ledger.begin(runId, toolName, input)
+                    : ledger.begin(runId, workerKey, toolName, input)
+                // A2：invocation 身份路径——重放幂等、在途等待不误判 UNKNOWN
+                : ledger.beginInvocation(runId, null, invocationKey, workerKey, toolName, input);
         notifyChanged(decision.id());
         return switch (decision.mode()) {
             case REPLAY -> decision.cachedResult() == null ? "" : decision.cachedResult();
             case UNKNOWN -> decision.message();
+            case PENDING_IN_FLIGHT -> decision.message();
             case EXECUTE -> execute(input, decision.id());
         };
     }

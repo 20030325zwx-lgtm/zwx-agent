@@ -67,11 +67,12 @@ class IdempotentToolCallbackTest {
     }
 
     @Test
-    void workerCallCarriesWorkerIdentityAndNotifiesOnBothTransitions() {
+    void workerCallCarriesInvocationIdentityAndNotifiesOnBothTransitions() {
         AgentToolCallLedgerService ledger = Mockito.mock(AgentToolCallLedgerService.class);
         ToolCallback delegate = tool("searchWeb");
         Mockito.when(delegate.call("{}")) .thenReturn("result");
-        Mockito.when(ledger.begin("run-1", "worker-2-researcher", "searchWeb", "{}"))
+        Mockito.when(ledger.beginInvocation(Mockito.eq("run-1"), Mockito.isNull(), Mockito.anyString(),
+                        Mockito.eq("worker-2-researcher"), Mockito.eq("searchWeb"), Mockito.eq("{}")))
                 .thenReturn(new AgentToolCallLedgerService.Decision(
                         AgentToolCallLedgerService.Mode.EXECUTE, 12L, null, null));
         java.util.List<Long> changes = new java.util.ArrayList<>();
@@ -79,11 +80,19 @@ class IdempotentToolCallbackTest {
                 changes::add)[0];
 
         ToolCallWorkerContext.set("worker-2-researcher");
-        try { Assertions.assertEquals("result", wrapped.call("{}")); }
-        finally { ToolCallWorkerContext.clear(); }
+        String firstKey;
+        String secondKey;
+        try {
+            Assertions.assertEquals("result", wrapped.call("{}"));
+            firstKey = ToolCallWorkerContext.nextInvocationKey();
+            secondKey = ToolCallWorkerContext.nextInvocationKey();
+        } finally { ToolCallWorkerContext.clear(); }
 
         Assertions.assertEquals(java.util.List.of(12L, 12L), changes);
         Mockito.verify(ledger).succeed(12L, "result");
+        // 有意重复调用必须获得新身份（同步骤内序号递增）
+        Assertions.assertNotEquals(firstKey, secondKey);
+        Assertions.assertTrue(firstKey.startsWith("worker-2-researcher#call-"));
     }
 
     private static ToolCallback tool(String name) {

@@ -1,0 +1,6 @@
+target/
+frontend/node_modules/
+frontend/dist/
+src/main/resources/static/
+.idea/
+*.iml

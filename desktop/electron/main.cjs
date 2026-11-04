@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, safeStorage } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const crypto = require('crypto')
 const http = require('http')
@@ -305,6 +305,30 @@ ipcMain.handle('desktop:choose-directory', async () => {
   await pushDirectoryGrants()
   return path
 })
+// 另存为：渲染进程传入文件字节（经鉴权 fetch 得到的 blob），主进程弹系统保存框并写盘
+ipcMain.handle('desktop:save-file', async (_, payload) => {
+  const window = BrowserWindow.getAllWindows()[0]
+  const suggested = String(payload?.fileName || 'file').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) || 'file'
+  const raw = payload?.data
+  if (!raw) throw new Error('文件内容为空。')
+  const buffer = Buffer.from(raw instanceof Uint8Array ? raw : new Uint8Array(raw))
+  if (!buffer.length) throw new Error('文件内容为空。')
+  const result = await dialog.showSaveDialog(window, {
+    title: '保存文件',
+    defaultPath: path.join(app.getPath('downloads'), suggested)
+  })
+  if (result.canceled || !result.filePath) return null
+  await fs.promises.writeFile(result.filePath, buffer)
+  return result.filePath
+})
+
+// 在访达 / 资源管理器中显示（用于导出后定位文件）
+ipcMain.handle('desktop:reveal-file', async (_, filePath) => {
+  if (typeof filePath !== 'string' || !filePath) throw new Error('无效的文件路径。')
+  shell.showItemInFolder(filePath)
+  return true
+})
+
 ipcMain.on('desktop:get-directory-grants', event => { event.returnValue = readGrants(readConfig()) })
 ipcMain.handle('desktop:revoke-directory-grant', async (_, path) => {
   const config = readConfig()

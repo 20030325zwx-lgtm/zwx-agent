@@ -43,7 +43,8 @@
               <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ msg.thinking || '正在思考...' }}
             </div>
           </div>
-          <DeliverableCard v-if="!msg.isUser && msg.deliverables?.length" :files="msg.deliverables" />
+          <DeliverableCard v-if="!msg.isUser && msg.deliverables?.length" :files="msg.deliverables"
+            :conversation-id="conversationId" />
           <RunSummaryCard v-if="!msg.isUser && msg.runSummary" :summary="msg.runSummary" />
           <ChangeSummaryCard v-if="!msg.isUser && msg.changeSummary" :summary="msg.changeSummary"
             @open="path => emit('open-code', { tab: 'diff', path })" />

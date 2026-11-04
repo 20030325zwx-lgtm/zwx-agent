@@ -89,6 +89,9 @@ public class ManusAgentController {
     private WorkspaceService workspaceService;
 
     @Resource
+    private com.zwx.zwxagent.platform.workspace.WorkspaceFileExportService workspaceFileExportService;
+
+    @Resource
     private com.zwx.zwxagent.platform.workspace.ProjectExecutionLockService projectExecutionLockService;
 
     @Resource
@@ -751,6 +754,27 @@ public class ManusAgentController {
                 .contentType(mediaType)
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(file.getFileName().toString(), StandardCharsets.UTF_8).build().toString())
                 .body(new FileSystemResource(file));
+    }
+
+    /** 导出会话工作区文件到桌面端已授权的本机目录（仅桌面端；返回真实绝对路径供「在访达中显示」）。 */
+    public record ExportFilesRequest(String conversationId, List<String> paths, String targetDir, Boolean overwrite) {
+    }
+
+    @PostMapping("/manus/files/export")
+    public List<com.zwx.zwxagent.platform.workspace.WorkspaceFileExportService.ExportResult> exportManusFiles(
+            CurrentActor actor, @RequestBody ExportFilesRequest request) throws java.io.IOException {
+        if (request == null || request.conversationId() == null
+                || !agentConversationService.hasConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, request.conversationId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "会话不存在");
+        }
+        try {
+            return workspaceFileExportService.export(actor.tenantId(), SUPER_AGENT_KEY, request.conversationId(),
+                    request.paths(), request.targetDir(), Boolean.TRUE.equals(request.overwrite()));
+        } catch (IllegalStateException | IllegalArgumentException exception) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, exception.getMessage());
+        }
     }
 
     /** 会话文件解析：优先统一工作区，回退旧工具目录（历史会话兼容）。 */

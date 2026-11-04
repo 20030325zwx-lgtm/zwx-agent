@@ -206,6 +206,9 @@ export const getManusConversationMessages = conversationId => request.get(`/ai/m
 export const deleteManusConversation = conversationId => request.delete(`/ai/manus/conversations/${conversationId}`)
 export const getManusFileUrl = (conversationId, path) =>
   fetchAuthBlobUrl(`/ai/manus/files?conversationId=${encodeURIComponent(conversationId)}&path=${encodeURIComponent(path)}`)
+// 桌面端：把会话工作区文件导出到已授权的本机目录（返回 [{from,to}]，仅桌面模式可用）
+export const exportManusFiles = (conversationId, paths, targetDir, overwrite = false) =>
+  request.post('/ai/manus/files/export', { conversationId, paths, targetDir, overwrite }).then(response => response.data)
 export const listManusRuns = conversationId =>
   request.get(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs`).then(response => response.data)
 export const listRecentManusRuns = (limit = 8) =>

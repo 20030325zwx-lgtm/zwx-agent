@@ -6,7 +6,12 @@ spring:
 server:
   port: 8130
 artifact:
-  # 与 backend 共享的产物目录（compose 里挂同一个卷）
+  # 引擎内部临时目录（backend 负责把结果落到会话工作区）
   output-root: ${ARTIFACT_OUTPUT_ROOT:/artifacts}
   max-bytes: ${ARTIFACT_MAX_BYTES:52428800}
   timeout-seconds: ${ARTIFACT_TIMEOUT_SECONDS:120}
+  # 内网调用口令：设置后 /internal/** 需带 X-Aster-Artifact-Token 头
+  internal-token: ${ARTIFACT_INTERNAL_TOKEN:}
+  # 可执行文件 / 字体路径覆盖（容器内一般可自动发现）
+  soffice-path: ${ARTIFACT_SOFFICE_PATH:}
+  pdf-font-path: ${ARTIFACT_PDF_FONT_PATH:}

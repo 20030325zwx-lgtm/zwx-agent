@@ -5,6 +5,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 VERSION=${VERSION:-0.0.1}
 TARGET_PLATFORM=${TARGET_PLATFORM:-linux/amd64}
 WITH_BROWSER_MCP=${WITH_BROWSER_MCP:-false}
+WITH_ARTIFACT_MCP=${WITH_ARTIFACT_MCP:-false}
 PACKAGE_NAME="aster-${VERSION}-$(printf '%s' "$TARGET_PLATFORM" | tr / -)"
 RELEASE_DIR="$ROOT_DIR/release/$PACKAGE_NAME"
 IMAGE_DIR="$RELEASE_DIR/images"
@@ -33,6 +34,10 @@ docker build --platform "$TARGET_PLATFORM" -t "aster-image-mcp:$VERSION" "$ROOT_
 docker build --platform "$TARGET_PLATFORM" -t "aster-document-mcp:$VERSION" "$ROOT_DIR/services/document-mcp"
 # 独立中台服务（与主站同仓库、独立镜像）
 docker build --platform "$TARGET_PLATFORM" -t "aster-eval-service:$VERSION" "$ROOT_DIR/services/eval-service"
+if [ "$WITH_ARTIFACT_MCP" = "true" ]; then
+  echo "构建 artifact 排版引擎（含 LibreOffice，体积较大）..."
+  docker build --platform "$TARGET_PLATFORM" -t "aster-artifact-mcp:$VERSION" "$ROOT_DIR/services/artifact-mcp"
+fi
 docker build --platform "$TARGET_PLATFORM" -t "aster-data-service:$VERSION" "$ROOT_DIR/services/data-service"
 if [ "$WITH_BROWSER_MCP" = "true" ]; then
   docker build --platform "$TARGET_PLATFORM" -t "aster-browser-mcp:$VERSION" "$ROOT_DIR/services/browser-mcp"
@@ -44,6 +49,9 @@ docker save -o "$IMAGE_DIR/aster-frontend.tar" "aster-frontend:$VERSION"
 docker save -o "$IMAGE_DIR/aster-image-mcp.tar" "aster-image-mcp:$VERSION"
 docker save -o "$IMAGE_DIR/aster-document-mcp.tar" "aster-document-mcp:$VERSION"
 docker save -o "$IMAGE_DIR/aster-eval-service.tar" "aster-eval-service:$VERSION"
+if [ "$WITH_ARTIFACT_MCP" = "true" ]; then
+  docker save -o "$IMAGE_DIR/aster-artifact-mcp.tar" "aster-artifact-mcp:$VERSION"
+fi
 docker save -o "$IMAGE_DIR/aster-data-service.tar" "aster-data-service:$VERSION"
 if [ "$WITH_BROWSER_MCP" = "true" ]; then
   docker save -o "$IMAGE_DIR/aster-browser-mcp.tar" "aster-browser-mcp:$VERSION"

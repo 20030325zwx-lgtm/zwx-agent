@@ -40,7 +40,7 @@ public class MemoryExtractionHook implements AgentHook {
         if (history == null || history.isEmpty()) return;
         String answer = lastAssistantText(history);
         if (answer == null || answer.isBlank()) return;
-        memoryService.extractAsync(context.tenantId(), context.agentKey(), null,
+        memoryService.extractAsync(context.tenantId(), context.agentKey(), context.userId(),
                 context.conversationId(), context.userPrompt(), answer);
     }
 

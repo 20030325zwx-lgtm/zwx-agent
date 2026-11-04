@@ -430,7 +430,7 @@ public class ManusGraphOrchestrator {
             ToolCallback[] tools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(), toolCallLedger,
                     id -> stream.send("tool-call", String.valueOf(id)));
             RunContext context = RunContext.of(tools, request.knowledgeContext(), stopped::get,
-                    request.tenantId(), request.conversationId(), chunk -> {
+                    request.tenantId(), request.userId(), request.conversationId(), chunk -> {
                         // 先保留已生成内容，再尝试推送；客户端断开后仍能把草稿落库。
                         streamedAnswer.append(chunk);
                         if (agentRunService != null && request.runId() != null && !request.runId().isBlank()) {

@@ -13,6 +13,7 @@ public record RunContext(ToolCallback[] tools,
                          String knowledgeContext,
                          BooleanSupplier stopCheck,
                          String tenantId,
+                         String userId,
                          String conversationId,
                          Consumer<String> answerChunkSink,
                          Consumer<ActivityEvent> activitySink,
@@ -23,29 +24,41 @@ public record RunContext(ToolCallback[] tools,
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck) {
-        return new RunContext(tools, knowledgeContext, stopCheck, null, null, null, null, true);
+        return new RunContext(tools, knowledgeContext, stopCheck, null, null, null, null, null, true);
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
                                 String tenantId, String conversationId) {
-        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, null, null, true);
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, null, conversationId, null, null, true);
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
                                 String tenantId, String conversationId, Consumer<String> answerChunkSink) {
-        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, answerChunkSink, null, true);
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, null, conversationId, answerChunkSink, null, true);
+    }
+
+    public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
+                                String tenantId, String userId, String conversationId, Consumer<String> answerChunkSink) {
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, userId, conversationId, answerChunkSink, null, true);
+    }
+
+    public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
+                                String tenantId, String userId, String conversationId, Consumer<String> answerChunkSink,
+                                Consumer<ActivityEvent> activitySink, boolean webSearchEnabled) {
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, userId, conversationId, answerChunkSink,
+                activitySink, webSearchEnabled);
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
                                 String tenantId, String conversationId, Consumer<String> answerChunkSink,
                                 Consumer<ActivityEvent> activitySink) {
-        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, answerChunkSink, activitySink, true);
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, null, conversationId, answerChunkSink, activitySink, true);
     }
 
     public static RunContext of(ToolCallback[] tools, String knowledgeContext, BooleanSupplier stopCheck,
                                 String tenantId, String conversationId, Consumer<String> answerChunkSink,
                                 Consumer<ActivityEvent> activitySink, boolean webSearchEnabled) {
-        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, conversationId, answerChunkSink,
+        return new RunContext(tools, knowledgeContext, stopCheck, tenantId, null, conversationId, answerChunkSink,
                 activitySink, webSearchEnabled);
     }
 }

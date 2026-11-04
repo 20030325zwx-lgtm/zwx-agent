@@ -78,16 +78,16 @@ public class MemoryService {
         }
     }
 
-    /** 最近优先 + prompt 关键词命中加权，返回 top 事实文本。 */
-    public List<String> factsFor(String tenantId, String agentKey, String userPrompt, int limit) {
-        if (isBlank(tenantId) || isBlank(agentKey) || limit <= 0) return List.of();
+    /** 最近优先 + prompt 关键词命中加权，返回 top 事实文本；必须携带 userId，无主记录一律不注入。 */
+    public List<String> factsFor(String tenantId, String userId, String agentKey, String userPrompt, int limit) {
+        if (isBlank(tenantId) || isBlank(userId) || isBlank(agentKey) || limit <= 0) return List.of();
         List<String> recent;
         try {
             recent = jdbcTemplate.query(
-                    "SELECT fact FROM agent_memory_fact WHERE tenant_id = ? AND agent_key = ? " +
+                    "SELECT fact FROM agent_memory_fact WHERE tenant_id = ? AND user_id = ? AND agent_key = ? " +
                             "ORDER BY created_at DESC, id DESC LIMIT " + SCAN_WINDOW,
                     (resultSet, index) -> resultSet.getString(1),
-                    tenantId, agentKey);
+                    tenantId, userId, agentKey);
         } catch (Exception cause) {
             log.warn("[memory] 事实查询失败：{}", cause.getMessage());
             return List.of();
@@ -159,10 +159,16 @@ public class MemoryService {
     void upsertFact(String tenantId, String agentKey, String userId, String conversationId, String fact) {
         String normalized = normalizeFact(fact);
         if (normalized.isEmpty()) return;
+        // 不可归属（无 user）的事实不落库：既无法安全注入，也无法按用户去重，避免堆积无主记录。
+        if (isBlank(userId)) {
+            log.debug("[memory] 事实缺少归属用户，跳过落库（tenant={}, agent={}）", tenantId, agentKey);
+            return;
+        }
         jdbcTemplate.update(
                 "INSERT INTO agent_memory_fact (tenant_id, agent_key, user_id, fact, fact_hash, source_conversation_id) " +
                         "VALUES (?, ?, ?, ?, ?, ?) " +
-                        "ON CONFLICT (tenant_id, agent_key, fact_hash) DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP",
+                        "ON CONFLICT (tenant_id, user_id, agent_key, fact_hash) WHERE user_id IS NOT NULL " +
+                        "DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP",
                 tenantId, agentKey, userId, normalized, sha256Hex(normalized), conversationId);
     }
 

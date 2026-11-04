@@ -75,4 +75,54 @@ class MemoryServiceTest {
         assertTrue(MemoryService.extractKeywords(null).isEmpty());
         assertTrue(MemoryService.extractKeywords("  ").isEmpty());
     }
+
+    // ---- A0 用户隔离回归：注入必须归属到人，不可归属事实不落库 ----
+
+    @Test
+    void factsForWithoutUserNeverQueries() {
+        var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var service = new MemoryService(jdbc, null, false);
+        assertTrue(service.factsFor("tenant", null, "super", "问句", 5).isEmpty(), "缺 userId 不得注入");
+        assertTrue(service.factsFor("tenant", "  ", "super", "问句", 5).isEmpty());
+        org.mockito.Mockito.verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void factsForFiltersByExactUser() {
+        var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var service = new MemoryService(jdbc, null, false);
+        org.mockito.Mockito.when(jdbc.query(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(org.springframework.jdbc.core.RowMapper.class),
+                org.mockito.ArgumentMatchers.eq("t1"), org.mockito.ArgumentMatchers.eq("u1"),
+                org.mockito.ArgumentMatchers.eq("super")))
+                .thenReturn(java.util.List.of("用户一的事实"));
+        assertEquals(java.util.List.of("用户一的事实"), service.factsFor("t1", "u1", "super", "问句", 5));
+        var sql = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(jdbc).query(sql.capture(),
+                org.mockito.ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<String>>any(),
+                org.mockito.ArgumentMatchers.eq("t1"), org.mockito.ArgumentMatchers.eq("u1"),
+                org.mockito.ArgumentMatchers.eq("super"));
+        assertTrue(sql.getValue().contains("user_id = ?"), "注入查询必须按 user_id 过滤");
+    }
+
+    @Test
+    void upsertSkipsFactsWithoutOwner() {
+        var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var service = new MemoryService(jdbc, null, false);
+        service.upsertFact("t1", "super", null, "conv-1", "无主事实");
+        service.upsertFact("t1", "super", " ", "conv-1", "无主事实");
+        org.mockito.Mockito.verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void upsertDedupesWithinOwnerScope() {
+        var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var service = new MemoryService(jdbc, null, false);
+        service.upsertFact("t1", "super", "u1", "conv-1", "用户一的事实");
+        var sql = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(jdbc).update(sql.capture(), org.mockito.ArgumentMatchers.any(Object[].class));
+        assertTrue(sql.getValue().contains("(tenant_id, user_id, agent_key, fact_hash)"),
+                "去重冲突目标必须包含 user_id");
+        assertTrue(sql.getValue().contains("WHERE user_id IS NOT NULL"), "冲突目标必须限定可归属记录");
+    }
 }

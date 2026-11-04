@@ -1,0 +1,20 @@
+日期：2026-11-05
+主题：工具确认决定在持久化失败时仍于内存放行
+
+问题现象：
+ToolConfirmationService.decide() 捕获数据库写失败后仅记日志（updated=0），继续把 APPROVED/DENIED 应用到内存 RunScope——批准在内存即刻生效，工具被放行，但库里该确认仍是 PENDING。服务重启后批准"消失"；在多实例部署下其他实例同样看不到该批准。
+
+影响范围：图编排路径所有带人工确认的工具调用（terminal 等有副作用工具）。DB 故障窗口内的批准等于未审计放行。
+
+原因：decide() 的 catch 分支吞掉异常后无条件同步内存状态；内存应用与持久化结果没有绑定。
+
+解决方式（整改批次 A0，授权闭锁）：
+- decide() 持久化失败改为抛 IllegalStateException，控制器返回错误，run 保持等待确认状态；
+- 内存状态仅在 UPDATE 实际命中（updated>0）时同步；updated=0（无 PENDING 行）时保持待确认不动；
+- 指标只在决定真正生效时上报。
+
+验证结果：ToolConfirmationServiceTest 3 项（成功路径同步内存 / DB 失败不放行且保持等待 / 零行命中不放行）通过。
+
+后续注意事项：
+- registerRun 恢复失败仍为记日志继续（空集合方向是失败闭合：已批准失效会重新走确认），维持不变；
+- A2 阶段将把确认粒度从 (run_id, tool_name) 升级为 operation_key + 参数指纹（方案 §7.5），本修复的闭锁语义需在该迁移中保持。

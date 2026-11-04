@@ -40,8 +40,8 @@ public class MemoryInjectionHook implements AgentHook {
     public void beforeRun(AgentRunContext context) {
         List<Message> history = context.messageHistory();
         if (history == null || history.isEmpty()) return;
-        if (isBlank(context.tenantId()) || isBlank(context.agentKey())) return;
-        List<String> facts = memoryService.factsFor(context.tenantId(), context.agentKey(), context.userPrompt(), 5);
+        if (isBlank(context.tenantId()) || isBlank(context.userId()) || isBlank(context.agentKey())) return;
+        List<String> facts = memoryService.factsFor(context.tenantId(), context.userId(), context.agentKey(), context.userPrompt(), 5);
         if (facts.isEmpty()) return;
         if (!(history.getFirst() instanceof UserMessage first)) return;
         StringBuilder prefix = new StringBuilder(FACTS_PREFIX_TEMPLATE.formatted(

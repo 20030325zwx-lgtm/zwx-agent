@@ -1,0 +1,23 @@
+日期：2026-11-05
+主题：长期记忆跨用户注入与去重键缺用户归属
+
+问题现象：
+1) MemoryService.factsFor 注入查询只按 (tenant_id, agent_key) 过滤，同租户不同用户会互相注入对方的长期事实。
+2) upsertFact 去重冲突目标 (tenant_id, agent_key, fact_hash) 不含 user_id：用户 B 新写入的事实会与用户 A 同文事实冲突，被错误合并到 A 的记录上；且无 user_id 的抽取记录永久无法安全注入。
+3) 抽取 hook（MemoryExtractionHook）固定传 null 作为 userId，导致所有抽取事实均无主。
+
+影响范围：agent_memory_fact 表全部读写路径（MemoryInjectionHook 注入、MemoryExtractionHook 抽取、治理接口）。是否实际发生跨用户注入取决于记忆开关与同租户多用户使用；代码路径缺陷确定存在。
+
+原因：V1 建表时唯一索引 uk_agent_memory_fact 缺 user_id；factsFor 签名无 userId；AgentRunContext/AgentRunIdentity/RunContext（graph）均未携带 userId，抽取 hook 无法拿到归属。
+
+解决方式（整改批次 A0）：
+- V34 迁移：删除全局唯一索引，改为 (tenant_id, user_id, agent_key, fact_hash) WHERE user_id IS NOT NULL 部分唯一索引（旧索引保证过全局唯一，子集无重复可直建）。
+- factsFor 增加 userId 必填参数，SQL 增加 user_id = ? 过滤；无主记录（user_id 空）永不注入。
+- upsertFact 无 userId 时跳过落库；冲突目标改为含 user_id 的部分唯一索引。
+- AgentRunIdentity/AgentRunContext/RunContext 增加 userId 并贯通到 BaseAgent/WorkersNode/ManusGraphOrchestrator；抽取与注入 hook 改用 context.userId()。
+
+验证结果：MemoryServiceTest 14 项、MemoryGovernanceTest 5 项、MemoryInjectionHookTest 6 项（含无 userId 不注入）、ToolConfirmationServiceTest 3 项全部通过；mvn compile 通过。
+
+后续注意事项：
+- user_id 为空的存量记录保留在库中但永不注入；如能确认归属（来源会话）再人工回填，不要批量猜测赋主。
+- 注入侧提示词模板不变；如未来开启 PROJECT scope 记忆，需在 A/D 阶段继续扩展 scope 列，不与本修复冲突。

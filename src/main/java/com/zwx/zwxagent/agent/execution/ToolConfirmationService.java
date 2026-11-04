@@ -119,8 +119,9 @@ public class ToolConfirmationService {
 
     /**
      * 记录用户决定并持久化；toolName 为空时对全部待确认工具生效。
+     * 持久化失败或未命中任何待确认行时，不同步内存状态（A0 闭锁：授权决定必须先落库才生效）。
      *
-     * @return 实际更新的工具数
+     * @return 实际持久化并生效的工具数
      */
     public int decide(String runId, String toolName, String decision) {
         boolean approved = DECISION_APPROVED.equals(decision);
@@ -135,10 +136,10 @@ public class ToolConfirmationService {
                     WHERE run_id = ? AND decision = 'PENDING' AND (?::text IS NULL OR tool_name = ?)
                     """, decision, runId, toolName, toolName);
         } catch (Exception exception) {
-            log.warn("持久化工具确认决定失败；runId={}, tool={}", runId, toolName, exception);
-            updated = 0;
+            log.warn("持久化工具确认决定失败，拒绝在内存放行；runId={}, tool={}", runId, toolName, exception);
+            throw new IllegalStateException("确认决定未能持久化，请稍后重试", exception);
         }
-        if (scope != null) {
+        if (updated > 0 && scope != null) {
             for (PendingConfirmation pending : scope.pending) {
                 if (toolName == null || toolName.equals(pending.toolName())) {
                     scope.pending.remove(pending);
@@ -148,7 +149,7 @@ public class ToolConfirmationService {
             }
         }
         log.info("工具确认决定已记录；runId={}, tool={}, decision={}, updated={}", runId, toolName, decision, updated);
-        if (metrics != null) metrics.toolConfirmationDecided(decision);
+        if (metrics != null && updated > 0) metrics.toolConfirmationDecided(decision);
         return updated;
     }
 

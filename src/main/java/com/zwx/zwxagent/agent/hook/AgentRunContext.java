@@ -16,6 +16,7 @@ public final class AgentRunContext {
     private final String runId;
     private final String agentKey;
     private final String tenantId;
+    private final String userId;
     private final String conversationId;
     private final String agentName;
     private final String userPrompt;
@@ -28,6 +29,7 @@ public final class AgentRunContext {
         this.runId = builder.runId;
         this.agentKey = builder.agentKey;
         this.tenantId = builder.tenantId;
+        this.userId = builder.userId;
         this.conversationId = builder.conversationId;
         this.agentName = builder.agentName;
         this.userPrompt = builder.userPrompt;
@@ -48,6 +50,10 @@ public final class AgentRunContext {
 
     public String tenantId() {
         return tenantId;
+    }
+
+    public String userId() {
+        return userId;
     }
 
     public String conversationId() {
@@ -84,6 +90,7 @@ public final class AgentRunContext {
         private String runId = UUID.randomUUID().toString();
         private String agentKey;
         private String tenantId;
+        private String userId;
         private String conversationId;
         private String agentName;
         private String userPrompt;
@@ -101,6 +108,11 @@ public final class AgentRunContext {
 
         public Builder tenantId(String value) {
             this.tenantId = value;
+            return this;
+        }
+
+        public Builder userId(String value) {
+            this.userId = value;
             return this;
         }
 

@@ -378,7 +378,7 @@ public class WorkersNode implements NodeAction {
         GraphWorker worker = new GraphWorker(roleTools, role, step.title(), workerKey, activitySink);
         if (runContext != null && runContext.tenantId() != null) {
             worker.setRunIdentity(new com.zwx.zwxagent.agent.core.AgentRunIdentity(
-                    runContext.tenantId(), "super", runContext.conversationId()));
+                    runContext.tenantId(), runContext.userId(), "super", runContext.conversationId()));
         }
         worker.setName(workerKey);
         worker.setSystemPrompt("""

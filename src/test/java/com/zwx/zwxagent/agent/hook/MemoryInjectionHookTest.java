@@ -17,7 +17,7 @@ class MemoryInjectionHookTest {
     private MemoryInjectionHook hookWithFacts(List<String> facts) {
         MemoryService stub = new MemoryService(null, null, false) {
             @Override
-            public List<String> factsFor(String tenantId, String agentKey, String userPrompt, int limit) {
+            public List<String> factsFor(String tenantId, String userId, String agentKey, String userPrompt, int limit) {
                 return facts;
             }
         };
@@ -25,8 +25,13 @@ class MemoryInjectionHookTest {
     }
 
     private AgentRunContext context(List<Message> history) {
+        return context(history, "user-1");
+    }
+
+    private AgentRunContext context(List<Message> history, String userId) {
         return AgentRunContext.builder()
                 .tenantId("default")
+                .userId(userId)
                 .agentKey("super")
                 .userPrompt("帮我规划周末")
                 .messageHistory(history)
@@ -64,6 +69,14 @@ class MemoryInjectionHookTest {
         List<Message> history = new ArrayList<>(List.of(new UserMessage("帮我规划周末")));
         AgentRunContext noIdentity = AgentRunContext.builder().messageHistory(history).build();
         hookWithFacts(List.of("用户在上海")).beforeRun(noIdentity);
+        assertEquals("帮我规划周末", ((UserMessage) history.getFirst()).getText());
+    }
+
+    @Test
+    void missingUserIdIsSkippedEvenWithTenantAndAgent() {
+        List<Message> history = new ArrayList<>(List.of(new UserMessage("帮我规划周末")));
+        // A0：无归属用户的事实不得注入，即使租户与智能体齐全
+        hookWithFacts(List.of("用户在上海")).beforeRun(context(history, null));
         assertEquals("帮我规划周末", ((UserMessage) history.getFirst()).getText());
     }
 

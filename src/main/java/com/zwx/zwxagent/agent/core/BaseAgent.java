@@ -92,6 +92,7 @@ public abstract class BaseAgent {
                 .agentName(name)
                 .userPrompt(userPrompt)
                 .tenantId(identity == null ? null : identity.tenantId())
+                .userId(identity == null ? null : identity.userId())
                 .agentKey(identity == null ? null : identity.agentKey())
                 .conversationId(identity == null ? null : identity.conversationId())
                 // 工作记忆活引用：转换型 hook（记忆压缩/注入）经它改写消息历史

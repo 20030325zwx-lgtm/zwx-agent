@@ -110,6 +110,9 @@ services:
       APP_PROJECT_WORKSPACE_ROOT: /app/projects
       # 服务间内部接口令牌（/api/internal/**）：与 eval-service/data-service 一致
       PLATFORM_INTERNAL_TOKEN: ${PLATFORM_INTERNAL_TOKEN}
+      # artifact 排版引擎（docx/pptx/Markdown-PDF）；留空 = 不注册对应工具
+      APP_ARTIFACT_BASE_URL: ${APP_ARTIFACT_BASE_URL:-}
+      APP_ARTIFACT_TOKEN: ${ARTIFACT_INTERNAL_TOKEN:-}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./temp:/app/temp
@@ -133,6 +136,28 @@ services:
       - backend
     ports:
       - "${ASTER_PORT:-8080}:80"
+
+  # ---------------------------------------------------------------------------
+  # artifact 排版引擎（可选）：docx / pptx / Markdown-PDF 渲染 + LibreOffice 格式转换。
+  # 只在启用时启动：docker compose --profile artifacts up -d artifact-mcp
+  # backend 侧需同时设置 .env 的 APP_ARTIFACT_BASE_URL=http://artifact-mcp:8130（否则不注册相关工具）。
+  # 镜像内含 LibreOffice 与 Noto CJK，体积约 800MB+，按需启用。
+  # ---------------------------------------------------------------------------
+  artifact-mcp:
+    profiles: ["artifacts"]
+    image: aster-artifact-mcp:${IMAGE_TAG}
+    restart: unless-stopped
+    mem_limit: 1024m
+    environment:
+      ARTIFACT_INTERNAL_TOKEN: ${ARTIFACT_INTERNAL_TOKEN:-}
+      ARTIFACT_TIMEOUT_SECONDS: ${ARTIFACT_TIMEOUT_SECONDS:-120}
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8130/internal/render/capabilities >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # ---------------------------------------------------------------------------
   # 独立中台服务（各自独立镜像、独立页面；与主站共用 PostgreSQL 的 platform schema）：

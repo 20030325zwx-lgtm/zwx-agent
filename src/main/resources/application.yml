@@ -71,6 +71,13 @@ spring.servlet.multipart:
   max-file-size: 100MB
   max-request-size: 100MB
 app:
+  # artifact 排版引擎（services/artifact-mcp）：docx / pptx / Markdown-PDF 与格式转换。
+  # 留空 = 不注册对应工具；容器部署时指向 http://artifact-mcp:8130。
+  artifact:
+    base-url: ${APP_ARTIFACT_BASE_URL:}
+    token: ${APP_ARTIFACT_TOKEN:}
+    timeout-seconds: ${APP_ARTIFACT_TIMEOUT_SECONDS:120}
+    max-bytes: ${APP_ARTIFACT_MAX_BYTES:52428800}
   config:
     # 用户/系统自定义密钥的加密口令；生产环境必须单独配置，缺省回退 JWT_SECRET 便于本地开发
     encryption-key: ${APP_CONFIG_ENCRYPTION_KEY:${JWT_SECRET:zwx-agent-dev-config-key-change-me}}

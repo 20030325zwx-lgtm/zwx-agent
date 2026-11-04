@@ -33,6 +33,7 @@ public class ToolFactory {
     private final int projectTaskTimeoutSeconds;
     private final com.zwx.zwxagent.creative.service.MediaJobService mediaJobService;
     private final com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService;
+    private final ArtifactClient artifactClient;
 
     public ToolFactory(ToolSandbox sandbox,
                        com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService,
@@ -54,7 +55,11 @@ public class ToolFactory {
                        @Value("${app.tools.db-query-external-enabled:false}") boolean dbQueryExternalEnabled,
                        @Value("${app.project-workspace.task-timeout-seconds:900}") int projectTaskTimeoutSeconds,
                        com.zwx.zwxagent.creative.service.MediaJobService mediaJobService,
-                       com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService) {
+                       com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService,
+                       @Value("${app.artifact.base-url:}") String artifactBaseUrl,
+                       @Value("${app.artifact.token:}") String artifactToken,
+                       @Value("${app.artifact.timeout-seconds:120}") int artifactTimeoutSeconds,
+                       @Value("${app.artifact.max-bytes:52428800}") int artifactMaxBytes) {
         this.sandbox = sandbox;
         this.workspaceService = workspaceService;
         this.projectWorkspaceService = projectWorkspaceService;
@@ -77,6 +82,7 @@ public class ToolFactory {
         this.projectTaskTimeoutSeconds = Math.max(10, projectTaskTimeoutSeconds);
         this.mediaJobService = mediaJobService;
         this.creativeProjectService = creativeProjectService;
+        this.artifactClient = new ArtifactClient(artifactBaseUrl, artifactToken, artifactTimeoutSeconds, artifactMaxBytes);
     }
 
     /** 工作区签名（design/plans/09 批次 A）：工具 workDir 来自统一工作区目录模型。 */
@@ -128,6 +134,10 @@ public class ToolFactory {
         }
         tools.add(new PDFGenerationTool(sandbox, workDir));
         tools.add(new SpreadsheetGenerationTool(sandbox, workDir));
+        // docx / pptx / Markdown-PDF 依赖 artifact 引擎（services/artifact-mcp）；未配置时不注册，避免模型调到必然失败的工具
+        if (artifactClient.enabled()) {
+            tools.add(new ArtifactDocumentTool(sandbox, workDir, artifactClient));
+        }
         tools.add(new CurrentTimeTool());
         if (userId != null && !userId.isBlank()) {
             tools.add(new CreativeImageTool(tenantId, userId, runId, mediaJobService, creativeProjectService));

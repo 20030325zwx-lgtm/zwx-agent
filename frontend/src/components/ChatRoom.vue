@@ -43,6 +43,9 @@
               <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ msg.thinking || '正在思考...' }}
             </div>
           </div>
+          <RunSummaryCard v-if="!msg.isUser && msg.runSummary" :summary="msg.runSummary" />
+          <ChangeSummaryCard v-if="!msg.isUser && msg.changeSummary" :summary="msg.changeSummary"
+            @open="path => emit('open-code', { tab: 'diff', path })" />
           <div v-if="!msg.isUser && citedChunks(msg).length" class="citation-preview" aria-label="引用资料">
             <div class="citation-heading"><BookOpen :size="15" /><span>引用资料</span><small>{{ citedChunks(msg).length }} 个切片</small></div>
             <button v-for="citation in citedChunks(msg)" :key="citation.key" type="button" class="citation-card" @click="openCitation(citation)">
@@ -157,6 +160,8 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import AgentTrace from './AgentTrace.vue'
 import CitationPreview from './CitationPreview.vue'
+import ChangeSummaryCard from './workspace/ChangeSummaryCard.vue'
+import RunSummaryCard from './workspace/RunSummaryCard.vue'
 import AsterAvatar from './AsterAvatar.vue'
 import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
@@ -172,7 +177,7 @@ const props = defineProps({
   knowledgeSearchAvailable: { type: Boolean, default: false },
   hideInput: { type: Boolean, default: false }
 })
-const emit = defineEmits(['send-message', 'edit-message', 'resend-message', 'continue-message', 'stop-generation'])
+const emit = defineEmits(['send-message', 'edit-message', 'resend-message', 'continue-message', 'stop-generation', 'open-code'])
 const agent = computed(() => getAgent(props.aiType))
 const quickPrompts = computed(() => agent.value.chat.quickPrompts)
 const emptyTitle = computed(() => agent.value.chat.emptyTitle)

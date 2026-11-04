@@ -26,7 +26,7 @@
           </div>
         </div>
         <div class="header-end">
-          <button v-if="activeConversation?.projectId" class="header-mcp" type="button" title="打开项目代码" @click="codeOpen = true">
+          <button v-if="activeConversation?.projectId" class="header-mcp" type="button" title="打开项目代码" @click="openCodeFiles">
             <Code2 :size="14" />
             <span>代码</span>
           </button>
@@ -73,7 +73,8 @@
                 <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" hide-input
                   knowledge-search-available attachments-enabled attachment-accept="image/jpeg,image/png,image/gif,image/webp"
                   @edit-message="cancelActiveStream" @resend-message="resendMessage"
-                  @continue-message="continueMessage" @stop-generation="stopGeneration" />
+                  @continue-message="continueMessage" @stop-generation="stopGeneration"
+                  @open-code="openCodeWorkspace" />
               </div>
             </template>
 
@@ -117,8 +118,9 @@
       </div>
       <AgentCompanion v-if="!activeRun || inspectorOpen" :state="companionState" :caption="companionCaption" />
     </main>
-    <CodeWorkspace :open="codeOpen" :conversation-id="chatId" :run-id="activeRun?.id || ''"
-      :project-name="activeProjectName" @close="codeOpen = false" />
+    <CodeWorkspace :open="codeOpen" :conversation-id="chatId" :run-id="codeRunId"
+      :project-name="activeProjectName" :initial-tab="codeInitialTab" :initial-path="codeInitialPath"
+      @close="codeOpen = false" />
     <ConfirmDialog
       :open="!!pendingDelete"
       title="删除会话"
@@ -156,7 +158,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CodeWorkspace from '../components/workspace/CodeWorkspace.vue'
 import RunInspector from '../components/workspace/RunInspector.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
-import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, listManusConversations, listManusRuns, listManusWebSources, listModelCatalog, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
+import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, getProjectCodeDiff, listManusConversations, listManusRuns, listManusToolCalls, listManusWebSources, listModelCatalog, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
 
 const permissionModes = [
   { value: 'PLAN', label: '只读规划', hint: '仅允许只读工具，写操作直接拒绝' },
@@ -225,6 +227,12 @@ const historyLoading = ref(false)
 const messagesLoading = ref(false)
 const sidebarOpen = ref(false)
 const codeOpen = ref(false)
+// 从对话流卡片进入代码工作区时直接落在「改动」页，并定位到具体文件
+const codeInitialTab = ref('files')
+const codeInitialPath = ref('')
+// 改动卡片展示的是「项目未提交改动」，进入代码工作区时也必须看项目视角，不能落到 run checkout 的差异
+const codeScope = ref('run')
+const codeRunId = computed(() => (codeScope.value === 'project' ? '' : (activeRun.value?.id || '')))
 const SIDEBAR_KEY = 'aster.super.sidebar.collapsed'
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_KEY) === 'true')
 watch(sidebarCollapsed, value => {
@@ -414,6 +422,99 @@ const parsePendingConfirmations = value => {
   }
 }
 
+// ── 对话流产物卡片：工具调用统计 + 工作区未提交改动（只标注最后一条回答） ──
+const READ_TOOL_NAMES = new Set([
+  'readProjectFile', 'readFile', 'listProjectTree', 'searchProjectCode',
+  'getProjectGitStatus', 'getProjectDiff', 'listProjectTasks',
+  'webSearch', 'scrapeWebPage', 'getCurrentTime'
+])
+// runProjectTask 结果形如：Task <id> completed|failed (exit=0, 1.2s)\n<output>
+const summarizeToolCalls = calls => {
+  const list = Array.isArray(calls) ? calls : []
+  if (!list.length) return null
+  let read = 0
+  let modify = 0
+  let run = 0
+  let other = 0
+  const tasks = []
+  list.forEach((call, index) => {
+    const name = String(call?.tool_name || call?.toolName || '')
+    if (name === 'runProjectTask') {
+      run += 1
+      const result = String(call?.result_preview || '')
+      const match = /^Task\s+(\S+)\s+(completed|failed)\s*\(exit=(-?\d+),\s*([\d.]+)s\)/.exec(result)
+      tasks.push({
+        key: `${index}-${name}`,
+        id: match?.[1] || String(call?.arguments || '').trim().slice(0, 40) || 'task',
+        ok: match ? match[2] === 'completed' : !/\bfail/i.test(result),
+        exit: match?.[3] ?? '',
+        seconds: match?.[4] ?? '',
+        output: result
+      })
+    } else if (name === 'applyProjectPatch') modify += 1
+    else if (READ_TOOL_NAMES.has(name)) read += 1
+    else other += 1
+  })
+  return { total: list.length, read, modify, run, other, tasks }
+}
+const summarizeDiff = diff => {
+  const files = Array.isArray(diff?.files) ? diff.files : []
+  if (!files.length) return null
+  return {
+    count: files.length,
+    additions: files.reduce((sum, file) => sum + (file.additions || 0), 0),
+    deletions: files.reduce((sum, file) => sum + (file.deletions || 0), 0),
+    branch: diff?.branch || '',
+    files: files.slice(0, 5)
+  }
+}
+// 注意：diff 是工作区「当前未提交改动」，不是本轮产出的快照，卡片文案不与 run 归因绑定
+const annotateRunArtifacts = async conversationId => {
+  if (!conversationId || chatId.value !== conversationId) return
+  let index = -1
+  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+    if (!messages.value[i].isUser) { index = i; break }
+  }
+  if (index < 0) return
+  const answer = messages.value[index]
+  if (!answer) return
+  const conversation = conversations.value.find(item => item.id === conversationId)
+  if (activeRun.value?.id && !answer.runSummary) {
+    try {
+      answer.runSummary = summarizeToolCalls(await listManusToolCalls(conversationId, activeRun.value.id))
+    } catch (error) {
+      console.error('Unable to load run tool summary:', error)
+    }
+  }
+  if (conversation?.projectId && !answer.changeSummary) {
+    try {
+      answer.changeSummary = summarizeDiff(await getProjectCodeDiff(conversationId))
+    } catch (error) {
+      console.error('Unable to load project diff summary:', error)
+    }
+  }
+}
+const openCodeWorkspace = payload => {
+  codeScope.value = 'project'
+  codeInitialTab.value = payload?.tab || 'diff'
+  codeInitialPath.value = payload?.path || ''
+  codeOpen.value = true
+}
+const openCodeFiles = () => {
+  codeScope.value = 'run'
+  codeInitialTab.value = 'files'
+  codeInitialPath.value = ''
+  codeOpen.value = true
+}
+// 代码工作区关闭后刷新「改动」卡片（用户可能在里面 revert 或编辑保存过）
+watch(codeOpen, open => {
+  if (open) return
+  const answer = [...messages.value].reverse().find(message => !message.isUser)
+  if (!answer) return
+  delete answer.changeSummary
+  annotateRunArtifacts(chatId.value)
+})
+
 const normalizeRun = (run, messageIndex = -1) => ({
   id: run?.id || '',
   status: run?.status || 'RUNNING',
@@ -537,6 +638,7 @@ const recoverFinishedRun = async (conversationId, run) => {
   activeAnswerIndex.value = index
   activeRun.value = { ...activeRun.value, messageIndex: index }
   await refreshWorkspaceFiles(conversationId)
+  await annotateRunArtifacts(conversationId)
   if (run.status === 'COMPLETED') settleCompanion('done', '任务完成')
   else settleCompanion('error', run.status === 'INTERRUPTED' ? '任务已中断' : '任务执行失败', 3200)
   if (index < 0) setTimeout(() => loadRunsForConversation(conversationId), 1200)
@@ -655,6 +757,7 @@ const selectConversation = async conversation => {
     hydrateFileUrls(conversation.id)
     await loadRunsForConversation(conversation.id)
     await refreshWorkspaceFiles(conversation.id)
+    await annotateRunArtifacts(conversation.id)
   } finally {
     messagesLoading.value = false
   }
@@ -882,6 +985,7 @@ const finishStream = async () => {
   hydrateFileUrls(conversationId)
   await loadRunsForConversation(conversationId)
   await refreshWorkspaceFiles(conversationId)
+  await annotateRunArtifacts(conversationId)
 }
 const cancelActiveStream = () => {
   eventSource?.close()
@@ -923,6 +1027,7 @@ const stopGeneration = async () => {
       hydrateFileUrls(chatId.value)
       await loadRunsForConversation(chatId.value)
       await refreshWorkspaceFiles(chatId.value)
+      await annotateRunArtifacts(chatId.value)
     } catch (error) { console.error('Unable to reload stopped run:', error) }
   }, 900)
 }

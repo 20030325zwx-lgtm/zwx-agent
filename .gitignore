@@ -51,3 +51,6 @@ evaluation/eval-sets/ci-intent-result.json
 /release/
 evaluation/eval-sets/task-eval-result.json
 evaluation/eval-sets/artifacts/
+
+# 本机工作区根目录（后端 APP_PROJECT_WORKSPACE_ROOT 默认 ./projects 的运行时数据）
+/projects/

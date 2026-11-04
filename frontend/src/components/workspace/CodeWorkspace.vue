@@ -197,7 +197,10 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   conversationId: { type: String, default: '' },
   runId: { type: String, default: '' },
-  projectName: { type: String, default: '' }
+  projectName: { type: String, default: '' },
+  // 从对话流卡片进入时直接落在「改动」页，并可选定位到某个文件
+  initialTab: { type: String, default: 'files' },
+  initialPath: { type: String, default: '' }
 })
 const emit = defineEmits(['close'])
 
@@ -519,10 +522,24 @@ const resetState = () => {
   treeError.value = ''
 }
 
+// 深链入口：对话流改动卡片 → 改动页（可选定位文件）
+const applyInitialSelection = () => {
+  if (props.initialTab === 'diff') tab.value = 'diff'
+  if (props.initialPath && diffFiles.value.some(file => file.path === props.initialPath)) {
+    activeDiffPath.value = props.initialPath
+  }
+}
+
 watch(() => props.open, async open => {
   if (!open) return
   resetState()
   await Promise.all([loadDir(''), loadDiff()])
+  applyInitialSelection()
+})
+
+// 面板已打开时再点其他卡片文件：直接切到对应差异
+watch([() => props.open, () => props.initialPath], ([open]) => {
+  if (open) applyInitialSelection()
 })
 
 watch(() => props.runId, async () => {

@@ -458,6 +458,7 @@ public class AgentRunService {
                 rs.getString("token_usage"),
                 rs.getString("pending_confirmation"),
                 checkpoint,
+                rs.getInt("engine_version"),
                 rs.getString("error_message"),
                 rs.getInt("resume_count"),
                 instant(rs, "created_at"),

@@ -26,10 +26,16 @@ public record AgentRun(String id,
                        String tokenUsageJson,
                        String pendingConfirmation,
                        GraphCheckpoint checkpoint,
+                       int engineVersion,
                        String errorMessage,
                        int resumeCount,
                        Instant createdAt,
                        Instant updatedAt) {
+
+    /** 是否为 A2 持久化运行底座（engine_version=2）。 */
+    public boolean engineV2() {
+        return engineVersion >= 2;
+    }
 
     public boolean resumable() {
         return "INTERRUPTED".equals(status) || "FAILED".equals(status)

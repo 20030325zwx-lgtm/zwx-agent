@@ -207,7 +207,7 @@ public class InternalEvalRunService {
                                 startedRunId, finalRagTraceJson, result);
                         resultRef.set(result);
                         latch.countDown();
-                    });
+                    }, null);
             manusGraphOrchestrator.runStream(request, evalExecutor);
             long deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(timeoutMinutes);
             while (!latch.await(500, TimeUnit.MILLISECONDS)) {

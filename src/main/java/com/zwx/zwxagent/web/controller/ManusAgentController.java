@@ -161,6 +161,12 @@ public class ManusAgentController {
 
     @Resource
     private RunQuotaService runQuotaService;
+    @Resource
+    private com.zwx.zwxagent.agent.execution.AgentRunStateService agentRunStateService;
+    @Resource
+    private com.zwx.zwxagent.agent.execution.store.AgentRunInputStore agentRunInputStore;
+    @Resource
+    private com.zwx.zwxagent.agent.execution.AgentExecutionTraceService agentExecutionTraceService;
 
     @Resource
     private WebSourceService webSourceService;
@@ -383,7 +389,8 @@ public class ManusAgentController {
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
                 conversationId, actor.tenantId(), actor.userId(), runChatModel, agentMessage, historyContext, availableTools, knowledgeContext,
                 knowledge.trace() == null ? null : ragTraceJson, prefaceActivity, runId, effectivePermissionMode.name(), null, null, cleanup,
-                result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result));
+                result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result),
+                null);
         ManusGraphOrchestrator.ManusRunHandle handle;
         try {
             handle = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
@@ -491,10 +498,17 @@ public class ManusAgentController {
 
     @PostMapping("/manus/conversations/{conversationId}/runs/{runId}/cancel")
     public Map<String, Object> cancelManusRun(CurrentActor actor, @PathVariable String conversationId,
-                                              @PathVariable String runId) {
+                                              @PathVariable String runId,
+                                              @org.springframework.web.bind.annotation.RequestBody(required = false) RunControlBody body) {
         agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        // A2：engine_version=2 的 run 走持久化控制请求（安全点生效），旧引擎维持在线取消
+        var run = agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId);
+        if (run.isPresent() && run.get().engineV2()) {
+            return controlRun(actor, conversationId, runId, body,
+                    com.zwx.zwxagent.agent.execution.AgentRunStateService.CONTROL_CANCEL_REQUESTED);
+        }
         return Map.of("cancelled", manusGraphOrchestrator.cancel(runId));
     }
 
@@ -543,6 +557,184 @@ public class ManusAgentController {
     }
 
     public record ConfirmationDecisionRequest(String toolName, String decision) {
+    }
+
+    // ------------------------------------------------------------------
+    // 工作智能体整改 A2：engine_version=2 持久化运行接口（方案 §9）
+    // 启动后由 AgentRunDispatcher 派发执行；SSE 仅为观察通道，断开不影响执行。
+    // ------------------------------------------------------------------
+
+    public record StartRunBody(String message, String modelRowId, String permissionMode,
+                               String clientRequestId, Boolean webSearch, Boolean knowledgeSearch) {
+    }
+
+    public record RunControlBody(Long expectedVersion, String requestId) {
+    }
+
+    public record RunAnswerBody(String answer, String requestId) {
+    }
+
+    /** 启动 v2 运行：幂等（clientRequestId），立即返回 202，执行由派发器认领。 */
+    @PostMapping("/manus/conversations/{conversationId}/runs")
+    public java.util.Map<String, Object> startManusRunV2(
+            com.zwx.zwxagent.platform.security.CurrentActor actor,
+            @PathVariable String conversationId,
+            @org.springframework.web.bind.annotation.RequestBody StartRunBody body) {
+        if (body == null || body.message() == null || body.message().isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "message is required");
+        }
+        if (body.clientRequestId() == null || body.clientRequestId().isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "clientRequestId is required");
+        }
+        var existingRun = agentRunStateService.findByStartRequestKey(actor.tenantId(), actor.userId(),
+                body.clientRequestId());
+        if (existingRun.isPresent()) {
+            // 启动幂等：重复请求返回既有 run，不再创建新的用户轮次
+            return java.util.Map.of("runId", existingRun.get(), "duplicated", true);
+        }
+        runQuotaService.checkRunAllowed(actor.userId());
+        agentConversationService.ensureConversation(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
+                conversationId, SUPER_DEFAULT_TITLE, body.message());
+        long userMessageId = agentConversationService.startUserTurn(actor.tenantId(), actor.userId(),
+                SUPER_AGENT_KEY, conversationId, body.message(), List.of(), body.clientRequestId());
+        String historyContext = agentConversationService
+                .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
+                .filter(historyMessage -> historyMessage.id() != userMessageId)
+                .map(historyMessage -> ("USER".equals(historyMessage.role()) ? "用户" : "助手")
+                        + ": " + historyMessage.content())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        String knowledgeContext = "";
+        if (Boolean.TRUE.equals(body.knowledgeSearch())) {
+            knowledgeContext = agentKnowledgeRagService
+                    .retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, body.message()).context();
+        }
+        String permissionMode = body.permissionMode() == null || body.permissionMode().isBlank()
+                ? com.zwx.zwxagent.capability.tools.PermissionMode.DEFAULT.name() : body.permissionMode();
+        var command = new com.zwx.zwxagent.agent.execution.AgentRunStateService.StartCommand(
+                conversationId, actor.tenantId(), actor.userId(), userMessageId, body.message(),
+                historyContext, knowledgeContext, permissionMode, "INTERACTIVE", body.clientRequestId());
+        var startResult = agentRunStateService.start(command, null);
+        long assistantMessageId = agentConversationService.appendAssistantReply(actor.tenantId(), actor.userId(),
+                SUPER_AGENT_KEY, conversationId, userMessageId, "", "IN_PROGRESS", startResult.runId(), null, null);
+        return java.util.Map.of(
+                "runId", startResult.runId(),
+                "userMessageId", userMessageId,
+                "assistantMessageId", assistantMessageId,
+                "duplicated", startResult.duplicated());
+    }
+
+    /** v2 运行快照：状态、控制请求、事件游标、待处理输入。 */
+    @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/snapshot")
+    public java.util.Map<String, Object> manusRunSnapshotV2(
+            com.zwx.zwxagent.platform.security.CurrentActor actor,
+            @PathVariable String conversationId, @PathVariable String runId) {
+        com.zwx.zwxagent.agent.execution.AgentRun run = agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        return java.util.Map.of(
+                "run", AgentRunView.from(run, agentRunService.assignments(runId), null),
+                "eventCursor", agentRunStateService.eventCursor(runId),
+                "stateVersion", agentRunStateService.stateVersion(runId, actor.tenantId(), actor.userId()).orElse(0L),
+                "pendingInputs", agentRunInputStore.pendingOfRun(actor.tenantId(), actor.userId(), runId));
+    }
+
+    /** 持久化事件分页（keyset 游标）：跨重启回放的权威来源。 */
+    @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/events")
+    public java.util.Map<String, Object> manusRunEventsV2(
+            com.zwx.zwxagent.platform.security.CurrentActor actor,
+            @PathVariable String conversationId, @PathVariable String runId,
+            @RequestParam(defaultValue = "0") long afterSeq,
+            @RequestParam(defaultValue = "100") int limit) {
+        agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        var events = agentExecutionTraceService.listAfter(runId, actor.tenantId(), actor.userId(),
+                afterSeq, limit);
+        long nextCursor = events.isEmpty() ? afterSeq : events.get(events.size() - 1).sequence();
+        return java.util.Map.of("events", events, "nextCursor", nextCursor,
+                "hasMore", events.size() >= Math.max(1, Math.min(limit, 500)));
+    }
+
+    /** v2 暂停：写入控制请求，执行器在安全点停机（正在运行的动作不立即中断）。 */
+    @PostMapping("/manus/conversations/{conversationId}/runs/{runId}/pause")
+    public java.util.Map<String, Object> pauseManusRunV2(
+            com.zwx.zwxagent.platform.security.CurrentActor actor,
+            @PathVariable String conversationId, @PathVariable String runId,
+            @org.springframework.web.bind.annotation.RequestBody(required = false) RunControlBody body) {
+        return controlRun(actor, conversationId, runId, body,
+                com.zwx.zwxagent.agent.execution.AgentRunStateService.CONTROL_PAUSE_REQUESTED);
+    }
+
+    private java.util.Map<String, Object> controlRun(
+            com.zwx.zwxagent.platform.security.CurrentActor actor, String conversationId, String runId,
+            RunControlBody body, String controlState) {
+        agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        boolean accepted = agentRunStateService.requestControl(runId, actor.tenantId(), actor.userId(),
+                controlState, body == null ? null : body.expectedVersion());
+        if (!accepted) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "Run is not in a controllable phase");
+        }
+        return java.util.Map.of("accepted", true, "controlState", controlState);
+    }
+
+    /** v2 恢复：用户暂停后的 run 重新入队（从检查点继续，不新建 run）。 */
+    @PostMapping("/manus/conversations/{conversationId}/runs/{runId}/resume")
+    public java.util.Map<String, Object> resumeManusRunV2(
+            com.zwx.zwxagent.platform.security.CurrentActor actor,
+            @PathVariable String conversationId, @PathVariable String runId) {
+        agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        if (!agentRunStateService.resume(runId, actor.tenantId(), actor.userId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "Run is not resumable in v2 state machine");
+        }
+        return java.util.Map.of("accepted", true, "phase", "QUEUED");
+    }
+
+    /** v2 同任务续答：答复只消费一次，原 run 重新入队，不新建 run（方案 §5.3）。 */
+    @PostMapping("/manus/conversations/{conversationId}/runs/{runId}/inputs/{inputId}/answer")
+    public java.util.Map<String, Object> answerManusRunV2(
+            com.zwx.zwxagent.platform.security.CurrentActor actor,
+            @PathVariable String conversationId, @PathVariable String runId, @PathVariable java.util.UUID inputId,
+            @org.springframework.web.bind.annotation.RequestBody RunAnswerBody body) {
+        com.zwx.zwxagent.agent.execution.AgentRun run = agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        if (body == null || body.answer() == null || body.answer().isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "answer is required");
+        }
+        if (body.requestId() == null || body.requestId().isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "requestId is required");
+        }
+        var question = agentRunInputStore.pendingOfRun(actor.tenantId(), actor.userId(), runId).stream()
+                .filter(input -> input.id().equals(inputId)
+                        && com.zwx.zwxagent.agent.execution.store.AgentRunInputStore.KIND_QUESTION.equals(input.kind()))
+                .findFirst()
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.CONFLICT, "No pending question with this id"));
+        var answerInput = agentRunInputStore.record(actor.tenantId(), actor.userId(), conversationId, runId,
+                question.stepId(), com.zwx.zwxagent.agent.execution.store.AgentRunInputStore.KIND_ANSWER,
+                java.util.Map.of("answer", body.answer(), "questionInputId", inputId.toString()),
+                body.requestId(), inputId, null);
+        if (!agentRunInputStore.accept(actor.tenantId(), actor.userId(), question.id(), question.version())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "Question already answered");
+        }
+        agentRunInputStore.markApplied(actor.tenantId(), actor.userId(), answerInput.id(), null);
+        if (!agentRunStateService.requeueAfterAnswer(runId, actor.tenantId(), actor.userId(), body.answer())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "Run is not waiting for input");
+        }
+        return java.util.Map.of("accepted", true, "answerInputId", answerInput.id().toString(),
+                "runId", run.id());
     }
 
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}/resume")
@@ -605,7 +797,7 @@ public class ManusAgentController {
                         com.zwx.zwxagent.capability.tools.PermissionMode.parse(run.permissionMode()).name(),
                         resumeCheckpoint, resumeFrom, cleanup,
                         result -> completeManusRun(actor, conversationId, run.userMessageId(), runId,
-                                ragTraceJson, run.assistantMessageId(), result));
+                                ragTraceJson, run.assistantMessageId(), result), null);
         com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunHandle handle;
         try {
             handle = manusGraphOrchestrator.runStream(runRequest, agentExecutor);

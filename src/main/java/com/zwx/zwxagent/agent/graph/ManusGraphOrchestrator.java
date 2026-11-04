@@ -275,7 +275,9 @@ public class ManusGraphOrchestrator {
                                   GraphCheckpoint resumeCheckpoint,
                                   String resumeFrom,
                                   Runnable cleanup,
-                                  Consumer<ManusRunResult> completionHandler) {
+                                  Consumer<ManusRunResult> completionHandler,
+                                  /** v2 派发路径：节点安全点轮询 control_state（暂停/取消），空则仅看本地 stopped。 */
+                                  java.util.function.BooleanSupplier controlStopCheck) {
     }
 
     public record ManusRunResult(String answer, List<String> activities, boolean completed,
@@ -429,7 +431,10 @@ public class ManusGraphOrchestrator {
             };
             ToolCallback[] tools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(), toolCallLedger,
                     id -> stream.send("tool-call", String.valueOf(id)));
-            RunContext context = RunContext.of(tools, request.knowledgeContext(), stopped::get,
+            java.util.function.BooleanSupplier safeStop = request.controlStopCheck() == null
+                    ? stopped::get
+                    : () -> stopped.get() || request.controlStopCheck().getAsBoolean();
+            RunContext context = RunContext.of(tools, request.knowledgeContext(), safeStop,
                     request.tenantId(), request.userId(), request.conversationId(), chunk -> {
                         // 先保留已生成内容，再尝试推送；客户端断开后仍能把草稿落库。
                         streamedAnswer.append(chunk);

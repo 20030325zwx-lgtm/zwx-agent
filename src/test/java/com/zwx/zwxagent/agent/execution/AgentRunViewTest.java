@@ -15,7 +15,7 @@ class AgentRunViewTest {
     private AgentRun run(GraphCheckpoint checkpoint) {
         return new AgentRun("run-1", "conv-1", "tenant-1", "user-1", "super", 10L, 11L,
                 "RUNNING", "WORKING", null, null, 0, null, null,
-                "EDIT", "整理手册", "", "", null, "{\"promptTokens\":4200}", null, checkpoint, null, 0,
+                "EDIT", "整理手册", "", "", null, "{\"promptTokens\":4200}", null, checkpoint, 1, null, 0,
                 Instant.parse("2026-10-22T10:00:00Z"), Instant.parse("2026-10-22T10:01:00Z"));
     }
 
@@ -57,7 +57,7 @@ class AgentRunViewTest {
                 List.of(), List.of(), 0, "unverified", "", "", "");
         AgentRun run = new AgentRun("run-1", "conv-1", "tenant-1", "user-1", "super", 10L, 11L,
                 "INTERRUPTED", "STOPPED", null, null, 0, null, null,
-                "EDIT", "整理手册", "", "", null, null, null, checkpoint, "boom", 2,
+                "EDIT", "整理手册", "", "", null, null, null, checkpoint, 1, "boom", 2,
                 Instant.parse("2026-10-22T10:00:00Z"), Instant.parse("2026-10-22T10:01:00Z"));
 
         AgentRunSummary summary = AgentRunSummary.from(run);

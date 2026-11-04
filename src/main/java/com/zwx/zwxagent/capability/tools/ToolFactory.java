@@ -35,6 +35,7 @@ public class ToolFactory {
     private final com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService;
     private final ArtifactClient artifactClient;
     private final com.zwx.zwxagent.agent.execution.AgentRunService agentRunService;
+    private final com.zwx.zwxagent.agent.execution.store.AgentRunInputStore agentRunInputStore;
 
     public ToolFactory(ToolSandbox sandbox,
                        com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService,
@@ -61,7 +62,8 @@ public class ToolFactory {
                        @Value("${app.artifact.token:}") String artifactToken,
                        @Value("${app.artifact.timeout-seconds:120}") int artifactTimeoutSeconds,
                        @Value("${app.artifact.max-bytes:52428800}") int artifactMaxBytes,
-                       com.zwx.zwxagent.agent.execution.AgentRunService agentRunService) {
+                       com.zwx.zwxagent.agent.execution.AgentRunService agentRunService,
+                       com.zwx.zwxagent.agent.execution.store.AgentRunInputStore agentRunInputStore) {
         this.sandbox = sandbox;
         this.workspaceService = workspaceService;
         this.projectWorkspaceService = projectWorkspaceService;
@@ -86,6 +88,7 @@ public class ToolFactory {
         this.creativeProjectService = creativeProjectService;
         this.artifactClient = new ArtifactClient(artifactBaseUrl, artifactToken, artifactTimeoutSeconds, artifactMaxBytes);
         this.agentRunService = agentRunService;
+        this.agentRunInputStore = agentRunInputStore;
     }
 
     /** 工作区签名（design/plans/09 批次 A）：工具 workDir 来自统一工作区目录模型。 */
@@ -97,7 +100,7 @@ public class ToolFactory {
     public ToolCallback[] createTools(String tenantId, String agentKey, String conversationId,
                                       boolean webSearchEnabled) {
         Path workDir = workspaceService.conversationRoot(tenantId, agentKey, conversationId);
-        return buildTools(workDir, tenantId, null, webSearchEnabled, null, null, null);
+        return buildTools(workDir, tenantId, null, null, webSearchEnabled, null, null, null);
     }
 
     public ToolCallback[] createTools(String tenantId, String userId, String agentKey, String conversationId,
@@ -111,7 +114,7 @@ public class ToolFactory {
         var project = projectWorkspaceService.resolveForConversation(tenantId, userId, conversationId).orElse(null);
         var runWorkspace = runId == null || runId.isBlank() ? null
                 : runWorkspaceService.resolve(tenantId, userId, conversationId, runId).orElse(null);
-        return buildTools(workDir, tenantId, userId, webSearchEnabled, project, runId, runWorkspace);
+        return buildTools(workDir, tenantId, userId, conversationId, webSearchEnabled, project, runId, runWorkspace);
     }
 
     /** 旧签名（scope 目录）：保留给测试与 legacy 调用。 */
@@ -121,10 +124,11 @@ public class ToolFactory {
 
     public ToolCallback[] createTools(String scope, boolean webSearchEnabled) {
         Path workDir = sandbox.scopeDir(scope);
-        return buildTools(workDir, null, null, webSearchEnabled, null, null, null);
+        return buildTools(workDir, null, null, null, webSearchEnabled, null, null, null);
     }
 
-    private ToolCallback[] buildTools(Path workDir, String tenantId, String userId, boolean webSearchEnabled,
+    private ToolCallback[] buildTools(Path workDir, String tenantId, String userId, String conversationId,
+                                      boolean webSearchEnabled,
                                       com.zwx.zwxagent.platform.workspace.ResolvedProjectWorkspace project,
                                       String runId,
                                       com.zwx.zwxagent.platform.workspace.RunWorkspaceContext runWorkspace) {
@@ -143,7 +147,7 @@ public class ToolFactory {
         }
         // 结构化提问：run 上下文存在时才注册（旧测试路径/无 run 场景不出现）
         if (runId != null && !runId.isBlank() && agentRunService != null) {
-            tools.add(new AskHumanTool(agentRunService, runId));
+            tools.add(new AskHumanTool(agentRunService, agentRunInputStore, runId, tenantId, userId, conversationId));
         }
         tools.add(new CurrentTimeTool());
         if (userId != null && !userId.isBlank()) {

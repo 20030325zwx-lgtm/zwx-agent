@@ -1,5 +1,8 @@
 # 设计文档
 
+- [工作 Agent 整改详细方案：执行、交互、目标与自动化（含数据库变更）](./2026-11-05-work-agent-remediation-plan.md)
+- [自动化模块改为可配置定时任务：产品与实施规划](./2026-11-04-scheduled-tasks-module.md)
+
 - [创作台画布化与工作流融合整改方案](./2026-11-04-creative-canvas-workflow-integration.md)
 - [视频提示词优化师：内置技能与固化规则](./2026-11-04-video-prompt-optimizer-skill.md)
 - [M1.5 智能体与创作模块融合：详细设计](./2026-11-02-creative-agent-integration.md)

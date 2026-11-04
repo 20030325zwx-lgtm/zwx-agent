@@ -13,6 +13,11 @@
 - store 包四个读写服务（DAG 校验/CAS/幂等消费/检查点哈希/证据验证），13 项测试。
 - V33 唯一键未删（按方案切换条件留待旧引擎退役）。
 
+### A2 收尾（提交 4a3b3b4，已推送）
+- 账本 invocation 身份路径：beginInvocation 写入 invocation_key/step_id，唯一索引防重；并发在途 PENDING 有界等待（约 5 秒）且不改写账本为 UNKNOWN（方案 §5.2）；V33 旧键冲突优雅回退读取（生产行为不回归）。
+- ToolCallWorkerContext 增加线程内调用序号：invocation_key = workerKey#call-N，步骤整体重放时序号一致（重放幂等），有意重复调用获得新身份。
+- IdempotentToolCallback 切换 invocation 路径；回归测试：账本 3 项 + 回调适配 5 项。
+
 ### A2（提交 beebca0）
 - 迁移 V40：agent_tool_confirmation 操作级授权列（operation_key/scope/consumed_at 等）。
 - AgentRunStateService（engine_version=2 状态机）：启动幂等、SKIP LOCKED 认领 + fencing、租约心跳/回收（有界重试→BLOCKED）、control_state 暂停/取消、排队期控制请求直接终态化、终态 CAS、同任务续答（答复并入 history_context，不重写 input）。
@@ -35,7 +40,7 @@
 
 ## 未完成（后续批次，按依赖序）
 
-- A2 收尾项（已明确推迟）：invocation_key/operation_key 实际写入账本（列与索引已就绪）与 PENDING 有界等待；确认粒度从 (run,tool) 切到 operation_key+参数指纹；V33 约束删除（旧引擎退役后）；ManusRunRequest 装配补 MCP 工具与知识检索（v2 装配当前为默认模型+项目工具+会话历史）。
+- A2 剩余项（已明确推迟）：确认粒度从 (run,tool) 切到 operation_key+参数指纹（确认意图先行落库，§7.5 Java 侧）；V33 约束删除（旧引擎退役后的清理批次；删除后同 worker 有意重复调用才真正解除物理去重）；ManusRunRequest 装配补 MCP 工具与知识检索（v2 装配当前为默认模型+项目工具+会话历史）。
 - B1：命令会话、上下文引用、STEER/NEXT_TURN 输入队列接入引擎。
 - B2：agent_artifact_change/restore + 轮次审阅（最高风险：撤销的崩溃补偿）。
 - C1：goal/iteration + profile/version；C2：scheduled_task/run（定时任务规划文档的前置已就绪）。

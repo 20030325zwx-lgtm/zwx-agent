@@ -563,6 +563,9 @@ public class CreativeSkillService {
             Map<String, Object> plan = new LinkedHashMap<>();
             plan.put("summary", summary);
             plan.put("prompt", planPrompt);
+            // 可选字段：优化类技能用它说明实际改动，其他技能不返回时为空数组。
+            plan.put("changes", CreativeJson.readStringList(
+                    CreativeJson.toJson(node.path("changes"))));
             plan.put("warnings", CreativeJson.readStringList(
                     CreativeJson.toJson(node.path("warnings"))));
             plan.put("missing", CreativeJson.readStringList(

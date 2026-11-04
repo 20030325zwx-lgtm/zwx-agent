@@ -9,6 +9,7 @@ import com.zwx.zwxagent.creative.domain.VideoSceneRecord;
 import com.zwx.zwxagent.creative.domain.VideoShotRecord;
 import com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository;
 import com.zwx.zwxagent.creative.story.StoryContentService;
+import com.zwx.zwxagent.creative.support.VideoPromptGuide;
 import com.zwx.zwxagent.creative.support.CreativeJson;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
@@ -44,18 +45,14 @@ public class PromptOptimizationService {
             只输出 JSON：{"prompt":"改写后的提示词"}，不要输出解释或 Markdown。
             """;
 
-    /** 视频提示词策略（依据火山 Seedance 2.0 提示词指南，2026-11-01 调研）。 */
-    private static final String SYSTEM_VIDEO_PROMPT = """
-            你是文生视频提示词编辑。把镜头意图改写为一段可直接提交给视频生成模型的中文提示词，规则：
-            1. 动作具体到部位、方向、速度与幅度（手指收紧/脚步停住/缓慢转头），用可见动作表达情绪；
-            2. 单镜头只用一种主运镜（推/拉/摇/移/跟/固定选其一），景别与角度明确；
-            3. 按事件顺序描述：起始姿态 → 主要动作 → 结束状态；单镜头负荷不要过载；
-            4. 结尾说明与下一镜头的衔接方向（如“视线固定在画面右侧”）；
-            5. 只描述画面内可见内容：身份背景/心理/伏笔不写入；声音未确认就不写声音；
-            6. 不用“高清 8K”等画质承诺词；不添加用户未要求的水印品牌；
-            7. 输出长度不超过 500 字。
-            只输出 JSON：{"optimizedText":"提交文本","changes":["改了什么"],"suggestions":["可选建议"],"missing":["缺失待补项"]}，
-            不要输出解释或 Markdown。
+    /**
+     * 视频提示词策略（2026-11-04 起）：复用 {@link VideoPromptGuide} 的七要素固化规则，
+     * 与内置「视频提示词优化师」技能同一套标准，避免按钮与技能给出两套口径；仅输出契约不同。
+     */
+    private static final String SYSTEM_VIDEO_PROMPT = VideoPromptGuide.RUBRIC + """
+
+            只输出 JSON：{"optimizedText":"提交文本","changes":["实际改动"],"suggestions":["可选建议"],"missing":["缺失待补项"]}，
+            不要输出解释或 Markdown。changes 每条以“主体/动作/环境/镜头/光线/风格/质感/删改/保留”开头。
             """;
 
     private static final String SYSTEM_VIDEO_STORY = """

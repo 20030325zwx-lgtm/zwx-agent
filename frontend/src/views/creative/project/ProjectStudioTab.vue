@@ -170,6 +170,9 @@
             <span class="cr-field-help">{{ skillRun.skillName }}</span>
           </div>
           <p v-if="planSummary" class="suggestion-text">{{ planSummary }}</p>
+          <ul v-if="planChanges.length" class="skill-changes" aria-label="本次优化点">
+            <li v-for="change in planChanges" :key="change">{{ change }}</li>
+          </ul>
           <textarea v-model="planPrompt" class="cr-textarea" rows="4" maxlength="8000"
                     aria-label="方案提示词（可编辑）" />
           <p v-for="warning in planWarnings" :key="warning" class="cr-field-help skill-warning">注意：{{ warning }}</p>
@@ -413,6 +416,7 @@ const skillOptions = computed(() => [
 ])
 const selectedSkill = computed(() => skills.value.find(skill => skill.slug === skillSlug.value) || null)
 const planSummary = computed(() => skillRun.value?.plan?.summary || '')
+const planChanges = computed(() => skillRun.value?.plan?.changes || [])
 const planWarnings = computed(() => skillRun.value?.plan?.warnings || [])
 const planMissing = computed(() => skillRun.value?.plan?.missing || [])
 // 多镜头方案（P1 MVP）：shots ≥2 时走逐镜生成，每镜独立任务
@@ -1068,6 +1072,16 @@ onBeforeUnmount(() => {
 
 .skill-block { border-top: 1px solid var(--wb-border); padding-top: var(--wb-space-3); }
 .skill-warning { color: var(--wb-warning); margin: 0; }
+.skill-changes {
+  margin: 4px 0 6px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--wb-text-2);
+  font-size: var(--wb-fs-caption);
+  line-height: var(--wb-lh-caption);
+}
 .skill-plan textarea { margin-top: 6px; }
 .skill-plan-failed { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .skill-plan-failed .cr-error { margin: 0; }

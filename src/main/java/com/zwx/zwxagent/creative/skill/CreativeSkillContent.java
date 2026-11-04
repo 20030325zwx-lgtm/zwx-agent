@@ -1,5 +1,7 @@
 package com.zwx.zwxagent.creative.skill;
 
+import com.zwx.zwxagent.creative.support.VideoPromptGuide;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -35,6 +37,18 @@ final class CreativeSkillContent {
 
             用户约束与既有内容冲突时，如实列入 missing，不要静默取舍。
             """ + "\n\n" + PLAN_OUTPUT_CONTRACT;
+
+    /** 优化师专用契约：多出 changes（实际改动），便于用户对照；禁止输出 shots，避免误走逐镜确认。 */
+    private static final String OPTIMIZER_OUTPUT_CONTRACT = """
+            输出必须只包含一个 JSON 对象，不要输出解释或 Markdown 代码块：
+            {"summary":"一句话诊断结论（最缺什么、改完适合什么场景）","prompt":"优化后的单镜头提示词",
+             "changes":["主体：补充了……","镜头：把推近改为固定……"],
+             "warnings":["原文包含两个核心动作，建议拆成两镜"],"missing":["服装未确认"]}
+            changes 只写实际做过的修改，每条以“主体/动作/环境/镜头/光线/风格/质感/删改/保留”开头；
+            不要输出 shots 字段，多镜头拆分建议写进 warnings。""";
+
+    private static final String VIDEO_PROMPT_OPTIMIZER = VideoPromptGuide.RUBRIC + "\n\n"
+            + OPTIMIZER_OUTPUT_CONTRACT;
 
     private static final String ONE_IMAGE_SHORT = """
             你是「一图短片」导演。用户会提供一张首帧图片和一句想法，你产出单镜头视频方案。
@@ -141,6 +155,10 @@ final class CreativeSkillContent {
                     "把目标与风格约束改写为单镜头视频提示词：动作具体、单一运镜、按起始-动作-收束组织。",
                     "DIRECTING", "PROMPT", "TEXT", "TEXT",
                     List.of("CHAT"), VIDEO_PROMPT_DIRECTOR),
+            new Seed("video-prompt-optimizer", "视频提示词优化师",
+                    "把已写好的视频提示词按七要素改写：补全主体/动作/环境/镜头/光线/风格/质感，收敛多动作与画质承诺。",
+                    "DIRECTING", "PROMPT", "TEXT", "TEXT",
+                    List.of("CHAT"), VIDEO_PROMPT_OPTIMIZER),
             new Seed("one-image-short", "一图短片",
                     "从一张首帧图出发设计单镜头运动方案，生成一段短视频。",
                     "SHORT_FORM", "GENERATE", "TEXT+IMAGE", "VIDEO",

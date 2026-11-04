@@ -213,4 +213,122 @@ class CreativeCanvasServiceTest {
         Assertions.assertThrows(IllegalArgumentException.class,
                 () -> CreativeCanvasService.prepareGraph(graph, "node", "video-1"));
     }
+
+    @Test
+    void upToIncludesAncestorChainAndExcludesSiblingBranches() throws Exception {
+        var graph = readGraph("""
+                {"nodes":[
+                  {"id":"a","type":"image_generate","data":{"label":"A","prompt":"第一幕","modelRowId":7}},
+                  {"id":"b","type":"image_generate","data":{"label":"B","prompt":"第二幕","modelRowId":7}},
+                  {"id":"c","type":"video_generate","data":{"label":"C","prompt":"成片","modelRowId":9}},
+                  {"id":"d","type":"image_generate","data":{"label":"D","prompt":"旁支","modelRowId":7}}],
+                 "edges":[{"source":"a","target":"b","sourceHandle":"flow-out","targetHandle":"flow-in"},
+                   {"source":"b","target":"c","sourceHandle":"flow-out","targetHandle":"flow-in"},
+                   {"source":"a","target":"d","sourceHandle":"flow-out","targetHandle":"flow-in"}]}
+                """);
+        Assertions.assertEquals(java.util.Set.of("a", "b", "c"),
+                CreativeCanvasService.prepareGraph(graph, "up_to", "c").nodeIds());
+        Assertions.assertTrue(CreativeCanvasService.requiredExternalParents(graph, "up_to", "c").isEmpty());
+        Assertions.assertEquals(java.util.Set.of("a", "b"),
+                CreativeCanvasService.requiredExternalParents(graph, "up_to", "c", java.util.Set.of("a", "b")));
+    }
+
+    @Test
+    void upToSkipsSucceededAncestorsReusesTheirOutputsAndRerunsTheRest() throws Exception {
+        var graph = readGraph("""
+                {"nodes":[
+                  {"id":"a","type":"image_generate","data":{"label":"首图","prompt":"猫","modelRowId":7}},
+                  {"id":"b","type":"image_generate","data":{"label":"重跑","prompt":"改色","modelRowId":7}},
+                  {"id":"c","type":"video_generate","data":{"label":"视频","prompt":"推镜","modelRowId":9}}],
+                 "edges":[{"source":"a","target":"b","sourceHandle":"media-out","targetHandle":"image-in"},
+                   {"source":"b","target":"c","sourceHandle":"flow-out","targetHandle":"flow-in"}]}
+                """);
+        var jdbc = mock(JdbcTemplate.class);
+        var workflows = mock(WorkflowService.class);
+        var service = spy(new CreativeCanvasService(jdbc, mapper, mock(CreativeProjectService.class), workflows));
+        var actor = new CurrentActor("user", "tenant", "test", Role.USER);
+        var project = java.util.UUID.randomUUID();
+        doReturn(new CreativeCanvasService.CanvasView(project, graph, mapper.createObjectNode(), 1, null))
+                .when(service).get(actor, project);
+        var statuses = new java.util.HashMap<>(java.util.Map.of("a", "SUCCEEDED", "b", "FAILED"));
+        when(jdbc.queryForList(anyString(), any(Object[].class))).thenAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            if (args.length == 6) {
+                String key = (String) args[4];
+                return java.util.List.of(java.util.Map.of("status", statuses.getOrDefault(key, "PENDING"),
+                        "message", "", "output", "{\"assetId\":\"00000000-0000-0000-0000-00000000000a\"}"));
+            }
+            return java.util.List.of(java.util.Map.of("media_type", "IMAGE", "status", "READY"));
+        });
+        var request = new CreativeCanvasService.RunRequest("up_to", "c", 1L, "test");
+        Assertions.assertEquals(2, service.validateRun(actor, project, request).executableNodes());
+
+        statuses.put("a", "RUNNING");
+        var running = Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.validateRun(actor, project, request));
+        Assertions.assertTrue(running.getMessage().contains("首图"));
+        Assertions.assertTrue(running.getMessage().contains("生成中"));
+        statuses.put("a", "SUCCEEDED");
+
+        var verified = service.withVerifiedParents(actor, project, graph, "up_to", "c", java.util.Set.of("a"));
+        for (var node : verified.path("nodes")) {
+            if ("a".equals(node.path("id").asText())) {
+                Assertions.assertEquals("00000000-0000-0000-0000-00000000000a",
+                        node.path("data").path("selectedAssetId").asText());
+            }
+        }
+        var prepared = CreativeCanvasService.prepareGraph(verified, "up_to", "c", java.util.Set.of("a"));
+        Assertions.assertEquals(java.util.Set.of("b", "c"), prepared.nodeIds());
+    }
+
+    @Test
+    void upToAlwaysRerunsSelectedNodeEvenWhenItAlreadySucceeded() throws Exception {
+        var graph = readGraph("""
+                {"nodes":[
+                  {"id":"a","type":"image_generate","data":{"label":"首图","prompt":"猫","modelRowId":7}},
+                  {"id":"b","type":"video_generate","data":{"label":"视频","prompt":"推镜","modelRowId":9}}],
+                 "edges":[{"source":"a","target":"b","sourceHandle":"text-out","targetHandle":"text-in"}]}
+                """);
+        var jdbc = mock(JdbcTemplate.class);
+        var workflows = mock(WorkflowService.class);
+        var service = spy(new CreativeCanvasService(jdbc, mapper, mock(CreativeProjectService.class), workflows));
+        var actor = new CurrentActor("user", "tenant", "test", Role.USER);
+        var project = java.util.UUID.randomUUID();
+        doReturn(new CreativeCanvasService.CanvasView(project, graph, mapper.createObjectNode(), 1, null))
+                .when(service).get(actor, project);
+        when(jdbc.queryForList(anyString(), any(Object[].class))).thenAnswer(invocation ->
+                java.util.List.of(java.util.Map.of("status", "SUCCEEDED", "message", "", "output",
+                        "{\"assetId\":\"00000000-0000-0000-0000-00000000000a\"}")));
+        var request = new CreativeCanvasService.RunRequest("up_to", "b", 1L, "test");
+        Assertions.assertEquals(1, service.validateRun(actor, project, request).executableNodes());
+    }
+
+    @Test
+    void upToRejectsWaitingSelectionAncestorForRerun() throws Exception {
+        var graph = readGraph("""
+                {"nodes":[
+                  {"id":"a","type":"image_generate","data":{"label":"首图","prompt":"猫","modelRowId":7}},
+                  {"id":"b","type":"video_generate","data":{"label":"视频","prompt":"推镜","modelRowId":9}}],
+                 "edges":[{"source":"a","target":"b","sourceHandle":"media-out","targetHandle":"image-in"}]}
+                """);
+        var jdbc = mock(JdbcTemplate.class);
+        var workflows = mock(WorkflowService.class);
+        var service = spy(new CreativeCanvasService(jdbc, mapper, mock(CreativeProjectService.class), workflows));
+        var actor = new CurrentActor("user", "tenant", "test", Role.USER);
+        var project = java.util.UUID.randomUUID();
+        doReturn(new CreativeCanvasService.CanvasView(project, graph, mapper.createObjectNode(), 1, null))
+                .when(service).get(actor, project);
+        when(jdbc.queryForList(anyString(), any(Object[].class))).thenAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            if (args.length == 6) {
+                return java.util.List.of(java.util.Map.of("status", "RUNNING",
+                        "message", "等待选择一个候选结果", "output", ""));
+            }
+            return java.util.List.of(java.util.Map.of("media_type", "IMAGE", "status", "READY"));
+        });
+        var error = Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.validateRun(actor, project, new CreativeCanvasService.RunRequest("up_to", "b", 1L, "test")));
+        Assertions.assertTrue(error.getMessage().contains("等待选择一个候选结果"));
+        verifyNoInteractions(workflows);
+    }
 }

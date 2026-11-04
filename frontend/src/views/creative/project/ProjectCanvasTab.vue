@@ -10,7 +10,7 @@
         <button class="canvas-icon" type="button" title="撤销" :disabled="!undoStack.length" @click="undo"><Undo2 :size="16" /></button>
         <button class="canvas-icon" type="button" title="适应画布" @click="fitView"><Scan :size="16" /></button>
         <span class="canvas-divider" />
-        <select v-model="runScope" class="run-scope" aria-label="运行范围"><option value="node">当前节点</option><option value="from_here">从此继续</option><option value="all">整条流程</option></select>
+        <select v-model="runScope" class="run-scope" aria-label="运行范围"><option value="node">当前节点</option><option value="up_to">执行到此节点</option><option value="from_here">从此继续</option><option value="all">整条流程</option></select>
         <button v-if="activeCanvasRun && ['RUNNING', 'WAITING_EXTERNAL', 'WAITING_SELECTION'].includes(activeCanvasRun.run?.status)"
                 class="canvas-tool" type="button" :disabled="busyNode" @click="cancelRun">停止</button>
         <button class="canvas-run" type="button" :title="runBlockedReason" :disabled="busyNode || !!runBlockedReason || (runScope === 'all' ? !nodes.some(isGenerationNode) : !canRun)" @click="runCanvas(runScope)">
@@ -100,6 +100,13 @@
             </button>
             <p v-if="!compatibleAssets.length" class="inspector-empty">暂无可用图片素材</p>
           </div>
+          <div class="inspector-run">
+            <button class="canvas-tool run-to-here" type="button" :disabled="busyNode || !canRun || !!upToBlocked"
+                    :title="upToBlocked || (canRun ? '自动跳过已成功的上级节点' : '请先完善本节点的提示词与模型')" @click="runCanvas('up_to')">
+              <Play :size="14" />{{ upToLabel }}
+            </button>
+            <p class="inspector-note">自动跳过已成功的上级节点，从缺失处执行到此节点。</p>
+          </div>
         </template>
         <div v-if="selectedNode.data.status && selectedNode.data.status !== 'IDLE'" class="node-job-state" :class="statusTone(selectedNode.data.status)">
           <span>{{ statusLabel(selectedNode.data.status) }}</span><span v-if="selectedNode.data.error">{{ selectedNode.data.error }}</span>
@@ -125,7 +132,7 @@
           <Background pattern-color="#cdd2df" :gap="22" :size="1" />
           <Controls position="bottom-right" :show-fit-view="false" :show-interactive="false" />
         </VueFlow>
-        <div class="canvas-guide"><span class="guide-dot" />蓝色控制执行 · 紫色传提示词 · 绿色传图片 · 下游等待全部上级完成</div>
+        <div class="canvas-guide"><span class="guide-dot" />蓝色控制执行 · 紫色传提示词 · 绿色传图片 · 下游等待全部上级完成 · 双击或选中按 Delete 删除连线</div>
         <div class="node-palette" role="toolbar" aria-label="添加节点">
           <span>添加节点</span>
           <button type="button" title="添加素材节点" @click="addNode('asset_input')"><ImagePlus :size="17" />素材</button>
@@ -136,6 +143,7 @@
           <button type="button" title="添加视频生成节点" @click="addNode('video_generate')"><Clapperboard :size="17" />视频</button>
         </div>
         <div v-if="actionError" class="canvas-notice" role="alert"><AlertCircle :size="14" />{{ actionError }}<button type="button" aria-label="关闭提示" @click="actionError = ''"><X :size="13" /></button></div>
+        <div v-if="canvasNotice" class="canvas-notice info" role="status"><span class="guide-dot" />{{ canvasNotice }}<button type="button" aria-label="关闭提示" @click="canvasNotice = ''"><X :size="13" /></button></div>
         <div v-if="!nodes.length" class="canvas-empty"><button type="button" @click="addNode(project?.kind === 'VIDEO' ? 'video_generate' : 'image_generate')"><Plus :size="17" />添加生成节点</button></div>
       </main>
     </div>
@@ -149,7 +157,7 @@ import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
-import { connectionKind, connectionError, effectivePrompt, normalizeConnection, isGenerationNode, ensureStart, dependencyIssue } from './canvasGraph'
+import { connectionKind, connectionError, effectivePrompt, normalizeConnection, isGenerationNode, ensureStart, dependencyIssue, siblingConnection } from './canvasGraph'
 import { Controls } from '@vue-flow/controls'
 import { AlertCircle, Check, Clapperboard, FileText, Film, Image, ImagePlus, Play, Plus, PanelLeft, Scan, Sparkles, Trash2, Undo2, Upload, WandSparkles, X } from 'lucide-vue-next'
 import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
@@ -174,6 +182,7 @@ const saveState = ref('saved')
 const saveLabel = computed(() => ({ saved: '已保存', saving: '保存中', error: '保存失败', conflict: '版本冲突' }[saveState.value]))
 const pageError = ref('')
 const actionError = ref('')
+const canvasNotice = ref('')
 const assets = ref([])
 const assetLoading = ref(false)
 const models = ref([])
@@ -188,7 +197,7 @@ const objectUrls = reactive(new Map())
 const stageRef = ref(null)
 const inspectorOpen = ref(true)
 const runScope = ref('node')
-const runScopeLabel = computed(() => ({ node: '生成当前节点', from_here: '从此继续', all: '运行整图' })[runScope.value])
+const runScopeLabel = computed(() => ({ node: '生成当前节点', up_to: '执行到此节点', from_here: '从此继续', all: '运行整图' })[runScope.value])
 provide('canvasPresentation', { assetUrl, assetName, assetType: id => assets.value.find(item => item.id === id)?.mediaType,
   prompt: id => effectivePrompt(id, nodes.value, edges.value),
   modelName: id => models.value.find(model => Number(model.id) === Number(id))?.label })
@@ -228,6 +237,10 @@ const nodeOutputs = computed(() => selectedNode.value?.data.candidates?.length
 const canRun = computed(() => selectedNode.value && isGenerationNode(selectedNode.value)
   && !!effectiveNodePrompt.value.trim() && !!selectedNode.value.data.modelRowId)
 const runBlockedReason = computed(() => dependencyIssue(selectedId.value, nodes.value, edges.value, runScope.value))
+const upToBlocked = computed(() => selectedNode.value && isGenerationNode(selectedNode.value)
+  ? dependencyIssue(selectedId.value, nodes.value, edges.value, 'up_to') : '')
+const upToLabel = computed(() => activeCanvasRun.value && ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(activeCanvasRun.value.run?.status)
+  && selectedNode.value?.data.status !== 'SUCCEEDED' ? '继续执行到此节点' : '执行到此节点')
 
 
 
@@ -341,6 +354,16 @@ function connectNodes(connection) {
   undoStack.value.push(JSON.stringify(graphSnapshot()))
   edges.value = addEdge({ ...normalized, type: 'default' }, edges.value)
   const target = nodes.value.find(node => node.id === normalized.target)
+  const kind = connectionKind(normalized, nodes.value)
+  const sibling = siblingConnection(normalized, nodes.value, edges.value)
+  if (sibling) {
+    const toVideo = kind === 'text' && target?.type === 'video_generate'
+    if (!toVideo || window.confirm(`是否同时将「${source?.data.label || '上游节点'}」的结果图片作为首帧？`)) {
+      edges.value = addEdge({ ...sibling, id: crypto.randomUUID(), type: 'default' }, edges.value)
+      canvasNotice.value = toVideo ? '已同时将上游结果图片设为视频首帧，双击连线可断开'
+        : '已同时连接提示词与图片素材，双击连线可单独断开'
+    }
+  }
   selectNode({ node: target })
   markChanged()
 }
@@ -348,6 +371,14 @@ function disconnect(edgeId) {
   undoStack.value.push(JSON.stringify(graphSnapshot()))
   edges.value = edges.value.filter(edge => edge.id !== edgeId)
   markChanged()
+}
+function onCanvasKeydown(event) {
+  if (!['Delete', 'Backspace'].includes(event.key)) return
+  const active = document.activeElement
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return
+  const selectedEdge = edges.value.find(edge => edge.selected)
+  if (selectedEdge) { disconnect(selectedEdge.id); event.preventDefault(); return }
+  if (selectedNode.value && selectedNode.value.type !== 'start') { removeSelected(); event.preventDefault() }
 }
 function removeSelected() {
   if (selectedNode.value?.type === 'start') return
@@ -624,8 +655,9 @@ async function loadCanvas() {
   nodes.value.forEach(node => { node.selected = node.id === selectedId.value })
   schedulePoll()
 }
-onMounted(loadCanvas)
+onMounted(() => { window.addEventListener('keydown', onCanvasKeydown); loadCanvas() })
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onCanvasKeydown)
   window.clearTimeout(saveTimer)
   window.clearTimeout(pollTimer)
   objectUrls.forEach(url => { if (url.startsWith('blob:')) URL.revokeObjectURL(url) })
@@ -732,6 +764,10 @@ watch(() => activeCanvasRun.value?.run?.status, schedulePoll)
 .node-palette button:hover { background: var(--wb-fill, #f0f1fa); color: #6466d5; }
 .node-palette i { height: 20px; width: 1px; background: var(--wb-border); margin: 0 5px; }
 .canvas-notice { position: absolute; left: 50%; bottom: 94px; transform: translateX(-35%); z-index: 10; display: flex; align-items: center; gap: 8px; padding: 10px 14px; max-width: 440px; border: 1px solid var(--wb-border); border-radius: 8px; background: var(--wb-surface); font-size: 11px; color: var(--wb-danger, #c94c62); box-shadow: 0 4px 14px rgb(24 32 60 / 8%); }
+.canvas-notice.info { color: var(--wb-text-2); }
+.inspector-run { margin: 2px 0 6px; display: grid; gap: 7px; }
+.inspector-run .run-to-here { width: 100%; color: #6466d5; border-color: var(--wb-border); background: var(--wb-surface); font-weight: 600; }
+.inspector-run .run-to-here:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-width: 900px) {
   .canvas-inspector { width: 260px; max-height: calc(100% - 110px); }
   .canvas-guide { display: none; }

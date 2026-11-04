@@ -99,7 +99,9 @@ public class CreativeCanvasService {
     public ValidationView validateRun(CurrentActor actor, UUID projectId, RunRequest request) {
         CanvasView canvas = requireRevision(actor, projectId, request);
         String scope = normalizeScope(request.scope());
-        PreparedGraph prepared = prepareGraph(withVerifiedParents(actor, projectId, canvas.graph(), scope, request.nodeId()), scope, request.nodeId());
+        Set<String> skips = resolveUpToSkips(actor, projectId, canvas.graph(), scope, request.nodeId());
+        PreparedGraph prepared = prepareGraph(
+                withVerifiedParents(actor, projectId, canvas.graph(), scope, request.nodeId(), skips), scope, request.nodeId(), skips);
         validateAssets(actor, prepared.literalAssetIds());
         List<String> warnings = prepared.nodeIds().size() > 6
                 ? List.of("本次将生成 " + prepared.nodeIds().size() + " 个媒体节点，请确认模型费用") : List.of();
@@ -114,7 +116,9 @@ public class CreativeCanvasService {
         }
         CanvasView canvas = requireRevision(actor, projectId, request);
         String scope = normalizeScope(request.scope());
-        PreparedGraph prepared = prepareGraph(withVerifiedParents(actor, projectId, canvas.graph(), scope, request.nodeId()), scope, request.nodeId());
+        Set<String> skips = resolveUpToSkips(actor, projectId, canvas.graph(), scope, request.nodeId());
+        PreparedGraph prepared = prepareGraph(
+                withVerifiedParents(actor, projectId, canvas.graph(), scope, request.nodeId(), skips), scope, request.nodeId(), skips);
         validateAssets(actor, prepared.literalAssetIds());
 
         UUID canvasRunId = UUID.randomUUID();
@@ -218,12 +222,16 @@ public class CreativeCanvasService {
     }
 
     static PreparedGraph prepareGraph(JsonNode graph, String scope, String selectedNodeId) {
+        return prepareGraph(graph, scope, selectedNodeId, Set.of());
+    }
+
+    static PreparedGraph prepareGraph(JsonNode graph, String scope, String selectedNodeId, Set<String> skipIds) {
         validate(new SaveRequest(graph, null, 0L), new ObjectMapper());
         Map<String, JsonNode> nodes = new LinkedHashMap<>();
         graph.path("nodes").forEach(node -> nodes.put(node.path("id").asText(), node));
         List<JsonNode> edges = new ArrayList<>();
         graph.path("edges").forEach(edges::add);
-        Set<String> included = includedNodes(nodes, edges, scope, selectedNodeId);
+        Set<String> included = includedNodes(nodes, edges, scope, selectedNodeId, skipIds);
         String startId = nodes.values().stream().filter(node -> "start".equals(node.path("type").asText()))
                 .findFirst().orElseThrow().path("id").asText();
         Set<String> reachable = new LinkedHashSet<>(Set.of(startId));
@@ -312,7 +320,7 @@ public class CreativeCanvasService {
     }
 
     private static Set<String> includedNodes(Map<String, JsonNode> nodes, List<JsonNode> edges,
-                                             String scope, String selectedNodeId) {
+                                             String scope, String selectedNodeId, Set<String> skipIds) {
         if ("all".equals(scope)) {
             Set<String> all = new LinkedHashSet<>();
             nodes.forEach((id, node) -> { if (GENERATION_TYPES.contains(node.path("type").asText())) all.add(id); });
@@ -342,6 +350,26 @@ public class CreativeCanvasService {
                     }
                 }
             }
+        } else if ("up_to".equals(scope)) {
+            ArrayDeque<String> queue = new ArrayDeque<>();
+            Set<String> visited = new HashSet<>();
+            queue.add(selectedNodeId);
+            while (!queue.isEmpty()) {
+                String current = queue.remove();
+                if (!visited.add(current)) continue;
+                for (JsonNode edge : edges) {
+                    if (!current.equals(edge.path("target").asText())) continue;
+                    String source = edge.path("source").asText();
+                    JsonNode sourceNode = nodes.get(source);
+                    if (sourceNode == null) continue;
+                    queue.add(source);
+                    if (GENERATION_TYPES.contains(sourceNode.path("type").asText())) included.add(source);
+                }
+            }
+            // Already-succeeded ancestors are skipped and referenced through their persisted output;
+            // the selected node itself always re-executes.
+            included.removeAll(skipIds);
+            included.add(selectedNodeId);
         }
         return included;
     }
@@ -369,11 +397,15 @@ public class CreativeCanvasService {
     }
 
     static Set<String> requiredExternalParents(JsonNode graph, String scope, String selectedNodeId) {
+        return requiredExternalParents(graph, scope, selectedNodeId, Set.of());
+    }
+
+    static Set<String> requiredExternalParents(JsonNode graph, String scope, String selectedNodeId, Set<String> skipIds) {
         Map<String, JsonNode> nodes = new LinkedHashMap<>();
         graph.path("nodes").forEach(node -> nodes.put(node.path("id").asText(), node));
         List<JsonNode> edges = new ArrayList<>();
         graph.path("edges").forEach(edges::add);
-        Set<String> included = includedNodes(nodes, edges, scope, selectedNodeId);
+        Set<String> included = includedNodes(nodes, edges, scope, selectedNodeId, skipIds);
         Set<String> parents = ancestorClosure(included, edges);
         parents.removeAll(included);
         parents.removeIf(id -> !GENERATION_TYPES.contains(nodes.get(id).path("type").asText()));
@@ -386,28 +418,60 @@ public class CreativeCanvasService {
         }
     }
 
+    // For up_to runs: skip ancestors whose latest persisted execution SUCCEEDED (their output is
+    // re-attached by withVerifiedParents), block while an ancestor is still generating, and re-run
+    // everything else (failed, cancelled, skipped or never executed).
+    private Set<String> resolveUpToSkips(CurrentActor actor, UUID projectId, JsonNode graph,
+                                         String scope, String nodeId) {
+        if (!"up_to".equals(scope)) return Set.of();
+        Map<String, JsonNode> nodes = new LinkedHashMap<>();
+        graph.path("nodes").forEach(node -> nodes.put(node.path("id").asText(), node));
+        List<JsonNode> edges = new ArrayList<>();
+        graph.path("edges").forEach(edges::add);
+        Set<String> skips = new LinkedHashSet<>();
+        for (String id : includedNodes(nodes, edges, scope, nodeId, Set.of())) {
+            Map<String, Object> row = latestExecution(actor, projectId, id);
+            String status = row == null ? "" : String.valueOf(row.get("status"));
+            if ("SUCCEEDED".equals(status)) {
+                skips.add(id);
+            } else if ("RUNNING".equals(status)) {
+                Object message = row.get("message");
+                String hint = message == null ? "" : String.valueOf(message).trim();
+                throw new IllegalArgumentException("节点「" + label(nodes.get(id)) + "」正在生成中"
+                        + (hint.isBlank() ? "" : "（" + hint + "）") + "，请等待完成后再执行");
+            }
+        }
+        return skips;
+    }
+
     // Trust persisted executions, never the status/selectedAssetId submitted in the browser draft.
-    private JsonNode withVerifiedParents(CurrentActor actor, UUID projectId, JsonNode graph, String scope, String nodeId) {
+    JsonNode withVerifiedParents(CurrentActor actor, UUID projectId, JsonNode graph, String scope,
+                                 String nodeId, Set<String> skipIds) {
         validate(new SaveRequest(graph, null, 0L), mapper);
         JsonNode verified = graph.deepCopy();
-        for (String parent : requiredExternalParents(graph, scope, nodeId)) {
-            List<Map<String, Object>> rows = jdbc.queryForList("""
-                    SELECT step->>'status' AS status, step->>'output' AS output
-                    FROM creative_canvas_run c JOIN workflow_run w ON w.id = c.workflow_run_id
-                    CROSS JOIN LATERAL jsonb_array_elements(w.steps) AS step
-                    WHERE c.project_id = ? AND c.tenant_id = ? AND c.user_id = ? AND step->>'key' = ?
-                      AND EXISTS (SELECT 1 FROM jsonb_array_elements(w.graph_snapshot->'nodes') AS n
-                        WHERE n->>'key' = ? AND n->>'type' IN ('media_image_generate','media_image_edit','media_video_generate'))
-                    ORDER BY c.created_at DESC LIMIT 1
-                    """, projectId, actor.tenantId(), actor.userId(), parent, parent);
+        for (String parent : requiredExternalParents(graph, scope, nodeId, skipIds)) {
+            Map<String, Object> row = latestExecution(actor, projectId, parent);
             JsonNode original = null;
             for (JsonNode node : verified.path("nodes")) if (parent.equals(node.path("id").asText())) original = node;
-            requireCompletedParent(label(original), rows.isEmpty() ? "未运行" : String.valueOf(rows.getFirst().get("status")));
-            String output = String.valueOf(rows.getFirst().get("output"));
+            requireCompletedParent(label(original), row == null ? "未运行" : String.valueOf(row.get("status")));
+            String output = row == null ? "" : String.valueOf(row.get("output"));
             String assetId = output == null || output.isBlank() ? "" : read(output).path("assetId").asText("");
             ((com.fasterxml.jackson.databind.node.ObjectNode) original).withObject("/data").put("selectedAssetId", assetId);
         }
         return verified;
+    }
+
+    private Map<String, Object> latestExecution(CurrentActor actor, UUID projectId, String nodeId) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT step->>'status' AS status, step->>'message' AS message, step->>'output' AS output
+                FROM creative_canvas_run c JOIN workflow_run w ON w.id = c.workflow_run_id
+                CROSS JOIN LATERAL jsonb_array_elements(w.steps) AS step
+                WHERE c.project_id = ? AND c.tenant_id = ? AND c.user_id = ? AND step->>'key' = ?
+                  AND EXISTS (SELECT 1 FROM jsonb_array_elements(w.graph_snapshot->'nodes') AS n
+                    WHERE n->>'key' = ? AND n->>'type' IN ('media_image_generate','media_image_edit','media_video_generate'))
+                ORDER BY c.created_at DESC LIMIT 1
+                """, projectId, actor.tenantId(), actor.userId(), nodeId, nodeId);
+        return rows.isEmpty() ? null : rows.getFirst();
     }
 
     private static String effectivePrompt(String id, Map<String, JsonNode> nodes,
@@ -447,8 +511,8 @@ public class CreativeCanvasService {
 
     private static String normalizeScope(String scope) {
         String value = scope == null ? "node" : scope.trim().toLowerCase();
-        if (!Set.of("node", "from_here", "all").contains(value)) {
-            throw new IllegalArgumentException("运行范围只支持 node/from_here/all");
+        if (!Set.of("node", "from_here", "all", "up_to").contains(value)) {
+            throw new IllegalArgumentException("运行范围只支持 node/from_here/all/up_to");
         }
         return value;
     }

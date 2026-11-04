@@ -81,6 +81,27 @@ export function dependencyIssue(id, nodes, edges, scope = 'node') {
       }
     }
   }
+  if (scope === 'up_to') {
+    const pending = [id]
+    while (pending.length) {
+      const current = pending.shift()
+      for (const edge of edges.filter(edge => edge.target === current)) {
+        if (!included.has(edge.source)) { included.add(edge.source); pending.push(edge.source) }
+      }
+    }
+    for (const key of [...included]) {
+      const node = nodes.find(item => item.id === key)
+      if (!node) { included.delete(key); continue }
+      // Succeeded ancestors are skipped by an up_to run; failed ones re-run; running ones block.
+      if (key !== id && isGenerationNode(node) && node.data.status === 'SUCCEEDED') { included.delete(key); continue }
+      if (['QUEUED', 'SUBMITTING', 'RUNNING', 'WAITING_EXTERNAL'].includes(node.data.status)) {
+        return `请等待「${node.data.label || key}」生成完成后再执行`
+      }
+      if (node.data.status === 'WAITING_SELECTION') {
+        return `「${node.data.label || key}」待选片，请先选择结果再继续执行`
+      }
+    }
+  }
   for (const key of included) if (!reachable.has(key)) return '请先将运行节点连接到开始节点所在流程'
   const visited = new Set(), ancestors = [...included]
   while (ancestors.length) {
@@ -95,4 +116,20 @@ export function dependencyIssue(id, nodes, edges, scope = 'node') {
     }
   }
   return ''
+}
+
+// One drag between two generation nodes should carry the full result: prompt plus reference image.
+// Returns the sibling edge to auto-add, or null when it would be invalid (duplicate, cycle,
+// unsupported port) — `edges` must already contain the freshly added dragged edge.
+export function siblingConnection(edge, nodes, edges) {
+  const source = nodes.find(node => node.id === edge.source)
+  const target = nodes.find(node => node.id === edge.target)
+  if (!isGenerationNode(source) || !isGenerationNode(target)) return null
+  const kind = connectionKind(edge, nodes)
+  if (kind !== 'text' && kind !== 'image') return null
+  const sibling = kind === 'text'
+    ? { ...edge, sourceHandle: 'media-out', targetHandle: 'image-in',
+        label: target.type === 'video_generate' ? '首帧' : '参考图' }
+    : { ...edge, sourceHandle: 'text-out', targetHandle: 'text-in', label: '提示词' }
+  return connectionError(sibling, nodes, edges) ? null : sibling
 }

@@ -11,13 +11,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 反馈仓储：插入（一次点击）、管理侧过滤列表、守卫状态流转。 */
+/** 反馈仓储：插入（一次点击）、管理侧过滤列表、守卫状态流转、根因归类。 */
 @Repository
 public class UserFeedbackRepository {
 
     private static final String SELECT = """
             SELECT id, tenant_id, user_id, rating, source, status, reason, tags,
-                   refs::text AS refs, converted_dataset_id, converted_case_id, created_at, updated_at
+                   refs::text AS refs, converted_dataset_id, converted_case_id,
+                   root_cause, assignee, resolution, created_at, updated_at
             FROM platform.user_feedback
             """;
 
@@ -33,6 +34,9 @@ public class UserFeedbackRepository {
             DataJson.parseMap(rs.getString("refs")),
             rs.getString("converted_dataset_id") == null ? null : UUID.fromString(rs.getString("converted_dataset_id")),
             rs.getString("converted_case_id") == null ? null : UUID.fromString(rs.getString("converted_case_id")),
+            rs.getString("root_cause"),
+            rs.getString("assignee"),
+            rs.getString("resolution"),
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("updated_at").toInstant());
 
@@ -59,7 +63,7 @@ public class UserFeedbackRepository {
     }
 
     public List<UserFeedbackRecord> list(String tenantId, String status, String rating, String source,
-                                         Long cursorMillis, String cursorId, int limit) {
+                                         String rootCause, Long cursorMillis, String cursorId, int limit) {
         StringBuilder sql = new StringBuilder(SELECT + " WHERE tenant_id = ?");
         List<Object> args = new java.util.ArrayList<>();
         args.add(tenantId);
@@ -74,6 +78,10 @@ public class UserFeedbackRepository {
         if (source != null && !source.isBlank()) {
             sql.append(" AND source = ?");
             args.add(source);
+        }
+        if (rootCause != null && !rootCause.isBlank()) {
+            sql.append(" AND root_cause = ?");
+            args.add(rootCause);
         }
         if (cursorMillis != null && cursorId != null && !cursorId.isBlank()) {
             sql.append(" AND (created_at, id) < (to_timestamp(? / 1000.0), ?)");
@@ -100,6 +108,15 @@ public class UserFeedbackRepository {
                         """, datasetId, caseId, id) > 0;
     }
 
+    /** 管理侧归类：根因/负责人/结论（不影响状态机，可随处理进展反复更新）。 */
+    public boolean updateAnalysis(UUID id, String tenantId, String rootCause, String assignee, String resolution) {
+        return jdbcTemplate.update("""
+                        UPDATE platform.user_feedback
+                        SET root_cause = ?, assignee = ?, resolution = ?, updated_at = now()
+                        WHERE id = ? AND tenant_id = ?
+                        """, rootCause, assignee, resolution, id, tenantId) > 0;
+    }
+
     public Map<String, Long> counts(String tenantId) {
         return jdbcTemplate.query("""
                         SELECT status, rating, COUNT(*) AS n FROM platform.user_feedback
@@ -113,5 +130,23 @@ public class UserFeedbackRepository {
                     }
                     return out;
                 }, tenantId);
+    }
+
+    /** 治理看板：按根因聚合（未归类的单列，避免被平均掉）。 */
+    public List<Map<String, Object>> rootCauseCounts(String tenantId) {
+        return jdbcTemplate.queryForList("""
+                SELECT COALESCE(root_cause, 'unclassified') AS root_cause, rating, COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE status = 'converted') AS converted
+                FROM platform.user_feedback
+                WHERE tenant_id = ?
+                GROUP BY 1, 2
+                ORDER BY total DESC
+                """, tenantId);
+    }
+
+    public long total(String tenantId) {
+        Long value = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM platform.user_feedback WHERE tenant_id = ?", Long.class, tenantId);
+        return value == null ? 0 : value;
     }
 }

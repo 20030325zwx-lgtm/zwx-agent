@@ -1,0 +1,30 @@
+日期：2026-11-04
+主题：评测数据集用例接口缺少归属校验（租户条件写在方法签名里但 SQL 没用）
+
+问题现象
+- `GET /api/ai/eval/datasets/{id}/cases` 直接按 datasetId 查询草稿/已发布用例，
+  未校验该数据集是否属于当前租户。
+- `EvalDatasetService.publishedCases(tenantId, ...)` / `draftCases(tenantId, ...)`
+  的 SQL 里根本没有 `tenant_id` 条件，tenantId 参数是摆设。
+
+影响范围
+- 评测中台跨租户数据可见性。利用条件苛刻（需要 ADMIN JWT 且猜到数据集 UUID），
+  当前单租户实例不可利用；但属于「设计写了租户隔离、实现没做」。
+
+原因
+- 早期实现只按 UUID 取数，入口层（导入/发布）调了 getDataset 做归属校验，
+  列表接口漏了；查询方法沿用了「参数占位」的写法，没有真正拼进 WHERE。
+
+解决方式
+- 所有数据集读写先走 `getDataset(tenantId, datasetId)` 做归属校验。
+- `publishedCases` / `draftCases` / 用例增删改 / 版本 fork / 删除级联的 SQL 全部补 `tenant_id` 条件。
+- 文件：services/eval-service/.../service/EvalDatasetService.java、
+  web/EvalController.java
+
+验证结果
+- 端到端脚本（隔离库 + 管理员令牌）29/29 通过；数据集用例读写、发布、fork 均正常。
+- 列表接口在未登录时仍 401，非本租户 UUID 返回「评测数据集不存在」。
+
+后续注意事项
+- 新增任何按 UUID 取数的接口，先确认归属校验在入口层做过；
+  仓储方法的 tenantId 参数必须在 SQL 里出现，否则应直接删掉这个参数。

@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** 实验进度事件：单调 seq；只有执行 worker 写入。 */
+/** 实验进度事件：seq 取自全局序列（并发写安全，单调用于游标轮询）。 */
 @Repository
 public class EvalEventRepository {
 
@@ -21,12 +21,11 @@ public class EvalEventRepository {
     public void append(UUID experimentId, String type, Map<String, Object> payload) {
         jdbcTemplate.update("""
                         INSERT INTO platform.eval_event (experiment_id, seq, type, payload)
-                        SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, CAST(? AS jsonb)
-                        FROM platform.eval_event WHERE experiment_id = ?
-                        """, experimentId, type, payload == null ? null : EvalJson.toJson(payload), experimentId);
+                        VALUES (?, nextval('platform.eval_event_seq'), ?, CAST(? AS jsonb))
+                        """, experimentId, type, payload == null ? null : EvalJson.toJson(payload));
     }
 
-    public List<Map<String, Object>> events(UUID experimentId, int afterSeq, int limit) {
+    public List<Map<String, Object>> events(UUID experimentId, long afterSeq, int limit) {
         return jdbcTemplate.queryForList("""
                         SELECT seq, type, payload::text AS payload, created_at
                         FROM platform.eval_event

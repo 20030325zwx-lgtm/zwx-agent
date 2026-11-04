@@ -246,6 +246,16 @@ public class InternalEvalRunService {
             digest.put("revision", run != null && run.checkpoint() != null ? run.checkpoint().revision() : null);
             digest.put("resumeCount", run == null ? null : run.resumeCount());
             digest.put("planSteps", plan.size());
+            if (run != null && run.tokenUsageJson() != null && !run.tokenUsageJson().isBlank()) {
+                try {
+                    var usage = JSON.readTree(run.tokenUsageJson());
+                    digest.put("inputTokens", usage.path("promptTokens").asInt(0));
+                    digest.put("outputTokens", usage.path("completionTokens").asInt(0));
+                    digest.put("llmCalls", usage.path("calls").asInt(0));
+                } catch (Exception ignored) {
+                    // token 账目缺失不影响评测结论
+                }
+            }
             response.put("digest", digest);
             response.put("snapshot", runTrajectoryService
                     .trajectory(evalUser.tenantId(), evalUser.id(), conversationId, runId).orElse(null));

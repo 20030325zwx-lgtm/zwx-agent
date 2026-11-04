@@ -29,6 +29,22 @@ app:
     base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com}
     model: ${EVAL_MODEL:qwen-plus}
     timeout-seconds: ${EVAL_MODEL_TIMEOUT_SECONDS:120}
+  eval:
+    # 模型价格表（元/千 token），按供应商公示价维护；未列出的模型用 defaults
+    pricing:
+      defaults:
+        input: 0.0008
+        output: 0.002
+      models:
+        qwen-turbo:
+          input: 0.0003
+          output: 0.0006
+        qwen-plus:
+          input: 0.0008
+          output: 0.002
+        qwen-max:
+          input: 0.0024
+          output: 0.0096
 
 eval:
   scheduler:
@@ -36,6 +52,9 @@ eval:
     interval-ms: ${EVAL_SCHEDULER_INTERVAL_MS:5000}
     batch-size: ${EVAL_SCHEDULER_BATCH_SIZE:1}
     lease-seconds: ${EVAL_SCHEDULER_LEASE_SECONDS:900}
+  runner:
+    # 单例评测器调用失败的重试次数（断言不通过不重试）
+    case-retry: ${EVAL_CASE_RETRY:1}
   task:
     timeout-minutes: ${EVAL_TASK_TIMEOUT_MINUTES:15}
   account:

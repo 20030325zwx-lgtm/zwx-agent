@@ -14,15 +14,22 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 数据集 / 版本 / 用例管理。发布版本不可变；导入只写草稿（version_no=0）。 */
+/**
+ * 数据集 / 版本 / 用例管理。发布版本不可变；导入与单条编辑只写草稿（version_no=0）。
+ * 所有读写都带 tenant 归属校验（数据集 UUID 不是访问凭据）。
+ */
 @Service
 public class EvalDatasetService {
+
+    private static final String TAGS_FROM_JSON = "ARRAY(SELECT jsonb_array_elements_text(CAST(? AS jsonb)))";
 
     private final JdbcTemplate jdbcTemplate;
 
     public EvalDatasetService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
+
+    // ---------------------------------------------------------------- 数据集
 
     public UUID createDataset(String tenantId, String name, EvalType evalType, String description) {
         UUID id = UUID.randomUUID();
@@ -35,6 +42,20 @@ public class EvalDatasetService {
             throw new IllegalArgumentException("同名数据集已存在：" + name);
         }
         return id;
+    }
+
+    public void updateDataset(String tenantId, UUID datasetId, String name, String description) {
+        Map<String, Object> existing = getDataset(tenantId, datasetId);
+        String nextName = name == null || name.isBlank() ? String.valueOf(existing.get("name")) : name.trim();
+        String nextDescription = description == null ? stringOrNull(existing.get("description")) : description;
+        try {
+            jdbcTemplate.update("""
+                    UPDATE platform.eval_dataset SET name = ?, description = ?, updated_at = now()
+                    WHERE id = ? AND tenant_id = ?
+                    """, nextName, nextDescription, datasetId, tenantId);
+        } catch (DuplicateKeyException exception) {
+            throw new IllegalArgumentException("同名数据集已存在：" + nextName);
+        }
     }
 
     public List<Map<String, Object>> listDatasets(String tenantId) {
@@ -77,6 +98,20 @@ public class EvalDatasetService {
         return dataset;
     }
 
+    public int deleteDataset(String tenantId, UUID datasetId) {
+        int deleted = jdbcTemplate.update(
+                "DELETE FROM platform.eval_dataset WHERE id = ? AND tenant_id = ?", datasetId, tenantId);
+        if (deleted > 0) {
+            jdbcTemplate.update("DELETE FROM platform.eval_case WHERE dataset_id = ? AND tenant_id = ?",
+                    datasetId, tenantId);
+            jdbcTemplate.update("DELETE FROM platform.eval_dataset_version WHERE dataset_id = ? AND tenant_id = ?",
+                    datasetId, tenantId);
+        }
+        return deleted;
+    }
+
+    // ---------------------------------------------------------------- 用例（草稿）
+
     /** 导入/覆盖草稿用例（version_no=0 upsert）；返回 {total,imported,updated}。 */
     public Map<String, Object> importCases(String tenantId, UUID datasetId, List<Map<String, Object>> rawCases) {
         Map<String, Object> dataset = getDataset(tenantId, datasetId);
@@ -89,31 +124,86 @@ public class EvalDatasetService {
                 throw new IllegalArgumentException("用例 " + normalized.externalId() + " 类型 "
                         + normalized.evalType().lower() + " 与数据集类型 " + datasetType.lower() + " 不一致");
             }
+            Map<String, Object> raw = rawCases.get(i);
             boolean existed = jdbcTemplate.queryForObject("""
                     SELECT COUNT(*) > 0 FROM platform.eval_case
-                    WHERE dataset_id = ? AND version_no = 0 AND external_id = ?
-                    """, Boolean.class, datasetId, normalized.externalId());
+                    WHERE dataset_id = ? AND tenant_id = ? AND version_no = 0 AND external_id = ?
+                    """, Boolean.class, datasetId, tenantId, normalized.externalId());
             jdbcTemplate.update("""
                             INSERT INTO platform.eval_case (id, tenant_id, dataset_id, version_no, external_id,
-                                                            payload, source)
-                            VALUES (?, ?, ?, 0, ?, CAST(? AS jsonb), ?)
+                                                            payload, tags, severity, source)
+                            VALUES (?, ?, ?, 0, ?, CAST(? AS jsonb), %s, ?, ?)
                             ON CONFLICT (dataset_id, version_no, external_id)
-                            DO UPDATE SET payload = CAST(EXCLUDED.payload AS jsonb), source = EXCLUDED.source
-                            """,
+                            DO UPDATE SET payload = CAST(EXCLUDED.payload AS jsonb),
+                                          tags = EXCLUDED.tags,
+                                          severity = EXCLUDED.severity,
+                                          source = EXCLUDED.source
+                            """.formatted(TAGS_FROM_JSON),
                     UUID.randomUUID(), tenantId, datasetId, normalized.externalId(),
-                    EvalJson.toJson(normalized.payload()), normalized.source());
+                    EvalJson.toJson(normalized.payload()), EvalJson.toJson(tagsOf(raw)),
+                    severityOf(raw), normalized.source());
             if (existed) updated++;
             else imported++;
         }
         return Map.of("total", rawCases.size(), "imported", imported, "updated", updated);
     }
 
+    /** 单条新增到草稿。 */
+    public Map<String, Object> addCase(String tenantId, UUID datasetId, Map<String, Object> body) {
+        Map<String, Object> dataset = getDataset(tenantId, datasetId);
+        EvalType datasetType = EvalType.parse(String.valueOf(dataset.get("eval_type")));
+        Map<String, Object> payload = payloadOf(body);
+        assertPayloadType(datasetType, payload);
+        String externalId = stringOrNull(body.get("externalId"));
+        if (externalId == null || externalId.isBlank()) {
+            externalId = "case-" + UUID.randomUUID().toString().substring(0, 8);
+        }
+        jdbcTemplate.update("""
+                        INSERT INTO platform.eval_case (id, tenant_id, dataset_id, version_no, external_id,
+                                                        payload, tags, severity, source)
+                        VALUES (?, ?, ?, 0, ?, CAST(? AS jsonb), %s, ?, 'manual')
+                        ON CONFLICT (dataset_id, version_no, external_id)
+                        DO UPDATE SET payload = CAST(EXCLUDED.payload AS jsonb), tags = EXCLUDED.tags,
+                                      severity = EXCLUDED.severity
+                        """.formatted(TAGS_FROM_JSON),
+                UUID.randomUUID(), tenantId, datasetId, externalId, EvalJson.toJson(payload),
+                EvalJson.toJson(tagsOf(body)), severityOf(body));
+        return Map.of("externalId", externalId);
+    }
+
+    /** 修改草稿用例（已发布版本不可改）。 */
+    public void updateCase(String tenantId, UUID datasetId, String externalId, Map<String, Object> body) {
+        Map<String, Object> dataset = getDataset(tenantId, datasetId);
+        EvalType datasetType = EvalType.parse(String.valueOf(dataset.get("eval_type")));
+        Map<String, Object> payload = payloadOf(body);
+        assertPayloadType(datasetType, payload);
+        int updated = jdbcTemplate.update("""
+                        UPDATE platform.eval_case
+                        SET payload = CAST(? AS jsonb), tags = %s, severity = ?
+                        WHERE dataset_id = ? AND tenant_id = ? AND version_no = 0 AND external_id = ?
+                        """.formatted(TAGS_FROM_JSON),
+                EvalJson.toJson(payload), EvalJson.toJson(tagsOf(body)), severityOf(body),
+                datasetId, tenantId, externalId);
+        if (updated == 0) throw new IllegalArgumentException("草稿用例不存在：" + externalId);
+    }
+
+    public void deleteCase(String tenantId, UUID datasetId, String externalId) {
+        getDataset(tenantId, datasetId);
+        int deleted = jdbcTemplate.update("""
+                DELETE FROM platform.eval_case
+                WHERE dataset_id = ? AND tenant_id = ? AND version_no = 0 AND external_id = ?
+                """, datasetId, tenantId, externalId);
+        if (deleted == 0) throw new IllegalArgumentException("草稿用例不存在：" + externalId);
+    }
+
+    // ---------------------------------------------------------------- 版本
+
     /** 发布草稿为下一正式版本（克隆草稿用例）。 */
     public int publish(String tenantId, UUID datasetId, String notes) {
         getDataset(tenantId, datasetId);
         Integer draftCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM platform.eval_case WHERE dataset_id = ? AND version_no = 0",
-                Integer.class, datasetId);
+                "SELECT COUNT(*) FROM platform.eval_case WHERE dataset_id = ? AND tenant_id = ? AND version_no = 0",
+                Integer.class, datasetId, tenantId);
         if (draftCount == null || draftCount == 0) {
             throw new IllegalArgumentException("草稿没有用例，无法发布");
         }
@@ -121,32 +211,54 @@ public class EvalDatasetService {
                 "SELECT COALESCE(MAX(version_no), 0) FROM platform.eval_dataset_version "
                         + "WHERE dataset_id = ? AND version_no > 0", Integer.class, datasetId);
         int nextVersion = (latest == null ? 0 : latest) + 1;
-        jdbcTemplate.update(con -> {
-            var ps = con.prepareStatement(
-                    "INSERT INTO platform.eval_dataset_version (id, tenant_id, dataset_id, version_no, notes) "
-                            + "VALUES (?, ?, ?, ?, ?)");
-            ps.setObject(1, UUID.randomUUID());
-            ps.setString(2, tenantId);
-            ps.setObject(3, datasetId);
-            ps.setInt(4, nextVersion);
-            ps.setString(5, notes);
-            return ps;
-        });
+        jdbcTemplate.update("""
+                INSERT INTO platform.eval_dataset_version (id, tenant_id, dataset_id, version_no, notes)
+                VALUES (?, ?, ?, ?, ?)
+                """, UUID.randomUUID(), tenantId, datasetId, nextVersion, notes);
         jdbcTemplate.update("""
                         INSERT INTO platform.eval_case (id, tenant_id, dataset_id, version_no, external_id,
-                                                        payload, tags, source)
-                        SELECT gen_random_uuid(), tenant_id, dataset_id, ?, external_id, payload, tags, source
+                                                        payload, tags, severity, source)
+                        SELECT gen_random_uuid(), tenant_id, dataset_id, ?, external_id, payload, tags, severity, source
                         FROM platform.eval_case WHERE dataset_id = ? AND version_no = 0
                         """, nextVersion, datasetId);
         return nextVersion;
     }
 
+    /** 从历史版本 fork 回草稿（改坏了的版本可以回退，而不是重新导入）。 */
+    public Map<String, Object> forkVersion(String tenantId, UUID datasetId, int versionNo, boolean confirm) {
+        getDataset(tenantId, datasetId);
+        Integer draftCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM platform.eval_case WHERE dataset_id = ? AND tenant_id = ? AND version_no = 0",
+                Integer.class, datasetId, tenantId);
+        int replaced = draftCount == null ? 0 : draftCount;
+        if (replaced > 0 && !confirm) {
+            throw new IllegalArgumentException("草稿已有 " + replaced + " 条用例，覆盖需确认（confirm=true）");
+        }
+        Integer sourceCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM platform.eval_case
+                WHERE dataset_id = ? AND tenant_id = ? AND version_no = ?
+                """, Integer.class, datasetId, tenantId, versionNo);
+        if (sourceCount == null || sourceCount == 0) {
+            throw new IllegalArgumentException("版本 v" + versionNo + " 没有用例");
+        }
+        jdbcTemplate.update("DELETE FROM platform.eval_case WHERE dataset_id = ? AND tenant_id = ? AND version_no = 0",
+                datasetId, tenantId);
+        jdbcTemplate.update("""
+                        INSERT INTO platform.eval_case (id, tenant_id, dataset_id, version_no, external_id,
+                                                        payload, tags, severity, source)
+                        SELECT gen_random_uuid(), tenant_id, dataset_id, 0, external_id, payload, tags, severity, source
+                        FROM platform.eval_case WHERE dataset_id = ? AND version_no = ?
+                        """, datasetId, versionNo);
+        return Map.of("replaced", replaced, "imported", sourceCount, "fromVersion", versionNo);
+    }
+
     public List<EvalCaseRecord> publishedCases(String tenantId, UUID datasetId, int versionNo) {
         return jdbcTemplate.query("""
                         SELECT id, tenant_id, dataset_id, version_no, external_id,
-                               payload::text AS payload, source, created_at
+                               payload::text AS payload, array_to_string(tags, ',') AS tags,
+                               severity, source, created_at
                         FROM platform.eval_case
-                        WHERE dataset_id = ? AND version_no = ?
+                        WHERE dataset_id = ? AND tenant_id = ? AND version_no = ?
                         ORDER BY external_id
                         """,
                 (rs, rowNum) -> new EvalCaseRecord(
@@ -156,9 +268,11 @@ public class EvalDatasetService {
                         rs.getInt("version_no"),
                         rs.getString("external_id"),
                         EvalJson.parseMap(rs.getString("payload")),
+                        splitTags(rs.getString("tags")),
+                        rs.getString("severity"),
                         rs.getString("source"),
                         rs.getTimestamp("created_at").toInstant()),
-                datasetId, versionNo);
+                datasetId, tenantId, versionNo);
     }
 
     public int latestPublishedVersion(UUID datasetId) {
@@ -170,20 +284,12 @@ public class EvalDatasetService {
 
     public List<Map<String, Object>> draftCases(String tenantId, UUID datasetId) {
         return jdbcTemplate.queryForList("""
-                        SELECT external_id, payload::text AS payload, source
-                        FROM platform.eval_case WHERE dataset_id = ? AND version_no = 0
+                        SELECT external_id, payload::text AS payload, array_to_string(tags, ',') AS tags,
+                               severity, source
+                        FROM platform.eval_case
+                        WHERE dataset_id = ? AND tenant_id = ? AND version_no = 0
                         ORDER BY external_id
-                        """, datasetId);
-    }
-
-    public int deleteDataset(String tenantId, UUID datasetId) {
-        int deleted = jdbcTemplate.update(
-                "DELETE FROM platform.eval_dataset WHERE id = ? AND tenant_id = ?", datasetId, tenantId);
-        if (deleted > 0) {
-            jdbcTemplate.update("DELETE FROM platform.eval_case WHERE dataset_id = ?", datasetId);
-            jdbcTemplate.update("DELETE FROM platform.eval_dataset_version WHERE dataset_id = ?", datasetId);
-        }
-        return deleted;
+                        """, datasetId, tenantId);
     }
 
     /** D1 一键回流的默认归宿：按租户查找/创建「线上回流」PROMPT 数据集。 */
@@ -230,8 +336,69 @@ public class EvalDatasetService {
         rawCase.put("expect", Map.of());
         rawCase.put("judge", Map.of("enabled", true, "threshold", 3.5));
         rawCase.put("source", "badcase");
+        rawCase.put("severity", "down".equals(rating) ? "critical" : "normal");
         rawCase.put("notes", notes);
         return rawCase;
+    }
+
+    // ---------------------------------------------------------------- 工具
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> payloadOf(Map<String, Object> body) {
+        Object payload = body.get("payload");
+        if (payload instanceof Map<?, ?> map) return new LinkedHashMap<>((Map<String, Object>) map);
+        // 兼容「直接把字段放在顶层」的写法
+        Map<String, Object> flat = new LinkedHashMap<>(body);
+        flat.remove("externalId");
+        flat.remove("tags");
+        flat.remove("severity");
+        flat.remove("payload");
+        if (flat.isEmpty()) throw new IllegalArgumentException("payload 不能为空");
+        return flat;
+    }
+
+    private static void assertPayloadType(EvalType datasetType, Map<String, Object> payload) {
+        EvalType inferred;
+        try {
+            inferred = EvalCaseNormalizer.inferType(payload);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("无法识别用例类型：" + exception.getMessage() + "（数据集类型 " + datasetType.lower() + "）");
+        }
+        if (inferred != datasetType) {
+            throw new IllegalArgumentException("用例字段看起来是 " + inferred.lower()
+                    + "，与数据集类型 " + datasetType.lower() + " 不一致");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> tagsOf(Map<String, Object> raw) {
+        Object tags = raw.get("tags");
+        if (tags instanceof List<?> list) {
+            return list.stream().map(String::valueOf).filter(tag -> !tag.isBlank()).toList();
+        }
+        return List.of();
+    }
+
+    private static String severityOf(Map<String, Object> raw) {
+        String severity = stringOrNull(raw.get("severity"));
+        if (severity == null) return "normal";
+        String normalized = severity.toLowerCase(java.util.Locale.ROOT);
+        if (!normalized.equals("normal") && !normalized.equals("critical")) {
+            throw new IllegalArgumentException("severity 只支持 normal / critical");
+        }
+        return normalized;
+    }
+
+    private static List<String> splitTags(String raw) {
+        if (raw == null || raw.isBlank()) return List.of();
+        return java.util.Arrays.stream(raw.split(",")).map(String::trim)
+                .filter(tag -> !tag.isEmpty()).toList();
+    }
+
+    private static String stringOrNull(Object value) {
+        if (value == null) return null;
+        String text = String.valueOf(value).trim();
+        return text.isEmpty() ? null : text;
     }
 
     private static String truncate(String value, int max) {

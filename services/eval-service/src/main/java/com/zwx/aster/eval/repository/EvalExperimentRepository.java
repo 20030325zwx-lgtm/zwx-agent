@@ -22,6 +22,7 @@ public class EvalExperimentRepository {
             SELECT id, tenant_id, created_by, dataset_id, dataset_version_no, eval_type, status,
                    candidate::text AS candidate, git_commit, totals::text AS totals,
                    error_code, error_message, version, lease_owner, lease_until, lease_epoch,
+                   concurrency, budget::text AS budget, resume_of,
                    started_at, finished_at, created_at, updated_at
             FROM platform.eval_experiment
             """;
@@ -43,6 +44,9 @@ public class EvalExperimentRepository {
             rs.getString("lease_owner"),
             rs.getTimestamp("lease_until") == null ? null : rs.getTimestamp("lease_until").toInstant(),
             rs.getLong("lease_epoch"),
+            rs.getInt("concurrency"),
+            rs.getString("budget"),
+            rs.getString("resume_of") == null ? null : UUID.fromString(rs.getString("resume_of")),
             rs.getTimestamp("started_at") == null ? null : rs.getTimestamp("started_at").toInstant(),
             rs.getTimestamp("finished_at") == null ? null : rs.getTimestamp("finished_at").toInstant(),
             rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant(),
@@ -57,11 +61,13 @@ public class EvalExperimentRepository {
     public EvalExperimentRecord insert(EvalExperimentRecord record) {
         jdbcTemplate.update("""
                         INSERT INTO platform.eval_experiment (id, tenant_id, created_by, dataset_id, dataset_version_no,
-                                                              eval_type, status, candidate, git_commit)
-                        VALUES (?, ?, ?, ?, ?, ?, 'queued', CAST(? AS jsonb), ?)
+                                                              eval_type, status, candidate, git_commit,
+                                                              concurrency, budget, resume_of)
+                        VALUES (?, ?, ?, ?, ?, ?, 'queued', CAST(? AS jsonb), ?, ?, CAST(? AS jsonb), ?)
                         """,
                 record.id(), record.tenantId(), record.createdBy(), record.datasetId(),
-                record.datasetVersionNo(), record.evalType(), record.candidateJson(), record.gitCommit());
+                record.datasetVersionNo(), record.evalType(), record.candidateJson(), record.gitCommit(),
+                record.concurrency(), record.budgetJson() == null ? "{}" : record.budgetJson(), record.resumeOf());
         return findById(record.id()).orElseThrow();
     }
 

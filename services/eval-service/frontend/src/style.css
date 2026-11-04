@@ -76,3 +76,47 @@ tbody tr:hover { background: var(--fill); }
 .chip { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; background: var(--fill); color: var(--text-2); }
 .chip.failed { background: #fdecec; color: var(--danger); }
 .chip.judge { background: var(--accent-soft); color: var(--accent); }
+
+/* ---- 评测台 E2：向导、对比报告、内联编辑器 ---- */
+.inline-row { display: flex; gap: 8px; align-items: center; }
+.picks { display: grid; gap: 8px; }
+.pick {
+  text-align: left; border: 1px solid var(--border); background: var(--surface);
+  border-radius: 12px; padding: 10px 12px; cursor: pointer; display: flex;
+  flex-direction: column; gap: 3px; font: inherit; color: var(--text);
+}
+.pick strong { font-size: 12.5px; }
+.pick span { color: var(--muted); font-size: 11.5px; }
+.pick.active { border-color: var(--accent); background: var(--accent-soft); }
+.pick:disabled { opacity: .45; cursor: not-allowed; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--muted); }
+.summary {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px;
+  background: var(--fill); display: flex; flex-direction: column; gap: 6px;
+}
+.summary-main { margin: 0; font-size: 12.5px; font-weight: 600; }
+.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; line-height: 1.55; }
+.compare { padding: 14px; }
+.compare-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.compare-head h3 { margin: 0 0 4px; font-size: 13px; }
+.compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+.compare-metric {
+  border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.compare-metric span { font-size: 11px; color: var(--muted); }
+.compare-values { display: flex; align-items: baseline; gap: 6px; }
+.compare-values strong { font-size: 16px; }
+.compare-values em { color: var(--muted); font-style: normal; }
+.compare-metric small { color: var(--text-2); font-size: 11px; }
+.compare-metric small.up { color: var(--success); }
+.compare-metric small.down { color: var(--danger); }
+.vs { color: var(--muted); padding: 0 4px; }
+.kv { display: flex; gap: 8px; font-size: 12px; padding: 3px 0; }
+.kv span { color: var(--muted); min-width: 74px; }
+.kv em { font-style: normal; color: var(--text-2); }
+.editor {
+  border: 1px solid var(--border); border-radius: 12px; padding: 10px;
+  margin-bottom: 10px; background: var(--fill);
+}

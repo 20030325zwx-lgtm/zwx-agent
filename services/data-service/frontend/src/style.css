@@ -76,3 +76,16 @@ tbody tr:hover { background: var(--fill); }
 .chip { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; background: var(--fill); color: var(--text-2); }
 .chip.failed { background: #fdecec; color: var(--danger); }
 .chip.judge { background: var(--accent-soft); color: var(--accent); }
+
+/* ---- 数据中台 D2：根因归类与隐式信号 ---- */
+.card-head { display: flex; align-items: baseline; gap: 10px; padding: 12px 14px 0; }
+.card-head h3 { margin: 0 0 8px; font-size: 12.5px; }
+.inline-row { display: flex; gap: 8px; align-items: center; }
+.answer {
+  margin: 0; white-space: pre-wrap; line-height: 1.6; color: var(--text-2);
+  background: var(--fill); border-radius: 10px; padding: 10px 12px; max-height: 260px; overflow-y: auto;
+}
+.signal-row { display: flex; flex-wrap: wrap; gap: 18px; padding: 4px 14px 14px; }
+.signal { display: flex; flex-direction: column; gap: 2px; }
+.signal strong { font-size: 18px; }
+.signal em { font-style: normal; font-size: 11px; color: var(--muted); }

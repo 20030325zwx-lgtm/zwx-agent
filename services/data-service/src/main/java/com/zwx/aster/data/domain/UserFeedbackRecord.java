@@ -17,10 +17,18 @@ public record UserFeedbackRecord(UUID id,
                                  Map<String, Object> refs,
                                  UUID convertedDatasetId,
                                  UUID convertedCaseId,
+                                 String rootCause,
+                                 String assignee,
+                                 String resolution,
                                  Instant createdAt,
                                  Instant updatedAt) {
 
     public boolean converted() {
         return "converted".equals(status);
+    }
+
+    /** 根因已归类（BadCase 治理看板的分母）。 */
+    public boolean classified() {
+        return rootCause != null && !rootCause.isBlank();
     }
 }

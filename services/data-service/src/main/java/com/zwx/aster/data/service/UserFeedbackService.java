@@ -13,16 +13,22 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
- * 数据中台 D1：用户反馈采集 → BadCase 库 → 一键回流评测集（调 eval-service 内部接口）。
+ * 数据中台 D2：用户反馈采集 → BadCase 根因归类 → 一键回流评测集（调 eval-service 内部接口）。
  * 反馈创建时冻结来源快照（只读查询主库 agent_run），后续编辑不影响回流用例。
  */
 @Service
 public class UserFeedbackService {
 
     private static final String INTERNAL_HEADER = "X-Aster-Internal-Token";
+
+    /** BadCase 根因分类：回答「这个月最多的问题该改哪一层」。 */
+    public static final Set<String> ROOT_CAUSES = Set.of(
+            "knowledge_gap", "retrieval_miss", "prompt_weak", "tool_args",
+            "intent_misroute", "refusal_fail", "latency", "other");
 
     private final UserFeedbackRepository feedbackRepository;
     private final JdbcTemplate jdbcTemplate;
@@ -39,9 +45,9 @@ public class UserFeedbackService {
         this.internalToken = internalToken;
     }
 
-    /** 一次点击入库：chat 来源按 runId 只读快照 question/answer。 */
+    /** 一次点击入库：chat 来源按 runId 只读快照 question/answer；标签可在同一次请求里带上。 */
     public UserFeedbackRecord create(JwtVerifier.Actor actor, String rating, String reason,
-                                     String runId, String conversationId) {
+                                     List<String> tags, String runId, String conversationId) {
         if (!"up".equals(rating) && !"down".equals(rating)) {
             throw new IllegalArgumentException("rating 必须是 up 或 down");
         }
@@ -57,8 +63,14 @@ public class UserFeedbackService {
             refs.put("question", run.get().get("input"));
             refs.put("answer", run.get().get("answer"));
         }
+        List<String> safeTags = tags == null ? List.of() : tags.stream()
+                .filter(tag -> tag != null && !tag.isBlank())
+                .map(String::trim)
+                .distinct()
+                .limit(8)
+                .toList();
         UserFeedbackRecord record = new UserFeedbackRecord(UUID.randomUUID(), actor.tenantId(), actor.userId(),
-                rating, "chat", "open", reason, List.of(), refs, null, null, null, null);
+                rating, "chat", "open", reason, safeTags, refs, null, null, null, null, null, null, null);
         return feedbackRepository.insert(record);
     }
 
@@ -76,13 +88,27 @@ public class UserFeedbackService {
     }
 
     public List<UserFeedbackRecord> list(JwtVerifier.Actor actor, String status, String rating, String source,
-                                         Long cursorMillis, String cursorId, int limit) {
-        return feedbackRepository.list(actor.tenantId(), status, rating, source,
+                                         String rootCause, Long cursorMillis, String cursorId, int limit) {
+        return feedbackRepository.list(actor.tenantId(), status, rating, source, rootCause,
                 cursorMillis, cursorId, Math.min(Math.max(limit, 1), 100));
     }
 
     public Map<String, Long> counts(JwtVerifier.Actor actor) {
         return feedbackRepository.counts(actor.tenantId());
+    }
+
+    /** 治理看板：总量、根因分布、回流转化率。 */
+    public Map<String, Object> stats(JwtVerifier.Actor actor) {
+        List<Map<String, Object>> byRootCause = feedbackRepository.rootCauseCounts(actor.tenantId());
+        long total = feedbackRepository.total(actor.tenantId());
+        long converted = byRootCause.stream()
+                .mapToLong(row -> ((Number) row.get("converted")).longValue()).sum();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", total);
+        result.put("converted", converted);
+        result.put("convertedRate", total == 0 ? null : Math.round(1000.0 * converted / total) / 1000.0);
+        result.put("byRootCause", byRootCause);
+        return result;
     }
 
     public UserFeedbackRecord get(JwtVerifier.Actor actor, UUID id) {
@@ -102,6 +128,23 @@ public class UserFeedbackService {
         feedbackRepository.transitionGuarded(id, targetStatus);
     }
 
+    /** 根因归类：根因/负责人/结论可反复更新，不影响状态机。 */
+    public UserFeedbackRecord updateAnalysis(JwtVerifier.Actor actor, UUID id, String rootCause,
+                                             String assignee, String resolution) {
+        get(actor, id);
+        String normalized = null;
+        if (rootCause != null && !rootCause.isBlank()) {
+            normalized = rootCause.trim().toLowerCase();
+            if (!ROOT_CAUSES.contains(normalized)) {
+                throw new IllegalArgumentException("rootCause 只支持 " + ROOT_CAUSES);
+            }
+        }
+        feedbackRepository.updateAnalysis(id, actor.tenantId(), normalized,
+                assignee == null || assignee.isBlank() ? null : assignee.trim(),
+                resolution == null || resolution.isBlank() ? null : resolution.trim());
+        return get(actor, id);
+    }
+
     /** 一键回流：调 eval-service 内部接口，成功后本地标记 converted 并保存链接。 */
     public Map<String, Object> convert(JwtVerifier.Actor actor, UUID id) {
         UserFeedbackRecord record = get(actor, id);
@@ -118,7 +161,7 @@ public class UserFeedbackService {
         body.put("tenantId", actor.tenantId());
         body.put("feedbackId", record.id().toString());
         body.put("rating", record.rating());
-        body.put("reason", record.reason());
+        body.put("reason", backflowReason(record));
         body.put("question", question);
         body.put("answer", answer);
         Map<String, Object> response;
@@ -144,6 +187,21 @@ public class UserFeedbackService {
         result.put("datasetId", datasetId.toString());
         result.put("caseExternalId", response.get("caseExternalId"));
         return result;
+    }
+
+    /** 回流理由带上根因与结论，让用例在评测集里自带上下文。 */
+    private static String backflowReason(UserFeedbackRecord record) {
+        StringBuilder reason = new StringBuilder();
+        if (record.classified()) {
+            reason.append("[根因:").append(record.rootCause()).append("] ");
+        }
+        if (record.resolution() != null && !record.resolution().isBlank()) {
+            reason.append(record.resolution()).append(' ');
+        }
+        if (record.reason() != null && !record.reason().isBlank()) {
+            reason.append(record.reason());
+        }
+        return reason.toString().trim();
     }
 
     private static String stringOf(Object value) {

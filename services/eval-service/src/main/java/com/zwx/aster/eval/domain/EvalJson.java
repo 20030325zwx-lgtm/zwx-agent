@@ -32,12 +32,25 @@ public final class EvalJson {
     }
 
     public static java.util.Map<String, Object> parseMap(String json) {
-        if (json == null || json.isBlank()) return new java.util.LinkedHashMap<>();
+        if (json == null || json.isBlank() || "null".equals(json.trim())) return new java.util.LinkedHashMap<>();
         try {
             return MAPPER.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {
             });
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("JSON 解析失败", exception);
+        }
+    }
+
+    /** 解析 JSON 数组（失败或非数组返回空列表，报告聚合不应因脏数据整体失败）。 */
+    public static java.util.List<java.util.Map<String, Object>> parseList(String json) {
+        if (json == null || json.isBlank() || "null".equals(json.trim())) return java.util.List.of();
+        try {
+            java.util.List<java.util.Map<String, Object>> parsed = MAPPER.readValue(json,
+                    new com.fasterxml.jackson.core.type.TypeReference<>() {
+                    });
+            return parsed == null ? java.util.List.of() : parsed;
+        } catch (JsonProcessingException exception) {
+            return java.util.List.of();
         }
     }
 }

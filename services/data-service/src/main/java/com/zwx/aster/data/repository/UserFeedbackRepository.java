@@ -117,6 +117,15 @@ public class UserFeedbackRepository {
                         """, rootCause, assignee, resolution, id, tenantId) > 0;
     }
 
+    /** 点踩后补标签：只允许反馈本人在未处理前补充（一次点击之后的可选第二步）。 */
+    public boolean updateTags(UUID id, String tenantId, String userId, List<String> tags) {
+        return jdbcTemplate.update("""
+                        UPDATE platform.user_feedback
+                        SET tags = ?, updated_at = now()
+                        WHERE id = ? AND tenant_id = ? AND user_id = ? AND status = 'open'
+                        """, tags.toArray(new String[0]), id, tenantId, userId) > 0;
+    }
+
     public Map<String, Long> counts(String tenantId) {
         return jdbcTemplate.query("""
                         SELECT status, rating, COUNT(*) AS n FROM platform.user_feedback

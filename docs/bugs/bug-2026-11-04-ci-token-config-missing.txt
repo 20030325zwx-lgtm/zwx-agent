@@ -1,0 +1,26 @@
+日期：2026-11-04
+主题：CI 只读令牌读配置缺失，gate 恒返回 403
+
+问题现象
+- 联调 B3-4 时，带正确 X-Aster-Ci-Token 调
+  GET /api/ai/eval/experiments/{id}/gate 返回 403 {"error":"ci token not allowed for this request"}。
+
+影响范围
+- 仅 CI 只读令牌（本批新增能力），不影响页面与既有 API；未上线，无线上影响。
+
+原因
+- AuthFilter 增加了 @Value("${app.internal.ci-token:}")，但 application.yml 没有定义该键，
+  值为空串 → 校验分支永远走 fail-closed 的 forbidden。
+
+解决方式
+- application.yml 补 app.internal.ci-token / ci-tenant（环境变量 PLATFORM_CI_TOKEN / PLATFORM_CI_TENANT）；
+  compose 与 .env.example 同步。
+- 文件：services/eval-service/src/main/resources/application.yml、
+  deploy/docker-compose/docker-compose.yml、.env.example
+
+验证结果
+- 正确令牌读 gate/report 200；写数据集与读数据集 403；错误令牌 403；E2E 20/20 通过。
+
+后续注意事项
+- 新增 @Value 配置项时，确认 application.yml 有同名键（哪怕是空默认值），
+  否则 fail-closed 的安全分支会把「未配置」表现成「没权限」，排查成本高。

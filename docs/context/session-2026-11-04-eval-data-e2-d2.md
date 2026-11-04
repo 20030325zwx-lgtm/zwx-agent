@@ -71,3 +71,34 @@
 - 临时验证实例端口：主站 8124（管理 8136）/ eval-service 8142 / data-service 8143，测毕已停止。
 - 模型价格表在 `services/eval-service/src/main/resources/application.yml` 的 `app.eval.pricing`，
   供应商调价时同步修改；拿不到价格时成本为 `null`。
+
+## 第三批 B3-1 ~ B3-4（同日追加）
+
+### 改动内容
+
+- **B3-1 点踩标签**：`PATCH /api/ai/feedback/{id}/tags`（本人 + status=open，最多 8 个）；
+  ChatRoom 点踩后浮出 5 个快捷标签（不准确/不完整/跑题/格式差/太慢），点选即 PATCH，不点也不丢反馈。
+- **B3-2 隐式信号**：`api/index.js` 新增 `reportSignal`（fetch + keepalive，失败忽略）；
+  已接：复制回答/消息（copy）、重新发送（regenerate/resend）、继续生成（regenerate/continue）、
+  素材收藏（adopt/star）、剧情采纳（adopt/story）、素材下载与批量下载（export）。
+- **B3-3 轨迹回流**：主站新增内部只读端点 `GET /internal/eval/runs?tenantId=`、
+  `GET /internal/eval/runs/{runId}/trajectory?tenantId=`（AgentRunService.findByIdInTenant /
+  findTenantRunOverviews、RunTrajectoryService.trajectoryInTenant，重构出 buildTrajectory 复用）；
+  数据中台新增「运行轨迹」页签：run 列表 → 计划/工具/模型调用 → 一键建回归用例
+  （复用 backflow，notes 带 `[trace 回流]`，标记 critical，标签默认 trace）。
+- **B3-4 CI 门禁**：eval-service AuthFilter 识别 `X-Aster-Ci-Token`，只放行
+  GET `/api/ai/eval/experiments**`（gate/report/export），租户由 `PLATFORM_CI_TENANT` 指定；
+  compose 与 .env.example 增加该配置；`/backflow` 支持指定 datasetId 与 tags。
+
+### 验证结果
+
+- 三端编译通过；主站前端 `npm run build` 通过；两个中台前端构建通过。
+- B3 端到端（隔离库）：**20/20** —— 标签 PATCH（含已处理 400）、信号计数、
+  run 列表与轨迹、trace 建用例（notes/critical/标签）、CI 令牌 gate/report 200 与写操作 403、
+  错误令牌 403、页面 200。
+- 本地 8123/8140/8141 已换新 jar 重启，`/api/ai/feedback/runs` 未登录 401（路由存在）。
+
+### 遗留
+
+- B3-5 发布 0.5.0 未执行（需要重打四个镜像并上服务器）。
+- ChatRoom 的快捷标签在浏览器里的实际交互未走查（登录态依赖主站管理员密码，仍为历史遗留）。

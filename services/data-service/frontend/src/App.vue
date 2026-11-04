@@ -14,6 +14,12 @@
 
     <p v-if="!token" class="error">未检测到登录状态：请先在 Aster 主站登录后再访问数据中台。</p>
 
+    <div class="toolbar" style="margin-bottom:14px">
+      <button class="tab" :class="{ active: view === 'feedback' }" @click="view = 'feedback'">反馈 / BadCase</button>
+      <button class="tab" :class="{ active: view === 'trace' }" @click="view = 'trace'">运行轨迹</button>
+    </div>
+
+    <template v-if="view === 'feedback'">
     <div class="metrics">
       <div class="metric">
         <h3>反馈总量</h3>
@@ -115,6 +121,9 @@
         <span v-if="!Object.keys(signalByEvent).length" class="muted">还没有信号上报</span>
       </div>
     </div>
+    </template>
+
+    <RunTracePanel v-else />
 
     <div v-if="selected" class="drawer-mask" @click.self="selected = null">
       <aside class="drawer">
@@ -177,6 +186,10 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import RunTracePanel from './components/RunTracePanel.vue'
+
+const VIEWS = ['feedback', 'trace']
+const view = ref(VIEWS[0])
 
 const API = '/api/ai/feedback'
 const ROOT_CAUSES = [
@@ -222,7 +235,6 @@ function rootCauseLabel(value) {
 }
 function signalLabel(value) { return SIGNAL_LABELS[value] || value }
 function formatTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—' }
-
 const unclassified = computed(() =>
   (stats.value.byRootCause || [])
     .filter((row) => row.root_cause === 'unclassified')

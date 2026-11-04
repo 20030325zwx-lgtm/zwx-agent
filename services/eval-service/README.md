@@ -32,6 +32,7 @@ Aster 的评测中台独立服务：数据集版本化、实验执行与对比�
 | 数据集 | `GET/POST /api/ai/eval/datasets`、`PUT/DELETE /datasets/{id}`、`POST /datasets/{id}/cases/import`、`GET/POST /datasets/{id}/cases`、`PUT/DELETE /datasets/{id}/cases/{externalId}`、`POST /datasets/{id}/publish`、`POST /datasets/{id}/versions/{v}/fork`、`GET /datasets/{id}/trend` |
 | 实验 | `POST /experiments`（target/concurrency/budget）、`GET /experiments`、`GET /experiments/{id}`、`POST /experiments/{id}/cancel`、`POST /experiments/{id}/resume`、`GET /experiments/compare` |
 | 报告 | `GET /experiments/{id}/report?groupBy=tag\|check\|dimension`、`/gate`、`/export`、`/results`、`/events` |
+| 内部回流 | `POST /api/internal/eval/backflow`（`X-Aster-Internal-Token`，可选 `datasetId`/`tags`） |
 | Prompt 资产 | `GET/POST /api/ai/eval/prompts`、`GET /prompts/{id}`、`POST /prompts/{id}/versions` |
 
 ## 配置（环境变量）
@@ -45,6 +46,8 @@ Aster 的评测中台独立服务：数据集版本化、实验执行与对比�
 | `DASHSCOPE_API_KEY` / `EVAL_MODEL` | PROMPT 评测与 judge 模型（默认 qwen-plus） |
 | `EVAL_SCHEDULER_ENABLED` | 是否执行实验调度（worker 设为 `true`） |
 | `EVAL_CASE_RETRY` | 单例评测器调用失败的重试次数（默认 1） |
+| `PLATFORM_CI_TOKEN` | CI 只读令牌：只放行 `GET /experiments**`（gate/report/export），留空禁用 |
+| `PLATFORM_CI_TENANT` | CI 令牌对应的租户，默认 `default` |
 
 模型价格表在 `application.yml` 的 `app.eval.pricing`，按供应商公示价维护；成本拿不到时为 `null`，不记为 0。
 

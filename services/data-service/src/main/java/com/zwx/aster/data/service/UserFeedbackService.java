@@ -128,6 +128,24 @@ public class UserFeedbackService {
         feedbackRepository.transitionGuarded(id, targetStatus);
     }
 
+    /** 点踩后补标签：本人 + 未处理才可改，最多 8 个。 */
+    public UserFeedbackRecord updateTags(JwtVerifier.Actor actor, UUID id, List<String> tags) {
+        UserFeedbackRecord record = get(actor, id);
+        if (!record.userId().equals(actor.userId())) {
+            throw new IllegalArgumentException("只能修改自己提交的反馈");
+        }
+        List<String> safeTags = tags == null ? List.of() : tags.stream()
+                .filter(tag -> tag != null && !tag.isBlank())
+                .map(String::trim)
+                .distinct()
+                .limit(8)
+                .toList();
+        if (!feedbackRepository.updateTags(id, actor.tenantId(), actor.userId(), safeTags)) {
+            throw new IllegalArgumentException("反馈已处理，不能再修改标签");
+        }
+        return get(actor, id);
+    }
+
     /** 根因归类：根因/负责人/结论可反复更新，不影响状态机。 */
     public UserFeedbackRecord updateAnalysis(JwtVerifier.Actor actor, UUID id, String rootCause,
                                              String assignee, String resolution) {

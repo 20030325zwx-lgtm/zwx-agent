@@ -4,6 +4,7 @@ import com.zwx.aster.data.domain.UserFeedbackRecord;
 import com.zwx.aster.data.security.JwtVerifier;
 import com.zwx.aster.data.service.UserFeedbackService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -91,6 +92,16 @@ public class UserFeedbackController {
     }
 
     public record AnalysisRequest(String rootCause, String assignee, String resolution) {
+    }
+
+    public record TagsRequest(List<String> tags) {
+    }
+
+    /** 点踩后的可选第二步：补快捷标签（本人、未处理）。 */
+    @PatchMapping("/{id}/tags")
+    public Map<String, Object> updateTags(JwtVerifier.Actor actor, @PathVariable UUID id,
+                                          @RequestBody TagsRequest request) {
+        return view(feedbackService.updateTags(actor, id, request.tags()));
     }
 
     /** 根因归类：可反复更新，是 BadCase 从「待办」变成「可统计」的关键一步。 */

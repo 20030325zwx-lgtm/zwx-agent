@@ -177,7 +177,7 @@ import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { Plus, RefreshCw, Users } from 'lucide-vue-next'
 import {
   confirmStoryEpisode, confirmStoryScene, createStoryEpisode, createStoryScene, deleteStoryEpisode,
-  deleteStoryScene, moveStoryEpisode, optimizeCreativePrompt, updateStoryEpisode, updateStoryScene
+  deleteStoryScene, moveStoryEpisode, optimizeCreativePrompt, reportSignal, updateStoryEpisode, updateStoryScene
 } from '../../../api'
 import { PROJECT_CTX } from './composables'
 import { SHOT_STATUS_LABEL } from './helpers'
@@ -364,6 +364,8 @@ async function adoptStory() {
     })
     optimizeResult.value = null
     await story.reload()
+    // 隐式信号：剧情优化被采纳（最接近「真实满意」的动作）
+    reportSignal('adopt', 'project', projectId.value, { kind: 'story', episodeId: episode.id })
   } catch (exception) {
     error.value = exception.response?.data?.error || '写回失败'
   }

@@ -22,6 +22,9 @@ app:
   internal:
     # 服务间调用的共享令牌（主站 /api/internal/** 与 data-service 回流共用）
     token: ${PLATFORM_INTERNAL_TOKEN:}
+    # CI 只读令牌：只放行 GET /experiments（门禁/报告/导出），租户固定为 ci-tenant
+    ci-token: ${PLATFORM_CI_TOKEN:}
+    ci-tenant: ${PLATFORM_CI_TENANT:default}
     # 主站内部 API 基址（compose 网络内为 http://backend:8123）
     backend-base-url: ${ASTER_BACKEND_URL:http://backend:8123}
   dashscope:

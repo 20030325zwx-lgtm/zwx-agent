@@ -111,7 +111,7 @@
           </div>
           <time class="message-time">{{ formatTime(msg.time) }}</time>
           <div v-if="!msg.isUser && msg.content" class="ai-message-actions">
-            <button type="button" title="复制回答" aria-label="复制回答" @click="copyMessage(msg.content)">⧉ 复制</button>
+            <button type="button" title="复制回答" aria-label="复制回答" @click="copyMessage(msg.content, msg)">⧉ 复制</button>
             <template v-if="conversationId && msg.runId">
               <button type="button" class="feedback-button" :class="{ active: msg.feedback === 'up', saving: msg.feedbackSaving }"
                       :disabled="!!msg.feedback || msg.feedbackSaving"
@@ -121,14 +121,20 @@
                       title="回答有问题（进入 BadCase 库，可回流评测集）" @click="sendFeedback(msg, 'down')">👎</button>
             </template>
           </div>
+          <div v-if="msg.feedback === 'down' && msg.feedbackTagsOpen" class="feedback-tags">
+            <span class="feedback-tags-hint">哪里有问题？（可跳过）</span>
+            <button v-for="tag in FEEDBACK_TAGS" :key="tag" type="button" class="feedback-tag"
+                    :class="{ active: (msg.feedbackTags || []).includes(tag) }"
+                    :disabled="msg.tagsSaving" @click="toggleFeedbackTag(msg, tag)">{{ tag }}</button>
+          </div>
           <div v-if="!msg.isUser && msg.status === 'INTERRUPTED' && connectionStatus !== 'connecting'" class="continue-row">
             <span class="continue-hint">回答被中断，已保留部分内容</span>
-            <button type="button" class="continue-button" @click="emit('continue-message', { message: msg, index })">继续生成 ▸</button>
+            <button type="button" class="continue-button" @click="continueMessage(msg, index)">继续生成 ▸</button>
           </div>
           <div v-if="msg.isUser && editingIndex !== index" class="message-actions" aria-label="消息操作">
-            <button type="button" title="复制消息" aria-label="复制消息" @click="copyMessage(msg.content)">⧉</button>
+            <button type="button" title="复制消息" aria-label="复制消息" @click="copyMessage(msg.content, msg)">⧉</button>
             <button type="button" title="编辑消息" aria-label="编辑消息" @click="editMessage(msg.content, index)">✎</button>
-            <button type="button" title="重新发送" aria-label="重新发送" @click="emit('resend-message', { content: msg.content, id: msg.id, index, imageKeys: msg.imageKeys || [] })">↻</button>
+            <button type="button" title="重新发送" aria-label="重新发送" @click="resendMessage(msg, index)">↻</button>
           </div>
         </article>
       </div>
@@ -176,7 +182,7 @@ import RunSummaryCard from './workspace/RunSummaryCard.vue'
 import AsterAvatar from './AsterAvatar.vue'
 import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
-import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment, createUserFeedback } from '../api'
+import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment, createUserFeedback, updateUserFeedbackTags, reportSignal } from '../api'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -206,19 +212,40 @@ const webSearch = ref(false)
 const knowledgeSearch = ref(false)
 const relevanceChoices = [{ value: 'RELEVANT', label: '相关' }, { value: 'PARTIAL', label: '部分相关' }, { value: 'IRRELEVANT', label: '不相关' }]
 
-// D1 数据中台：一次点击反馈，成功后按钮定格；失败回滚可重试（不弹窗打断对话）
+// D1 数据中台：一次点击反馈，成功后按钮定格；点踩额外浮出可选标签（不点也不丢）
+const FEEDBACK_TAGS = ['不准确', '不完整', '跑题', '格式差', '太慢']
+
 const sendFeedback = async (msg, rating) => {
   if (!msg.runId || msg.feedback || msg.feedbackSaving || !props.conversationId) return
   msg.feedbackSaving = true
   try {
-    await createUserFeedback({ rating, runId: msg.runId, conversationId: props.conversationId })
+    const record = await createUserFeedback({ rating, runId: msg.runId, conversationId: props.conversationId })
     msg.feedback = rating
+    msg.feedbackId = record?.id
+    msg.feedbackTags = record?.tags || []
+    if (rating === 'down' && msg.feedbackId) msg.feedbackTagsOpen = true
     emit('answer-feedback', { rating, runId: msg.runId, messageId: msg.id })
   } catch (exception) {
     console.warn('反馈提交失败', exception)
     window.alert(`反馈提交失败：${exception.response?.data?.error || '请稍后重试'}`)
   } finally {
     msg.feedbackSaving = false
+  }
+}
+
+/** 点踩后的第二步：增删标签；失败只提示，不回滚已提交的反馈。 */
+const toggleFeedbackTag = async (msg, tag) => {
+  if (!msg.feedbackId || msg.tagsSaving) return
+  const current = msg.feedbackTags || []
+  const next = current.includes(tag) ? current.filter(item => item !== tag) : [...current, tag]
+  msg.tagsSaving = true
+  try {
+    const updated = await updateUserFeedbackTags(msg.feedbackId, next)
+    msg.feedbackTags = updated?.tags || next
+  } catch (exception) {
+    console.warn('标签保存失败', exception)
+  } finally {
+    msg.tagsSaving = false
   }
 }
 
@@ -347,9 +374,23 @@ const sendMessage = () => {
   clearSelectedImages()
   if (fileInput.value) fileInput.value.value = ''
 }
-const copyMessage = async content => {
-  try { await navigator.clipboard.writeText(stripInlineCitations(content)) }
-  catch (error) { console.error('Copy message failed:', error) }
+const copyMessage = async (content, msg) => {
+  try {
+    await navigator.clipboard.writeText(stripInlineCitations(content))
+    // 隐式信号：复制是最廉价的质量肯定，失败不影响复制本身
+    reportSignal('copy', msg?.runId ? 'run' : 'conversation',
+      msg?.runId || props.conversationId, { messageId: msg?.id })
+  } catch (error) { console.error('Copy message failed:', error) }
+}
+const resendMessage = (msg, index) => {
+  reportSignal('regenerate', 'conversation', props.conversationId,
+    { messageId: msg.id, mode: 'resend' })
+  emit('resend-message', { content: msg.content, id: msg.id, index, imageKeys: msg.imageKeys || [] })
+}
+const continueMessage = (msg, index) => {
+  reportSignal('regenerate', 'conversation', props.conversationId,
+    { runId: msg.runId, messageId: msg.id, mode: 'continue' })
+  emit('continue-message', { message: msg, index })
 }
 const editMessage = (content, index) => {
   editingContent.value = content || ''
@@ -599,6 +640,16 @@ onBeforeUnmount(() => {
 .feedback-button { filter: grayscale(1); opacity: 0.65; }
 .feedback-button:hover { filter: none; opacity: 1; }
 .feedback-button.active { filter: none; opacity: 1; background: var(--cr-accent-soft, var(--wb-brand-soft)); }
+.feedback-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 0 2px; }
+.feedback-tags-hint { font-size: 11px; color: var(--wb-muted, #87878f); }
+.feedback-tag {
+  border: 1px solid var(--wb-border, #e4e3df); background: transparent;
+  color: var(--wb-text-2, #5f5f67); border-radius: 999px; padding: 2px 9px;
+  font-size: 11px; cursor: pointer;
+}
+.feedback-tag:hover { background: var(--wb-fill, #f1f0ec); }
+.feedback-tag.active { background: var(--cr-accent-soft, #efeafd); border-color: transparent; color: var(--wb-brand, #6654c7); }
+.feedback-tag:disabled { opacity: .5; cursor: default; }
 
 @media (hover: none) {
   .ai-message-actions { opacity: 1; }

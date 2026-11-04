@@ -171,6 +171,13 @@ public class AgentRunService {
                 """, runMapper(), runId, tenantId, userId, conversationId).stream().findFirst();
     }
 
+    /** 中台只读查询：按租户校验（跨用户），仅供内部令牌端点使用。 */
+    public Optional<AgentRun> findByIdInTenant(String tenantId, String runId) {
+        return jdbcTemplate.query("""
+                SELECT * FROM agent_run WHERE id = ? AND tenant_id = ? AND agent_key = 'super'
+                """, runMapper(), runId, tenantId).stream().findFirst();
+    }
+
     public List<AgentRun> findScopedRuns(String tenantId, String userId, String conversationId, int limit) {
         return jdbcTemplate.query("""
                 SELECT * FROM agent_run
@@ -213,8 +220,37 @@ public class AgentRunService {
                 tenantId, userId, Math.max(1, limit));
     }
 
-    public Optional<AgentRun> findLatestResumable(String tenantId, String userId, String conversationId) {
+    /** 中台轨迹浏览条目：租户内跨用户，带答案与 token，仅内部令牌端点使用。 */
+    public record TenantRunOverview(String id, String conversationId, String conversationTitle, String userId,
+                                    String status, String input, String answer,
+                                    Integer promptTokens, Integer completionTokens,
+                                    java.time.Instant createdAt, java.time.Instant updatedAt) {
+    }
+
+    public List<TenantRunOverview> findTenantRunOverviews(String tenantId, int limit) {
         return jdbcTemplate.query("""
+                SELECT r.id, r.conversation_id, r.status, r.input, r.user_id,
+                       COALESCE(c.title, '') AS conversation_title,
+                       COALESCE(r.final_answer, r.partial_answer, '') AS answer,
+                       COALESCE(r.prompt_tokens, 0) AS prompt_tokens,
+                       COALESCE(r.completion_tokens, 0) AS completion_tokens,
+                       r.created_at, r.updated_at
+                FROM agent_run r
+                LEFT JOIN agent_conversation c ON c.id = r.conversation_id
+                WHERE r.tenant_id = ? AND r.agent_key = 'super'
+                  AND r.input IS NOT NULL AND r.input <> ''
+                ORDER BY r.updated_at DESC
+                LIMIT ?
+                """,
+                (rs, rowNum) -> new TenantRunOverview(
+                        rs.getString("id"), rs.getString("conversation_id"), rs.getString("conversation_title"),
+                        rs.getString("user_id"), rs.getString("status"), rs.getString("input"),
+                        rs.getString("answer"), rs.getInt("prompt_tokens"), rs.getInt("completion_tokens"),
+                        rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()),
+                tenantId, Math.min(Math.max(limit, 1), 100));
+    }
+
+    public Optional<AgentRun> findLatestResumable(String tenantId, String userId, String conversationId) {        return jdbcTemplate.query("""
                 SELECT * FROM agent_run
                 WHERE tenant_id = ? AND user_id = ? AND conversation_id = ? AND agent_key = 'super'
                   AND status IN ('INTERRUPTED', 'FAILED')

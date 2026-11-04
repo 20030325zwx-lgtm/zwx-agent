@@ -13,6 +13,7 @@ Aster 的数据中台独立服务：反馈采集、BadCase 归类、隐式信号
   按事件聚合——比点赞密集的质量真值，也用于交叉验证 judge 是否失准
 - **一键回流**：好评 → golden 用例，负评 → 回归用例（`critical` 分级），
   根因与处理结论自动写入用例 notes；写入评测中台「线上回流-单轮直调」数据集草稿
+- **轨迹浏览与回流**：最近 run 列表 → 计划/工具/模型调用时间线 → 一键建回归用例（notes 带 `[trace 回流]`，标 critical）
 
 ## 与评测中台的关系
 
@@ -27,6 +28,7 @@ Aster 的数据中台独立服务：反馈采集、BadCase 归类、隐式信号
 | 归类 | `PUT /api/ai/feedback/{id}/analysis`（`rootCause/assignee/resolution`）、`POST /{id}/status`、`POST /{id}/convert` |
 | 看板 | `GET /api/ai/feedback/stats` |
 | 信号 | `POST /api/ai/feedback/signals`（登录用户）、`GET /signals/summary?days=7`、`GET /signals`（管理员） |
+| 轨迹 | `GET /api/ai/feedback/runs`、`GET /runs/{runId}/trajectory`、`POST /runs/{runId}/to-case`（管理员） |
 
 ## 配置（环境变量）
 

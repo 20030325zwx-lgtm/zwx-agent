@@ -241,6 +241,11 @@ Flyway 会在后端启动时自动执行数据库迁移。
 - 环境变量：`PLATFORM_INTERNAL_TOKEN`（服务间令牌，必填）、`JWT_SECRET`（与主站
   globe.conf 的 `app.security.jwt-secret` 必须一致，中台服务本地验签用）、`DASHSCOPE_API_KEY`
   （PROMPT/judge 直连）、`EVAL_MODEL`（默认 qwen-plus）。
+- **CI 只读门禁**（可选）：`.env` 设 `PLATFORM_CI_TOKEN`（留空禁用）、`PLATFORM_CI_TENANT`
+  （默认 default）。该令牌只能 `GET /api/ai/eval/experiments**`（gate/report/export/结果），
+  写操作与其它路径一律 403，适合给发布脚本消费。
+- 数据中台「运行轨迹」走主站内部只读端点（`/api/internal/eval/runs**`），
+  依赖 `PLATFORM_INTERNAL_TOKEN` 与主站 `ASTER_BACKEND_URL`。
 - 部署脚本（release/deploy-0.4.0.sh）会自动从 globe.conf 提取 JWT_SECRET、随机生成
   PLATFORM_INTERNAL_TOKEN 并写入 `.env`。
 - **重建 backend/frontend 容器后必须重启 nginx-proxy**（DNS 缓存，否则 502）。

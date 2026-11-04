@@ -26,7 +26,8 @@ public class InternalBackflowController {
     }
 
     public record BackflowRequest(String tenantId, String feedbackId, String rating,
-                                  String reason, String question, String answer) {
+                                  String reason, String question, String answer,
+                                  String datasetId, List<String> tags) {
     }
 
     @PostMapping("/backflow")
@@ -40,10 +41,17 @@ public class InternalBackflowController {
         if (request.question() == null || request.question().isBlank()) {
             throw new IllegalArgumentException("反馈缺少来源问题快照，无法回流");
         }
-        UUID datasetId = datasetService.findOrCreateBackflowDataset(request.tenantId());
+        // 未指定目标数据集时落到默认的「线上回流-单轮直调」；指定时必须属于本租户
+        UUID datasetId = request.datasetId() == null || request.datasetId().isBlank()
+                ? datasetService.findOrCreateBackflowDataset(request.tenantId())
+                : UUID.fromString(request.datasetId());
+        datasetService.getDataset(request.tenantId(), datasetId);
         Map<String, Object> rawCase = EvalDatasetService.buildBackflowCase(
                 request.feedbackId(), request.rating(), request.reason(),
                 request.question(), request.answer());
+        if (request.tags() != null && !request.tags().isEmpty()) {
+            rawCase.put("tags", request.tags());
+        }
         datasetService.importCases(request.tenantId(), datasetId, List.of(rawCase));
         String externalId = (String) rawCase.get("id");
         UUID caseId = datasetService.findDraftCaseId(datasetId, externalId).orElse(null);

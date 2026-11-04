@@ -22,6 +22,8 @@ app:
     token: ${PLATFORM_INTERNAL_TOKEN:}
     # 回流目标：评测中台内部接口
     eval-base-url: ${ASTER_EVAL_URL:http://eval-service:8140}
+    # 轨迹只读：主站内部接口
+    backend-base-url: ${ASTER_BACKEND_URL:http://backend:8123}
 
 logging:
   level:

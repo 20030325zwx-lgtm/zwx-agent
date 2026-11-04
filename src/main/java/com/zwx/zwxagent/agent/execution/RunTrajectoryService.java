@@ -29,9 +29,16 @@ public class RunTrajectoryService {
 
     public Optional<Map<String, Object>> trajectory(String tenantId, String userId,
                                                     String conversationId, String runId) {
-        Optional<AgentRun> found = agentRunService.findScoped(tenantId, userId, conversationId, runId);
-        if (found.isEmpty()) return Optional.empty();
-        AgentRun run = found.get();
+        return agentRunService.findScoped(tenantId, userId, conversationId, runId).map(this::buildTrajectory);
+    }
+
+    /** 中台侧只读轨迹：按租户校验（不限定提交用户），仅供内部令牌端点使用。 */
+    public Optional<Map<String, Object>> trajectoryInTenant(String tenantId, String runId) {
+        return agentRunService.findByIdInTenant(tenantId, runId).map(this::buildTrajectory);
+    }
+
+    private Map<String, Object> buildTrajectory(AgentRun run) {
+        String runId = run.id();
 
         Map<String, Object> runView = new LinkedHashMap<>();
         runView.put("id", run.id());
@@ -104,7 +111,7 @@ public class RunTrajectoryService {
             item.put("createdAt", rs.getTimestamp("created_at"));
             return item;
         }, runId));
-        return Optional.of(result);
+        return result;
     }
 
     private Object readJson(String json) {

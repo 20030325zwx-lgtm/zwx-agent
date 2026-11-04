@@ -219,8 +219,8 @@ import {
   LayoutGrid, Maximize2, Minimize2, Proportions, SlidersHorizontal, Upload
 } from 'lucide-vue-next'
 import {
-  deleteCreativeAsset, getCreativeJob, listCreativeAssets, listCreativeProjects, restoreCreativeAsset,
-  updateCreativeAsset, uploadCreativeAsset
+  deleteCreativeAsset, getCreativeJob, listCreativeAssets, listCreativeProjects, reportSignal,
+  restoreCreativeAsset, updateCreativeAsset, uploadCreativeAsset
 } from '../../api'
 import { downloadBlob, formatBytes, starBurst, useAssetUrls, useVideoUrls } from './shared'
 import MediaTile from '../../components/creative/MediaTile.vue'
@@ -484,6 +484,7 @@ async function downloadSelected() {
       if (!asset) continue
       const url = asset.mediaType === 'VIDEO' ? await videoUrlFor(id) : await urlFor(id)
       downloadBlob(url, `${asset.displayName || id}.${asset.mediaType === 'VIDEO' ? 'mp4' : 'png'}`)
+      reportSignal('export', 'asset', id, { kind: 'batch-download' })
     }
   } finally {
     busyBatch.value = false
@@ -526,6 +527,7 @@ async function previewAction({ type, asset }) {
   if (type === 'download') {
     const url = asset.mediaType === 'VIDEO' ? await videoUrlFor(asset.id) : await urlFor(asset.id)
     downloadBlob(url, `${asset.displayName || asset.id}.${asset.mediaType === 'VIDEO' ? 'mp4' : 'png'}`)
+    reportSignal('export', 'asset', asset.id, { kind: 'download' })
     return
   }
   if (type === 'use-prompt') {
@@ -569,7 +571,11 @@ async function toggleStar(asset, event) {
     const updated = await updateCreativeAsset(asset.id, { starred: !asset.starred })
     const index = assets.value.findIndex(item => item.id === asset.id)
     if (index >= 0) assets.value[index] = updated
-    if (updated.starred) starBurst(burstTarget)
+    if (updated.starred) {
+      starBurst(burstTarget)
+      // 收藏是「采纳」的轻量代理：素材值得留下
+      reportSignal('adopt', 'asset', asset.id, { kind: 'star' })
+    }
   } catch (exception) {
     showToast('收藏失败', 'error')
   }

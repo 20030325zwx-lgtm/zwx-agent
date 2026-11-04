@@ -518,11 +518,36 @@ export const deleteCreativeAsset = assetId =>
 // 生产同域下即 API_BASE_URL，由 nginx 把 /api/ai/feedback 路由到 data-service）。
 const DATA_API_BASE = import.meta.env.VITE_DATA_API_URL
   || (import.meta.env.DEV ? 'http://localhost:8141/api' : API_BASE_URL)
-export const createUserFeedback = payload => {
+
+function dataHeaders() {
   const headers = {}
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
   const localHeaders = localTokenHeader()
   if (localHeaders['X-Aster-Local-Token']) headers['X-Aster-Local-Token'] = localHeaders['X-Aster-Local-Token']
-  return axios.post(`${DATA_API_BASE}/ai/feedback`, payload, { headers }).then(r => r.data)
+  return headers
+}
+
+export const createUserFeedback = payload =>
+  axios.post(`${DATA_API_BASE}/ai/feedback`, payload, { headers: dataHeaders() }).then(r => r.data)
+
+/** 点踩后的可选第二步：补齐快捷标签（不阻塞对话）。 */
+export const updateUserFeedbackTags = (feedbackId, tags) =>
+  axios.patch(`${DATA_API_BASE}/ai/feedback/${encodeURIComponent(feedbackId)}/tags`, { tags },
+    { headers: dataHeaders() }).then(r => r.data)
+
+/**
+ * 隐式信号上报：fire-and-forget。失败只落 debug 日志，绝不打断用户操作，
+ * 用 keepalive 保证「复制后立刻切页」这类场景也能送达。
+ */
+export const reportSignal = (event, subjectType, subjectId, props = {}) => {
+  if (!subjectId) return Promise.resolve()
+  return fetch(`${DATA_API_BASE}/ai/feedback/signals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...dataHeaders() },
+    keepalive: true,
+    body: JSON.stringify({ event, subjectType, subjectId, props })
+  }).catch(exception => {
+    console.debug('信号上报失败（忽略）', event, exception)
+  })
 }

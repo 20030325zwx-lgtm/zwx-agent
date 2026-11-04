@@ -14,7 +14,8 @@ import java.security.MessageDigest;
 import java.util.Optional;
 
 /**
- * 鉴权链：/health 公开；/api/internal/** 只认 X-Aster-Internal-Token（常量时间比较，fail-closed）；
+ * 鉴权链：/health 与页面公开；/api/internal/** 只认 X-Aster-Internal-Token；
+ * GET /api/ai/eval/experiments/** 额外认 X-Aster-Ci-Token（只读门禁，租户由配置指定）；
  * 其余 /api/ai/** 认主站 JWT，Actor 写入 request attribute。
  */
 @Component
@@ -22,13 +23,21 @@ public class AuthFilter extends OncePerRequestFilter {
 
     public static final String ACTOR_ATTRIBUTE = "aster.eval.actor";
     public static final String INTERNAL_HEADER = "X-Aster-Internal-Token";
+    public static final String CI_HEADER = "X-Aster-Ci-Token";
 
     private final JwtVerifier jwtVerifier;
     private final String internalToken;
+    private final String ciToken;
+    private final String ciTenant;
 
-    public AuthFilter(JwtVerifier jwtVerifier, @Value("${app.internal.token:}") String internalToken) {
+    public AuthFilter(JwtVerifier jwtVerifier,
+                      @Value("${app.internal.token:}") String internalToken,
+                      @Value("${app.internal.ci-token:}") String ciToken,
+                      @Value("${app.internal.ci-tenant:default}") String ciTenant) {
         this.jwtVerifier = jwtVerifier;
         this.internalToken = internalToken;
+        this.ciToken = ciToken;
+        this.ciTenant = ciTenant;
     }
 
     @Override
@@ -46,6 +55,20 @@ public class AuthFilter extends OncePerRequestFilter {
                 unauthorized(response, "invalid internal token");
                 return;
             }
+            filterChain.doFilter(request, response);
+            return;
+        }
+        String ciProvided = request.getHeader(CI_HEADER);
+        if (ciProvided != null) {
+            // CI 令牌只读：只放行 GET 且仅实验读取/门禁/报告/导出
+            boolean readOnly = "GET".equalsIgnoreCase(request.getMethod())
+                    && path.startsWith("/api/ai/eval/experiments");
+            if (ciToken.isBlank() || !constantTimeEquals(ciProvided, ciToken) || !readOnly) {
+                forbidden(response, "ci token not allowed for this request");
+                return;
+            }
+            request.setAttribute(ACTOR_ATTRIBUTE,
+                    new JwtVerifier.Actor("ci", ciTenant, "ci", "ADMIN"));
             filterChain.doFilter(request, response);
             return;
         }
@@ -69,6 +92,12 @@ public class AuthFilter extends OncePerRequestFilter {
 
     private static void unauthorized(HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"error\":\"" + message + "\"}");
+    }
+
+    private static void forbidden(HttpServletResponse response, String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write("{\"error\":\"" + message + "\"}");
     }

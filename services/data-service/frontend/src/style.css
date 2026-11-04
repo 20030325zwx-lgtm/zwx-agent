@@ -89,3 +89,8 @@ tbody tr:hover { background: var(--fill); }
 .signal { display: flex; flex-direction: column; gap: 2px; }
 .signal strong { font-size: 18px; }
 .signal em { font-style: normal; font-size: 11px; color: var(--muted); }
+
+/* ---- 轨迹浏览 ---- */
+.plan-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.plan-list li { line-height: 1.55; }
+.plan-list .chip { margin-left: 6px; }

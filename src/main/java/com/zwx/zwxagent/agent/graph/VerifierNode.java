@@ -46,6 +46,7 @@ public class VerifierNode implements NodeAction {
             Pattern.compile("[\\w\\u4e00-\\u9fa5.-]+\\.(pdf|PDF|md|MD|txt|docx|xlsx|csv|html|json|png|jpg|jpeg)");
 
     private final ChatClient chatClient;
+    private final com.zwx.zwxagent.agent.execution.PromptSource promptSource;
 
     /** 计量归属的 run：节点实例按 run 创建，apply 时从图状态绑定。 */
     private final AtomicReference<String> tokenUsageRunId = new AtomicReference<>("");
@@ -56,6 +57,13 @@ public class VerifierNode implements NodeAction {
 
     public VerifierNode(ChatModel chatModel, TokenUsageService tokenUsage,
                  com.zwx.zwxagent.agent.observability.ModelIoService modelIo) {
+        this(chatModel, tokenUsage, modelIo, null);
+    }
+
+    public VerifierNode(ChatModel chatModel, TokenUsageService tokenUsage,
+                 com.zwx.zwxagent.agent.observability.ModelIoService modelIo,
+                 com.zwx.zwxagent.agent.execution.PromptSource promptSource) {
+        this.promptSource = promptSource;
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(new MyLoggerAdvisor(),
                         new TokenUsageAdvisor("verifier", tokenUsage, tokenUsageRunId::get, modelIo))
@@ -121,7 +129,7 @@ public class VerifierNode implements NodeAction {
         try {
             String planText = planDetails(plan, results);
             verdictJson = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
+                    .system(promptSource == null ? SYSTEM_PROMPT : promptSource.resolve("verifier", SYSTEM_PROMPT))
                     .user("用户请求：" + input + "\n\n计划与结果：\n" + planText)
                     .call()
                     .content();

@@ -34,6 +34,7 @@ public class ToolFactory {
     private final com.zwx.zwxagent.creative.service.MediaJobService mediaJobService;
     private final com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService;
     private final ArtifactClient artifactClient;
+    private final com.zwx.zwxagent.agent.execution.AgentRunService agentRunService;
 
     public ToolFactory(ToolSandbox sandbox,
                        com.zwx.zwxagent.platform.workspace.WorkspaceService workspaceService,
@@ -59,7 +60,8 @@ public class ToolFactory {
                        @Value("${app.artifact.base-url:}") String artifactBaseUrl,
                        @Value("${app.artifact.token:}") String artifactToken,
                        @Value("${app.artifact.timeout-seconds:120}") int artifactTimeoutSeconds,
-                       @Value("${app.artifact.max-bytes:52428800}") int artifactMaxBytes) {
+                       @Value("${app.artifact.max-bytes:52428800}") int artifactMaxBytes,
+                       com.zwx.zwxagent.agent.execution.AgentRunService agentRunService) {
         this.sandbox = sandbox;
         this.workspaceService = workspaceService;
         this.projectWorkspaceService = projectWorkspaceService;
@@ -83,6 +85,7 @@ public class ToolFactory {
         this.mediaJobService = mediaJobService;
         this.creativeProjectService = creativeProjectService;
         this.artifactClient = new ArtifactClient(artifactBaseUrl, artifactToken, artifactTimeoutSeconds, artifactMaxBytes);
+        this.agentRunService = agentRunService;
     }
 
     /** 工作区签名（design/plans/09 批次 A）：工具 workDir 来自统一工作区目录模型。 */
@@ -137,6 +140,10 @@ public class ToolFactory {
         // docx / pptx / Markdown-PDF 依赖 artifact 引擎（services/artifact-mcp）；未配置时不注册，避免模型调到必然失败的工具
         if (artifactClient.enabled()) {
             tools.add(new ArtifactDocumentTool(sandbox, workDir, artifactClient));
+        }
+        // 结构化提问：run 上下文存在时才注册（旧测试路径/无 run 场景不出现）
+        if (runId != null && !runId.isBlank() && agentRunService != null) {
+            tools.add(new AskHumanTool(agentRunService, runId));
         }
         tools.add(new CurrentTimeTool());
         if (userId != null && !userId.isBlank()) {

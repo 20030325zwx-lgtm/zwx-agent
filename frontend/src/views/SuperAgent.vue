@@ -69,6 +69,18 @@
                 <span class="confirmation-mode">{{ activeRun.permissionMode || defaultPermissionMode }} 模式</span>
                 <button type="button" class="confirmation-action" @click="confirmationDialogOpen = true">查看并确认</button>
               </div>
+              <div v-if="activeRun?.waitingReason === 'NEED_INPUT'" class="question-banner" role="status">
+                <span class="question-text">
+                  <HelpCircle :size="14" />
+                  <span>{{ activeRun.waitingDetail || '智能体在等待你补充信息' }}</span>
+                </span>
+                <span class="question-actions">
+                  <input v-model="humanAnswer" type="text" class="question-input" placeholder="输入回答，回车提交…"
+                    @keydown.enter.prevent="submitHumanAnswer" />
+                  <button type="button" class="question-submit" :disabled="!humanAnswer.trim()"
+                    @click="submitHumanAnswer">提交</button>
+                </span>
+              </div>
               <div class="canvas-conversation">
                 <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" hide-input
                   knowledge-search-available attachments-enabled attachment-accept="image/jpeg,image/png,image/gif,image/webp"
@@ -148,7 +160,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import {
-  BookOpen, ClipboardList, Code2, Database, Download, Globe2, Menu, PanelLeftClose, PanelLeftOpen,
+  BookOpen, ClipboardList, Code2, Database, Download, Globe2, HelpCircle, Menu, PanelLeftClose, PanelLeftOpen,
   PanelRightOpen, PauseCircle, Plug, RotateCw, Workflow
 } from 'lucide-vue-next'
 import AgentCompanion from '../components/AgentCompanion.vue'
@@ -159,7 +171,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CodeWorkspace from '../components/workspace/CodeWorkspace.vue'
 import RunInspector from '../components/workspace/RunInspector.vue'
 import TaskComposer from '../components/workspace/TaskComposer.vue'
-import { browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, getProjectCodeDiff, listManusConversations, listManusRuns, listManusToolCalls, listManusWebSources, listModelCatalog, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
+import { answerManusRun, browseProjectDirectories, chatWithManus, resumeManusRun, reconnectManusRun, cancelManusRun, createManusConversation, createProject, decideManusConfirmation, deleteManusConversation, getManusConversationMessages, getManusFileUrl, getManusImageUrl, getManusRun, getPermissionSettings, getProjectCodeDiff, listManusConversations, listManusRuns, listManusToolCalls, listManusWebSources, listModelCatalog, listProjects, listWorkspaceFiles, selectProjectDirectory, uploadManusImage } from '../api'
 
 const permissionModes = [
   { value: 'PLAN', label: '只读规划', hint: '仅允许只读工具，写操作直接拒绝' },
@@ -526,6 +538,25 @@ const openCodeWorkspace = payload => {
   codeInitialPath.value = payload?.path || ''
   codeOpen.value = true
 }
+const humanAnswer = ref('')
+const answering = ref(false)
+const submitHumanAnswer = async () => {
+  const answer = humanAnswer.value.trim()
+  const run = activeRun.value
+  if (!answer || !run?.id || !chatId.value || answering.value) return
+  answering.value = true
+  try {
+    await answerManusRun(chatId.value, run.id, answer)
+    run.waitingReason = ''
+    run.waitingDetail = ''
+    humanAnswer.value = ''
+    sendMessage(answer)
+  } catch (error) {
+    console.error('Unable to submit answer:', error)
+  } finally {
+    answering.value = false
+  }
+}
 const openCodeFiles = () => {
   codeScope.value = 'run'
   codeInitialTab.value = 'files'
@@ -544,6 +575,12 @@ watch(codeOpen, open => {
 const normalizeRun = (run, messageIndex = -1) => ({
   id: run?.id || '',
   status: run?.status || 'RUNNING',
+  phase: run?.phase || 'WORKING',
+  waitingReason: run?.waitingReason || '',
+  waitingDetail: run?.waitingDetail || '',
+  backgroundJobs: run?.backgroundJobs || 0,
+  assignments: Array.isArray(run?.assignments) ? run.assignments : [],
+  promptVersions: run?.promptVersions || {},
   lastNode: run?.lastNode || '',
   nextNode: run?.nextNode || '',
   input: run?.input || '',
@@ -1464,6 +1501,46 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .confirmation-action:hover { background: var(--wb-fill); }
+
+.question-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 2px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--wb-border);
+  border-left: 3px solid var(--wb-brand);
+  border-radius: var(--wb-radius);
+  background: var(--wb-surface);
+  font-size: 12px;
+  color: var(--wb-text-2);
+}
+
+.question-text { display: flex; align-items: flex-start; gap: 7px; line-height: 1.55; }
+.question-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.question-input {
+  width: 240px;
+  border: 1px solid var(--wb-border);
+  border-radius: 999px;
+  padding: 5px 11px;
+  background: var(--wb-bg);
+  color: var(--wb-text);
+  font-size: 12px;
+  outline: none;
+}
+.question-input:focus { border-color: var(--wb-brand); }
+.question-submit {
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 13px;
+  background: var(--wb-text);
+  color: var(--wb-surface);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.question-submit:disabled { opacity: 0.5; cursor: default; }
 
 .plan-gate-banner {
   display: flex;

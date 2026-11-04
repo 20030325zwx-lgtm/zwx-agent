@@ -41,6 +41,7 @@ public class PlannerNode implements NodeAction {
             """;
 
     private final ChatClient chatClient;
+    private final com.zwx.zwxagent.agent.execution.PromptSource promptSource;
 
     /** 计量归属的 run：节点实例按 run 创建，apply 时从图状态绑定。 */
     private final AtomicReference<String> tokenUsageRunId = new AtomicReference<>("");
@@ -51,6 +52,13 @@ public class PlannerNode implements NodeAction {
 
     public PlannerNode(ChatModel chatModel, TokenUsageService tokenUsage,
                  com.zwx.zwxagent.agent.observability.ModelIoService modelIo) {
+        this(chatModel, tokenUsage, modelIo, null);
+    }
+
+    public PlannerNode(ChatModel chatModel, TokenUsageService tokenUsage,
+                 com.zwx.zwxagent.agent.observability.ModelIoService modelIo,
+                 com.zwx.zwxagent.agent.execution.PromptSource promptSource) {
+        this.promptSource = promptSource;
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(new MyLoggerAdvisor(),
                         new TokenUsageAdvisor("planner", tokenUsage, tokenUsageRunId::get, modelIo))
@@ -97,7 +105,7 @@ public class PlannerNode implements NodeAction {
         String activity;
         try {
             String output = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
+                    .system(promptSource == null ? SYSTEM_PROMPT : promptSource.resolve("planner", SYSTEM_PROMPT))
                     .user(prompt)
                     .call()
                     .content();

@@ -134,7 +134,12 @@
     <div v-else class="tab-panel run-meta">
       <template v-if="run">
         <dl>
+          <div><dt>阶段</dt><dd>{{ phaseLabel }}</dd></div>
+          <div v-if="run.waitingReason"><dt>等待</dt><dd>{{ waitingLabel }}</dd></div>
           <div><dt>状态</dt><dd>{{ run.status || '—' }}</dd></div>
+          <div v-if="run.backgroundJobs"><dt>后台任务</dt><dd>{{ run.backgroundJobs }} 个进行中</dd></div>
+          <div v-if="run.assignments?.length"><dt>派工</dt><dd>{{ run.assignments.length }} 次（最近第 {{ run.assignments[run.assignments.length - 1]?.attempt }} 次）</dd></div>
+          <div v-if="promptVersionText"><dt>提示词</dt><dd>{{ promptVersionText }}</dd></div>
           <div><dt>完成节点</dt><dd>{{ run.lastNode || '—' }}</dd></div>
           <div><dt>下一节点</dt><dd>{{ run.nextNode || '—' }}</dd></div>
           <div><dt>恢复次数</dt><dd>{{ run.resumeCount || 0 }}</dd></div>
@@ -266,6 +271,28 @@ const promptShare = phase => totalPromptTokens.value
   ? Math.round(((phase.promptTokens || 0) / totalPromptTokens.value) * 100)
   : 0
 
+const PHASE_LABELS = {
+  QUEUED: '排队中',
+  WORKING: '执行中',
+  WAITING_HUMAN: '等待你处理',
+  BLOCKED: '已阻塞',
+  FAILED: '失败',
+  DONE: '已完成',
+  STOPPED: '已停止'
+}
+const phaseLabel = computed(() => PHASE_LABELS[props.run?.phase] || props.run?.phase || '—')
+const WAITING_LABELS = {
+  CONFIRM_PLAN: '确认执行计划',
+  CONFIRM_TOOL: '确认工具操作',
+  NEED_INPUT: '补充信息'
+}
+const waitingLabel = computed(() => WAITING_LABELS[props.run?.waitingReason] || props.run?.waitingReason)
+const promptVersionText = computed(() => {
+  const versions = props.run?.promptVersions || {}
+  const entries = Object.entries(versions)
+  if (!entries.length) return ''
+  return entries.map(([key, version]) => `${key} v${version === 0 ? '默认' : version}`).join(' · ')
+})
 const verificationLabel = computed(() => ({
   pass: '已验收',
   unverified: '未验收',

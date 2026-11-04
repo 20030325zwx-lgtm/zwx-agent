@@ -68,6 +68,8 @@ import java.util.stream.Stream;
 @RequestMapping("/ai")
 public class ManusAgentController {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ManusAgentController.class);
+
     private static final String SUPER_AGENT_KEY = "super";
     private static final String SUPER_DEFAULT_TITLE = "新的超级智能体对话";
     private static final Pattern GENERATED_FILE = Pattern.compile("(?:PDF generated successfully to:|File written successfully to:|Resource downloaded successfully to:)\\s*([^\"\\r\\n]+)");
@@ -87,6 +89,9 @@ public class ManusAgentController {
 
     @Resource
     private WorkspaceService workspaceService;
+
+    @Resource
+    private com.zwx.zwxagent.agent.execution.PromptVersionService promptVersionService;
 
     @Resource
     private com.zwx.zwxagent.platform.workspace.WorkspaceFileExportService workspaceFileExportService;
@@ -356,6 +361,7 @@ public class ManusAgentController {
             throw exception;
         }
         modelCatalogService.attachToRun(runId, modelSelection);
+        recordPromptSnapshot(runId);
         try {
             availableTools = Stream.concat(
                             Arrays.stream(toolFactory.createTools(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
@@ -417,10 +423,39 @@ public class ManusAgentController {
 
     @GetMapping("/manus/conversations/{conversationId}/runs/{runId}")
     public AgentRunView getManusRun(CurrentActor actor, @PathVariable String conversationId, @PathVariable String runId) {
-        return agentRunService.findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
-                .map(AgentRunView::from)
+        return runView(actor, conversationId, runId);
+    }
+
+    /** 统一装配 run 视图：阶段、派工历史、提示词版本快照。 */
+    private AgentRunView runView(CurrentActor actor, String conversationId, String runId) {
+        com.zwx.zwxagent.agent.execution.AgentRun run = agentRunService
+                .findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        return AgentRunView.from(run, agentRunService.assignments(runId),
+                AgentRunView.parsePromptVersions(run.promptVersionsJson()));
+    }
+
+    public record RunAnswerRequest(String answer) {
+    }
+
+    /**
+     * 回答智能体的结构化提问（askHuman）：清空等待状态并返回最新视图。
+     * 答复正文由前端作为新消息发送（新一轮会带上这句答复继续）。
+     */
+    @PostMapping("/manus/conversations/{conversationId}/runs/{runId}/answer")
+    public AgentRunView answerManusRun(CurrentActor actor, @PathVariable String conversationId,
+                                       @PathVariable String runId, @RequestBody RunAnswerRequest request) {
+        com.zwx.zwxagent.agent.execution.AgentRun run = agentRunService
+                .findScoped(actor.tenantId(), actor.userId(), conversationId, runId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Run not found"));
+        if (!run.waitingForInput()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "该任务当前不在等待补充信息");
+        }
+        agentRunService.markInputAnswered(runId);
+        return runView(actor, conversationId, runId);
     }
 
     /** 轨迹导出：检查点 + 工具账本 + 模型调用 + 执行事件，用于评测留证与回放。 */
@@ -803,5 +838,19 @@ public class ManusAgentController {
             return List.of();
         }
         return workspaceService.listFiles(actor.tenantId(), agentKey, conversationId, Math.min(Math.max(limit, 1), 500));
+    }
+
+    /** run 开始时的提示词版本快照（0 = 内置默认），便于事后追溯。 */
+    private void recordPromptSnapshot(String runId) {
+        try {
+            java.util.Map<String, Integer> versions = promptVersionService.snapshot(
+                    java.util.Map.of(
+                            com.zwx.zwxagent.agent.execution.PromptVersionService.PLANNER, "",
+                            com.zwx.zwxagent.agent.execution.PromptVersionService.VERIFIER, "",
+                            com.zwx.zwxagent.agent.execution.PromptVersionService.AGGREGATOR, ""));
+            agentRunService.recordPromptVersions(runId, toJson(versions));
+        } catch (Exception exception) {
+            log.debug("Unable to record prompt versions for run {}: {}", runId, exception.getMessage());
+        }
     }
 }

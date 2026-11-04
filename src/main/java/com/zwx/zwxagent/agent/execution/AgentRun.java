@@ -12,6 +12,12 @@ public record AgentRun(String id,
                        long userMessageId,
                        Long assistantMessageId,
                        String status,
+                       String phase,
+                       String waitingReason,
+                       String waitingDetail,
+                       int backgroundJobs,
+                       Instant backgroundDeadline,
+                       String promptVersionsJson,
                        String permissionMode,
                        String input,
                        String historyContext,
@@ -28,6 +34,15 @@ public record AgentRun(String id,
     public boolean resumable() {
         return "INTERRUPTED".equals(status) || "FAILED".equals(status)
                 || ("RUNNING".equals(status) && checkpoint != null && checkpoint.lastNode() != null);
+    }
+
+    /** 是否正在等用户补充信息（askHuman 提问，区别于工具/计划确认）。 */
+    public boolean waitingForInput() {
+        return WaitingReason.NEED_INPUT == WaitingReason.from(waitingReason);
+    }
+
+    public WaitingReason waitingReasonEnum() {
+        return WaitingReason.from(waitingReason);
     }
 
     /** run 是否正挂起等待工具确认（挂起期间 status=INTERRUPTED + pending_confirmation 非空）。 */

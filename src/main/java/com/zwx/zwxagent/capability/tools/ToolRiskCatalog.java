@@ -21,6 +21,8 @@ public final class ToolRiskCatalog {
             Map.entry("getProjectGitStatus", ToolRisk.READ_ONLY),
             Map.entry("getProjectDiff", ToolRisk.READ_ONLY),
             Map.entry("listProjectTasks", ToolRisk.READ_ONLY),
+            // 结构化提问不产生副作用，不弹确认
+            Map.entry("askHuman", ToolRisk.READ_ONLY),
             // 交付物写入
             Map.entry("writeFile", ToolRisk.WRITE),
             Map.entry("generatePDF", ToolRisk.WRITE),

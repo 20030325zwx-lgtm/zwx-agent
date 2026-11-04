@@ -59,15 +59,62 @@ public class AgentRunService {
         String ownerInstance = instanceRegistry == null ? null : instanceRegistry.currentInstanceId();
         int inserted = jdbcTemplate.update("""
                 INSERT INTO agent_run (id, conversation_id, tenant_id, user_id, agent_key, user_message_id,
-                                       status, permission_mode, input, history_context, knowledge_context, rag_trace_json,
+                                       status, phase, permission_mode, input, history_context, knowledge_context, rag_trace_json,
                                        owner_instance)
-                SELECT ?, c.id, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?, ?, ?
+                SELECT ?, c.id, ?, ?, ?, ?, 'RUNNING', 'WORKING', ?, ?, ?, ?, ?, ?
                 FROM agent_conversation c
                 WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.agent_key = ?
                 """, id, tenantId, userId, agentKey, userMessageId, permissionMode, input, historyContext,
                 knowledgeContext, ragTraceJson, ownerInstance, conversationId, tenantId, userId, agentKey);
         if (inserted == 0) throw new IllegalArgumentException("Agent conversation was not found");
+        startAssignment(id, 1, null);
         return id;
+    }
+
+    /** 记录 prompt 版本快照（run 开始时写入，事后可知道这次用了哪版提示词）。 */
+    public void recordPromptVersions(String runId, String versionsJson) {
+        if (runId == null || runId.isBlank() || versionsJson == null || versionsJson.isBlank()) return;
+        jdbcTemplate.update("""
+                UPDATE agent_run SET prompt_versions = CAST(? AS jsonb), updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, versionsJson, runId);
+    }
+
+    // ── 派工（Assignment）：一次执行绑定一行，重派/续跑都新建 ──────────────────
+
+    public record AssignmentView(String id, int attempt, String executorType, String status,
+                                 String sessionRef, String workDir, Instant startedAt, Instant endedAt) {
+    }
+
+    /** 开启一次派工：attempt 从 1 起，续跑时调用方传 resumeCount+1。 */
+    public void startAssignment(String runId, int attempt, String workDir) {
+        if (runId == null || runId.isBlank()) return;
+        jdbcTemplate.update("""
+                INSERT INTO agent_run_assignment (id, run_id, attempt, executor_type, work_dir, status)
+                VALUES (?, ?, ?, 'local', ?, 'RUNNING')
+                ON CONFLICT (run_id, attempt) DO UPDATE SET status = 'RUNNING', ended_at = NULL
+                """, UUID.randomUUID().toString(), runId, Math.max(1, attempt), workDir);
+    }
+
+    /** 结束当前（最新）派工：DONE/FAILED/WAITING_HUMAN 各自落一段结果摘要。 */
+    public void endAssignment(String runId, String summary) {
+        if (runId == null || runId.isBlank()) return;
+        jdbcTemplate.update("""
+                UPDATE agent_run_assignment SET status = 'ENDED', ended_at = CURRENT_TIMESTAMP,
+                       result_summary = ?
+                WHERE run_id = ? AND status = 'RUNNING'
+                """, summary, runId);
+    }
+
+    public List<AssignmentView> assignments(String runId) {
+        if (runId == null || runId.isBlank()) return List.of();
+        return jdbcTemplate.query("""
+                SELECT id, attempt, executor_type, status, session_ref, work_dir, started_at, ended_at
+                FROM agent_run_assignment WHERE run_id = ? ORDER BY attempt
+                """, (rs, rowNum) -> new AssignmentView(
+                rs.getString("id"), rs.getInt("attempt"), rs.getString("executor_type"), rs.getString("status"),
+                rs.getString("session_ref"), rs.getString("work_dir"),
+                instant(rs, "started_at"), instant(rs, "ended_at")), runId);
     }
 
     public void checkpoint(String runId, GraphCheckpoint checkpoint) {
@@ -115,49 +162,140 @@ public class AgentRunService {
     }
 
     public void finish(String runId, String status, String answer, String error, Long assistantMessageId) {
+        // 本轮结束时统计该 run 仍在跑的后台媒体任务：>0 时阶段保持 WORKING 并保留 slot（默认 30 分钟）
+        int backgroundJobs = countActiveMediaJobs(runId);
         jdbcTemplate.update("""
-                UPDATE agent_run SET status = ?, final_answer = COALESCE(?, final_answer),
+                UPDATE agent_run SET status = ?, phase = CASE
+                        WHEN waiting_reason = 'NEED_INPUT' THEN 'WAITING_HUMAN'
+                        WHEN ? = 'COMPLETED' AND ? > 0 THEN 'WORKING'
+                        WHEN ? = 'COMPLETED' THEN 'DONE'
+                        WHEN ? = 'FAILED' THEN 'FAILED'
+                        WHEN ? = 'INTERRUPTED' AND waiting_reason IS NOT NULL THEN 'WAITING_HUMAN'
+                        WHEN ? = 'INTERRUPTED' THEN 'STOPPED'
+                        ELSE phase END,
+                    background_jobs = ?,
+                    background_deadline = CASE WHEN ? > 0 THEN CURRENT_TIMESTAMP + INTERVAL '30 minutes' ELSE NULL END,
+                    final_answer = COALESCE(?, final_answer),
                     partial_answer = COALESCE(?, partial_answer), error_message = ?,
                     assistant_message_id = COALESCE(?, assistant_message_id),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-                """, status, answer, answer, error, assistantMessageId, runId);
+                """, status, status, backgroundJobs, status, status, status, status,
+                backgroundJobs, backgroundJobs, answer, answer, error, assistantMessageId, runId);
+        endAssignment(runId, status + (backgroundJobs > 0 ? " · 后台任务 " + backgroundJobs : ""));
+    }
+
+    private int countActiveMediaJobs(String runId) {
+        if (runId == null || runId.isBlank()) return 0;
+        try {
+            Integer count = jdbcTemplate.queryForObject("""
+                    SELECT count(*) FROM creative_media_job
+                    WHERE source_run_id = ? AND status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                    """, Integer.class, runId);
+            return count == null ? 0 : count;
+        } catch (Exception exception) {
+            // 媒体表不存在（裁剪部署）时按无后台任务处理
+            return 0;
+        }
     }
 
     public void restart(String runId) {
         String ownerInstance = instanceRegistry == null ? null : instanceRegistry.currentInstanceId();
         jdbcTemplate.update("""
-                UPDATE agent_run SET status = 'RUNNING', error_message = NULL, owner_instance = ?,
-                    pending_confirmation = NULL,
+                UPDATE agent_run SET status = 'RUNNING', phase = 'WORKING', error_message = NULL, owner_instance = ?,
+                    pending_confirmation = NULL, waiting_reason = NULL, waiting_detail = NULL,
+                    background_jobs = 0, background_deadline = NULL,
                     resume_count = resume_count + 1, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """, ownerInstance, runId);
+        Integer nextAttempt = jdbcTemplate.queryForObject(
+                "SELECT resume_count + 1 FROM agent_run WHERE id = ?", Integer.class, runId);
+        startAssignment(runId, nextAttempt == null ? 1 : nextAttempt, null);
     }
 
     /** run 挂起等待工具确认：记录待确认清单（JSON），决定并恢复后由 restart 清空。 */
     public void markPendingConfirmation(String runId, String pendingJson) {
         if (runId == null || runId.isBlank() || pendingJson == null || pendingJson.isBlank()) return;
         jdbcTemplate.update("""
-                UPDATE agent_run SET pending_confirmation = CAST(? AS jsonb), updated_at = CURRENT_TIMESTAMP
+                UPDATE agent_run SET pending_confirmation = CAST(? AS jsonb),
+                       phase = 'WAITING_HUMAN', waiting_reason = 'CONFIRM_TOOL',
+                       waiting_detail = '有副作用工具等待确认',
+                       updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """, pendingJson, runId);
     }
 
     public void markInterrupted(String runId, String reason) {
         jdbcTemplate.update("""
-                UPDATE agent_run SET status = 'INTERRUPTED', error_message = ?, updated_at = CURRENT_TIMESTAMP
+                UPDATE agent_run SET status = 'INTERRUPTED', phase = 'STOPPED',
+                       waiting_reason = NULL, waiting_detail = NULL,
+                       error_message = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND status = 'RUNNING'
                 """, reason, runId);
+        endAssignment(runId, "INTERRUPTED: " + (reason == null ? "" : reason));
     }
 
     /** 计划确认门：计划已生成待授权，标记挂起状态供工作台展示计划卡片。 */
     public void markPlanPending(String runId) {
         if (runId == null || runId.isBlank()) return;
         jdbcTemplate.update("""
-                UPDATE agent_run SET status = 'INTERRUPTED', verification_status = 'plan_pending',
+                UPDATE agent_run SET status = 'INTERRUPTED', phase = 'WAITING_HUMAN',
+                                      waiting_reason = 'CONFIRM_PLAN',
+                                      waiting_detail = '多步计划已生成，等待确认后执行',
+                                      verification_status = 'plan_pending',
                                       error_message = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """, runId);
+        endAssignment(runId, "WAITING_HUMAN: CONFIRM_PLAN");
+    }
+
+    /**
+     * 智能体通过 askHuman 提问：run 进入「等待补充信息」，问题原文存在 waiting_detail，
+     * 面板/对话流据此渲染可回答的卡片（不靠自由文本推断）。
+     */
+    public void markWaitingInput(String runId, String question) {
+        if (runId == null || runId.isBlank()) return;
+        jdbcTemplate.update("""
+                UPDATE agent_run SET phase = 'WAITING_HUMAN', waiting_reason = 'NEED_INPUT',
+                       waiting_detail = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, question == null ? "" : question, runId);
+    }
+
+    /** 用户已回答提问：清空等待状态（答复本身作为新消息/新 run 继续，老 run 收口）。 */
+    public void markInputAnswered(String runId) {
+        if (runId == null || runId.isBlank()) return;
+        jdbcTemplate.update("""
+                UPDATE agent_run SET phase = CASE WHEN phase = 'WAITING_HUMAN' THEN 'DONE' ELSE phase END,
+                       waiting_reason = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """, runId);
+        endAssignment(runId, "DONE: 用户已答复提问");
+    }
+
+    /** 后台任务扫尾：仍有任务则保持 WORKING；超过保留时限置 BLOCKED；清零则 DONE。 */
+    public int sweepBackgroundRuns() {
+        return jdbcTemplate.update("""
+                UPDATE agent_run r SET
+                    background_jobs = sub.cnt,
+                    phase = CASE
+                        WHEN sub.cnt > 0 AND r.background_deadline > CURRENT_TIMESTAMP THEN 'WORKING'
+                        WHEN sub.cnt > 0 THEN 'BLOCKED'
+                        ELSE 'DONE' END,
+                    waiting_reason = CASE WHEN sub.cnt > 0 AND r.background_deadline <= CURRENT_TIMESTAMP
+                                          THEN 'NEED_INPUT' ELSE r.waiting_reason END,
+                    waiting_detail = CASE WHEN sub.cnt > 0 AND r.background_deadline <= CURRENT_TIMESTAMP
+                                          THEN '后台任务超过保留时限仍未结束，请检查生成任务或稍后重试'
+                                          ELSE r.waiting_detail END,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM (SELECT r2.id,
+                             (SELECT count(*) FROM creative_media_job j
+                              WHERE j.source_run_id = r2.id
+                                AND j.status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')) AS cnt
+                      FROM agent_run r2
+                      WHERE r2.background_jobs > 0) sub
+                WHERE r.id = sub.id
+                """);
     }
 
     public void bindAssistantMessage(String runId, long assistantMessageId) {
@@ -306,6 +444,12 @@ public class AgentRunService {
                 rs.getLong("user_message_id"),
                 assistantId,
                 rs.getString("status"),
+                rs.getString("phase"),
+                rs.getString("waiting_reason"),
+                rs.getString("waiting_detail"),
+                rs.getInt("background_jobs"),
+                instant(rs, "background_deadline"),
+                rs.getString("prompt_versions"),
                 rs.getString("permission_mode"),
                 rs.getString("input"),
                 rs.getString("history_context"),

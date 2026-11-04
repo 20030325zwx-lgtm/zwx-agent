@@ -204,6 +204,12 @@ export const browseProjectDirectories = (path = null) => request.get('/ai/projec
 export const selectProjectDirectory = payload => request.post('/ai/projects/select', payload).then(response => response.data)
 export const getManusConversationMessages = conversationId => request.get(`/ai/manus/conversations/${conversationId}/messages`).then(response => response.data)
 export const deleteManusConversation = conversationId => request.delete(`/ai/manus/conversations/${conversationId}`)
+export const answerManusRun = (conversationId, runId, answer) =>
+  request.post(`/ai/manus/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/answer`, { answer }).then(r => r.data)
+export const listPrompts = () => request.get('/ai/prompts').then(r => r.data)
+export const listPromptVersions = key => request.get(`/ai/prompts/${encodeURIComponent(key)}/versions`).then(r => r.data)
+export const savePrompt = (key, payload) => request.post(`/ai/prompts/${encodeURIComponent(key)}`, payload).then(r => r.data)
+
 export const getManusFileUrl = (conversationId, path) =>
   fetchAuthBlobUrl(`/ai/manus/files?conversationId=${encodeURIComponent(conversationId)}&path=${encodeURIComponent(path)}`)
 // 桌面端：把会话工作区文件导出到已授权的本机目录（返回 [{from,to}]，仅桌面模式可用）

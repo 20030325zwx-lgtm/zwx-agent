@@ -84,6 +84,7 @@ public class ManusGraphOrchestrator {
     private final com.zwx.zwxagent.capability.tools.PermissionService permissionService;
     private final com.zwx.zwxagent.agent.observability.ModelIoService modelIo;
     private final com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
+    private final com.zwx.zwxagent.agent.execution.PromptSource promptSource;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private CompiledGraph compiledGraph;
@@ -94,7 +95,7 @@ public class ManusGraphOrchestrator {
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor) {
-        this(dashscopeChatModel, workerExecutor, null, null, null, null, null, null, null);
+        this(dashscopeChatModel, workerExecutor, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -107,7 +108,8 @@ public class ManusGraphOrchestrator {
                                   com.zwx.zwxagent.agent.execution.ToolConfirmationService toolConfirmationService,
                                   com.zwx.zwxagent.capability.tools.PermissionService permissionService,
                                   com.zwx.zwxagent.agent.observability.ModelIoService modelIo,
-                                  com.zwx.zwxagent.agent.observability.AgentMetrics metrics) {
+                                  com.zwx.zwxagent.agent.observability.AgentMetrics metrics,
+                                  com.zwx.zwxagent.agent.execution.PromptSource promptSource) {
         this.chatModel = dashscopeChatModel;
         this.workerExecutor = workerExecutor;
         this.agentRunService = agentRunService;
@@ -117,6 +119,7 @@ public class ManusGraphOrchestrator {
         this.permissionService = permissionService;
         this.modelIo = modelIo;
         this.metrics = metrics;
+        this.promptSource = promptSource;
     }
 
     @PostConstruct
@@ -137,10 +140,10 @@ public class ManusGraphOrchestrator {
                 toolConfirmationService, modelIo);
         StateGraph graph = new StateGraph(this::newState);
         graph.addNode(NODE_RESUME_ROUTER, AsyncNodeAction.node_async(state -> Map.of()));
-        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel, tokenUsage, modelIo)));
+        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel, tokenUsage, modelIo, promptSource)));
         graph.addNode(NODE_WORKERS, AsyncNodeAction.node_async(workersNode));
-        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel, tokenUsage, modelIo)));
-        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel, tokenUsage, modelIo)));
+        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel, tokenUsage, modelIo, promptSource)));
+        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel, tokenUsage, modelIo, promptSource)));
         graph.addNode(NODE_PLAN_GATE, AsyncNodeAction.node_async(state -> Map.of()));
         graph.addEdge(StateGraph.START, NODE_RESUME_ROUTER);
         graph.addConditionalEdges(NODE_RESUME_ROUTER, AsyncEdgeAction.edge_async(this::routeResume),

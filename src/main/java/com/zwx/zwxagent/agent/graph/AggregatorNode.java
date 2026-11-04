@@ -31,6 +31,7 @@ public class AggregatorNode implements NodeAction {
             """;
 
     private final ChatClient chatClient;
+    private final com.zwx.zwxagent.agent.execution.PromptSource promptSource;
 
     /** 计量归属的 run：节点实例按 run 创建，apply 时从图状态绑定。 */
     private final AtomicReference<String> tokenUsageRunId = new AtomicReference<>("");
@@ -41,6 +42,13 @@ public class AggregatorNode implements NodeAction {
 
     public AggregatorNode(ChatModel chatModel, TokenUsageService tokenUsage,
                  com.zwx.zwxagent.agent.observability.ModelIoService modelIo) {
+        this(chatModel, tokenUsage, modelIo, null);
+    }
+
+    public AggregatorNode(ChatModel chatModel, TokenUsageService tokenUsage,
+                 com.zwx.zwxagent.agent.observability.ModelIoService modelIo,
+                 com.zwx.zwxagent.agent.execution.PromptSource promptSource) {
+        this.promptSource = promptSource;
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(new MyLoggerAdvisor(),
                         new TokenUsageAdvisor("aggregator", tokenUsage, tokenUsageRunId::get, modelIo))
@@ -83,7 +91,7 @@ public class AggregatorNode implements NodeAction {
         String finalAnswer;
         try {
             var content = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
+                    .system(promptSource == null ? SYSTEM_PROMPT : promptSource.resolve("aggregator", SYSTEM_PROMPT))
                     .user("用户请求：" + input
                             + (knowledge.isBlank() ? "" : "\n\n本轮检索到的私有知识片段：\n" + knowledge
                             + "\n汇总时保留工作者的 [文件名#切片号] 引用，不得补充资料未支持的事实。")

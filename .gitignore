@@ -54,3 +54,10 @@ evaluation/eval-sets/artifacts/
 
 # 本机工作区根目录（后端 APP_PROJECT_WORKSPACE_ROOT 默认 ./projects 的运行时数据）
 /projects/
+
+# 本地/镜像构建产物（由 Dockerfile 从前端 dist 拷贝，不提交）
+services/*/src/main/resources/static/
+
+# 独立中台服务的前端依赖与构建产物（Docker 内构建）
+services/*/frontend/node_modules/
+services/*/frontend/dist/

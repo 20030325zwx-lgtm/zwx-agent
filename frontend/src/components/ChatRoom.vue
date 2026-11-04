@@ -110,6 +110,14 @@
           <time class="message-time">{{ formatTime(msg.time) }}</time>
           <div v-if="!msg.isUser && msg.content" class="ai-message-actions">
             <button type="button" title="复制回答" aria-label="复制回答" @click="copyMessage(msg.content)">⧉ 复制</button>
+            <template v-if="conversationId && msg.runId">
+              <button type="button" class="feedback-button" :class="{ active: msg.feedback === 'up', saving: msg.feedbackSaving }"
+                      :disabled="!!msg.feedback || msg.feedbackSaving"
+                      title="回答有帮助（用于沉淀优质样本）" @click="sendFeedback(msg, 'up')">👍</button>
+              <button type="button" class="feedback-button" :class="{ active: msg.feedback === 'down', saving: msg.feedbackSaving }"
+                      :disabled="!!msg.feedback || msg.feedbackSaving"
+                      title="回答有问题（进入 BadCase 库，可回流评测集）" @click="sendFeedback(msg, 'down')">👎</button>
+            </template>
           </div>
           <div v-if="!msg.isUser && msg.status === 'INTERRUPTED' && connectionStatus !== 'connecting'" class="continue-row">
             <span class="continue-hint">回答被中断，已保留部分内容</span>
@@ -165,7 +173,7 @@ import RunSummaryCard from './workspace/RunSummaryCard.vue'
 import AsterAvatar from './AsterAvatar.vue'
 import { BookOpen, BookOpenCheck, ChevronRight, FileText, Globe2, Paperclip, Square } from 'lucide-vue-next'
 import { getAgent } from '../config/agents'
-import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment } from '../api'
+import { getAgentKnowledgeChunk, judgeRagCandidate as saveRagJudgment, createUserFeedback } from '../api'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -175,9 +183,11 @@ const props = defineProps({
   attachmentAccept: { type: String, default: 'image/jpeg,image/png,image/gif' },
   webSearchAvailable: { type: Boolean, default: false },
   knowledgeSearchAvailable: { type: Boolean, default: false },
-  hideInput: { type: Boolean, default: false }
+  hideInput: { type: Boolean, default: false },
+  // D1 数据中台：会话 ID，用于回答 👍/👎 反馈（无会话上下文的用法可不传，按钮自动隐藏）
+  conversationId: { type: String, default: '' }
 })
-const emit = defineEmits(['send-message', 'edit-message', 'resend-message', 'continue-message', 'stop-generation', 'open-code'])
+const emit = defineEmits(['send-message', 'edit-message', 'resend-message', 'continue-message', 'stop-generation', 'open-code', 'answer-feedback'])
 const agent = computed(() => getAgent(props.aiType))
 const quickPrompts = computed(() => agent.value.chat.quickPrompts)
 const emptyTitle = computed(() => agent.value.chat.emptyTitle)
@@ -192,6 +202,22 @@ const editingContent = ref('')
 const webSearch = ref(false)
 const knowledgeSearch = ref(false)
 const relevanceChoices = [{ value: 'RELEVANT', label: '相关' }, { value: 'PARTIAL', label: '部分相关' }, { value: 'IRRELEVANT', label: '不相关' }]
+
+// D1 数据中台：一次点击反馈，成功后按钮定格；失败回滚可重试（不弹窗打断对话）
+const sendFeedback = async (msg, rating) => {
+  if (!msg.runId || msg.feedback || msg.feedbackSaving || !props.conversationId) return
+  msg.feedbackSaving = true
+  try {
+    await createUserFeedback({ rating, runId: msg.runId, conversationId: props.conversationId })
+    msg.feedback = rating
+    emit('answer-feedback', { rating, runId: msg.runId, messageId: msg.id })
+  } catch (exception) {
+    console.warn('反馈提交失败', exception)
+    window.alert(`反馈提交失败：${exception.response?.data?.error || '请稍后重试'}`)
+  } finally {
+    msg.feedbackSaving = false
+  }
+}
 
 const ragStatusLabel = status => ({ SUCCESS: '已召回', NO_HIT: '无命中', TIMEOUT: '超时', OVERLOADED: '繁忙', FAILED: '失败' }[status] || status)
 const judgeCandidate = async (message, candidate, judgment) => {
@@ -567,6 +593,9 @@ onBeforeUnmount(() => {
 }
 
 .ai-message-actions button:hover { background: var(--wb-fill); color: var(--wb-text); }
+.feedback-button { filter: grayscale(1); opacity: 0.65; }
+.feedback-button:hover { filter: none; opacity: 1; }
+.feedback-button.active { filter: none; opacity: 1; background: var(--cr-accent-soft, var(--wb-brand-soft)); }
 
 @media (hover: none) {
   .ai-message-actions { opacity: 1; }

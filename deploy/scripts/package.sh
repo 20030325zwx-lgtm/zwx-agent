@@ -31,6 +31,9 @@ docker build --platform "$TARGET_PLATFORM" -t "aster-backend:$VERSION" -f "$ROOT
 docker build --platform "$TARGET_PLATFORM" -t "aster-frontend:$VERSION" "$ROOT_DIR/frontend"
 docker build --platform "$TARGET_PLATFORM" -t "aster-image-mcp:$VERSION" "$ROOT_DIR/services/image-search-mcp"
 docker build --platform "$TARGET_PLATFORM" -t "aster-document-mcp:$VERSION" "$ROOT_DIR/services/document-mcp"
+# 独立中台服务（与主站同仓库、独立镜像）
+docker build --platform "$TARGET_PLATFORM" -t "aster-eval-service:$VERSION" "$ROOT_DIR/services/eval-service"
+docker build --platform "$TARGET_PLATFORM" -t "aster-data-service:$VERSION" "$ROOT_DIR/services/data-service"
 if [ "$WITH_BROWSER_MCP" = "true" ]; then
   docker build --platform "$TARGET_PLATFORM" -t "aster-browser-mcp:$VERSION" "$ROOT_DIR/services/browser-mcp"
 fi
@@ -40,6 +43,8 @@ docker save -o "$IMAGE_DIR/aster-backend.tar" "aster-backend:$VERSION"
 docker save -o "$IMAGE_DIR/aster-frontend.tar" "aster-frontend:$VERSION"
 docker save -o "$IMAGE_DIR/aster-image-mcp.tar" "aster-image-mcp:$VERSION"
 docker save -o "$IMAGE_DIR/aster-document-mcp.tar" "aster-document-mcp:$VERSION"
+docker save -o "$IMAGE_DIR/aster-eval-service.tar" "aster-eval-service:$VERSION"
+docker save -o "$IMAGE_DIR/aster-data-service.tar" "aster-data-service:$VERSION"
 if [ "$WITH_BROWSER_MCP" = "true" ]; then
   docker save -o "$IMAGE_DIR/aster-browser-mcp.tar" "aster-browser-mcp:$VERSION"
 fi

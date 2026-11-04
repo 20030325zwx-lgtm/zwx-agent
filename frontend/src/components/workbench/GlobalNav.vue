@@ -42,18 +42,23 @@
       </router-link>
 
       <p class="wb-nav-group-label">更多</p>
-      <router-link
-        v-for="item in secondaryItems"
-        :key="item.to"
-        :to="item.to"
-        class="wb-nav-item wb-nav-item-quiet"
-        :class="{ active: isActive(item) }"
-        :title="item.label"
-        :aria-label="item.label"
-      >
-        <component :is="item.icon" :size="18" :stroke-width="1.9" />
-        <span class="wb-nav-label">{{ item.label }}</span>
-      </router-link>
+      <template v-for="item in secondaryItems" :key="item.to">
+        <a v-if="item.external" :href="item.to" class="wb-nav-item wb-nav-item-quiet"
+           :title="item.label" :aria-label="item.label">
+          <component :is="item.icon" :size="18" :stroke-width="1.9" />
+          <span class="wb-nav-label">{{ item.label }}</span>
+        </a>
+        <router-link v-else
+          :to="item.to"
+          class="wb-nav-item wb-nav-item-quiet"
+          :class="{ active: isActive(item) }"
+          :title="item.label"
+          :aria-label="item.label"
+        >
+          <component :is="item.icon" :size="18" :stroke-width="1.9" />
+          <span class="wb-nav-label">{{ item.label }}</span>
+        </router-link>
+      </template>
     </div>
 
     <div class="wb-nav-bottom">
@@ -84,7 +89,7 @@ import { useRoute } from 'vue-router'
 import {
   Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
   PanelLeftClose, PanelLeftOpen, Workflow, Palette, FolderOpen, Images, Sparkles,
-  Activity
+  Activity, Gauge, DatabaseZap
 } from 'lucide-vue-next'
 import AsterMark from '../AsterMark.vue'
 import ActivityDrawer from '../creative/ActivityDrawer.vue'
@@ -129,6 +134,9 @@ const secondaryItems = [
   { to: '/workflows', label: '工作流', icon: Workflow, match: ['/workflows'] },
   { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] },
   { to: '/super-agent', label: '智能体', icon: MessagesSquare, match: ['/super-agent'] },
+  // 两个中台是独立服务与独立页面（同域前缀路由）：/eval/ 评测中台、/data/ 数据中台
+  { to: '/eval/', label: '评测台', icon: Gauge, external: true },
+  { to: '/data/', label: '数据中台', icon: DatabaseZap, external: true },
   { to: '/workbench', label: '服务概览', icon: Compass, match: ['/workbench'] }
 ]
 const items = [...primaryItems, ...secondaryItems]

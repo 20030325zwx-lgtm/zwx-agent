@@ -510,3 +510,16 @@ export const updateCreativeAsset = (assetId, payload) =>
   request.patch(`/ai/creative/assets/${encodeURIComponent(assetId)}`, payload).then(response => response.data)
 export const deleteCreativeAsset = assetId =>
   request.delete(`/ai/creative/assets/${encodeURIComponent(assetId)}`).then(response => response.data)
+
+// 数据中台（独立服务）：回答反馈走独立 base（开发环境用 VITE_DATA_API_URL 指向 8141；
+// 生产同域下即 API_BASE_URL，由 nginx 把 /api/ai/feedback 路由到 data-service）。
+const DATA_API_BASE = import.meta.env.VITE_DATA_API_URL
+  || (import.meta.env.DEV ? 'http://localhost:8141/api' : API_BASE_URL)
+export const createUserFeedback = payload => {
+  const headers = {}
+  const token = getToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const localHeaders = localTokenHeader()
+  if (localHeaders['X-Aster-Local-Token']) headers['X-Aster-Local-Token'] = localHeaders['X-Aster-Local-Token']
+  return axios.post(`${DATA_API_BASE}/ai/feedback`, payload, { headers }).then(r => r.data)
+}

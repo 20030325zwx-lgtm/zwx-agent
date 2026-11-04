@@ -72,6 +72,7 @@
               <div class="canvas-conversation">
                 <ChatRoom :messages="messages" :connection-status="connectionStatus" ai-type="super" hide-input
                   knowledge-search-available attachments-enabled attachment-accept="image/jpeg,image/png,image/gif,image/webp"
+                  :conversation-id="chatId"
                   @edit-message="cancelActiveStream" @resend-message="resendMessage"
                   @continue-message="continueMessage" @stop-generation="stopGeneration"
                   @open-code="openCodeWorkspace" />

@@ -1,0 +1,29 @@
+server:
+  port: 8141
+  shutdown: graceful
+
+spring:
+  application:
+    name: aster-data-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/zwx_agent}
+    username: ${SPRING_DATASOURCE_USERNAME:zwx_agent}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DATA_DB_POOL_MAX:4}
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:zwx-agent-dev-jwt-secret-change-me-0123456789abcdef}
+  internal:
+    token: ${PLATFORM_INTERNAL_TOKEN:}
+    # 回流目标：评测中台内部接口
+    eval-base-url: ${ASTER_EVAL_URL:http://eval-service:8140}
+
+logging:
+  level:
+    root: INFO
+    com.zwx.aster.data: INFO

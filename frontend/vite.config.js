@@ -14,6 +14,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    cors: true
+    cors: true,
+    // 本地开发时 /eval/ 与 /data/ 代理到两个独立中台服务（生产由 nginx 同域前缀路由）
+    proxy: {
+      '/eval': 'http://127.0.0.1:8140',
+      '/data': 'http://127.0.0.1:8141'
+    }
   }
 })

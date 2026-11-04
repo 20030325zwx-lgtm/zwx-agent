@@ -24,6 +24,8 @@ public class SecurityConfig {
             "/auth/login",
             "/auth/token",
             "/auth/register",
+            // 服务间内部接口：由 InternalTokenFilter 校验 X-Aster-Internal-Token（fail-closed）
+            "/internal/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",

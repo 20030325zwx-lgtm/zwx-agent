@@ -11,6 +11,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    # 仅绑定回环：本机 SSH 隧道（开发库 15432→5432）与运维 pg_dump 使用；
+    # 不经过公网（安全组只开放 SSH/80/443）。
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -104,6 +108,8 @@ services:
       APP_MCP_ALLOW_PRIVATE_ENDPOINTS: "true"
       APP_TEMP_DIR: /app/temp
       APP_PROJECT_WORKSPACE_ROOT: /app/projects
+      # 服务间内部接口令牌（/api/internal/**）：与 eval-service/data-service 一致
+      PLATFORM_INTERNAL_TOKEN: ${PLATFORM_INTERNAL_TOKEN}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./temp:/app/temp
@@ -127,6 +133,68 @@ services:
       - backend
     ports:
       - "${ASTER_PORT:-8080}:80"
+
+  # ---------------------------------------------------------------------------
+  # 独立中台服务（各自独立镜像、独立页面；与主站共用 PostgreSQL 的 platform schema）：
+  #   eval-service 评测中台：/eval/ 页面 + /api/ai/eval/**；执行经主站内部 API
+  #   data-service 数据中台：/data/ 页面 + /api/ai/feedback/**；回流调 eval-service
+  # 服务间通过 X-Aster-Internal-Token（PLATFORM_INTERNAL_TOKEN）鉴权。
+  # ---------------------------------------------------------------------------
+  eval-service:
+    image: aster-eval-service:${IMAGE_TAG}
+    restart: unless-stopped
+    mem_limit: 1024m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:-}
+      PLATFORM_INTERNAL_TOKEN: ${PLATFORM_INTERNAL_TOKEN}
+      ASTER_BACKEND_URL: http://backend:8123
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      EVAL_MODEL: ${EVAL_MODEL:-qwen-plus}
+      EVAL_SCHEDULER_ENABLED: "true"
+      EVAL_TASK_TIMEOUT_MINUTES: ${EVAL_TASK_TIMEOUT_MINUTES:-15}
+      TZ: ${TZ:-Asia/Shanghai}
+    expose:
+      - "8140"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8140/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  data-service:
+    image: aster-data-service:${IMAGE_TAG}
+    restart: unless-stopped
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eval-service:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:-}
+      PLATFORM_INTERNAL_TOKEN: ${PLATFORM_INTERNAL_TOKEN}
+      ASTER_EVAL_URL: http://eval-service:8140
+      TZ: ${TZ:-Asia/Shanghai}
+    expose:
+      - "8141"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8141/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
   # 监控栈（可选）：docker compose --profile monitoring up -d prometheus grafana
   prometheus:

@@ -29,6 +29,9 @@ public class BatchSubmitScheduler {
     private final VideoStoryContentRepository contentRepository;
     private final ShotProductionService productionService;
 
+    @org.springframework.beans.factory.annotation.Value("${app.story.batch.submit-enabled:true}")
+    private boolean submitEnabled;
+
     public BatchSubmitScheduler(VideoBatchRepository batchRepository,
                                 VideoStoryContentRepository contentRepository,
                                 ShotProductionService productionService) {
@@ -39,6 +42,7 @@ public class BatchSubmitScheduler {
 
     @Scheduled(fixedDelayString = "${app.story.batch.submit-interval-ms:2000}")
     public void tick() {
+        if (!submitEnabled) return;
         try {
             var batches = batchRepository.listRunningBatches(5);
             for (var batch : batches) {

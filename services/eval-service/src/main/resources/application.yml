@@ -1,0 +1,48 @@
+server:
+  port: 8140
+  shutdown: graceful
+
+spring:
+  application:
+    name: aster-eval-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/zwx_agent}
+    username: ${SPRING_DATASOURCE_USERNAME:zwx_agent}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${EVAL_DB_POOL_MAX:5}
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+# 主站 JWT 同源验签（claims: sub/uid/tenant/role）
+app:
+  jwt:
+    secret: ${JWT_SECRET:zwx-agent-dev-jwt-secret-change-me-0123456789abcdef}
+  internal:
+    # 服务间调用的共享令牌（主站 /api/internal/** 与 data-service 回流共用）
+    token: ${PLATFORM_INTERNAL_TOKEN:}
+    # 主站内部 API 基址（compose 网络内为 http://backend:8123）
+    backend-base-url: ${ASTER_BACKEND_URL:http://backend:8123}
+  dashscope:
+    api-key: ${DASHSCOPE_API_KEY:}
+    base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com}
+    model: ${EVAL_MODEL:qwen-plus}
+    timeout-seconds: ${EVAL_MODEL_TIMEOUT_SECONDS:120}
+
+eval:
+  scheduler:
+    enabled: ${EVAL_SCHEDULER_ENABLED:false}
+    interval-ms: ${EVAL_SCHEDULER_INTERVAL_MS:5000}
+    batch-size: ${EVAL_SCHEDULER_BATCH_SIZE:1}
+    lease-seconds: ${EVAL_SCHEDULER_LEASE_SECONDS:900}
+  task:
+    timeout-minutes: ${EVAL_TASK_TIMEOUT_MINUTES:15}
+  account:
+    username: ${EVAL_ACCOUNT_USERNAME:eval-bot}
+    password: ${EVAL_ACCOUNT_PASSWORD:eval-bot-local}
+
+logging:
+  level:
+    root: INFO
+    com.zwx.aster.eval: INFO

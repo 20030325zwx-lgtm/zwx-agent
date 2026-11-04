@@ -12,6 +12,9 @@ class AgentKnowledgeIndexRecoveryJob {
     private final JdbcTemplate jdbcTemplate;
     private final AgentKnowledgeDocumentService documentService;
 
+    @org.springframework.beans.factory.annotation.Value("${app.agent.rag.index-recovery-enabled:true}")
+    private boolean indexRecoveryEnabled;
+
     AgentKnowledgeIndexRecoveryJob(JdbcTemplate jdbcTemplate, AgentKnowledgeDocumentService documentService) {
         this.jdbcTemplate = jdbcTemplate;
         this.documentService = documentService;
@@ -19,6 +22,7 @@ class AgentKnowledgeIndexRecoveryJob {
 
     @Scheduled(fixedDelayString = "${app.agent.rag.index-retry-interval-ms:60000}")
     void retryFailedIndexes() {
+        if (!indexRecoveryEnabled) return;
         List<String> ids = jdbcTemplate.queryForList("""
                 SELECT id FROM agent_knowledge_document
                 WHERE lifecycle_status = 'FAILED' AND next_retry_at <= CURRENT_TIMESTAMP AND index_attempts < 3

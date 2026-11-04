@@ -1,5 +1,5 @@
 <template>
-  <div class="ps-shell">
+  <div class="ps-shell" :class="{ 'canvas-mode': activeKey === 'canvas' }">
     <header class="ps-bar">
       <router-link to="/creative/works" class="ps-back" aria-label="返回作品">
         <ArrowLeft :size="16" />
@@ -11,7 +11,7 @@
           {{ project.status === 'ACTIVE' ? '进行中' : '已归档' }}
         </span>
       </div>
-      <div v-if="isVideo" class="ps-progress" aria-label="制作进度">
+      <div v-if="isVideo && activeKey !== 'canvas'" class="ps-progress" aria-label="制作进度">
         <span class="ps-metric">镜头 <em>{{ story.progress.value.total }}</em></span>
         <span class="ps-metric">已选片 <em>{{ story.progress.value.selected }}</em></span>
         <router-link v-if="story.progress.value.pendingSelection" class="ps-metric is-warn"
@@ -121,7 +121,7 @@
 import { computed, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, BookOpen, FileText, Images, LayoutGrid, ListChecks, Palette, RefreshCw, Users, Workflow
+  ArrowLeft, BookOpen, FileText, Images, LayoutGrid, ListChecks, RefreshCw, Users, Workflow
 } from 'lucide-vue-next'
 import { getCreativeProject, getCreativeJob, listModelCatalog } from '../../../api'
 import { downloadBlob, formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta, useAssetUrls, useVideoUrls } from '../shared'
@@ -131,7 +131,7 @@ import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
 import ReferenceAssetStrip from '../../../components/creative/ReferenceAssetStrip.vue'
 
-const TAB_KEYS = new Set(['studio', 'story', 'storyboard', 'settings', 'chapters', 'workflow', 'tasks', 'assets'])
+const TAB_KEYS = new Set(['canvas', 'studio', 'story', 'storyboard', 'settings', 'chapters', 'workflow', 'tasks', 'assets'])
 
 const route = useRoute()
 const router = useRouter()
@@ -168,8 +168,7 @@ const activeKey = computed(() => {
 // 项目里只表达"这部作品的内部结构"：全局的 作品/素材/任务 语义在这里是项目内的视角
 const NAV = {
   IMAGE: [
-    { key: 'studio', label: '创作', icon: Palette },
-    { key: 'workflow', label: '工作流', icon: Workflow },
+    { key: 'canvas', label: '画布', icon: Workflow },
     { key: 'tasks', label: '任务', icon: ListChecks },
     { key: 'assets', label: '素材', icon: Images }
   ],
@@ -180,21 +179,19 @@ const NAV = {
     { key: 'assets', label: '素材', icon: Images }
   ],
   VIDEO: [
+    { key: 'canvas', label: '画布', icon: Workflow },
     { key: 'story', label: '剧情', icon: BookOpen },
     { key: 'storyboard', label: '分镜', icon: LayoutGrid },
     { key: 'settings', label: '设定', icon: Users },
-    { key: 'workflow', label: '工作流', icon: Workflow },
     { key: 'assets', label: '素材', icon: Images },
     { key: 'tasks', label: '任务', icon: ListChecks },
-    { key: 'studio', label: '快速生成', icon: Palette }
   ]
 }
 const navItems = computed(() => NAV[project.value?.kind] || NAV.IMAGE)
 
 function defaultTab(kind) {
   if (kind === 'NOVEL') return 'chapters'
-  if (kind === 'VIDEO') return 'story'
-  return 'studio'
+  return 'canvas'
 }
 
 async function loadProject() {
@@ -240,6 +237,7 @@ async function refreshAll() {
 async function settleRoute() {
   const legacy = route.query.tab
   let key = TAB_KEYS.has(legacy) ? legacy : activeKey.value
+  if (key === 'studio') key = 'canvas'
   if (!key) key = defaultTab(project.value?.kind)
   const query = {}
   if (route.query.runId) query.runId = route.query.runId
@@ -494,4 +492,14 @@ onMounted(async () => {
   .ps-nav-item { justify-content: center; padding: 0; }
   .ps-progress { display: none; }
 }
+/* The canvas owns the center; project sections become a slim horizontal strip. */
+.ps-shell.canvas-mode { min-width: 0; overflow: hidden; }
+.canvas-mode .ps-body { flex-direction: column; overflow: hidden; }
+.canvas-mode .ps-rail { width: auto; flex: 0 0 42px; flex-direction: row; align-items: center; padding: 0 20px; gap: 16px; border-right: 0; border-bottom: 1px solid var(--wb-border); overflow: auto; }
+.canvas-mode .ps-nav-item { height: 42px; padding: 0 4px; border-radius: 0; font-size: 12px; }
+.canvas-mode .ps-nav-item.active { background: transparent; box-shadow: inset 0 -2px var(--wb-brand); }
+.canvas-mode .ps-nav-item.active::before { display: none; }
+.canvas-mode .ps-main { padding: 0; min-width: 0; min-height: 0; overflow: hidden; display: flex; }
+.canvas-mode .ps-name { font-size: 14px; max-width: 420px; }
+
 </style>

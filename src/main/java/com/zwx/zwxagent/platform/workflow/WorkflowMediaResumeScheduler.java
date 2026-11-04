@@ -108,10 +108,18 @@ public class WorkflowMediaResumeScheduler {
                         FROM media_job_output o
                         JOIN creative_asset a ON a.id = o.asset_id
                         WHERE o.job_id = ? AND o.ingest_state = 'DONE'
-                        ORDER BY o.output_index LIMIT 1
+                        ORDER BY o.output_index
                         """, java.util.UUID.fromString(jobId));
                 if (assets.isEmpty()) {
                     workflowService.failMediaNode(runId, nodeKey, "媒体任务已完成但没有可用的入库产物");
+                    return;
+                }
+                if (assets.size() > 1) {
+                    List<Map<String, Object>> candidates = assets.stream().map(asset -> Map.<String, Object>of(
+                            "assetId", String.valueOf(asset.get("asset_id")),
+                            "mediaType", String.valueOf(asset.getOrDefault("media_type", "IMAGE")),
+                            "jobId", jobId)).toList();
+                    workflowService.waitForMediaSelection(runId, nodeKey, writeJson(candidates));
                     return;
                 }
                 String assetId = String.valueOf(assets.getFirst().get("asset_id"));
@@ -137,7 +145,7 @@ public class WorkflowMediaResumeScheduler {
         return errors.isEmpty() ? "图片生成失败" : errors.getFirst();
     }
 
-    private String writeJson(Map<String, Object> payload) {
+    private String writeJson(Object payload) {
         try {
             return objectMapper.writeValueAsString(payload);
         } catch (Exception exception) {

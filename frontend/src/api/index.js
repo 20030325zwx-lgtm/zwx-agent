@@ -357,6 +357,24 @@ export const getCreativeProject = projectId =>
   request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}`).then(response => response.data)
 export const updateCreativeProject = (projectId, payload) =>
   request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}`, payload).then(response => response.data)
+export const getCreativeCanvas = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/canvas`).then(response => response.data)
+export const saveCreativeCanvas = (projectId, payload) =>
+  request.put(`/ai/creative/projects/${encodeURIComponent(projectId)}/canvas`, payload).then(response => response.data)
+export const validateCreativeCanvasRun = (projectId, payload) =>
+  request.post('/ai/creative/projects/' + encodeURIComponent(projectId) + '/canvas/validate', payload).then(response => response.data)
+export const startCreativeCanvasRun = (projectId, payload) =>
+  request.post('/ai/creative/projects/' + encodeURIComponent(projectId) + '/canvas/runs', payload).then(response => response.data)
+export const listCreativeCanvasRuns = (projectId, limit = 20) =>
+  request.get('/ai/creative/projects/' + encodeURIComponent(projectId) + '/canvas/runs', { params: { limit } }).then(response => response.data)
+export const getCreativeCanvasRun = (projectId, runId) =>
+  request.get('/ai/creative/projects/' + encodeURIComponent(projectId) + '/canvas/runs/' + encodeURIComponent(runId)).then(response => response.data)
+export const selectCreativeCanvasCandidate = (projectId, runId, payload) =>
+  request.post('/ai/creative/projects/' + encodeURIComponent(projectId) + '/canvas/runs/' + encodeURIComponent(runId) + '/selections', payload)
+    .then(response => response.data)
+export const cancelCreativeCanvasRun = (projectId, runId) =>
+  request.post('/ai/creative/projects/' + encodeURIComponent(projectId) + '/canvas/runs/' + encodeURIComponent(runId) + '/cancel')
+    .then(response => response.data)
 export const listCreativeDrafts = (projectId, limit = 20) =>
   request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/drafts`, { params: { limit } }).then(response => response.data)
 export const createCreativeDraft = (projectId, payload) =>

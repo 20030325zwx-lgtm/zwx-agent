@@ -542,13 +542,8 @@ async function startFromComposer() {
     if (modelRowId.value) handoff.modelRowId = modelRowId.value
     if (composeKind.value === 'IMAGE') handoff.size = composeSize.value
     if (composeKind.value === 'VIDEO') handoff.seconds = composeSeconds.value
-    if (skill || firstFrameId.value || handoff.modelRowId) {
-      try { sessionStorage.setItem('aster.creative.handoff', JSON.stringify(handoff)) } catch (error) { /* 忽略 */ }
-      const query = skill ? `?tab=studio&skill=${encodeURIComponent(skill)}` : '?tab=studio'
-      router.push(`/creative/projects/${project.id}${query}`)
-      return
-    }
-    router.push(`/creative/projects/${project.id}`)
+    try { sessionStorage.setItem('aster.creative.handoff', JSON.stringify(handoff)) } catch (error) { /* 忽略 */ }
+    router.push(`/creative/projects/${project.id}/canvas`)
   } catch (error) {
     startError.value = error.response?.data?.error || '创建失败，请稍后重试'
   } finally {

@@ -1,0 +1,13 @@
+日期：2026-11-04
+问题现象：画布生成前自动保存请求在途时可能提前提交任务；工作流参数中的素材引用列表不会递归解析，画布下游节点无法读取上游 assetId；视频播放地址还可能被前端重复拼接；节点卡片读取未绑定的 data 变量会在展示已选结果时触发运行时错误。
+影响范围：项目创作画布的草稿一致性、整图/从节点运行和视频结果预览。
+原因：保存函数未向调用者返回在途请求；WorkflowService.resolveValue 只递归 Map；播放 URL helper 与页面重复处理相对地址。
+解决方式：保存请求改为串行且可等待；参数解析增加 List 递归；页面直接使用 API helper 返回的完整播放地址；节点组件保存 defineProps 返回值并通过 props.data 读取。
+验证结果：后端编译与画布校验单测通过，前端生产构建通过；运行时端到端在服务重启后继续验收。
+后续注意事项：新增参数容器类型时需同步补递归解析测试；任务提交前必须等待草稿 revision 落库。
+
+2026-11-04 追加修复：
+UUID 节点键包含连字符，旧引用正则不支持，导致列表递归后仍无法解析 {{uuid.assetId}}。正则补充连字符；插值用 Matcher.quoteReplacement 保留 $ 和反斜杠原文。
+类型化提示词边递归读取上游有效提示词，素材边单独解析 assetId；仅运行下游时，文本边不要求上游选择媒体结果。相同源/目标的文字与图片依赖在运行图中去重。
+resumeWaiting 原来在事务提交前 dispatch，下游可能读取未提交的上游结果；现统一走既有 submitAfterCommit。
+验证：CreativeCanvasServiceTest 7 项、WorkflowReferenceResolutionTest 2 项、WorkflowGraphValidationTest 5 项、WorkflowInputsValidationTest 2 项通过，覆盖 UUID 列表引用、特殊字符插值、递归提示词、端口匹配及提交后调度。未调用真实模型。

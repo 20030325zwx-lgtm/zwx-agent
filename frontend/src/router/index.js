@@ -101,6 +101,11 @@ const routes = [
         },
         children: [
           {
+            path: 'canvas',
+            name: 'CreativeProjectCanvas',
+            component: () => import('../views/creative/project/ProjectCanvasTab.vue')
+          },
+          {
             path: '',
             name: 'CreativeProject',
             component: () => import('../views/creative/project/ProjectEntry.vue')
@@ -108,7 +113,7 @@ const routes = [
           {
             path: 'studio',
             name: 'CreativeProjectStudio',
-            component: () => import('../views/creative/project/ProjectStudioTab.vue')
+            redirect: to => ({ path: `/creative/projects/${to.params.projectId}/canvas`, query: to.query })
           },
           {
             path: 'story',

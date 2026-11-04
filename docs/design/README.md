@@ -1,5 +1,6 @@
 # 设计文档
 
+- [创作台画布化与工作流融合整改方案](./2026-11-04-creative-canvas-workflow-integration.md)
 - [视频提示词优化师：内置技能与固化规则](./2026-11-04-video-prompt-optimizer-skill.md)
 - [M1.5 智能体与创作模块融合：详细设计](./2026-11-02-creative-agent-integration.md)
 - [Aster AI 创作 UI 视觉与交互设计规范](./2026-11-02-ai-creative-ui-visual-design.md)

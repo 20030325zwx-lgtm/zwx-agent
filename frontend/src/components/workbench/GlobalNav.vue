@@ -126,7 +126,7 @@ const primaryItems = [
   { to: '/creative/skills', label: '技能', icon: Sparkles, match: ['/creative/skills'] }
 ]
 const secondaryItems = [
-  { to: '/workflows', label: '工作流', icon: Workflow, match: ['/workflows'] },
+  { to: '/workflows', label: '自动化', icon: Workflow, match: ['/workflows'] },
   { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] },
   { to: '/super-agent', label: '智能体', icon: MessagesSquare, match: ['/super-agent'] },
   // 评测中台（/eval/）与数据中台（/data/）是独立服务页面，不进入主站菜单，仅支持路由直达

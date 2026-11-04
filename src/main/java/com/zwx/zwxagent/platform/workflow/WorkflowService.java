@@ -17,6 +17,8 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import jakarta.annotation.PreDestroy;
 import java.io.ByteArrayInputStream;
@@ -151,7 +153,7 @@ public class WorkflowService {
     // 续跑时输出从 steps 重载，截断过小会让下游引用拿到残缺文本（评审 R06 的输出截断项）。
     // 运行时间线 UI 只展示 message，不渲染全文。
     private static final int MAX_OUTPUT_CHARS = 100_000;
-    private static final Pattern REF_PATTERN = Pattern.compile("\\{\\{([a-zA-Z0-9_.]+)}}");
+    private static final Pattern REF_PATTERN = Pattern.compile("\\{\\{([a-zA-Z0-9_.-]+)}}");
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules()
@@ -508,6 +510,35 @@ public class WorkflowService {
         return visited;
     }
 
+    /** 取消画布/工作流运行；排队任务直接取消，运行中任务按供应商能力请求取消。 */
+    public WorkflowRunView cancelRun(String tenantId, String userId, String runId) {
+        WorkflowRunRow row = find(runId, tenantId, userId);
+        if (Set.of("SUCCEEDED", "FAILED", "CANCELLED").contains(row.status())) {
+            return view(runId, tenantId, userId);
+        }
+        var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
+                userId, tenantId, userId, com.zwx.zwxagent.platform.security.Role.USER);
+        List<UUID> jobs = jdbcTemplate.queryForList("""
+                SELECT media_job_id FROM workflow_node_execution
+                WHERE run_id = ? AND media_job_id IS NOT NULL
+                  AND status IN ('WAITING_EXTERNAL', 'WAITING_SELECTION')
+                """, UUID.class, runId);
+        for (UUID jobId : jobs) {
+            try { mediaJobService.cancel(actor, jobId); }
+            catch (RuntimeException exception) { log.info("画布运行取消任务未立即生效：run={} job={} {}", runId, jobId, exception.getMessage()); }
+        }
+        List<StepState> steps = parseSteps(row.steps()).stream().map(step ->
+                Set.of("PENDING", "RUNNING").contains(step.status())
+                        ? new StepState(step.key(), step.name(), "SKIPPED", "运行已取消", step.output(),
+                        step.startedAt(), Instant.now()) : step).toList();
+        jdbcTemplate.update("""
+                UPDATE workflow_run SET status = 'CANCELLED', current_step = NULL,
+                    steps = ?::jsonb, error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND tenant_id = ? AND user_id = ?
+                """, toJson(steps), runId, tenantId, userId);
+        return view(runId, tenantId, userId);
+    }
+
     /** 从指定节点重跑（仅终态运行）：新运行复用父输入与定义快照，祖先输出继承、下游重新执行。 */
     public WorkflowRunView rerunFrom(String tenantId, String userId, String runId, String fromNode) {
         WorkflowRunRow parent = find(runId, tenantId, userId);
@@ -534,8 +565,48 @@ public class WorkflowService {
         RunContext context = new RunContext(id, tenantId, userId, parent.workflowKey(), parent.definitionVersion(),
                 parent.workflowKey(), "", graph, input, steps,
                 new ArrayList<>(), parent.creativeProjectId());
-        executor.submit(() -> execute(context));
+        submitAfterCommit(context);
         return view(id, tenantId, userId);
+    }
+
+    /** 项目创作画布直接以不可变图快照发起运行，不污染通用工作流定义版本。 */
+    public WorkflowRunView startSnapshot(String tenantId, String userId, String workflowKey,
+                                         WorkflowGraph graph, Map<String, Object> input, UUID projectId) {
+        validateGraph(graph);
+        var actor = new com.zwx.zwxagent.platform.security.CurrentActor(
+                userId, tenantId, userId, com.zwx.zwxagent.platform.security.Role.USER);
+        creativeProjectService.get(actor, projectId);
+        Map<String, Object> safeInput = input == null || input.isEmpty()
+                ? Map.of("source", "creative_canvas") : new LinkedHashMap<>(input);
+        String id = UUID.randomUUID().toString();
+        List<StepState> steps = graph.nodes().stream()
+                .map(node -> new StepState(node.key(), node.name(), "PENDING", "", "", null, null))
+                .toList();
+        jdbcTemplate.update("""
+                        INSERT INTO workflow_run (id, tenant_id, user_id, workflow_key, definition_version,
+                                                  status, current_step, input, steps, artifacts, graph_snapshot,
+                                                  creative_project_id)
+                        VALUES (?, ?, ?, ?, 0, 'RUNNING', ?, ?::jsonb, ?::jsonb, '[]'::jsonb, ?::jsonb, ?)
+                        """,
+                id, tenantId, userId, workflowKey, graph.nodes().getFirst().key(),
+                toJson(safeInput), toJson(steps), toJson(graph), projectId);
+        RunContext context = new RunContext(id, tenantId, userId, workflowKey, 0,
+                "创作画布", "项目画布运行", graph, safeInput, new ArrayList<>(steps),
+                new ArrayList<>(), projectId);
+        submitAfterCommit(context);
+        return view(id, tenantId, userId);
+    }
+
+    private void submitAfterCommit(RunContext context) {
+        Runnable task = () -> executor.submit(() -> execute(context));
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { task.run(); }
+            });
+        } else {
+            task.run();
+        }
     }
 
     // ---------------------------------------------------------------- 模板导出导入（D 批）
@@ -699,7 +770,7 @@ public class WorkflowService {
         RunContext context = new RunContext(id, tenantId, userId, workflowKey, definition.version(),
                 definition.name(), definition.description(), definition.graph(), input, steps, new ArrayList<>(),
                 creativeProjectId);
-        executor.submit(() -> execute(context));
+        submitAfterCommit(context);
         return view(id, tenantId, userId);
     }
 
@@ -1065,8 +1136,9 @@ public class WorkflowService {
         if (prompt == null || prompt.isBlank()) {
             throw new IllegalArgumentException((isEdit ? "图片编辑" : "图片生成") + "提示词为空");
         }
-        if (prompt.length() > 500) {
-            throw new IllegalArgumentException("提示词超过模型上限 500 个字符");
+        if (prompt.length() > com.zwx.zwxagent.creative.domain.ParameterSchema.MODEL_PROMPT_MAX) {
+            throw new IllegalArgumentException("提示词超过模型上限 "
+                    + com.zwx.zwxagent.creative.domain.ParameterSchema.MODEL_PROMPT_MAX + " 个字符");
         }
         // 参考图：imageAssetIds 接受数组或逗号/空白分隔的 assetId 列表（支持 {{节点.output.assetId}} 引用）
         java.util.List<UUID> referenceAssetIds = parseAssetIdList(params.get("imageAssetIds"));
@@ -1083,7 +1155,8 @@ public class WorkflowService {
                 : workflowProject(actor, text(params.get("projectId")));
         com.zwx.zwxagent.creative.service.MediaJobService.CreateJobResult created = mediaJobService.create(actor,
                 "workflow-" + context.id() + "-" + node.key(), projectId,
-                new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, operation, null,
+                new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, operation,
+                        longValue(params.get("modelRowId")),
                         prompt, prompt, Map.of("size", size), referenceAssetIds, null, null, false),
                 com.zwx.zwxagent.creative.domain.JobSourceType.WORKFLOW, context.id(), node.key());
         jdbcTemplate.update("""
@@ -1109,8 +1182,9 @@ public class WorkflowService {
         if (prompt == null || prompt.isBlank()) {
             throw new IllegalArgumentException("视频生成提示词为空");
         }
-        if (prompt.length() > 500) {
-            throw new IllegalArgumentException("提示词超过模型上限 500 个字符");
+        if (prompt.length() > com.zwx.zwxagent.creative.domain.ParameterSchema.MODEL_PROMPT_MAX) {
+            throw new IllegalArgumentException("提示词超过模型上限 "
+                    + com.zwx.zwxagent.creative.domain.ParameterSchema.MODEL_PROMPT_MAX + " 个字符");
         }
         java.util.List<UUID> referenceAssetIds = parseAssetIdList(params.get("imageAssetIds"));
         String operation = referenceAssetIds.isEmpty()
@@ -1129,7 +1203,8 @@ public class WorkflowService {
                 : workflowProject(actor, text(params.get("projectId")));
         com.zwx.zwxagent.creative.service.MediaJobService.CreateJobResult created = mediaJobService.create(actor,
                 "workflow-" + context.id() + "-" + node.key(), projectId,
-                new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, operation, null,
+                new com.zwx.zwxagent.creative.service.MediaJobService.CreateJobRequest(projectId, operation,
+                        longValue(params.get("modelRowId")),
                         prompt, prompt, videoParams, referenceAssetIds, null, null, false),
                 com.zwx.zwxagent.creative.domain.JobSourceType.WORKFLOW, context.id(), node.key());
         jdbcTemplate.update("""
@@ -1195,6 +1270,57 @@ public class WorkflowService {
                 resumeWaiting(runId);
             }
         });
+    }
+
+    /** 多候选媒体产物需要用户明确选择，运行暂停但其它数据保持可恢复。 */
+    public void waitForMediaSelection(String runId, String nodeKey, String candidatesJson) {
+        transactionTemplate.executeWithoutResult(status -> {
+            int updated = jdbcTemplate.update("""
+                    UPDATE workflow_node_execution
+                    SET status = 'WAITING_SELECTION', candidate_assets = ?::jsonb,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE run_id = ? AND node_key = ? AND status = 'WAITING_EXTERNAL'
+                    """, candidatesJson, runId, nodeKey);
+            if (updated == 0) return;
+            updateWaitingStep(runId, nodeKey, "RUNNING", "等待选择一个候选结果", "");
+            jdbcTemplate.update("""
+                    UPDATE workflow_run SET status = 'WAITING_SELECTION', current_step = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status IN ('WAITING_EXTERNAL', 'RUNNING')
+                    """, nodeKey, runId);
+        });
+    }
+
+    /** 选择属于该节点本次运行的候选资产并继续后继节点。 */
+    public WorkflowRunView selectMediaCandidate(String tenantId, String userId, String runId,
+                                                String nodeKey, String assetId) {
+        find(runId, tenantId, userId);
+        List<String> rows = jdbcTemplate.queryForList("""
+                SELECT candidate_assets::text FROM workflow_node_execution
+                WHERE run_id = ? AND node_key = ? AND status = 'WAITING_SELECTION'
+                """, String.class, runId, nodeKey);
+        if (rows.isEmpty()) throw new IllegalStateException("该节点当前不在等待选择");
+        JsonNode candidates = parseNode(rows.getFirst());
+        JsonNode chosen = null;
+        for (JsonNode candidate : candidates) {
+            if (assetId != null && assetId.equals(candidate.path("assetId").asText())) chosen = candidate;
+        }
+        if (chosen == null) throw new IllegalArgumentException("候选素材不属于该节点本次运行");
+        String output = toJson(Map.of(
+                "assetId", chosen.path("assetId").asText(),
+                "jobId", chosen.path("jobId").asText(),
+                "mediaType", chosen.path("mediaType").asText("IMAGE")));
+        transactionTemplate.executeWithoutResult(status -> {
+            int updated = jdbcTemplate.update("""
+                    UPDATE workflow_node_execution SET status = 'SUCCEEDED', output_json = ?::jsonb,
+                        error = NULL, updated_at = CURRENT_TIMESTAMP
+                    WHERE run_id = ? AND node_key = ? AND status = 'WAITING_SELECTION'
+                    """, output, runId, nodeKey);
+            if (updated == 0) throw new IllegalStateException("候选选择状态已变化，请刷新后重试");
+            updateWaitingStep(runId, nodeKey, "SUCCEEDED", "已选择候选结果", output);
+            resumeWaiting(runId);
+        });
+        return view(runId, tenantId, userId);
     }
 
     /**
@@ -1274,7 +1400,7 @@ public class WorkflowService {
                 : step).toList();
         jdbcTemplate.update("""
                 UPDATE workflow_run SET steps = ?::jsonb, current_step = NULL, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                WHERE id = ? AND status IN ('WAITING_EXTERNAL', 'WAITING_SELECTION')
                 """, toJson(updated), runId);
     }
 
@@ -1282,7 +1408,7 @@ public class WorkflowService {
     public boolean resumeWaiting(String runId) {
         int claimed = jdbcTemplate.update("""
                 UPDATE workflow_run SET status = 'RUNNING', updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND status = 'WAITING_EXTERNAL'
+                WHERE id = ? AND status IN ('WAITING_EXTERNAL', 'WAITING_SELECTION')
                 """, runId);
         if (claimed == 0) return false;
         WorkflowRunRow row = findAny(runId);
@@ -1299,7 +1425,7 @@ public class WorkflowService {
         RunContext context = new RunContext(row.id(), row.tenantId(), row.userId(), row.workflowKey(),
                 row.definitionVersion(), row.workflowKey(), "", graph, input, parseSteps(row.steps()), artifacts,
                 row.creativeProjectId());
-        executor.submit(() -> execute(context));
+        submitAfterCommit(context);
         return true;
     }
 
@@ -1510,12 +1636,15 @@ public class WorkflowService {
             }
             return result;
         }
+        if (value instanceof List<?> list) {
+            return list.stream().map(item -> resolveValue(item, input, outputs)).toList();
+        }
         if (!(value instanceof String text)) return value;
         Matcher matcher = REF_PATTERN.matcher(text);
         if (matcher.matches()) {
             return lookupRef(matcher.group(1), input, outputs);
         }
-        return matcher.replaceAll(match -> String.valueOf(lookupRef(match.group(1), input, outputs)));
+        return matcher.replaceAll(match -> Matcher.quoteReplacement(String.valueOf(lookupRef(match.group(1), input, outputs))));
     }
 
     private String lookupRef(String ref, Map<String, Object> input, Map<String, String> outputs) {
@@ -1877,6 +2006,15 @@ public class WorkflowService {
 
     private static String text(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private static Long longValue(Object value) {
+        if (value == null || String.valueOf(value).isBlank()) return null;
+        if (value instanceof Number number) return number.longValue();
+        try { return Long.parseLong(String.valueOf(value)); }
+        catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("modelRowId 格式不正确");
+        }
     }
 
     private static String truncate(String value, int max) {

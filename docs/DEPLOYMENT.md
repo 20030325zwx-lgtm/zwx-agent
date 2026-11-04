@@ -231,6 +231,11 @@ cp ../aster-0.1.0-linux-amd64/../globe.conf /home/globe.conf  # 如路径不同�
 
 Flyway 会在后端启动时自动执行数据库迁移。
 
+> **重建 frontend 后必须重载外层 nginx**：`aster-nginx-proxy`（独立容器，反代 `frontend:80`）在启动时解析容器 IP；
+> `docker compose up -d` 重建 frontend 后 IP 变化会导致 502。执行
+> `docker exec aster-nginx-proxy nginx -s reload` 即可（不会影响同一反代下的其它站点）。
+
+
 ### 独立中台服务（评测 / 数据中台）
 
 `deploy/docker-compose/docker-compose.yml` 含 `eval-service`（8140）与 `data-service`（8141），

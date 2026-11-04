@@ -1,0 +1,29 @@
+日期：2026-11-04
+问题现象：
+服务器部署 0.5.1 后，admin 调用技能列表显示「视频提示词优化师」compat=MISSING，
+missing=["方案生成模型未配置"]；但同一数据库里 admin 有 chat 绑定，系统也有 chat 默认绑定，
+服务器 globe.conf 里的 DashScope API Key 与 provider 1 的明文密钥哈希一致。
+
+影响范围：
+服务器侧所有依赖 chat/vision 绑定解析的功能；绑定密钥无法解密时，旧配置/环境变量兜底被挡住。
+
+原因：
+1. 本地与服务器的 app.config.encryption-key 不一致（本机默认 key 的 SHA-256 与服务器不同），
+   共享库里用本地 key 加密的 provider secret 在服务器无法解密，decrypt 返回 null。
+2. ModelCatalogService.bindingConfig 在密钥为空时仍返回 ResolvedModelConfig（apiKey=null），
+   computeResolve 认为"用户绑定已命中"，不再回退系统绑定/legacy 配置，
+   于是拿到无密钥配置，技能兼容性检查判为 MISSING。
+
+解决方式：
+bindingConfig 检测 decrypt 结果，空密钥时返回 Optional.empty() 并记录 warn，
+让解析继续回退到系统绑定或 AppConfigurationService 的旧配置/环境变量。
+
+验证结果：
+- 服务器 0.5.2 部署后，GET /api/ai/creative/skills：7 个技能，优化师 compat=READY；
+- POST skill-runs 成功生成方案（见部署会话摘要）。
+
+后续注意事项：
+- 本地与服务端共享同一 PostgreSQL 但 encryption-key 不同，是长期隐患：任一环境改供应商密钥，
+  另一环境可能解不开。建议后续统一密钥来源，或给本地开发使用独立数据库。
+- 不要把真实密钥写进迁移；系统默认绑定仍是环境配置。
+- 绑定密钥不可用时应继续回退，而不是返回半可用配置。

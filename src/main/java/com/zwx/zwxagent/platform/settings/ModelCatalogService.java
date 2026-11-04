@@ -540,8 +540,16 @@ public class ModelCatalogService {
         if (model == null || !model.enabled()) return Optional.empty();
         String baseUrl = "dashscope".equals(provider.protocol()) && isBlank(provider.baseUrl())
                 ? null : provider.baseUrl();
+        String apiKey = decrypt(provider);
+        if (isBlank(apiKey)) {
+            // 绑定存在但密钥不可用（例如跨环境加密口令不一致）时，不能返回无密钥配置挡住下一层；
+            // 回退系统绑定或旧配置/环境变量，避免"列表显示可用、生成时才报未配置 Key"。
+            log.warn("模型绑定缺少可解密密钥，回退下一层；scope={}, purpose={}, providerId={}",
+                    source, purpose, provider.id());
+            return Optional.empty();
+        }
         return Optional.of(new ResolvedModelConfig(purpose, provider.protocol(), baseUrl,
-                model.modelId(), decrypt(provider), source));
+                model.modelId(), apiKey, source));
     }
 
     /**

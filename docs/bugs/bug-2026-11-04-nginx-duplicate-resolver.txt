@@ -1,0 +1,26 @@
+日期：2026-11-04
+主题：frontend nginx 配置 resolver 指令重复导致容器反复重启
+
+问题现象
+- 0.4.0 部署后 aster-frontend-1 状态 Restarting；
+  docker logs 显示 [emerg] "resolver" directive is duplicate in default.conf:81。
+
+影响范围
+- 根因只在新增中台前缀路由时引入：nginx 启动失败，整站不可用（首页 502/无法连接）。
+
+原因
+- 为让中台服务未启动时 nginx 也能启动，新增了变量 upstream（$eval_upstream/$data_upstream），
+  并在文件前部加了一条 resolver；文件后部已有一条（browser-mcp 用）。
+  nginx 同一 server 块只允许一条 resolver 指令。
+
+解决方式
+- 删除新增的 resolver，仅保留文件后部原有的一条；变量 upstream 直接复用它。
+- 文件：frontend/nginx.conf
+
+验证结果
+- frontend 容器正常启动；/ → 200、/eval/ → 200、/data/ → 200；
+  中台服务重建后仅需 docker restart aster-nginx-proxy 刷新上游 IP。
+
+后续注意事项
+- nginx 配置改动务必先 `nginx -t`（或在临时容器内验证）再发布；
+  resolver 只写一条，放在 server 块任意位置均可被变量 proxy_pass 使用。

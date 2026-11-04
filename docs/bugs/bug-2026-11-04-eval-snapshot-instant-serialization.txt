@@ -1,0 +1,32 @@
+日期：2026-11-04
+主题：评测快照序列化失败（Instant 无 JSR310 模块）+ 单例留证失败拖垮整个实验
+
+问题现象
+- TASK 实验整体 failed（EXECUTION_ERROR「JSON 序列化失败」），且没有任何单例结果落库；
+  正常应至少每个用例各有一条（含失败）结果。
+
+影响范围
+- E1 评测中台 TASK 评估器全链路验证时暴露；不影响主平台（主链路序列化走 Spring MVC
+  的全局 ObjectMapper，自带 JSR310 模块）。
+
+原因（两点叠加）
+1. EvalJson 的 ObjectMapper 是裸 new ObjectMapper()，未注册 JavaTimeModule。
+   RunTrajectoryService 返回的轨迹 Map 里含 Instant（createdAt/updatedAt 等），
+   toJson 时抛 InvalidDefinitionException → IllegalStateException「JSON 序列化失败」。
+   controller 直接返回该 Map 没问题，是因为 Spring Boot 全局 mapper 已注册 JSR310。
+2. EvalRunner 的单例留证（resultRepository.upsert + event append）在 per-case try 之外，
+   序列化异常逃逸到实验级 catch，把整个实验打成 failed，后续用例不再执行。
+
+解决方式
+- EvalJson：MAPPER.findAndRegisterModules() + disable WRITE_DATES_AS_TIMESTAMPS。
+- EvalRunner：把「执行 + 留证 + 事件」包进同一个 per-case try/catch；留证失败按
+  CaseOutcome.failure 落库并记 CASE_FAILED 事件，实验继续。
+- 顺带：EvalTargetService/ManusTaskRunner 的模型解析补第三级回退（eval→agent→chat），
+  全新库无 agent 绑定时 legacy 配置只认 chat/vision 描述符，此前会抛「未知的模型配置项」。
+
+验证结果
+- 修复重启后 E2E：四类实验全部 SUCCEEDED，TASK 快照正常落库。
+
+后续注意事项
+- eval 模块内任何「独立于 Spring MVC 的序列化」都要过 EvalJson，别绕过它直接用裸 mapper。
+- 新库/新环境接入评测前先在模型设置里配好 agent（及可选 eval）绑定，或依赖 chat 兜底。

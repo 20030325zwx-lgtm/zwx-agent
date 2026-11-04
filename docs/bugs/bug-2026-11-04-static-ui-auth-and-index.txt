@@ -1,0 +1,29 @@
+日期：2026-11-04
+主题：中台独立页 /eval/ /data/ 返回 401/500（静态页被鉴权拦截 + 缺 index 转发）
+
+问题现象
+- 0.4.0 部署后 https://www.zhuwenxuan.online/eval/ 与 /data/ 返回 401；
+  修复鉴权后改为 500，静态资源 404。
+
+影响范围
+- 仅两个独立中台服务的自带页面；API 正常。
+
+原因（两处叠加）
+1. 服务内 AuthFilter 只放行 /health，浏览器直接打开 /eval/（无 Authorization 头）被 401；
+   页面本身应公开、页面内 /api 调用才需要 JWT。
+2. Spring MVC 静态资源不对子目录自动返回 index.html，/eval/ 触发
+   NoResourceFoundException，又被 @ExceptionHandler(Exception.class) 兜底成 500。
+
+解决方式
+- AuthFilter 放行 /eval/（或 /data/）与 /favicon.ico，仅 /api/** 要求 JWT。
+- 新增 UiController：GET /eval/ → forward:/eval/index.html（data 同理）。
+- ApiExceptionHandler 增加 NoResourceFoundException → 404，避免兜底 500。
+- 文件：services/{eval,data}-service/.../security/AuthFilter.java、web/UiController.java、
+  web/ApiExceptionHandler.java
+
+验证结果
+- /eval/ 200、/data/ 200、页面 JS 资源 200；/api/ai/eval/** 与 /api/ai/feedback 未登录仍 401。
+
+后续注意事项
+- 独立服务的静态页面路径（base）与 nginx 前缀必须一致（/eval/、/data/），
+  新增页面路由时同步检查 AuthFilter 放行列表。

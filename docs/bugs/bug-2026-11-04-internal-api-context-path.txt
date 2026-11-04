@@ -1,0 +1,29 @@
+日期：2026-11-04
+主题：内部 API 在 context-path=/api 下路径双重前缀（404 而非 401）
+
+问题现象
+- 拆分联调时，用错误/缺失 X-Aster-Internal-Token 调主站
+  POST /api/internal/eval/intent 返回 404（预期 401）。
+- 正确令牌也 404，内部执行链路完全不可用。
+
+影响范围
+- 仅影响 0.4.0 拆分引入的内部接口；主站既有功能不受影响。
+
+原因
+- 主站配置了 server.servlet.context-path=/api，但 InternalEvalController 的
+  @RequestMapping 写成 /api/internal/eval、InternalTokenFilter 的 URL pattern 写成
+  /api/internal/*。Spring MVC 与非 Spring 过滤器模式都相对 context-path 解析，
+  实际生效路径变成 /api/api/internal/eval（404），过滤器也不会命中。
+
+解决方式
+- Controller 映射改为 /internal/eval；FilterRegistrationBean 的 urlPatterns 改为 /internal/*。
+- 外部调用 URL 仍是 http://backend:8123/api/internal/eval/**（context-path + 映射）。
+- 文件：src/main/java/com/zwx/zwxagent/platform/internal/InternalEvalController.java、
+  InternalSecurityConfig.java
+
+验证结果
+- 错误令牌 → 401；正确令牌 → 200（{"available":false,"router":"none"} 因服务端未启用意图路由）。
+
+后续注意事项
+- 主站新增任何 @RequestMapping / 过滤器模式时，先确认是否已带 context-path；
+  应用内路径一律相对 /api 书写，只有对外文档/nginx/客户端 URL 带 /api。

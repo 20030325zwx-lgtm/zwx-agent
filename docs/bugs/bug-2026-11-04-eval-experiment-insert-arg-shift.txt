@@ -1,0 +1,28 @@
+日期：2026-11-04
+主题：EvalExperimentService.create 构造 EvalExperimentRecord 漏传 status 导致参数整体右移
+
+问题现象
+- POST /ai/eval/experiments 返回 500，PSQL「invalid input syntax for type json:
+  Token "e2e" is invalid」——gitCommit 的值被绑定进 candidate 的 CAST(? AS jsonb) 参数。
+
+影响范围
+- 评测实验无法创建（E1 MVP 新增代码，不影响既有功能）。
+
+原因
+- EvalExperimentRecord 是 20 字段 record；create 里手工逐位传参时漏掉第 7 位 status，
+  从 status 起整体右移一位：status 拿到了 candidate JSON 串，candidateJson 拿到了 gitCommit，
+  插入时 JSONB 列收到裸字符串报错。编译期无法发现（20 个实参数量恰好凑齐）。
+
+解决方式
+- 在 evalType 之后补上 "queued"（status 列），其余参数回归正确位置。
+- 文件：src/main/java/com/zwx/zwxagent/platform/eval/EvalExperimentService.java
+
+验证结果
+- 修复重启后 E2E：四类实验全部创建成功并执行到 SUCCEEDED。
+
+后续注意事项
+- 20 字段 record 手工逐位构造极易错位；后续如再扩展该 record，
+  建议引入紧凑构造器（如 only-create 所需字段的工厂方法）或 Builder，
+  避免「位置语义」靠人眼对齐。
+- 与 bug-2026-11-04-eval-find-due-for-claim-param-count.txt 同属 E1 E2E 首轮暴露的
+  JdbcTemplate 手写参数问题，回归时一并关注。

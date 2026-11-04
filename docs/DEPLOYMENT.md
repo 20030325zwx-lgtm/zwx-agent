@@ -20,11 +20,21 @@ frontend (Nginx, 8080/80)
         |-- document-mcp:8128
         |-- MinerU 在线 API（知识库入库、parse_document）
         |-- DashScope / 阿里云 OSS
+
+独立中台服务（0.4.0 起，各自独立镜像与页面，与主站同仓库）：
+  +-- eval-service  评测中台镜像：/eval/ 页面 + /api/ai/eval/**；实验调度在本服务内执行
+  +-- data-service  数据中台镜像：/data/ 页面 + /api/ai/feedback/**；回流调 eval-service
+        两者共用同一个 postgres（platform schema，主站是 schema 所有者）；
+        执行链路经主站内部 API（/api/internal/eval/**，X-Aster-Internal-Token 鉴权）。
 ```
 
 - `browser-mcp` 默认不启用，使用 Docker Compose `browser` profile；需要网页截图时再打开。
 - Docling 默认不部署，知识库 PDF/Office 入库使用 MinerU；Docling 仅作为私有化部署选项。
 - MinIO 默认不部署，图片和知识库文档使用阿里云 OSS。
+- 两个中台服务只做编排/评分/反馈管理，不重复实现智能体运行时：TASK/意图/检索经主站
+  `/api/internal/eval/**` 执行（共享令牌 `PLATFORM_INTERNAL_TOKEN`，fail-closed）。
+- 内存：eval-service 1024m、data-service 512m；中台数据在 `platform` schema，
+  V23/V24 迁移仍由 backend 负责（部署顺序 backend 先启动即完成迁移）。
 
 ## 2. 服务器前置条件
 
@@ -220,6 +230,20 @@ cp ../aster-0.1.0-linux-amd64/../globe.conf /home/globe.conf  # 如路径不同�
 ```
 
 Flyway 会在后端启动时自动执行数据库迁移。
+
+### 独立中台服务（评测 / 数据中台）
+
+`deploy/docker-compose/docker-compose.yml` 含 `eval-service`（8140）与 `data-service`（8141），
+各自独立镜像（`aster-eval-service` / `aster-data-service`），不对外暴露端口：
+
+- nginx 前缀路由（`frontend/nginx.conf`）：`/api/ai/eval/`、`/eval/` → eval-service；
+  `/api/ai/feedback`、`/data/` → data-service。
+- 环境变量：`PLATFORM_INTERNAL_TOKEN`（服务间令牌，必填）、`JWT_SECRET`（与主站
+  globe.conf 的 `app.security.jwt-secret` 必须一致，中台服务本地验签用）、`DASHSCOPE_API_KEY`
+  （PROMPT/judge 直连）、`EVAL_MODEL`（默认 qwen-plus）。
+- 部署脚本（release/deploy-0.4.0.sh）会自动从 globe.conf 提取 JWT_SECRET、随机生成
+  PLATFORM_INTERNAL_TOKEN 并写入 `.env`。
+- **重建 backend/frontend 容器后必须重启 nginx-proxy**（DNS 缓存，否则 502）。
 
 ### 回滚
 

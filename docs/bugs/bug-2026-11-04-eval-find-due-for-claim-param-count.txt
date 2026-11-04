@@ -1,0 +1,32 @@
+日期：2026-11-04
+主题：EvalExperimentRepository.findDueForClaim 占位符数量与实参不匹配
+
+问题现象
+- 创建评测实验（POST /ai/eval/experiments）返回 500；后端日志出现
+  PSQLException「栏位索引超过许可范围：3，栏位数：2」，调用栈指向
+  EvalRunScheduler.tick → EvalExperimentRepository.findDueForClaim。
+- 每个调度轮次（5s）都报一次，实验永远无法被认领执行。
+
+影响范围
+- 评测中台实验调度完全不可用（E1 MVP 新增代码，不影响既有功能）。
+- E2E 验证（隔离库 8124 实例）首次运行时暴露。
+
+原因
+- SQL 语句 WHERE 子句里只有一个时间戳占位符
+  （`status='queued' OR (status='running' AND (lease_until IS NULL OR lease_until < ?))`），
+  但调用方传了两个 `Timestamp.from(now)` 加一个 limit，共 3 个实参。
+  两个时间戳是笔误残留（仿 media_job 的 SQL 原有两处 now）。
+
+解决方式
+- 删掉多余的时间戳实参，仅保留 `Timestamp.from(now), limit`。
+- 文件：src/main/java/com/zwx/zwxagent/platform/eval/EvalExperimentRepository.java
+
+验证结果
+- 修复后 `mvn -DskipTests package` 通过；隔离库 E2E（/tmp/eval_e2e.py）
+  四类实验（intent/retrieval/prompt/task）全部跑到 SUCCEEDED 并产出结果与对比报告。
+
+后续注意事项
+- 仿写 media_job 的「两个时间戳」SQL 时注意占位符计数：media_job 的
+  next_action_at 与 lease_until 是两个独立条件，eval 的查询里没有 next_action_at。
+- 该类错误在 SQL 与实参分离的 JdbcTemplate 写法下编译期无法发现，
+  新查询建议 E2E 或调度冒烟先跑一轮空认领再交付。

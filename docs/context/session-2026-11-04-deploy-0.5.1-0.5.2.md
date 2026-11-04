@@ -38,9 +38,10 @@
   共享库里用本机 key 加密的 provider secret 在服务器无法解密。
 - 原 `bindingConfig` 在密钥为空时仍返回无密钥配置，挡住系统绑定/旧配置兜底；
   `603fb8d` 改为空密钥即 `Optional.empty()`，继续回退。
-- 长期风险：本地与服务端共享同一 PostgreSQL，但 encryption-key 不同；
-  任一环境在模型设置里保存密钥，另一环境可能解不开。建议后续统一密钥来源，
-  或给本地开发使用独立数据库。
+- **已于同日解决**：生成统一的新 key，重加密全部 6 条供应商密钥，并同步本地
+  `application-local.yml` 与服务器 `globe.conf`；两端技能均为 READY、无回退告警。
+  详见 [统一配置加密口令](./session-2026-11-04-unified-encryption-key.md)。
+- 中期仍建议给本地开发使用独立数据库，彻底消除跨环境密钥耦合。
 
 ## 回滚
 

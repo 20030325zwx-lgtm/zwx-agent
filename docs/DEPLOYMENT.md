@@ -141,6 +141,17 @@ app.config.encryption-key=<建议单独设置>
 
 `app.security.jwt-secret` 是必填项；管理员密码建议在首次部署前设置，避免使用默认 `admin123`。
 
+> **与本地共享数据库时必须统一 `app.config.encryption-key`**：供应商密钥、模型覆盖密钥和 MCP 密钥
+> 都以该口令加密后存库（`*.secret_ciphertext`）。服务器写在 `/home/globe.conf`，
+> 本地写在 `src/main/resources/application-local.yml` 的 `app.config.encryption-key`
+> （该文件 Git 忽略），两边必须是同一个值。只改密钥而不重新加密存量数据，会导致
+> `model_provider` / `app_configuration` / `mcp_server_configuration` 里的密文无法解密。
+>
+> 更换口令的正确顺序：停两端后端 → 备份数据库 → 用旧口令解密、新口令重加密全部
+> `secret_ciphertext` → 同步更新两端配置 → 启动并验证技能/模型列表不再出现
+> 「模型绑定缺少可解密密钥，回退下一层」。后端对密钥不可用的绑定有回退保护，
+> 但回退只是兜底，不能替代两端口令一致。
+
 ### 4.3 启动
 
 ```bash

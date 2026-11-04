@@ -427,7 +427,8 @@ public class ManusGraphOrchestrator {
                     log.debug("实时活动事件推送失败；runId={}", request.runId(), exception);
                 }
             };
-            ToolCallback[] tools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(), toolCallLedger);
+            ToolCallback[] tools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(), toolCallLedger,
+                    id -> stream.send("tool-call", String.valueOf(id)));
             RunContext context = RunContext.of(tools, request.knowledgeContext(), stopped::get,
                     request.tenantId(), request.conversationId(), chunk -> {
                         // 先保留已生成内容，再尝试推送；客户端断开后仍能把草稿落库。
@@ -719,7 +720,8 @@ public class ManusGraphOrchestrator {
     private static String eventKey(ActivityEvent event) {
         return (event.phase() == null ? "" : event.phase()) + "|"
                 + (event.agent() == null ? "" : event.agent()) + "|"
-                + (event.summary() == null ? "" : event.summary());
+                + (event.summary() == null ? "" : event.summary()) + "|"
+                + (event.workerKey() == null ? "" : event.workerKey());
     }
 
     private static boolean consumeLiveSent(Map<String, AtomicInteger> liveEvents, ActivityEvent event) {

@@ -33,13 +33,13 @@
             <template v-else>{{ msg.content }}</template>
           </div>
           <div v-else class="message-content markdown-content">
-            <AgentTrace v-if="msg.activities?.length || msg.startedAt" :message="msg" :index="index"
+            <AgentTrace v-if="msg.activities?.length || msg.toolCalls?.length || msg.startedAt" :message="msg" :index="index"
               :working="isTurnWorking(index)" :now="nowTick" />
             <template v-if="msg.content">
               <div v-html="renderMarkdown(msg.content)"></div>
               <span v-if="connectionStatus === 'connecting' && index === messages.length - 1" class="streaming-pulse" aria-label="正在生成"><i></i><i></i><i></i></span>
             </template>
-            <div v-else-if="connectionStatus === 'connecting' && index === messages.length - 1" class="thinking-state">
+            <div v-else-if="connectionStatus === 'connecting' && index === messages.length - 1 && !msg.startedAt" class="thinking-state">
               <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ msg.thinking || '正在思考...' }}
             </div>
           </div>
@@ -362,7 +362,8 @@ const renderMarkdown = content => DOMPurify.sanitize(marked.parse(stripInlineCit
 const nowTick = ref(Date.now())
 let tickTimer = null
 
-const isTurnWorking = index => props.connectionStatus === 'connecting' && index === props.messages.length - 1
+const isTurnWorking = index => (props.connectionStatus === 'connecting' && index === props.messages.length - 1)
+  || props.messages[index]?.status === 'RUNNING'
 const sendMessage = () => {
   if (props.connectionStatus === 'connecting') return
   if (!inputMessage.value.trim() && !selectedImages.value.length) return

@@ -66,6 +66,26 @@ class IdempotentToolCallbackTest {
         Mockito.verify(ledger).fail(eq(9L), anyString());
     }
 
+    @Test
+    void workerCallCarriesWorkerIdentityAndNotifiesOnBothTransitions() {
+        AgentToolCallLedgerService ledger = Mockito.mock(AgentToolCallLedgerService.class);
+        ToolCallback delegate = tool("searchWeb");
+        Mockito.when(delegate.call("{}")) .thenReturn("result");
+        Mockito.when(ledger.begin("run-1", "worker-2-researcher", "searchWeb", "{}"))
+                .thenReturn(new AgentToolCallLedgerService.Decision(
+                        AgentToolCallLedgerService.Mode.EXECUTE, 12L, null, null));
+        java.util.List<Long> changes = new java.util.ArrayList<>();
+        ToolCallback wrapped = IdempotentToolCallback.wrapAll("run-1", new ToolCallback[]{delegate}, ledger,
+                changes::add)[0];
+
+        ToolCallWorkerContext.set("worker-2-researcher");
+        try { Assertions.assertEquals("result", wrapped.call("{}")); }
+        finally { ToolCallWorkerContext.clear(); }
+
+        Assertions.assertEquals(java.util.List.of(12L, 12L), changes);
+        Mockito.verify(ledger).succeed(12L, "result");
+    }
+
     private static ToolCallback tool(String name) {
         ToolCallback callback = Mockito.mock(ToolCallback.class);
         ToolDefinition definition = Mockito.mock(ToolDefinition.class);

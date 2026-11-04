@@ -28,32 +28,37 @@ public class AgentToolCallLedgerService {
     }
 
     public Decision begin(String runId, String toolName, String arguments) {
+        return begin(runId, "", toolName, arguments);
+    }
+
+    public Decision begin(String runId, String workerKey, String toolName, String arguments) {
         String safeArguments = arguments == null ? "" : arguments;
         String hash = sha256(safeArguments);
-        Long id = insertPending(runId, toolName, hash, safeArguments);
+        String key = workerKey == null ? "" : workerKey;
+        Long id = insertPending(runId, key, toolName, hash, safeArguments);
         if (id != null) {
             return new Decision(Mode.EXECUTE, id, null, null);
         }
-        return readExisting(runId, toolName, hash);
+        return readExisting(runId, key, toolName, hash);
     }
 
-    private Long insertPending(String runId, String toolName, String hash, String arguments) {
+    private Long insertPending(String runId, String workerKey, String toolName, String hash, String arguments) {
         try {
             return jdbcTemplate.queryForObject("""
-                    INSERT INTO agent_tool_call (run_id, tool_name, arguments_hash, arguments, status)
-                    VALUES (?, ?, ?, ?, 'PENDING')
-                    ON CONFLICT (run_id, tool_name, arguments_hash) DO NOTHING
+                    INSERT INTO agent_tool_call (run_id, worker_key, tool_name, arguments_hash, arguments, status)
+                    VALUES (?, ?, ?, ?, ?, 'PENDING')
+                    ON CONFLICT (run_id, worker_key, tool_name, arguments_hash) DO NOTHING
                     RETURNING id
-                    """, Long.class, runId, toolName, hash, arguments);
+                    """, Long.class, runId, workerKey, toolName, hash, arguments);
         } catch (EmptyResultDataAccessException exception) {
             return null;
         }
     }
 
-    private Decision readExisting(String runId, String toolName, String hash) {
+    private Decision readExisting(String runId, String workerKey, String toolName, String hash) {
         return jdbcTemplate.query("""
                 SELECT id, status, result FROM agent_tool_call
-                WHERE run_id = ? AND tool_name = ? AND arguments_hash = ?
+                WHERE run_id = ? AND worker_key = ? AND tool_name = ? AND arguments_hash = ?
                 """, (rs, rowNum) -> {
                     long id = rs.getLong("id");
                     String status = rs.getString("status");
@@ -77,7 +82,7 @@ public class AgentToolCallLedgerService {
                     }
                     return new Decision(Mode.REPLAY, id, result,
                             "该工具调用上次执行失败，已返回上次失败结果，避免重复产生副作用。");
-                }, runId, toolName, hash).stream().findFirst()
+                }, runId, workerKey, toolName, hash).stream().findFirst()
                 .orElseGet(() -> new Decision(Mode.EXECUTE, null, null, null));
     }
 
@@ -100,7 +105,7 @@ public class AgentToolCallLedgerService {
     /** run 的工具调用审计清单（幂等账本只读视图）：工具、参数摘要、状态与时间，供运行检查器展示。 */
     public List<Map<String, Object>> auditForRun(String runId, int limit) {
         return jdbcTemplate.queryForList("""
-                SELECT tool_name, LEFT(arguments, 400) AS arguments, status,
+                SELECT id, worker_key, tool_name, LEFT(arguments, 400) AS arguments, status,
                        LEFT(COALESCE(result, ''), 300) AS result_preview, created_at, updated_at
                 FROM agent_tool_call
                 WHERE run_id = ?

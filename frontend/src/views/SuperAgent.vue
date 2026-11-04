@@ -269,6 +269,9 @@ const refreshingRun = ref(false)
 const confirmationDialogOpen = ref(false)
 const decidingConfirmation = ref(false)
 let runPollTimer = null
+let toolPollTimer = null
+let toolPollBusy = false
+const toolCallVersions = new Map()
 const INSPECTOR_STORAGE_KEY = 'aster_super_agent_inspector_open'
 const inspectorOpen = ref(localStorage.getItem(INSPECTOR_STORAGE_KEY) !== 'false')
 watch(inspectorOpen, value => {
@@ -337,7 +340,8 @@ const parseActivity = data => {
   try {
     const event = JSON.parse(data)
     if (event && typeof event === 'object' && event.summary) {
-      return { phase: event.phase || 'work', agent: event.agent || '', summary: event.summary, detail: event.summary }
+      return { phase: event.phase || 'work', agent: event.agent || '', summary: event.summary,
+        workerKey: event.workerKey || '', detail: event.summary }
     }
   } catch { /* 旧格式纯文本兜底 */ }
   return { phase: 'work', agent: '', summary: activityLabel(data), detail: data }
@@ -380,6 +384,7 @@ const mapMessage = message => ({
   isUser: message.role === 'USER',
   time: new Date(message.createdAt).getTime(),
   activities: [],
+  toolCalls: [],
   status: message.status,
   runId: message.executionRunId,
   files: mapFiles(chatId.value, message.fileAttachments),
@@ -400,6 +405,7 @@ const captureLiveTrace = () => {
     runId: answer.runId || null,
     status: answer.status || null,
     activities: answer.activities?.length ? answer.activities : null,
+    toolCalls: answer.toolCalls?.length ? answer.toolCalls : null,
     startedAt: answer.startedAt || null,
     finishedAt: answer.finishedAt || null
   }
@@ -410,6 +416,7 @@ const restoreLiveTrace = trace => {
   const target = answers[0]
   if (!target) return
   if (trace.activities?.length) target.activities = trace.activities
+  if (trace.toolCalls?.length) target.toolCalls = trace.toolCalls
   if (trace.startedAt && !target.startedAt) target.startedAt = trace.startedAt
   if (trace.finishedAt) target.finishedAt = trace.finishedAt
   if (trace.status) target.status = trace.status
@@ -618,6 +625,29 @@ const refreshConversations = async () => {
   finally { historyLoading.value = false }
 }
 const refreshProjects = async () => { projects.value = await listProjects() }
+const loadToolCallsForRun = async (conversationId, runId) => {
+  if (!conversationId || !runId) return
+  const requestKey = `${conversationId}:${runId}`
+  const version = (toolCallVersions.get(requestKey) || 0) + 1
+  toolCallVersions.set(requestKey, version)
+  try {
+    const calls = await listManusToolCalls(conversationId, runId, 500)
+    if (chatId.value !== conversationId || toolCallVersions.get(requestKey) !== version) return
+    messages.value.forEach(message => {
+      if (!message.isUser && message.runId === runId) message.toolCalls = calls
+    })
+  } catch (error) {
+    console.error('Unable to load tool calls:', error)
+  }
+}
+const loadConversationToolCalls = async conversationId => {
+  const runIds = [...new Set(messages.value.filter(message => !message.isUser && message.runId).map(message => message.runId))]
+  // Bound concurrent requests when restoring long conversations.
+  for (let index = 0; index < runIds.length; index += 4) {
+    if (chatId.value !== conversationId) return
+    await Promise.all(runIds.slice(index, index + 4).map(runId => loadToolCallsForRun(conversationId, runId)))
+  }
+}
 const loadRunsForConversation = async (conversationId, preferredRunId = null) => {
   if (!conversationId) {
     activeRun.value = null
@@ -635,26 +665,39 @@ const loadRunsForConversation = async (conversationId, preferredRunId = null) =>
     const chosenId = preferredRunId && runs.some(run => run.id === preferredRunId) ? preferredRunId : runs[0].id
     const detail = await getManusRun(conversationId, chosenId)
     if (chatId.value !== conversationId) return
-    const index = messages.value.findIndex(message => !message.isUser
+    let index = messages.value.findIndex(message => !message.isUser
       && ((detail.assistantMessageId != null && String(message.id) === String(detail.assistantMessageId))
         || message.runId === detail.id))
+    if (index < 0 && detail.status === 'RUNNING') {
+      const userIndex = messages.value.findIndex(message => message.isUser
+        && String(message.id) === String(detail.userMessageId))
+      index = userIndex < 0 ? messages.value.length : userIndex + 1
+      messages.value.splice(index, 0, {
+        content: '', isUser: false, time: Date.now(), status: 'RUNNING', runId: detail.id,
+        activities: [], toolCalls: [], startedAt: detail.createdAt ? new Date(detail.createdAt).getTime() : Date.now()
+      })
+    }
     if (index >= 0) {
       const answer = messages.value[index]
       if (answer) {
         // 历史消息没有实时轨迹：用 run 的语义事件与起止时间补出时间线
         if (!answer.activities.length && detail.events?.length) {
           answer.activities = detail.events.map(event => ({
-            phase: event.phase || 'work', agent: event.agent || '', summary: event.summary || '', detail: event.summary || ''
+            phase: event.phase || 'work', agent: event.agent || '', summary: event.summary || '',
+            workerKey: event.workerKey || '', detail: event.summary || ''
           }))
         }
         if (!answer.startedAt && detail.createdAt) {
           answer.startedAt = new Date(detail.createdAt).getTime()
-          answer.finishedAt = detail.updatedAt ? new Date(detail.updatedAt).getTime() : null
+          answer.finishedAt = detail.status === 'RUNNING' ? null
+            : detail.updatedAt ? new Date(detail.updatedAt).getTime() : null
         }
+        answer.status = detail.status
       }
     }
     activeRun.value = normalizeRun(detail, index)
     activeAnswerIndex.value = index
+    await loadToolCallsForRun(conversationId, detail.id)
   } catch (error) {
     console.error('Unable to load run workspace:', error)
   }
@@ -680,6 +723,7 @@ const refreshWorkspaceFiles = async conversationId => {
 }
 const stopRunPolling = () => {
   if (runPollTimer) { clearInterval(runPollTimer); runPollTimer = null }
+  if (toolPollTimer) { clearInterval(toolPollTimer); toolPollTimer = null }
 }
 const recoverFinishedRun = async (conversationId, run) => {
   eventSource?.close()
@@ -693,6 +737,7 @@ const recoverFinishedRun = async (conversationId, run) => {
   if (chatId.value !== conversationId) return
   messages.value = history.map(mapMessage)
   restoreLiveTrace(liveTrace)
+  await loadConversationToolCalls(conversationId)
   hydrateFileUrls(conversationId)
   let index = run.assistantMessageId != null
     ? messages.value.findIndex(message => String(message.id) === String(run.assistantMessageId))
@@ -726,6 +771,16 @@ const refreshActiveRun = async () => {
     if (!detail.verification?.status && run.verification?.status) updated.verification = run.verification
     if (!updated.tokenUsage && run.tokenUsage) updated.tokenUsage = run.tokenUsage
     activeRun.value = updated
+    const answer = messages.value[messageIndex]
+    if (answer && !answer.isUser && answer.runId === run.id) {
+      answer.status = detail.status
+      if (detail.events?.length > (answer.activities?.length || 0)) {
+        answer.activities = detail.events.map(event => ({
+          phase: event.phase || 'work', agent: event.agent || '', summary: event.summary || '',
+          workerKey: event.workerKey || '', detail: event.summary || ''
+        }))
+      }
+    }
     if (previousStatus === 'RUNNING' && ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(updated.status)) {
       await recoverFinishedRun(conversationId, updated)
     }
@@ -739,6 +794,12 @@ const scheduleRunPolling = () => {
   stopRunPolling()
   if (activeRun.value?.id && activeRun.value.status === 'RUNNING') {
     runPollTimer = setInterval(() => { refreshActiveRun() }, 5000)
+    toolPollTimer = setInterval(async () => {
+      if (toolPollBusy) return
+      toolPollBusy = true
+      try { await loadToolCallsForRun(chatId.value, activeRun.value?.id) }
+      finally { toolPollBusy = false }
+    }, 1500)
   }
 }
 watch(() => `${activeRun.value?.id || ''}|${activeRun.value?.status || ''}`, scheduleRunPolling)
@@ -819,6 +880,7 @@ const selectConversation = async conversation => {
     messages.value = (await getManusConversationMessages(conversation.id)).map(mapMessage)
     hydrateFileUrls(conversation.id)
     await loadRunsForConversation(conversation.id)
+    await loadConversationToolCalls(conversation.id)
     await refreshWorkspaceFiles(conversation.id)
     await annotateRunArtifacts(conversation.id)
   } finally {
@@ -867,7 +929,7 @@ const sendMessage = async payload => {
   cancelActiveStream()
   activeTurnStart = messages.value.length
   addMessage(message, true, imageObjectKeys)
-  messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], startedAt: Date.now() })
+  messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], toolCalls: [], startedAt: Date.now() })
   const answerIndex = messages.value.length - 1
   activeAnswerIndex.value = answerIndex
   activeRun.value = normalizeRun({ status: 'RUNNING', canCancel: true, input: message, createdAt: new Date().toISOString() }, answerIndex)
@@ -892,6 +954,7 @@ const attachManusStream = (stream, answerIndex) => {
       activeRun.value.canCancel = true
     }
     if (!answer?.content) setCompanion('thinking', '任务已创建，正在规划步骤')
+    loadToolCallsForRun(chatId.value, event.data)
   })
   stream.addEventListener('plan', event => {
     try {
@@ -935,9 +998,15 @@ const attachManusStream = (stream, answerIndex) => {
     const answer = messages.value[answerIndex]
     if (!answer) return
     const activity = parseActivity(event.data || '')
-    answer.activities.push({ phase: activity.phase, agent: activity.agent, summary: activity.summary, detail: activity.detail, at: Date.now() })
-    if (activeRun.value) activeRun.value.events.push({ phase: activity.phase, agent: activity.agent, summary: activity.summary })
+    answer.activities.push({ phase: activity.phase, agent: activity.agent, summary: activity.summary,
+      workerKey: activity.workerKey, detail: activity.detail, at: Date.now() })
+    if (activeRun.value) activeRun.value.events.push({ phase: activity.phase, agent: activity.agent,
+      summary: activity.summary, workerKey: activity.workerKey })
     if (!answer.content) setCompanion('working', activity.summary)
+  })
+  stream.addEventListener('tool-call', () => {
+    const runId = messages.value[answerIndex]?.runId || activeRun.value?.id
+    if (runId) loadToolCallsForRun(chatId.value, runId)
   })
   stream.addEventListener('interrupted', () => {
     const answer = messages.value[answerIndex]
@@ -1045,6 +1114,7 @@ const finishStream = async () => {
   if (chatId.value !== conversationId) return
   messages.value = history.map(mapMessage)
   restoreLiveTrace(liveTrace)
+  await loadConversationToolCalls(conversationId)
   hydrateFileUrls(conversationId)
   await loadRunsForConversation(conversationId)
   await refreshWorkspaceFiles(conversationId)
@@ -1087,6 +1157,7 @@ const stopGeneration = async () => {
     try {
       messages.value = (await getManusConversationMessages(chatId.value)).map(mapMessage)
       restoreLiveTrace(liveTrace)
+      await loadConversationToolCalls(chatId.value)
       hydrateFileUrls(chatId.value)
       await loadRunsForConversation(chatId.value)
       await refreshWorkspaceFiles(chatId.value)
@@ -1105,6 +1176,7 @@ const continueMessage = ({ message, index }) => {
   const previousContent = answer.content
   answer.content = ''
   answer.activities = []
+  answer.toolCalls = []
   answer.status = null
   answer.ragTrace = null
   answer.startedAt = Date.now()

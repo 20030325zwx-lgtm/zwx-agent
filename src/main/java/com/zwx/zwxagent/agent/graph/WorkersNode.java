@@ -7,6 +7,7 @@ import com.zwx.zwxagent.agent.core.ToolCallAgent;
 import com.zwx.zwxagent.agent.advisor.MyLoggerAdvisor;
 import com.zwx.zwxagent.agent.advisor.TokenUsageAdvisor;
 import com.zwx.zwxagent.agent.execution.ToolConfirmationService;
+import com.zwx.zwxagent.capability.tools.ToolCallWorkerContext;
 import com.zwx.zwxagent.agent.observability.TokenUsageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -55,22 +56,29 @@ public class WorkersNode implements NodeAction {
     private static class GraphWorker extends ToolCallAgent {
         final WorkerRole role;
         final String title;
+        final String workerKey;
         final List<ActivityEvent> events = new ArrayList<>();
         final Consumer<ActivityEvent> activitySink;
 
-        GraphWorker(ToolCallback[] tools, WorkerRole role, String title, Consumer<ActivityEvent> activitySink) {
+        GraphWorker(ToolCallback[] tools, WorkerRole role, String title, String workerKey,
+                    Consumer<ActivityEvent> activitySink) {
             super(tools);
             this.role = role;
             this.title = title;
+            this.workerKey = workerKey;
             this.activitySink = activitySink;
         }
 
         @Override
         public String step() {
-            String result = super.step();
+            String result;
+            ToolCallWorkerContext.set(workerKey);
+            try { result = super.step(); }
+            finally { ToolCallWorkerContext.clear(); }
             for (BaseAgent.ToolExecution execution : lastToolExecutions()) {
                 ActivityEvent event = ActivityEvent.of("work", role.displayName(),
-                        WorkerRole.toolLabel(execution.name()) + " → " + compact(execution.result(), MAX_EVENT_SUMMARY_CHARS));
+                        WorkerRole.toolLabel(execution.name()) + " → " + compact(execution.result(), MAX_EVENT_SUMMARY_CHARS),
+                        workerKey);
                 events.add(event);
                 streamEvent(activitySink, event);
             }
@@ -192,8 +200,9 @@ public class WorkersNode implements NodeAction {
                         .build();
                 String upstream = upstreamPrompt(plan, results,
                         step.dependsOn().stream().map(dep -> indexOfId(plan, dep)).toList());
+                String workerKey = "worker-" + stepNumber + "-" + step.role().key();
                 ActivityEvent startEvent = ActivityEvent.of("work", step.role().displayName(),
-                        "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title());
+                        "开始执行（" + stepNumber + "/" + plan.size() + "）：" + step.title(), workerKey);
                 events.add(startEvent);
                 streamEvent(activitySink, startEvent);
                 FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
@@ -365,12 +374,13 @@ public class WorkersNode implements NodeAction {
         String knowledge = runContext == null ? "" : runContext.knowledgeContext();
         boolean webSearchEnabled = runContext == null || runContext.webSearchEnabled();
         ToolCallback[] roleTools = filterTools(allTools, role);
-        GraphWorker worker = new GraphWorker(roleTools, role, step.title(), activitySink);
+        String workerKey = "worker-" + stepNumber + "-" + role.key();
+        GraphWorker worker = new GraphWorker(roleTools, role, step.title(), workerKey, activitySink);
         if (runContext != null && runContext.tenantId() != null) {
             worker.setRunIdentity(new com.zwx.zwxagent.agent.core.AgentRunIdentity(
                     runContext.tenantId(), "super", runContext.conversationId()));
         }
-        worker.setName("worker-" + stepNumber + "-" + role.key());
+        worker.setName(workerKey);
         worker.setSystemPrompt("""
                 你是多智能体团队中的%s。专注完成分配给你的子任务，不要展开任务范围。
                 使用工具时保持克制：能一步完成就不要多步；拿不到的信息明确说明，不要编造。
@@ -418,7 +428,7 @@ public class WorkersNode implements NodeAction {
             activities.add("[worker" + stepNumber + "/" + role.key() + "] 结论：" + compact(summary));
             List<ActivityEvent> events = new ArrayList<>(worker.events);
             ActivityEvent doneEvent = ActivityEvent.of("work", role.displayName(),
-                    "完成：" + compact(summary, MAX_EVENT_SUMMARY_CHARS));
+                    "完成：" + compact(summary, MAX_EVENT_SUMMARY_CHARS), workerKey);
             events.add(doneEvent);
             streamEvent(activitySink, doneEvent);
             return new WorkerOutcome(activities, events, "【" + step.title() + "】" + summary);

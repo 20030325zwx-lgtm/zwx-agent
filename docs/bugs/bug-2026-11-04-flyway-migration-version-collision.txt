@@ -1,0 +1,28 @@
+日期：2026-11-04
+问题现象：
+新增 V27__retire_obsolete_creative_skills.sql 后，后端启动失败，日志报
+"Found more than one migration with version 27"；launchctl 反复拉起但 /api/health 不可达。
+
+影响范围：
+本地后端无法启动；技能下架迁移未执行。前端因后端不可用而无法加载技能列表。
+
+原因：
+1. 仓库已存在并发会话提交的 V27__agent_run_lifecycle.sql，新迁移重复使用 V27。
+2. 将迁移重命名为 V30 后，Maven 增量构建没有删除 target/classes 中旧文件名的资源，
+   JAR 里仍同时包含旧的 V27__retire_obsolete_creative_skills.sql，冲突继续存在。
+
+解决方式：
+1. 迁移重命名为 V30__retire_obsolete_creative_skills.sql；
+2. 删除 target/classes/db/migration/V27__retire_obsolete_creative_skills.sql 构建残留；
+3. 重新执行 mvn -DskipTests package；
+4. 重启后端。
+
+验证结果：
+- flyway_schema_history：v27 / v28 / v29 / v30 均 success；
+- creative_skill：7 个 PUBLISHED，4 个 RETIRED（测试导入技能 + 3 个下架内置技能）；
+- 后端 health 返回 ok，启动日志无种子失败。
+
+后续注意事项：
+- 新增 Flyway 迁移前先按版本排序确认当前最大版本号，不要只看自己会话开始时的快照。
+- 迁移文件改名后必须清理 target/classes 或直接 mvn clean package，否则旧资源会残留进 JAR。
+- 内置技能下架要同时移除 CreativeSkillContent 种子，否则 seed() 会因 slug 唯一键冲突而失败。

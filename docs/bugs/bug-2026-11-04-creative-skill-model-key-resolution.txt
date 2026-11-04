@@ -1,0 +1,31 @@
+日期：2026-11-04
+问题现象：
+创作台选择「视频提示词优化师」点「生成方案」，报
+"技能方案生成失败：未配置模型 API Key，请在“模型设置”中填写，或通过环境变量提供"；
+但技能列表显示该技能为 READY。数据库里 admin 已配置 DashScope 供应商与 chat 绑定。
+
+影响范围：
+所有依赖 CHAT 能力的技能方案生成；无个人 chat 绑定的账号（如 creative_ui_test）必然失败。
+
+原因：
+1. CreativeSkillService.chatAvailable 只验证"能解析到模型配置"，没有校验 apiKey 与 modelName，
+   因此技能显示 READY，直到真正建模才失败。
+2. 系统作用域没有 chat 默认绑定；没有个人绑定的用户会回退到旧配置/环境变量，
+   而 spring.ai.dashscope.api-key 为空，最终得到无密钥配置。
+
+解决方式：
+1. chatAvailable 增加 hasApiKey + modelName 校验，缺密钥时技能如实显示"缺能力"；
+2. 本环境新增系统级 chat 绑定：SYSTEM / chat -> 智谱 BigModel / glm-4.7-flash（免费，已配置密钥）。
+   该绑定是环境配置，不写成 Flyway 迁移：新环境密钥未填时不应自动改变全站默认模型。
+3. 重启后端清除 30s 解析缓存。
+
+验证结果：
+- 用本地默认 JWT 密钥签发 admin token，GET /ai/creative/skills：7 项，优化师 compat=READY；
+- POST /ai/creative/projects/{videoProject}/skill-runs：HTTP 200，生成 3 镜方案，
+  summary/changes/negativePrompt 均返回；
+- 供应商密钥用默认 cipher 解密校验通过（hint 与库中一致）。
+
+后续注意事项：
+- 新环境需要在"模型设置"里配置系统默认文本模型，否则无个人绑定的账号仍会缺模型；
+- 不要把带真实密钥的 system binding 写进迁移；V7 只种供应商与模型、不自动绑定是正确设计；
+- 技能兼容性检查应继续以"可实际建模"为准，而不是"能解析到一行配置"。

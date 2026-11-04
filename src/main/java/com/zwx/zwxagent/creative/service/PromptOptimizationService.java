@@ -52,7 +52,8 @@ public class PromptOptimizationService {
     private static final String SYSTEM_VIDEO_PROMPT = VideoPromptGuide.RUBRIC + """
 
             只输出 JSON：{"optimizedText":"提交文本","changes":["实际改动"],"suggestions":["可选建议"],"missing":["缺失待补项"]}，
-            不要输出解释或 Markdown。changes 每条以“主体/动作/环境/镜头/光线/风格/质感/删改/保留”开头。
+            不要输出解释或 Markdown。changes 每条以“主体/动作/环境/镜头/光线/风格/质感/删改/保留/拆镜”开头。
+            本入口只返回一条主提示词；若原文需要拆成多镜，optimizedText 给首镜，拆分方案写入 suggestions。
             """;
 
     private static final String SYSTEM_VIDEO_STORY = """

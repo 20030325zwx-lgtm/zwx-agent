@@ -38,14 +38,23 @@ final class CreativeSkillContent {
             用户约束与既有内容冲突时，如实列入 missing，不要静默取舍。
             """ + "\n\n" + PLAN_OUTPUT_CONTRACT;
 
-    /** 优化师专用契约：多出 changes（实际改动），便于用户对照；禁止输出 shots，避免误走逐镜确认。 */
+    /** 优化师专用契约：除改写稿外，给出分镜拆解、负向提示与改动清单。 */
     private static final String OPTIMIZER_OUTPUT_CONTRACT = """
             输出必须只包含一个 JSON 对象，不要输出解释或 Markdown 代码块：
-            {"summary":"一句话诊断结论（最缺什么、改完适合什么场景）","prompt":"优化后的单镜头提示词",
-             "changes":["主体：补充了……","镜头：把推近改为固定……"],
-             "warnings":["原文包含两个核心动作，建议拆成两镜"],"missing":["服装未确认"]}
-            changes 只写实际做过的修改，每条以“主体/动作/环境/镜头/光线/风格/质感/删改/保留”开头；
-            不要输出 shots 字段，多镜头拆分建议写进 warnings。""";
+            {"summary":"一句话诊断结论（最缺什么、改完适合什么场景）",
+             "prompt":"首镜（或单镜）可直接提交的提示词",
+             "negativePrompt":"可选的负向提示；目标模型不支持时留空字符串",
+             "shots":[{"index":1,"title":"镜头名","shotSize":"Medium shot 中景",
+                       "angle":"Eye level 平视","cameraMove":"Dolly in 推轨","focalLength":"35mm",
+                       "lighting":"Golden hour 黄金时刻","prompt":"该镜可直接提交的提示词",
+                       "durationSeconds":5,"transition":"向右摇出，接下一镜"}],
+             "changes":["主体：补充了……","拆镜：把连续动作拆成 3 镜"],
+             "warnings":["原文包含两个核心动作，已按节拍拆镜"],"missing":["服装未确认"]}
+            要求：
+            - 单镜方案 shots 放 1 个元素；多镜方案 2–8 个元素；每镜字段尽量齐全，未知字段留空字符串；
+            - prompt 必须等于第 1 镜的 prompt，方便工作台直接采用首镜；
+            - changes 只写实际做过的修改，每条以“主体/动作/环境/镜头/光线/风格/质感/删改/保留/拆镜”开头；
+            - 不输出 JSON 以外的任何内容。""";
 
     private static final String VIDEO_PROMPT_OPTIMIZER = VideoPromptGuide.RUBRIC + "\n\n"
             + OPTIMIZER_OUTPUT_CONTRACT;
@@ -88,19 +97,6 @@ final class CreativeSkillContent {
             本技能只交付文字分镜与素材清单，不自动生成视频；用户确认后可在对应镜头上逐镜生成。
             """ + "\n\n" + PLAN_OUTPUT_CONTRACT;
 
-    private static final String CAMERA_PERFORMANCE_DESIGNER = """
-            你是「运镜与表演设计」指导。把用户给出的镜头目标与时长拆解为相机与表演两条可执行的线。
-
-            方法（相机与主体分离原则）：
-            1. 相机线：只选一种主运镜（推/拉/摇/移/跟/环绕/固定），写明起点景别与终点景别、运动速度与节奏；不把两种主运镜塞进同一镜头；
-            2. 表演线：主体动作按时间轴展开（前 1/3 铺垫姿态 → 中段主要动作 → 尾段收束），每个动作落到可见的部位与幅度；情绪用微表情与体态表达（眼神移动、呼吸起伏、手指收紧），不写心理描写；
-            3. 合成：把两条线合并成一段可直接提交的提示词——先相机行为，再主体动作，最后环境与光线；总长不超过 500 字；
-            4. 若目标信息不足以确定景别/速度，按用户目标给出默认选择，并把不确定项列入 missing；
-            5. 声音未接入能力，不写音效与配乐。
-
-            用户输入包含参考图时，方案以图中可见内容为起始状态，不虚构画面外设定。
-            """ + "\n\n" + PLAN_OUTPUT_CONTRACT;
-
     private static final String FIRST_FRAME_DESIGNER = """
             你是「首帧设计师」。为一段尚未开始的视频设计第一帧图片提示词——首帧决定整段视频的起点质量。
 
@@ -112,31 +108,6 @@ final class CreativeSkillContent {
             5. 用户未给出的风格细节保持开放，把可选项列入 suggestions，不替用户锁死。
 
             使用路径：先用本方案生成首帧图片，再配合「一图短片」把图片动起来。
-            """ + "\n\n" + PLAN_OUTPUT_CONTRACT;
-
-    private static final String AMBIENT_MOTION = """
-            你是「氛围图动起来」导演。用户会提供一张氛围图（风景、场景、静物），你设计一段克制的环境运动方案。
-
-            方法（图生视频从简单动效开始）：
-            1. 只选一种环境动效作为主运动：雾的流动、光的推移、雨雪下落、水面涟漪、树叶摆动、人群远动——一次只动一种，不叠加；
-            2. 相机保持固定或极缓慢推移（速度写到"近乎不可察觉"级别）；氛围图的价值在沉浸感，不在事件；
-            3. 起始状态严格承接图片可见内容：只让图中本来就存在的元素动起来，不添加画面外的新主体；
-            4. 时长内给出节奏建议：前段静止建立感 → 中段运动显现 → 尾段回到近似静止（可循环的收束）；
-            5. 不写人物表演、不写声音；图中无法确认的元素列入 missing。
-
-            提交生成的提示词只描述画面与运动本身，不引用图片文件位置。
-            """ + "\n\n" + PLAN_OUTPUT_CONTRACT;
-
-    private static final String FASHION_LOOK_DISPLAY = """
-            你是「穿搭展示短片」导演。用户会提供服装/穿搭图片与卖点（面料、版型、场合），你产出单镜头上身展示方案。
-
-            方法：
-            1. 展示逻辑：以一个能带出服装结构的主体动作为核心——缓慢转身、行走一步、抬手整理袖口/领口，选其一；
-            2. 面料与版型用运动呈现：转身时裙摆的垂坠与回弹、走动时衣料的摆动幅度；卖点对应一个可见的画面焦点；
-            3. 相机与主体分离：相机线（固定全身机位 / 缓慢环绕 90 度内）+ 表演线（单一主动作），总长不超过 500 字；
-            4. 图片是起始状态：人物形象、服装细节以图为准，不改动服装结构与颜色；图中不可见的细节（内衬、面料成分）列入 missing；
-            5. 本项目未接入音频：不写口播、音乐与走秀节拍；不添加未要求的文字与水印。
-
             """ + "\n\n" + PLAN_OUTPUT_CONTRACT;
 
     private static final String NARRATIVE_SHORT_FILM = """
@@ -156,7 +127,7 @@ final class CreativeSkillContent {
                     "DIRECTING", "PROMPT", "TEXT", "TEXT",
                     List.of("CHAT"), VIDEO_PROMPT_DIRECTOR),
             new Seed("video-prompt-optimizer", "视频提示词优化师",
-                    "把已写好的视频提示词按七要素改写：补全主体/动作/环境/镜头/光线/风格/质感，收敛多动作与画质承诺。",
+                    "把已写好的视频提示词按七要素改写，并拆解为可逐镜使用的分镜：镜头词汇、焦距、负向提示与人物修正。",
                     "DIRECTING", "PROMPT", "TEXT", "TEXT",
                     List.of("CHAT"), VIDEO_PROMPT_OPTIMIZER),
             new Seed("one-image-short", "一图短片",
@@ -171,22 +142,10 @@ final class CreativeSkillContent {
                     "把剧本片段拆解为结构化镜头表与逐镜提示词，确认后可逐镜生成（每镜独立任务）。",
                     "DIRECTING", "STORYBOARD", "TEXT", "TEXT",
                     List.of("CHAT", "TEXT_TO_VIDEO"), SCRIPT_TO_STORYBOARD),
-            new Seed("camera-performance-designer", "运镜与表演设计",
-                    "把镜头目标拆成相机与表演两条线：单一主运镜、动作时间轴、微表情可见化。",
-                    "DIRECTING", "PROMPT", "TEXT", "TEXT",
-                    List.of("CHAT"), CAMERA_PERFORMANCE_DESIGNER),
             new Seed("first-frame-designer", "首帧设计师",
                     "为一段视频设计第一帧图片提示词：构图留运动空间、光线具体，先出图再动起来。",
                     "SHORT_FORM", "PROMPT", "TEXT", "TEXT",
                     List.of("CHAT"), FIRST_FRAME_DESIGNER),
-            new Seed("ambient-motion", "氛围图动起来",
-                    "从一张氛围图设计克制的环境运动：一次只动一种元素，相机近乎静止。",
-                    "SHORT_FORM", "GENERATE", "TEXT+IMAGE", "VIDEO",
-                    List.of("CHAT", "IMAGE_TO_VIDEO"), AMBIENT_MOTION),
-            new Seed("fashion-look-display", "穿搭展示短片",
-                    "从服装图与卖点生成上身展示方案：用运动呈现面料与版型，相机与表演分离。",
-                    "COMMERCE", "GENERATE", "TEXT+IMAGE", "VIDEO",
-                    List.of("CHAT", "IMAGE_TO_VIDEO"), FASHION_LOOK_DISPLAY),
             new Seed("narrative-short-film", "多镜头叙事短片",
                     "把故事想法拆为 3–8 镜方案：先锁视觉规则再逐镜拆解，确认后逐镜生成。",
                     "SHORT_FORM", "STORYBOARD", "TEXT", "TEXT",
@@ -209,7 +168,12 @@ final class CreativeSkillContent {
     }
 
     static CreativeSkillVersionRecord versionRecord(Seed seed, UUID skillId, UUID versionId, String body) {
-        return new CreativeSkillVersionRecord(versionId, skillId, 1, body,
+        return versionRecord(seed, skillId, versionId, body, 1);
+    }
+
+    static CreativeSkillVersionRecord versionRecord(Seed seed, UUID skillId, UUID versionId, String body,
+                                                    int version) {
+        return new CreativeSkillVersionRecord(versionId, skillId, version, body,
                 java.util.Map.of(), java.util.Map.of(), "BUILTIN", "",
                 hashOf(body), "SELF_WRITTEN", "OWN", java.time.Instant.now());
     }

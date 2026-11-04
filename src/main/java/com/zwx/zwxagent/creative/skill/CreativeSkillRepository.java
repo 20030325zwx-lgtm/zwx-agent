@@ -146,6 +146,13 @@ public class CreativeSkillRepository {
                 VERSION_MAPPER, skillId, version).stream().findFirst();
     }
 
+    /** 内置技能正文升级后推进最新版本指针；历史版本与历史运行引用保持不变。 */
+    public boolean updateLatestVersion(UUID skillId, int version) {
+        return jdbcTemplate.update(
+                "UPDATE creative_skill SET latest_version = ?, updated_at = now() WHERE id = ?",
+                version, skillId) > 0;
+    }
+
     // ---------------------------------------------------------------- 运行
 
     public void insertRun(CreativeSkillRunRecord run) {

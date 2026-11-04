@@ -8,12 +8,13 @@ import org.junit.jupiter.api.Test;
 
 /**
  * 内置技能种子契约：slug 唯一；视频提示词优化师携带共享七要素规则，
- * 且明确禁止输出 shots（否则前端会误触发逐镜确认，而该技能只有 CHAT 能力）。
+ * 并输出分镜拆解（shots）与负向提示（negativePrompt）。该技能仍只有 CHAT 能力，
+ * 前端必须按 mediaOperation 判断是否允许逐镜生成，而不是看到 shots 就提交任务。
  */
 class CreativeSkillContentTest {
 
     @Test
-    void optimizerSeedCarriesSharedRubricAndSingleShotContract() {
+    void optimizerSeedCarriesSharedRubricAndStoryboardContract() {
         CreativeSkillContent.Seed optimizer = CreativeSkillContent.SEEDS.stream()
                 .filter(seed -> "video-prompt-optimizer".equals(seed.slug()))
                 .findFirst()
@@ -25,8 +26,12 @@ class CreativeSkillContentTest {
         Assertions.assertEquals(List.of("CHAT"), optimizer.requiredCapabilities());
         Assertions.assertTrue(optimizer.body().contains(
                 "[主体] + [动作] + [环境] + [镜头语言] + [光线色调] + [风格] + [质感]"));
-        Assertions.assertTrue(optimizer.body().contains("不要输出 shots"));
-        Assertions.assertTrue(optimizer.body().contains("\"changes\""));
+        Assertions.assertTrue(optimizer.body().contains("Close-up 特写"));
+        Assertions.assertTrue(optimizer.body().contains("Dolly in 推轨"));
+        Assertions.assertTrue(optimizer.body().contains("anatomically correct hands and face"));
+        Assertions.assertTrue(optimizer.body().contains("\"shots\""));
+        Assertions.assertTrue(optimizer.body().contains("\"negativePrompt\""));
+        Assertions.assertTrue(optimizer.body().contains("分镜拆解"));
     }
 
     @Test
@@ -35,5 +40,17 @@ class CreativeSkillContentTest {
         for (CreativeSkillContent.Seed seed : CreativeSkillContent.SEEDS) {
             Assertions.assertTrue(slugs.add(seed.slug()), "重复的技能 slug：" + seed.slug());
         }
+    }
+
+    @Test
+    void retiredSkillsAreNotReseeded() {
+        Set<String> slugs = new HashSet<>();
+        for (CreativeSkillContent.Seed seed : CreativeSkillContent.SEEDS) {
+            slugs.add(seed.slug());
+        }
+        // 2026-11-04 清理：重叠/小众技能由 V27 下架，种子不得再重建
+        Assertions.assertFalse(slugs.contains("camera-performance-designer"));
+        Assertions.assertFalse(slugs.contains("ambient-motion"));
+        Assertions.assertFalse(slugs.contains("fashion-look-display"));
     }
 }

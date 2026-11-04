@@ -6,6 +6,7 @@ import com.zwx.zwxagent.creative.domain.CreativeException;
 import com.zwx.zwxagent.creative.domain.CreativeAssetRecord;
 import com.zwx.zwxagent.creative.domain.JobSourceType;
 import com.zwx.zwxagent.creative.domain.MediaJobRecord;
+import com.zwx.zwxagent.creative.domain.ParameterSchema;
 import com.zwx.zwxagent.creative.repository.CreativeAssetRepository;
 import com.zwx.zwxagent.creative.repository.MediaJobRepository;
 import com.zwx.zwxagent.creative.service.CreativeProjectService;
@@ -76,11 +77,13 @@ public class CreativeSkillService {
     void seed() {
         try {
             for (CreativeSkillContent.Seed seed : CreativeSkillContent.SEEDS) {
-                if (repository.skillSlugExists(seed.slug())) {
-                    // 系统技能元数据随种子演进同步（能力/分类）；正文升版仍走显式版本流程
+                var existing = repository.findPublishedBySlug(seed.slug());
+                if (existing.isPresent()) {
+                    // 系统技能元数据随种子演进同步（能力/分类）
                     repository.syncSystemSkillMeta(seed.slug(), seed.name(), seed.summary(),
                             seed.category(), seed.stage(), seed.inputTypes(), seed.outputTypes(),
                             seed.requiredCapabilities());
+                    upgradeSystemSkillBody(seed, existing.get());
                     continue;
                 }
                 UUID skillId = UUID.randomUUID();
@@ -94,6 +97,29 @@ public class CreativeSkillService {
         } catch (RuntimeException exception) {
             // 种子失败不阻断启动：技能页如实显示空目录（与 SkillRepository 的容错原则一致）
             log.warn("[creative-skills] 内置技能种子失败：{}", exception.getMessage());
+        }
+    }
+
+    /**
+     * 内置技能正文变更时追加新版本并推进 latest_version：历史版本整行保留，
+     * 已创建的 run 仍引用原版本，解释不受影响；用户私有导入技能不经过本路径。
+     */
+    private void upgradeSystemSkillBody(CreativeSkillContent.Seed seed, CreativeSkillRecord skill) {
+        String newHash = CreativeSkillContent.hashOf(seed.body());
+        var latest = repository.findVersion(skill.id(), skill.latestVersion()).orElse(null);
+        if (latest != null && newHash.equals(latest.contentHash())) return;
+        int next = skill.latestVersion() + 1;
+        try {
+            if (!repository.versionExists(skill.id(), next)) {
+                repository.insertVersion(CreativeSkillContent.versionRecord(
+                        seed, skill.id(), UUID.randomUUID(), seed.body(), next));
+            }
+            // 即使版本行已由其他实例写入，也把本实例看到的旧指针推进到该版本
+            repository.updateLatestVersion(skill.id(), next);
+            log.info("[creative-skills] 内置技能 {} 正文已变更，升级至 v{}", seed.slug(), next);
+        } catch (org.springframework.dao.DuplicateKeyException exception) {
+            repository.updateLatestVersion(skill.id(), next);
+            log.info("[creative-skills] 内置技能 {} v{} 已由其他实例写入", seed.slug(), next);
         }
     }
 
@@ -163,9 +189,11 @@ public class CreativeSkillService {
 
     private boolean chatAvailable(String userId) {
         try {
-            catalogService.resolveWithFallback(userId,
-                    ModelCatalogService.PURPOSE_OPTIMIZE, ModelCatalogService.PURPOSE_CHAT);
-            return true;
+            var config = catalogService.resolveWithFallback(userId,
+                    ModelCatalogService.PURPOSE_OPTIMIZE, ModelCatalogService.PURPOSE_CHAT).config();
+            // 仅"能解析到绑定"不等于可用：密钥或模型名缺失时，计划生成必然在建模阶段失败。
+            return config.hasApiKey()
+                    && config.modelName() != null && !config.modelName().isBlank();
         } catch (RuntimeException exception) {
             return false;
         }
@@ -544,6 +572,22 @@ public class CreativeSkillService {
         return plan;
     }
 
+    /**
+     * 方案文本必须可直接提交：超过模型提示词上限时在句末压缩，并写入 warnings。
+     * 服务端统一裁剪，保证"采用首镜""采用此镜""逐镜生成"拿到的是同一份合规文本。
+     */
+    static String clipPrompt(String value, String label, List<String> warnings) {
+        String prompt = value == null ? "" : value.trim();
+        int max = ParameterSchema.MODEL_PROMPT_MAX;
+        if (prompt.length() <= max) return prompt;
+        int boundary = Math.max(
+                Math.max(prompt.lastIndexOf('。', max - 1), prompt.lastIndexOf('！', max - 1)),
+                Math.max(prompt.lastIndexOf('；', max - 1), prompt.lastIndexOf('\n', max - 1)));
+        int cut = boundary >= max * 3 / 5 ? boundary + 1 : max;
+        warnings.add(label + "提示词超过 " + max + " 字，已压缩到 " + cut + " 字，请检查是否丢失信息");
+        return prompt.substring(0, cut).trim();
+    }
+
     /** 结构化输出必须合法（skill 设计 §8.1）：解析失败如实报错，不用纯文本兜底冒充方案。 */
     private Map<String, Object> parsePlan(String raw) {
         if (raw == null) throw CreativeException.optimizeFailed("技能方案不是合法的结构化输出");
@@ -562,19 +606,33 @@ public class CreativeSkillService {
             }
             Map<String, Object> plan = new LinkedHashMap<>();
             plan.put("summary", summary);
-            plan.put("prompt", planPrompt);
             // 可选字段：优化类技能用它说明实际改动，其他技能不返回时为空数组。
             plan.put("changes", CreativeJson.readStringList(
                     CreativeJson.toJson(node.path("changes"))));
-            plan.put("warnings", CreativeJson.readStringList(
-                    CreativeJson.toJson(node.path("warnings"))));
+            plan.put("negativePrompt", node.path("negativePrompt").asText("").trim());
             plan.put("missing", CreativeJson.readStringList(
                     CreativeJson.toJson(node.path("missing"))));
+            List<String> warnings = new ArrayList<>(CreativeJson.readStringList(
+                    CreativeJson.toJson(node.path("warnings"))));
             var shots = node.path("shots");
             if (shots.isArray() && !shots.isEmpty()) {
-                plan.put("shots", CreativeJson.fromJson(CreativeJson.toJson(shots),
-                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() { }));
+                List<Map<String, Object>> shotList = CreativeJson.fromJson(CreativeJson.toJson(shots),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() { });
+                for (int i = 0; i < shotList.size(); i++) {
+                    Map<String, Object> shot = shotList.get(i);
+                    Object rawPrompt = shot.get("prompt");
+                    String clipped = clipPrompt(rawPrompt == null ? "" : String.valueOf(rawPrompt),
+                            "第 " + (i + 1) + " 镜", warnings);
+                    if (clipped.isBlank()) warnings.add("第 " + (i + 1) + " 镜缺少提示词");
+                    shot.put("prompt", clipped);
+                }
+                plan.put("shots", shotList);
+                // 顶层 prompt 与首镜一致，保证"采用首镜"与逐镜采用得到同一份可提交文本。
+                plan.put("prompt", shotList.get(0).get("prompt"));
+            } else {
+                plan.put("prompt", clipPrompt(planPrompt, "方案", warnings));
             }
+            plan.put("warnings", warnings);
             return plan;
         } catch (CreativeException exception) {
             throw exception;

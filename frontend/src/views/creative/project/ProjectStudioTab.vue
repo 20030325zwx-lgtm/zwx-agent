@@ -174,11 +174,28 @@
             <li v-for="change in planChanges" :key="change">{{ change }}</li>
           </ul>
           <textarea v-model="planPrompt" class="cr-textarea" rows="4" maxlength="8000"
-                    aria-label="方案提示词（可编辑）" />
+                    aria-label="首镜提示词（可编辑）" />
+          <div v-if="planShots.length" class="skill-shots">
+            <p class="skill-shots-title">分镜拆解（{{ planShots.length }} 镜）</p>
+            <article v-for="(shot, index) in planShots" :key="index" class="skill-shot">
+              <div class="skill-shot-head">
+                <strong>镜 {{ shot.index || index + 1 }}{{ shot.title ? ` · ${shot.title}` : '' }}</strong>
+                <button type="button" class="inline-link" @click="adoptShotPrompt(shot)">采用此镜</button>
+              </div>
+              <p class="skill-shot-meta">
+                <span v-for="(meta, metaIndex) in shotMeta(shot)" :key="metaIndex">{{ meta }}</span>
+              </p>
+              <p class="skill-shot-prompt">{{ shot.prompt }}</p>
+              <p v-if="shot.transition" class="cr-field-help">衔接：{{ shot.transition }}</p>
+            </article>
+          </div>
+          <p v-if="planNegativePrompt" class="cr-field-help skill-negative">
+            负向提示（仅当目标模型支持时使用）：{{ planNegativePrompt }}
+          </p>
           <p v-for="warning in planWarnings" :key="warning" class="cr-field-help skill-warning">注意：{{ warning }}</p>
           <p v-for="item in planMissing" :key="item" class="cr-field-help skill-warning">待补：{{ item }}</p>
           <div class="suggestion-actions">
-            <button v-if="hasShots" type="button" class="cr-primary"
+            <button v-if="canConfirmShots" type="button" class="cr-primary"
                     :disabled="skillConfirming" @click="confirmShots"
                     title="每个镜头独立任务，失败可单独重试">
               <Spinner v-if="skillConfirming" /> {{ skillConfirming ? '提交中…' : `确认并逐镜生成（${shotCount} 镜）` }}
@@ -188,7 +205,10 @@
               <Spinner v-if="skillConfirming" /> {{ skillConfirming ? '提交中…' : '确认并生成' }}
             </button>
             <button v-else type="button" class="cr-primary" :disabled="!planPrompt.trim()"
-                    @click="adoptPlanText">采用到输入台</button>
+                    @click="adoptPlanText">{{ planShots.length > 1 ? '采用首镜到输入台' : '采用到输入台' }}</button>
+            <button v-if="planShots.length" type="button" class="cr-ghost" @click="copyStoryboard">
+              复制分镜表
+            </button>
             <button type="button" class="cr-ghost" @click="dismissPlan">放弃</button>
           </div>
           <p class="cr-field-help">原提示词始终保留；方案确认后按现有任务语义执行（可原位重试与恢复）。</p>
@@ -419,10 +439,13 @@ const planSummary = computed(() => skillRun.value?.plan?.summary || '')
 const planChanges = computed(() => skillRun.value?.plan?.changes || [])
 const planWarnings = computed(() => skillRun.value?.plan?.warnings || [])
 const planMissing = computed(() => skillRun.value?.plan?.missing || [])
-// 多镜头方案（P1 MVP）：shots ≥2 时走逐镜生成，每镜独立任务
-const hasShots = computed(() => (skillRun.value?.plan?.shots || []).length >= 2
+const planNegativePrompt = computed(() => skillRun.value?.plan?.negativePrompt || '')
+// 分镜拆解：文本型技能也展示；只有文生视频技能才允许逐镜确认，避免 CHAT-only 技能误触发生成
+const planShots = computed(() => skillRun.value?.plan?.shots || [])
+const hasShots = computed(() => planShots.value.length >= 2
   && skillRun.value?.planStatus === 'PENDING_CONFIRM')
-const shotCount = computed(() => (skillRun.value?.plan?.shots || []).length)
+const canConfirmShots = computed(() => hasShots.value && skillRun.value?.mediaOperation === 'text_to_video')
+const shotCount = computed(() => planShots.value.length)
 const shotJobItems = computed(() => skillRun.value?.shotJobs?.items || [])
 const shotRefreshing = ref(false)
 
@@ -567,6 +590,40 @@ function adoptPlanText() {
   markDirty()
   dismissPlan()
   showToast('方案已带入输入台，原文仍保留', 'success')
+}
+
+/** 分镜元信息：只展示模型实际给出的字段，缺项不补占位。 */
+function shotMeta(shot) {
+  return [shot.shotSize, shot.angle, shot.cameraMove, shot.focalLength, shot.lighting,
+    shot.durationSeconds ? `${shot.durationSeconds}s` : ''].filter(Boolean)
+}
+
+/** 采用单镜提示词：只替换输入台，不关闭方案，方便继续比较其他镜头。 */
+function adoptShotPrompt(shot) {
+  const text = (shot?.prompt || '').trim()
+  if (!text) return
+  idea.value = text
+  effective.value = text
+  finalSynced.value = true
+  markDirty()
+  showToast(`已采用第 ${shot.index || ''} 镜提示词，原文仍保留`, 'success')
+}
+
+/** 复制完整分镜表：纯文本，便于带到外部工具或分镜文档。 */
+async function copyStoryboard() {
+  const text = planShots.value.map((shot, index) => {
+    const head = `镜 ${shot.index || index + 1}${shot.title ? ` · ${shot.title}` : ''}`
+    const meta = shotMeta(shot).join(' · ')
+    return [head, meta, shot.prompt, shot.transition ? `衔接：${shot.transition}` : '']
+      .filter(Boolean).join('\n')
+  }).join('\n\n')
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast('分镜表已复制', 'success')
+  } catch {
+    showToast('复制失败，请检查浏览器剪贴板权限', 'error')
+  }
 }
 
 function dismissPlan() {
@@ -1082,6 +1139,32 @@ onBeforeUnmount(() => {
   font-size: var(--wb-fs-caption);
   line-height: var(--wb-lh-caption);
 }
+.skill-shots { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.skill-shots-title { margin: 0; color: var(--wb-text-2); font-size: var(--wb-fs-compact); }
+.skill-shot {
+  padding: 8px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-surface-2);
+}
+.skill-shot-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.skill-shot-head strong { font-size: var(--wb-fs-compact); }
+.skill-shot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 4px 0;
+  color: var(--wb-muted);
+  font-size: var(--wb-fs-caption);
+}
+.skill-shot-prompt {
+  margin: 4px 0 0;
+  color: var(--wb-text);
+  font-size: var(--wb-fs-caption);
+  line-height: var(--wb-lh-caption);
+  white-space: pre-wrap;
+}
+.skill-negative { color: var(--wb-text-2); margin: 4px 0; }
 .skill-plan textarea { margin-top: 6px; }
 .skill-plan-failed { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .skill-plan-failed .cr-error { margin: 0; }

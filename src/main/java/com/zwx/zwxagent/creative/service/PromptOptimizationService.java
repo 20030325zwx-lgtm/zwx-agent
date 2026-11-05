@@ -1,6 +1,7 @@
 package com.zwx.zwxagent.creative.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.zwx.zwxagent.creative.asset.CreativeAssetService;
 import com.zwx.zwxagent.creative.domain.CreativeException;
 import com.zwx.zwxagent.creative.domain.ParameterSchema;
 import com.zwx.zwxagent.creative.domain.VideoContinuityNoteRecord;
@@ -9,21 +10,29 @@ import com.zwx.zwxagent.creative.domain.VideoSceneRecord;
 import com.zwx.zwxagent.creative.domain.VideoShotRecord;
 import com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository;
 import com.zwx.zwxagent.creative.story.StoryContentService;
+import com.zwx.zwxagent.creative.support.ImageStyleCatalog;
 import com.zwx.zwxagent.creative.support.VideoPromptGuide;
 import com.zwx.zwxagent.creative.support.CreativeJson;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
 import com.zwx.zwxagent.platform.settings.ModelCatalogService;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.content.Media;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MimeTypeUtils;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
  * 提示词优化（P0 重构，2026-11-01）：按模式分流策略，不再所有输入都走文生图改写。
- * - IMAGE：沿用旧「文生图提示词编辑」行为与响应字段（兼容现有调用方）。
+ * - IMAGE：沿用旧「文生图提示词编辑」行为与响应字段（兼容现有调用方）；风格取自
+ *   {@link ImageStyleCatalog}（摄影取向 + 漫画），其中 PHOTO_MATCH 会读取参考图并沿用其镜头/光线/调色。
  * - VIDEO_PROMPT 优化生成提示词：按 Seedance 指南把镜头意图改写为可提交文本（动作部位/幅度/速度、
  *   单镜头一种运镜、起始→主要→结束、衔接方向），可注入项目/镜头上下文（服务端按 ID 读取，不信任客户端拼装）。
  * - VIDEO_STORY 优化剧情 / VIDEO_STORYBOARD 细化分镜：返回结构化建议文本。
@@ -32,6 +41,9 @@ import java.util.UUID;
 @Service
 public class PromptOptimizationService {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(PromptOptimizationService.class);
+
     public static final int PROMPT_MAX = 8000;
 
     public static final String MODE_IMAGE = "IMAGE";
@@ -39,9 +51,14 @@ public class PromptOptimizationService {
     public static final String MODE_VIDEO_STORY = "VIDEO_STORY";
     public static final String MODE_VIDEO_STORYBOARD = "VIDEO_STORYBOARD";
 
-    /** 图片风格：写实（贴近照片）与漫画/插画（二次元线稿上色）。 */
-    public static final String IMAGE_STYLE_REALISTIC = "REALISTIC";
-    public static final String IMAGE_STYLE_COMIC = "COMIC";
+    /** 图片风格：取自风格目录；写实/漫画保留旧常量名以兼容既有调用方。 */
+    public static final String IMAGE_STYLE_REALISTIC = ImageStyleCatalog.REALISTIC;
+    public static final String IMAGE_STYLE_COMIC = ImageStyleCatalog.COMIC;
+    public static final String IMAGE_STYLE_PHOTO_MATCH = ImageStyleCatalog.PHOTO_MATCH;
+
+    /** 参考图上限：只用于风格分析，两张足够（主参考 + 备选），避免多图抬高时延与费用。 */
+    private static final int MAX_REFERENCE_IMAGES = 2;
+    private static final long MAX_REFERENCE_BYTES = 8L * 1024 * 1024;
 
     private static final String IMAGE_COMMON_RULES = """
             只输出 JSON：{"prompt":"改写后的提示词"}，不要输出解释或 Markdown。
@@ -69,6 +86,32 @@ public class PromptOptimizationService {
             4. 漫画语言：需要时加入网点（screentone）、速度线、集中线；不生成文字或对白气泡内的文字；
             5. 构图：强透视、镜头感明确，角色姿态有支撑点、不僵硬；
             6. 风格约束：避免照片质感、真实皮肤毛孔与 3D 渲染感，线条风格必须统一。
+            """ + IMAGE_COMMON_RULES;
+
+    /**
+     * 摄影风格通用骨架（2026-11-05）：主体/环境/镜头/光线四段保持通用写法，
+     * 具体取向由风格目录的 rubric 注入，新增风格不需要再写一份完整系统提示词。
+     */
+    private static final String SYSTEM_IMAGE_PHOTO_TEMPLATE = """
+            你是摄影方向的文生图提示词编辑。把用户描述改写为一段可直接生成「照片」的中文提示词，规范：
+            1. 主体：身份/年龄/服装面料与褶皱、皮肤与毛发质感（毛孔、细绒毛、自然瑕疵），自然姿态与微表情；
+            2. 环境：真实地点与材质、天气、时段，避免抽象背景；
+            3. 镜头：等效焦段（24mm 环境 / 35mm 纪实 / 50mm 自然 / 85mm 人像 / 100mm 微距）、光圈与景深、机位与构图；
+            4. 光线：光源类型与方向、色温、阴影软硬；
+            5. 质感与调色：严格按下方「风格锚点」执行，不混入其他风格的特征；
+            6. 真实感约束：避免插画感、3D 渲染感、塑料皮肤与 AI 感，五官与手指自然。
+            【风格锚点】%s
+            """ + IMAGE_COMMON_RULES;
+
+    /** 跟随原片：参考图只用来提取风格要素，不复述其内容，避免把上一张的主体带进新图。 */
+    private static final String SYSTEM_IMAGE_PHOTO_MATCH = """
+            你是摄影风格分析与文生图提示词编辑。用户会附带一张参考照片和一段文字描述，规则：
+            1. 先读参考片的风格要素：镜头（焦段感/景深/透视）、光线（方向/软硬/色温）、
+               色彩与调色（饱和度/对比/高光与阴影倾向/偏色）、质感（胶片颗粒或数码锐度）、构图（取景与留白）；
+            2. 改写后的提示词必须沿用这套风格要素，让新画面看起来是同一个人、同一台机器、同一套调色拍出来的续作；
+            3. 只提取风格，不复述参考片里的具体人物、物体、场景内容，避免把上一张的内容带进新图；
+            4. 用户文字描述优先；描述与参考片冲突时以文字为准，但保持风格一致；
+            5. 参考片信息不足时按「自然光 + 50mm + 中性调色」补齐，不编造品牌、文字或水印。
             """ + IMAGE_COMMON_RULES;
 
     /**
@@ -103,8 +146,13 @@ public class PromptOptimizationService {
             不要输出解释或 Markdown。
             """;
 
+    /**
+     * imageStyle 只在 IMAGE 模式生效（缺省写实）；referenceAssetIds 供「跟随原片」读取参考图，
+     * 服务端按 ID 校验归属后读取，不信任客户端传入的图片内容或地址。
+     */
     public record OptimizeRequest(String prompt, String mode, UUID projectId,
-                                  UUID episodeId, UUID sceneId, UUID shotId, String imageStyle) {
+                                  UUID episodeId, UUID sceneId, UUID shotId, String imageStyle,
+                                  List<UUID> referenceAssetIds) {
     }
 
     /**
@@ -125,17 +173,20 @@ public class PromptOptimizationService {
     private final CreativeProjectService projectService;
     private final StoryContentService storyContentService;
     private final VideoStoryResourceRepository resourceRepository;
+    private final CreativeAssetService assetService;
 
     public PromptOptimizationService(ModelCatalogService catalogService,
                                      DynamicChatModelFactory chatModelFactory,
                                      CreativeProjectService projectService,
                                      StoryContentService storyContentService,
-                                     VideoStoryResourceRepository resourceRepository) {
+                                     VideoStoryResourceRepository resourceRepository,
+                                     CreativeAssetService assetService) {
         this.catalogService = catalogService;
         this.chatModelFactory = chatModelFactory;
         this.projectService = projectService;
         this.storyContentService = storyContentService;
         this.resourceRepository = resourceRepository;
+        this.assetService = assetService;
     }
 
     public OptimizeResult optimize(CurrentActor actor, OptimizeRequest request) {
@@ -151,8 +202,11 @@ public class PromptOptimizationService {
         }
         String system;
         String userContent;
+        boolean matchReference = false;
         if (MODE_IMAGE.equals(mode)) {
-            system = imageSystemPrompt(normalizeImageStyle(request == null ? null : request.imageStyle()));
+            String style = normalizeImageStyle(request == null ? null : request.imageStyle());
+            matchReference = IMAGE_STYLE_PHOTO_MATCH.equals(style);
+            system = imageSystemPrompt(style);
             userContent = trimmed;
         } else {
             var context = buildContext(actor, mode, request);
@@ -163,12 +217,35 @@ public class PromptOptimizationService {
             };
             userContent = trimmed + (context.isBlank() ? "" : "\n\n" + context);
         }
-        var selection = catalogService.resolveWithFallback(
-                userId, ModelCatalogService.PURPOSE_OPTIMIZE, ModelCatalogService.PURPOSE_CHAT);
+        List<ReferenceImage> referenceImages = matchReference
+                ? loadReferenceImages(actor, request.referenceAssetIds())
+                : List.of();
+        if (matchReference && referenceImages.isEmpty()) {
+            throw new IllegalArgumentException("「跟随原片」需要先连接或添加一张参考图片");
+        }
+        var selection = matchReference
+                ? resolveVisionSelection(userId)
+                : catalogService.resolveWithFallback(
+                        userId, ModelCatalogService.PURPOSE_OPTIMIZE, ModelCatalogService.PURPOSE_CHAT);
+        log.info("提示词优化：mode={} style={} model={} provider={} 参考图={} 张",
+                mode, request == null ? null : request.imageStyle(),
+                selection.config().modelName(), selection.config().provider(), referenceImages.size());
         String raw;
         try {
-            ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
-            raw = client.prompt().system(system).user(userContent).call().content();
+            ChatClient client = ChatClient.builder(referenceImages.isEmpty()
+                    ? chatModelFactory.model(selection.config())
+                    : chatModelFactory.multimodalModel(selection.config())).build();
+            if (referenceImages.isEmpty()) {
+                raw = client.prompt().system(system).user(userContent).call().content();
+            } else {
+                raw = client.prompt().system(system).user(spec -> {
+                    spec.text(userContent);
+                    for (var image : referenceImages) {
+                        spec.media(new Media(MimeTypeUtils.parseMimeType(image.mimeType()),
+                                new ByteArrayResource(image.bytes())));
+                    }
+                }).call().content();
+            }
         } catch (Exception exception) {
             throw CreativeException.optimizeFailed("提示词优化失败：" + rootMessage(exception));
         }
@@ -302,6 +379,53 @@ public class PromptOptimizationService {
         if (content.length() > 0) blocks.append("\n【").append(label).append("】\n").append(content);
     }
 
+    // ---------------------------------------------------------------- 参考图（跟随原片）
+
+    private record ReferenceImage(String mimeType, byte[] bytes) {
+    }
+
+    /**
+     * 读取参考图用于风格分析：优先缩略图（体积小、时延低，风格判断不需要原图分辨率），
+     * 无缩略图时回退原图；非图片、空文件、超限一律跳过，由调用方按「至少一张」判定。
+     */
+    private List<ReferenceImage> loadReferenceImages(CurrentActor actor, List<UUID> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) return List.of();
+        var images = new ArrayList<ReferenceImage>();
+        for (UUID assetId : assetIds.stream().filter(Objects::nonNull).distinct().toList()) {
+            if (images.size() >= MAX_REFERENCE_IMAGES) break;
+            byte[] thumbnail = assetService.thumbnail(actor, assetId);
+            if (thumbnail != null && thumbnail.length > 0) {
+                images.add(new ReferenceImage("image/png", thumbnail));
+                continue;
+            }
+            var content = assetService.content(actor, assetId);
+            String mimeType = content.mimeType() == null ? "" : content.mimeType().toLowerCase(Locale.ROOT);
+            byte[] bytes = content.bytes();
+            if (!mimeType.startsWith("image/")) continue;
+            if (bytes == null || bytes.length == 0 || bytes.length > MAX_REFERENCE_BYTES) continue;
+            images.add(new ReferenceImage(content.mimeType(), bytes));
+        }
+        return images;
+    }
+
+    /**
+     * 跟随原片必须有视觉能力：vision 用途优先，未绑定时回退 optimize/chat（多数对话模型支持图片输入）；
+     * 都不可用才报错，并指向具体绑定位置，避免只抛「未配置模型」让人无从下手。
+     */
+    private ModelCatalogService.ResolvedSelection resolveVisionSelection(String userId) {
+        try {
+            return catalogService.resolve(userId, ModelCatalogService.PURPOSE_VISION);
+        } catch (RuntimeException visionUnavailable) {
+            try {
+                return catalogService.resolveWithFallback(
+                        userId, ModelCatalogService.PURPOSE_OPTIMIZE, ModelCatalogService.PURPOSE_CHAT);
+            } catch (RuntimeException fallbackUnavailable) {
+                throw CreativeException.optimizeFailed(
+                        "「跟随原片」需要能读图的模型：请在设置→模型绑定中为 vision 用途选择模型");
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- 解析
 
     /** 容忍模型包裹代码块或多余文本：取首个 JSON 对象的 prompt 字段（IMAGE 模式，C09 兼容）。 */
@@ -361,18 +485,23 @@ public class PromptOptimizationService {
         }
     }
 
-    /** 图片风格归一化：缺省为写实；非法值显式拒绝，便于前端及时纠正。 */
+    /** 图片风格归一化：缺省为自然写实；非法值显式拒绝，便于前端及时纠正。 */
     static String normalizeImageStyle(String imageStyle) {
-        String value = imageStyle == null || imageStyle.isBlank()
-                ? IMAGE_STYLE_REALISTIC : imageStyle.trim().toUpperCase(java.util.Locale.ROOT);
-        return switch (value) {
-            case IMAGE_STYLE_REALISTIC, IMAGE_STYLE_COMIC -> value;
-            default -> throw new IllegalArgumentException("不支持的图片风格：" + imageStyle);
-        };
+        try {
+            return ImageStyleCatalog.normalize(imageStyle);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("不支持的图片风格：" + imageStyle);
+        }
     }
 
     static String imageSystemPrompt(String imageStyle) {
-        return IMAGE_STYLE_COMIC.equals(imageStyle) ? SYSTEM_IMAGE_COMIC : SYSTEM_IMAGE_REALISTIC;
+        String style = normalizeImageStyle(imageStyle);
+        return switch (style) {
+            case IMAGE_STYLE_COMIC -> SYSTEM_IMAGE_COMIC;
+            case IMAGE_STYLE_PHOTO_MATCH -> SYSTEM_IMAGE_PHOTO_MATCH;
+            case IMAGE_STYLE_REALISTIC -> SYSTEM_IMAGE_REALISTIC;
+            default -> SYSTEM_IMAGE_PHOTO_TEMPLATE.formatted(ImageStyleCatalog.require(style).rubric());
+        };
     }
 
     private static String normalizeMode(String mode) {

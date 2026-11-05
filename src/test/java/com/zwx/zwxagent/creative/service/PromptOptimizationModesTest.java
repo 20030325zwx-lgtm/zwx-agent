@@ -1,6 +1,7 @@
 package com.zwx.zwxagent.creative.service;
 
 import com.zwx.zwxagent.creative.domain.CreativeException;
+import com.zwx.zwxagent.creative.support.ImageStyleCatalog;
 
 import java.util.List;
 import org.junit.jupiter.api.Assertions;
@@ -87,5 +88,67 @@ class PromptOptimizationModesTest {
         Assertions.assertTrue(comic.contains("赛璐璐"));
         Assertions.assertTrue(comic.contains("网点"));
         Assertions.assertFalse(comic.contains("f/1.8"), "漫画规范不应混入写实镜头参数");
+    }
+
+    // ---- 摄影风格目录（2026-11-05）：每种取向一份风格锚点，跟随原片走视觉输入 ----
+
+    @Test
+    void catalogExposesPhotographyLooksAndSingleReferenceStyle() {
+        var views = ImageStyleCatalog.views();
+        Assertions.assertEquals(views.size(),
+                views.stream().map(ImageStyleCatalog.View::code).distinct().count(), "风格编码不能重复");
+        Assertions.assertEquals(List.of(
+                        "PHOTO_MATCH", "REALISTIC", "FILM_PORTRAIT", "BLACK_WHITE", "DOCUMENTARY", "CINEMATIC",
+                        "LANDSCAPE", "PRODUCT", "RETRO_CCD", "JAPANESE_FRESH", "MOODY_NIGHT", "MACRO", "COMIC"),
+                views.stream().map(ImageStyleCatalog.View::code).toList());
+        Assertions.assertEquals(List.of("PHOTO_MATCH"),
+                views.stream().filter(ImageStyleCatalog.View::needsReference)
+                        .map(ImageStyleCatalog.View::code).toList(),
+                "只有跟随原片依赖参考图");
+        Assertions.assertTrue(views.stream().allMatch(view ->
+                !view.label().isBlank() && !view.hint().isBlank() && !view.group().isBlank()));
+    }
+
+    @Test
+    void everyPhotographyStyleInjectsItsOwnAnchor() {
+        for (var style : ImageStyleCatalog.styles()) {
+            String prompt = PromptOptimizationService.imageSystemPrompt(style.code());
+            Assertions.assertTrue(prompt.contains("只输出 JSON"), style.code() + " 缺少输出契约");
+            switch (style.code()) {
+                case "COMIC", "PHOTO_MATCH", "REALISTIC" -> {
+                    // 这三种走各自独立系统提示词，不使用通用骨架
+                }
+                default -> {
+                    Assertions.assertFalse(style.rubric().isBlank(), style.code() + " 缺少风格锚点");
+                    Assertions.assertTrue(prompt.contains(style.rubric()), style.code() + " 的锚点未注入");
+                    Assertions.assertTrue(prompt.contains("【风格锚点】"), style.code() + " 未使用摄影骨架");
+                }
+            }
+        }
+
+        String film = PromptOptimizationService.imageSystemPrompt("FILM_PORTRAIT");
+        Assertions.assertTrue(film.contains("Portra 400"));
+        Assertions.assertTrue(film.contains("85mm"));
+        Assertions.assertTrue(PromptOptimizationService.imageSystemPrompt("CINEMATIC").contains("宽银幕"));
+
+        String match = PromptOptimizationService.imageSystemPrompt(
+                PromptOptimizationService.IMAGE_STYLE_PHOTO_MATCH);
+        Assertions.assertTrue(match.contains("风格要素"));
+        Assertions.assertTrue(match.contains("不复述参考片"));
+        Assertions.assertTrue(match.contains("只输出 JSON"));
+        Assertions.assertFalse(match.contains("Portra 400"), "跟随原片不应预置某个具体胶片取向");
+    }
+
+    @Test
+    void newStyleCodesNormalizeAndUnknownStillRejected() {
+        Assertions.assertEquals("MACRO", PromptOptimizationService.normalizeImageStyle(" macro "));
+        Assertions.assertEquals("PHOTO_MATCH", PromptOptimizationService.normalizeImageStyle("photo_match"));
+        Assertions.assertEquals("REALISTIC", PromptOptimizationService.normalizeImageStyle(""));
+        Assertions.assertThrows(IllegalArgumentException.class,
+                () -> PromptOptimizationService.normalizeImageStyle("oil-painting"));
+        Assertions.assertTrue(ImageStyleCatalog.needsReference("PHOTO_MATCH"));
+        Assertions.assertFalse(ImageStyleCatalog.needsReference("CINEMATIC"));
+        Assertions.assertTrue(ImageStyleCatalog.views().stream().noneMatch(view -> view.hint().length() > 60),
+                "提示语要短，避免撑开检查器");
     }
 }

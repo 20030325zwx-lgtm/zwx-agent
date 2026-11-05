@@ -964,7 +964,7 @@ public class WorkflowService {
             try (var in = mediaStorage.open(asset.objectKey())) {
                 bytes = in.readAllBytes();
             }
-            ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
+            ChatClient client = ChatClient.builder(chatModelFactory.multimodalModel(selection.config())).build();
             String prompt = question == null || question.isBlank()
                     ? "描述这张图片的主体、场景、文字与要点。" : question;
             String answer = client.prompt()

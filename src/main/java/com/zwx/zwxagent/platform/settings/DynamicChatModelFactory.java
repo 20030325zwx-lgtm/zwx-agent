@@ -22,18 +22,32 @@ public class DynamicChatModelFactory {
     private final ConcurrentHashMap<String, ChatModel> cache = new ConcurrentHashMap<>();
 
     public ChatModel model(ResolvedModelConfig config) {
+        return model(config, false);
+    }
+
+    /**
+     * 多模态（图片输入）：DashScope 原生协议的文本端点不接受图片，必须切到 multimodal-generation 端点
+     * （ChatOptions.multiModel=true），否则上游会报「url error」。OpenAI 兼容协议本身按 content parts 传图，
+     * 无需特殊选项，复用同一实现。
+     */
+    public ChatModel multimodalModel(ResolvedModelConfig config) {
+        return model(config, true);
+    }
+
+    private ChatModel model(ResolvedModelConfig config, boolean multimodal) {
         validate(config);
         String cacheKey = String.join("|", config.provider(), nullToEmpty(config.baseUrl()),
-                config.modelName(), Integer.toHexString(config.apiKey().hashCode()));
+                config.modelName(), Integer.toHexString(config.apiKey().hashCode()),
+                multimodal ? "multimodal" : "text");
         if (cache.size() >= MAX_CACHE_SIZE) cache.clear();
-        return cache.computeIfAbsent(cacheKey, ignored -> build(config));
+        return cache.computeIfAbsent(cacheKey, ignored -> build(config, multimodal));
     }
 
     public void clear() {
         cache.clear();
     }
 
-    private ChatModel build(ResolvedModelConfig config) {
+    private ChatModel build(ResolvedModelConfig config, boolean multimodal) {
         if (AppConfigurationService.PROVIDER_OPENAI_COMPATIBLE.equalsIgnoreCase(config.provider())) {
             OpenAiApi.Builder apiBuilder = OpenAiApi.builder()
                     .baseUrl(config.baseUrl())
@@ -53,12 +67,11 @@ public class DynamicChatModelFactory {
                 .baseUrl(baseUrl)
                 .apiKey(config.apiKey())
                 .build();
-        DashScopeChatOptions options = DashScopeChatOptions.builder()
-                .withModel(config.modelName())
-                .build();
+        var optionsBuilder = DashScopeChatOptions.builder().withModel(config.modelName());
+        if (multimodal) optionsBuilder.withMultiModel(true);
         return DashScopeChatModel.builder()
                 .dashScopeApi(api)
-                .defaultOptions(options)
+                .defaultOptions(optionsBuilder.build())
                 .build();
     }
 

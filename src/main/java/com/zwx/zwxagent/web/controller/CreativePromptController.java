@@ -1,11 +1,15 @@
 package com.zwx.zwxagent.web.controller;
 
 import com.zwx.zwxagent.creative.service.PromptOptimizationService;
+import com.zwx.zwxagent.creative.support.ImageStyleCatalog;
 import com.zwx.zwxagent.platform.security.CurrentActor;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 提示词优化 API（C09 + P0 扩展）：只返回改写结果，不创建任务、不触发生成。
@@ -26,8 +30,14 @@ public class CreativePromptController {
     public PromptOptimizationService.OptimizeResult optimize(
             CurrentActor actor, @RequestBody PromptOptimizationService.OptimizeRequest body) {
         var request = body == null
-                ? new PromptOptimizationService.OptimizeRequest(null, null, null, null, null, null, null)
+                ? new PromptOptimizationService.OptimizeRequest(null, null, null, null, null, null, null, null)
                 : body;
         return optimizationService.optimize(actor, request);
+    }
+
+    /** 图片风格目录：前端下拉的唯一来源（分组、文案、是否依赖参考图）。 */
+    @GetMapping("/image-styles")
+    public List<ImageStyleCatalog.View> imageStyles() {
+        return ImageStyleCatalog.views();
     }
 }

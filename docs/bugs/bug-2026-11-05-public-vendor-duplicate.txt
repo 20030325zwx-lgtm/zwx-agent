@@ -1,0 +1,33 @@
+日期：2026-11-05
+主题：frontend/public/vendor 被重复复制损坏，导致前端构建失败（Unknown system error -70）
+
+问题现象
+- 发布时 vite build 在 prepareOutDir/复制 public 阶段失败：
+  Unknown system error -70: scandir '.../frontend/public/vendor/pdf/fonts/files 3'
+- 同一目录下还出现大量「 2」后缀副本：`files 2`、`noto-sans-sc 2.css`、`openjpeg 2.wasm`、`FoxitSerif 2.pfb` 等；
+  `files 2` 链接数异常（65535），是损坏的目录项。
+- 前一次失败的 ENOTEMPTY（rmdir dist/vendor）也是同一个根因的连带现象。
+
+影响范围
+- 前端构建/发布（dist 打包失败或带入重复静态资源，体积约翻倍）；
+- 不影响 dev server 运行（中间件按需读文件），但磁盘占用持续增长。
+
+原因
+- `frontend/public/vendor/` 是 @file-viewer/vite-plugin 在 dev server 启动时复制渲染器资源的产物（gitignored）。
+- 多次 dev 启动 + 复制异常/中断后产生了带「 2」「 3」后缀的重复副本，其中 `files 3` 目录项损坏，scandir 直接报错。
+- vite build 会把 public/* 原样复制进 dist，因此一个损坏目录就能让整个构建失败；重复副本还会一并进入镜像。
+
+解决方式
+- 删除生成的 `frontend/public/vendor` 与残留 `dist`，重新 `npm run build`；
+- 生产产物不依赖 public/vendor：插件 build 钩子会把 18 个渲染器资源直接写入 `dist/vendor`，构建后已确认
+  `dist/vendor/{docx,pdf,ppt,pptx,xlsx}` 存在、`dist/flyfish-viewer-assets.json` 正常；
+- 之后由 dev server 重新生成干净的 public/vendor。
+
+验证结果
+- 清理后构建 19s 通过，入口 blob 不变（assets/index-EGM0VR1M.js），dist 体积由含重复副本的规模降到 71MB；
+- 发布脚本构建校验（index.html 存在且 mtime 新于本次构建）通过。
+
+后续注意事项
+- public/vendor 属于生成物，发现「 2」「 3」后缀副本或 scandir 报错时，直接删掉整个目录重建即可，不要逐个手工清理。
+- 若 dev 启动时再次出现重复副本，需要检查是否有两个 dev server 实例或复制被中断。
+- 工作区里同样出现过 `frontend/src/components/workbench/GlobalNav 2.vue` 这类访达重名副本，提交前留意不要误加。

@@ -39,11 +39,37 @@ public class PromptOptimizationService {
     public static final String MODE_VIDEO_STORY = "VIDEO_STORY";
     public static final String MODE_VIDEO_STORYBOARD = "VIDEO_STORYBOARD";
 
-    private static final String SYSTEM_IMAGE = """
-            你是文生图提示词编辑。把用户描述改写为一段可直接用于图片生成模型的中文提示词：
-            主体、场景、构图、光线、风格要具体，不添加用户未要求的文字水印或品牌。
+    /** 图片风格：写实（贴近照片）与漫画/插画（二次元线稿上色）。 */
+    public static final String IMAGE_STYLE_REALISTIC = "REALISTIC";
+    public static final String IMAGE_STYLE_COMIC = "COMIC";
+
+    private static final String IMAGE_COMMON_RULES = """
             只输出 JSON：{"prompt":"改写后的提示词"}，不要输出解释或 Markdown。
+            改写要求：保留用户原意与关键约束，不新增用户未要求的元素、文字、水印或品牌；
+            提示词需可直接提交给图片生成模型，控制在 300 字以内，信息密度高、少用空泛形容词。
             """;
+
+    /** 写实摄影规范（贴合照片）：主体质感、镜头语言、光线与真实感约束。 */
+    private static final String SYSTEM_IMAGE_REALISTIC = """
+            你是摄影方向的文生图提示词编辑。把用户描述改写为一段可直接生成「写实照片」的中文提示词，规范：
+            1. 主体：年龄/性别/发型/体型，服装面料与褶皱，皮肤质感（毛孔、细绒毛、自然瑕疵），自然姿态与微表情；
+            2. 环境：真实地点与材质、天气、时段（阴天、黄金时刻、夜晚现场光等），避免抽象背景；
+            3. 镜头：等效焦段（24mm 环境 / 35mm 纪实 / 85mm 人像特写）、光圈与景深（如 f/1.8 浅景深）、拍摄角度与构图（三分法、引导线、平视或俯拍）；
+            4. 光线：光源类型与方向（窗光侧逆光、柔光箱、现场混合光）、色温、阴影软硬；
+            5. 质感：胶片或数码取向（柔和肤色过渡的胶片质感 / 清晰自然的数码质感）、轻微颗粒或适度动态模糊、自然色彩分级；
+            6. 真实感约束：避免插画感、3D 渲染感、塑料皮肤与 AI 感；五官与手指自然。
+            """ + IMAGE_COMMON_RULES;
+
+    /** 漫画/插画规范：子风格、线稿、赛璐璐上色、漫画语言与风格统一约束。 */
+    private static final String SYSTEM_IMAGE_COMIC = """
+            你是漫画/插画方向的文生图提示词编辑。把用户描述改写为一段可直接生成「漫画风插画」的中文提示词，规范：
+            1. 先定子风格并贯穿全图：日漫（少年/少女/青年）、国漫、美式漫画或韩漫 webtoon，线条与上色随子风格统一；
+            2. 线稿：干净有力的勾线、粗细变化与墨线描边（ink outline），关键轮廓加粗；
+            3. 上色：赛璐璐平涂与块面阴影（硬边缘）、简洁高光；可按子风格采用有限色板与氛围色；
+            4. 漫画语言：需要时加入网点（screentone）、速度线、集中线；不生成文字或对白气泡内的文字；
+            5. 构图：强透视、镜头感明确，角色姿态有支撑点、不僵硬；
+            6. 风格约束：避免照片质感、真实皮肤毛孔与 3D 渲染感，线条风格必须统一。
+            """ + IMAGE_COMMON_RULES;
 
     /**
      * 视频提示词策略（2026-11-04 起）：复用 {@link VideoPromptGuide} 的七要素固化规则，
@@ -78,7 +104,7 @@ public class PromptOptimizationService {
             """;
 
     public record OptimizeRequest(String prompt, String mode, UUID projectId,
-                                  UUID episodeId, UUID sceneId, UUID shotId) {
+                                  UUID episodeId, UUID sceneId, UUID shotId, String imageStyle) {
     }
 
     /**
@@ -126,7 +152,7 @@ public class PromptOptimizationService {
         String system;
         String userContent;
         if (MODE_IMAGE.equals(mode)) {
-            system = SYSTEM_IMAGE;
+            system = imageSystemPrompt(normalizeImageStyle(request == null ? null : request.imageStyle()));
             userContent = trimmed;
         } else {
             var context = buildContext(actor, mode, request);
@@ -333,6 +359,20 @@ public class PromptOptimizationService {
         } catch (Exception exception) {
             return List.of();
         }
+    }
+
+    /** 图片风格归一化：缺省为写实；非法值显式拒绝，便于前端及时纠正。 */
+    static String normalizeImageStyle(String imageStyle) {
+        String value = imageStyle == null || imageStyle.isBlank()
+                ? IMAGE_STYLE_REALISTIC : imageStyle.trim().toUpperCase(java.util.Locale.ROOT);
+        return switch (value) {
+            case IMAGE_STYLE_REALISTIC, IMAGE_STYLE_COMIC -> value;
+            default -> throw new IllegalArgumentException("不支持的图片风格：" + imageStyle);
+        };
+    }
+
+    static String imageSystemPrompt(String imageStyle) {
+        return IMAGE_STYLE_COMIC.equals(imageStyle) ? SYSTEM_IMAGE_COMIC : SYSTEM_IMAGE_REALISTIC;
     }
 
     private static String normalizeMode(String mode) {

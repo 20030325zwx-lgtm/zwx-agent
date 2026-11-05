@@ -77,6 +77,10 @@
           </label>
           <p v-if="selectedNode.data.skillSlug" class="inspector-note">起步技能：{{ selectedNode.data.skillSlug }}。技能只作为创作上下文保留，不会自动触发计费生成。</p>
           <div class="inspector-actions">
+            <select v-if="selectedNode.type !== 'video_generate'" v-model="imageStyle" class="style-select" aria-label="图片风格">
+              <option value="REALISTIC">写实</option>
+              <option value="COMIC">漫画</option>
+            </select>
             <button class="optimize-button" type="button" :disabled="optimizing || !selectedNode.data.prompt?.trim()" @click="optimizePrompt">
               <Sparkles :size="14" />{{ optimizing ? '优化中' : '优化提示词' }}
             </button>
@@ -191,6 +195,8 @@ const assetLoading = ref(false)
 const models = ref([])
 const bindings = ref({})
 const optimizing = ref(false)
+// 图片提示词优化风格：写实（贴近照片）/ 漫画（二次元插画）
+const imageStyle = ref('REALISTIC')
 const optimizedPrompt = ref('')
 const busyNode = ref(false)
 const showAssetPicker = ref(false)
@@ -462,7 +468,8 @@ async function optimizePrompt() {
     const result = await optimizeCreativePrompt({
       prompt: selectedNode.value.data.prompt,
       mode: type === 'video_generate' ? 'VIDEO_PROMPT' : 'IMAGE',
-      projectId: projectId.value
+      projectId: projectId.value,
+      imageStyle: type === 'video_generate' ? null : imageStyle.value
     })
     optimizedPrompt.value = result.optimizedPrompt || ''
   } catch (error) { actionError.value = error.response?.data?.error || '提示词优化失败' }
@@ -699,6 +706,7 @@ watch(() => activeCanvasRun.value?.run?.status, schedulePoll)
 .inspector-field textarea { min-height: 76px; line-height: 1.55; }
 .inspector-field small { justify-self: end; }
 .inspector-actions,.inspector-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 13px; }
+.style-select { height: 26px; padding: 0 6px; border: 1px solid var(--wb-border); border-radius: 6px; background: var(--wb-bg); color: var(--wb-text); font-size: 11px; }
 .optimize-button,.inline-action { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: #2563eb; font-size: 11px; cursor: pointer; }
 .optimize-button:disabled { opacity: .5; cursor: default; }
 .inspector-section-head { border-top: 1px solid var(--wb-border); padding-top: 11px; color: var(--wb-text); font-size: 11px; font-weight: 600; }

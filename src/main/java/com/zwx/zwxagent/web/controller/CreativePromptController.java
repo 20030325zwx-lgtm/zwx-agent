@@ -26,7 +26,7 @@ public class CreativePromptController {
     public PromptOptimizationService.OptimizeResult optimize(
             CurrentActor actor, @RequestBody PromptOptimizationService.OptimizeRequest body) {
         var request = body == null
-                ? new PromptOptimizationService.OptimizeRequest(null, null, null, null, null, null)
+                ? new PromptOptimizationService.OptimizeRequest(null, null, null, null, null, null, null)
                 : body;
         return optimizationService.optimize(actor, request);
     }

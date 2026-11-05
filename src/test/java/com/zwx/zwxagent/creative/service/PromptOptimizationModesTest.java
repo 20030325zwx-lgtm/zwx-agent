@@ -57,4 +57,35 @@ class PromptOptimizationModesTest {
                 () -> PromptOptimizationService.extractStructured("{\"changes\":[\"只有建议\"]}"));
     }
 
+    // ---- 图片风格（写实/漫画）——两套规范各自独立，缺省写实，非法值显式拒绝 ----
+
+    @Test
+    void imageStyleDefaultsToRealisticAndAcceptsComic() {
+        Assertions.assertEquals(PromptOptimizationService.IMAGE_STYLE_REALISTIC,
+                PromptOptimizationService.normalizeImageStyle(null));
+        Assertions.assertEquals(PromptOptimizationService.IMAGE_STYLE_REALISTIC,
+                PromptOptimizationService.normalizeImageStyle("  "));
+        Assertions.assertEquals(PromptOptimizationService.IMAGE_STYLE_COMIC,
+                PromptOptimizationService.normalizeImageStyle("comic"));
+        Assertions.assertThrows(IllegalArgumentException.class,
+                () -> PromptOptimizationService.normalizeImageStyle("anime"));
+    }
+
+    @Test
+    void styleSpecificSystemPromptsCarryTheirRubrics() {
+        String realistic = PromptOptimizationService.imageSystemPrompt(
+                PromptOptimizationService.IMAGE_STYLE_REALISTIC);
+        Assertions.assertTrue(realistic.contains("写实照片"));
+        Assertions.assertTrue(realistic.contains("等效焦段"));
+        Assertions.assertTrue(realistic.contains("皮肤质感"));
+        Assertions.assertTrue(realistic.contains("只输出 JSON"));
+
+        String comic = PromptOptimizationService.imageSystemPrompt(
+                PromptOptimizationService.IMAGE_STYLE_COMIC);
+        Assertions.assertTrue(comic.contains("漫画风插画"));
+        Assertions.assertTrue(comic.contains("墨线描边"));
+        Assertions.assertTrue(comic.contains("赛璐璐"));
+        Assertions.assertTrue(comic.contains("网点"));
+        Assertions.assertFalse(comic.contains("f/1.8"), "漫画规范不应混入写实镜头参数");
+    }
 }

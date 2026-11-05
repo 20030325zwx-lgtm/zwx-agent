@@ -4,7 +4,27 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
-    mem_limit: 1g
+    mem_limit: 2g
+    # 参数按 8 核/8G 云盘调优（2026-11-05）：默认 shared_buffers=128MB、random_page_cost=4 对 SSD 偏保守。
+    # pg_stat_statements 需要预加载，用于后续按真实耗时定位慢查询。
+    command:
+      - postgres
+      - -c
+      - shared_buffers=768MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.max=5000
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

@@ -1,0 +1,34 @@
+日期：2026-11-05
+主题：DashScope 协议下图片输入报 "url error"（模型读不到参考图）
+
+问题现象
+- 调用提示词优化「跟随原片」（PHOTO_MATCH）时，后端返回 422：
+  提示词优化失败：400 - {"code":"InvalidParameter","message":"url error, please check url！"}
+- 同一张图用 curl 直连 DashScope 多模态端点可正常识别，说明图片本身、鉴权、数据 URI 都没问题。
+- 该缺陷同样影响工作流「本地素材图片理解」（WorkflowService.understandLocalAsset），此前会表现为降级提示。
+
+影响范围
+- 所有通过 DashScope 原生协议调用、且消息里带图片的链路：提示词优化（跟随原片）、工作流图片理解。
+- OpenAI 兼容协议不受影响（按 content parts 传图）。
+
+原因
+- spring-ai-alibaba 1.0.0.2 的 DashScopeChatModel 默认把请求发到
+  /api/v1/services/aigc/text-generation/generation（纯文本端点）。带图片时需要
+  DashScopeChatOptions.multiModel=true 才会切到
+  /api/v1/services/aigc/multimodal-generation/generation。
+- 文本端点收到 image 内容时，把值当 URL 解析，于是返回 "url error"，与图片实际内容无关。
+- 定位方式：本地启动抓包代理，让 DashScopeApi 指向代理，打印真实请求路径与请求体。
+
+解决方式
+- DynamicChatModelFactory 增加 multimodalModel(config)：DashScope 分支设置 withMultiModel(true)，
+  缓存键区分 text/multimodal；OpenAI 兼容分支共用同一实现（无需额外选项）。
+- PromptOptimizationService 有参考图时使用 multimodalModel；WorkflowService.understandLocalAsset 同步改用。
+
+验证结果
+- 独立小程序（DashScopeChatModel + Media）加 withMultiModel(true) 后调用成功；
+- 本地真实接口：PHOTO_MATCH 返回 200，输出沿用参考片的 50mm/柔和侧逆光/暖调/轻微颗粒，且未复述参考片主体；
+- 工作流图片理解路径代码同步修复，未单独回归（依赖同一工厂方法）。
+
+后续注意事项
+- 新增任何"给模型喂图片/视频"的调用时，DashScope 协议必须走 multimodalModel()，用 model() 会静默退化为文本端点并报 url error。
+- 若升级 spring-ai-alibaba，需确认多模态端点切换逻辑是否仍依赖 multiModel 选项。

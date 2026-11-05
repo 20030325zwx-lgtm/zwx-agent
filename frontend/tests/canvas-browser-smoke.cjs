@@ -22,6 +22,7 @@ const fs = require('node:fs')
     { id: 'video-1', type: 'video_generate', position: { x: 720, y: 0 }, data: { label: '镜头动画', prompt: '镜头缓缓推进，海浪轻轻涌动。', modelRowId: 9, seconds: 5, status: 'IDLE' } }
   ], edges: [] } }
   let submitted = null
+  let optimizePayload = null
   let runStatus = 'RUNNING'
   const mockRun = () => ({ id: 'test-run', run: { status: runStatus === 'RUNNING' ? 'WAITING_EXTERNAL' : 'SUCCEEDED', steps: [
     { key: 'image-1', status: runStatus, output: '' },
@@ -43,6 +44,16 @@ const fs = require('node:fs')
       if (req.method() === 'POST') { submitted = req.postDataJSON(); data = mockRun() }
       else data = submitted ? [mockRun()] : []
     } else if (pathname.endsWith('/canvas/runs/test-run')) data = mockRun()
+    else if (pathname.endsWith('/prompts/image-styles')) data = [
+      { code: 'PHOTO_MATCH', label: '跟随原片', group: 'photo', hint: '读取参考照片的镜头、光线与调色', needsReference: true },
+      { code: 'REALISTIC', label: '自然写实', group: 'photo', hint: '通用真实照片质感', needsReference: false },
+      { code: 'CINEMATIC', label: '电影感', group: 'photo', hint: '宽银幕构图与低调光', needsReference: false },
+      { code: 'COMIC', label: '漫画插画', group: 'illustration', hint: '墨线描边＋赛璐璐平涂', needsReference: false }
+    ]
+    else if (pathname.endsWith('/prompts/optimize')) {
+      optimizePayload = req.postDataJSON()
+      data = { originalPrompt: optimizePayload.prompt, optimizedPrompt: '优化后的提示词', modelName: 'mock' }
+    }
     else if (pathname.endsWith('/projects/' + projectId)) data = { id: projectId, name: '海边日落 · 创作画布', kind: 'VIDEO', status: 'ACTIVE' }
     else if (pathname.endsWith('/jobs') || pathname.endsWith('/assets')) data = { items: [] }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) })
@@ -174,6 +185,21 @@ const fs = require('node:fs')
     await page.locator('.graph-card.kind-start .card-head').click()
     await page.keyboard.press('Backspace')
     assert.equal(await page.locator('.vue-flow__node').count(), 4, 'start node must survive Backspace')
+    // 图片风格：目录驱动分组下拉、无参考图时禁用「跟随原片」、按节点记忆并随请求提交
+    await page.locator('[data-id="image-1"] .card-head').click()
+    const styleSelect = page.locator('.canvas-inspector select[aria-label="图片风格"]')
+    assert.equal(await styleSelect.count(), 1)
+    assert.equal(await styleSelect.locator('optgroup').count(), 2, '风格按摄影/插画分组')
+    assert.equal(await styleSelect.inputValue(), 'REALISTIC', '无参考图默认自然写实')
+    assert.equal(await styleSelect.locator('option[value="PHOTO_MATCH"]').isDisabled(), true,
+      '跟随原片需要参考图，未连接时禁用')
+    await styleSelect.selectOption('CINEMATIC')
+    assert.match(await page.locator('.style-hint').innerText(), /宽银幕/)
+    await page.locator('.canvas-inspector textarea').fill('黄昏的城市天台，风把外套吹起')
+    await page.getByRole('button', { name: /优化提示词/ }).click()
+    await page.waitForFunction(() => document.querySelector('.optimized-preview'))
+    assert.equal(optimizePayload?.imageStyle, 'CINEMATIC')
+    assert.deepEqual(optimizePayload?.referenceAssetIds, [], '非跟随原片不上传参考图')
     await page.locator('[data-id="video-1"] .card-head').click()
     await page.screenshot({ path: path.join(out, 'canvas-desktop.png'), fullPage: true })
     await page.setViewportSize({ width: 1024, height: 768 })
@@ -181,7 +207,7 @@ const fs = require('node:fs')
     await page.screenshot({ path: path.join(out, 'canvas-compact.png'), fullPage: true })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
     assert.deepEqual(errors, [])
-    console.log(JSON.stringify({ passed: true, checks: ['single protected default start', 'drag flow/text/image links', 'dual-connect prompt+image between generation nodes', 'video first-frame confirm', 'edge delete via double-click and Backspace, node via Backspace, start protected', 'unfinished parent blocks execution', 'completed parent unblocks execution', 'run-to-here up_to skips succeeded ancestors', 'upstream-only generation', 'recursive prompt preview', 'cycle rejection', 'save and reload', 'disconnect and undo', 'drag node and persist', 'central layout', 'compact viewport'], edges: draft.graph.edges, screenshots: out }, null, 2))
+    console.log(JSON.stringify({ passed: true, checks: ['single protected default start', 'drag flow/text/image links', 'dual-connect prompt+image between generation nodes', 'video first-frame confirm', 'edge delete via double-click and Backspace, node via Backspace, start protected', 'unfinished parent blocks execution', 'completed parent unblocks execution', 'run-to-here up_to skips succeeded ancestors', 'upstream-only generation', 'recursive prompt preview', 'cycle rejection', 'save and reload', 'disconnect and undo', 'drag node and persist', 'central layout', 'compact viewport', 'image style catalog select'], edges: draft.graph.edges, screenshots: out }, null, 2))
   } catch (error) {
     await page.screenshot({ path: path.join(out, 'failure.png'), fullPage: true })
     console.error('Page errors:', errors)

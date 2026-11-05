@@ -383,6 +383,9 @@ export const updateCreativeDraft = (draftId, payload) =>
   request.patch(`/ai/creative/drafts/${encodeURIComponent(draftId)}`, payload).then(response => response.data)
 export const optimizeCreativePrompt = payload =>
   request.post('/ai/creative/prompts/optimize', payload).then(response => response.data)
+// 图片风格目录：分组/文案/是否依赖参考图由后端供给，前端不再硬编码风格枚举
+export const listCreativePromptImageStyles = () =>
+  request.get('/ai/creative/prompts/image-styles').then(response => response.data)
 // 视频剧情域（P1/P2）：剧集/场次/镜头/角色/地点/连续性 + 候选选片
 export const getStoryWorkspace = projectId =>
   request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/workspace`).then(r => r.data)

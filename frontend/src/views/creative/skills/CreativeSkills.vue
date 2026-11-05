@@ -136,13 +136,8 @@ import {
 import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
 import SkillDetailDrawer from '../../../components/creative/SkillDetailDrawer.vue'
+import { SKILL_CATEGORY_LABEL as CATEGORY_LABEL, skillCategoryLabel as categoryLabel } from '../../../components/creative/skillCategories'
 
-const CATEGORY_LABEL = {
-  DIRECTING: '导演与分镜',
-  SHORT_FORM: '短片',
-  COMMERCE: '电商',
-  GENERAL: '通用'
-}
 const STAGE_LABEL = {
   PROMPT: '提示词',
   STORYBOARD: '分镜',
@@ -182,10 +177,6 @@ const filtered = computed(() => {
     return true
   })
 })
-
-function categoryLabel(value) {
-  return CATEGORY_LABEL[value] || '通用'
-}
 
 function inputLabel(value) {
   const map = { TEXT: '文本', 'TEXT+IMAGE': '文本 + 图片' }

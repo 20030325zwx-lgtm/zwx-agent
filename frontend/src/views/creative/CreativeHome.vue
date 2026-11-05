@@ -51,13 +51,12 @@
             <button type="button" class="home-tool" @click="goAssets">
               <Plus :size="14" /> 参考素材
             </button>
-            <DropdownSelect v-model="composeSkill" class="home-tool-select" size="sm"
-                            :options="skillOptions" placeholder="技能" aria-label="技能" />
+            <SkillPicker v-model="composeSkills" class="home-tool-skill" :skills="skills" />
             <template v-if="composeKind !== 'NOVEL'">
-              <DropdownSelect v-model="modelRowId" class="home-tool-select home-tool-model" size="sm"
+              <DropdownSelect v-model="modelRowId" class="home-tool-select home-tool-model" size="sm" variant="pill"
                               :options="modelOptions" placeholder="模型" aria-label="模型" />
               <DropdownSelect v-if="composeKind === 'IMAGE'" v-model="composeSize" class="home-tool-select"
-                              size="sm" :options="sizeOptions" aria-label="尺寸" />
+                              size="sm" variant="pill" :options="sizeOptions" aria-label="尺寸" />
               <div v-else class="home-tool-duration">
                 <Clock :size="14" />
                 <input v-model="composeSeconds" class="home-tool-input" maxlength="2" inputmode="numeric"
@@ -304,6 +303,7 @@ import {
 } from '../../api'
 import { formatTime, statusMeta } from './shared'
 import ProjectCard from '../../components/creative/ProjectCard.vue'
+import SkillPicker from '../../components/creative/SkillPicker.vue'
 import DropdownSelect from '../../components/ui/DropdownSelect.vue'
 import Spinner from '../../components/ui/Spinner.vue'
 import AssetParamField from '../../components/workflow/AssetParamField.vue'
@@ -317,7 +317,8 @@ const loading = ref(true)
 const loadError = ref('')
 const idea = ref('')
 const composeKind = ref('IMAGE')
-const composeSkill = ref('')
+// 可多选：技能只作为创作上下文交接，不自动触发计费生成
+const composeSkills = ref([])
 const firstFrameId = ref('')
 // 图片参考素材（image_edit），来自素材库「引用到创作台」
 const refImageIds = ref('')
@@ -327,11 +328,6 @@ const startError = ref('')
 // 本地草稿（redesign §5.1）：输入先本地即时保存，刷新可恢复；提交时才创建项目
 const COMPOSER_KEY = 'aster.creative.composer'
 const recentProject = computed(() => projects.value[0] || null)
-const skillOptions = computed(() => [
-  { value: '', label: '可选技能' },
-  ...skills.value.filter(skill => skill.compat === 'READY')
-    .map(skill => ({ value: skill.slug, label: skill.name }))
-])
 
 function restoreDraft() {
   try {
@@ -342,7 +338,9 @@ function restoreDraft() {
     if (draft.kind && kindOptions.some(option => option.value === draft.kind && option.enabled)) {
       composeKind.value = draft.kind
     }
-    if (typeof draft.skill === 'string') composeSkill.value = draft.skill
+    // 兼容旧草稿的单技能字段
+    if (Array.isArray(draft.skills)) composeSkills.value = draft.skills.filter(Boolean)
+    else if (typeof draft.skill === 'string' && draft.skill) composeSkills.value = [draft.skill]
     if (typeof draft.firstFrame === 'string' && draft.firstFrame) firstFrameId.value = draft.firstFrame
     if (typeof draft.refImage === 'string' && draft.refImage) refImageIds.value = draft.refImage
     if (draft.modelRowId) modelRowId.value = draft.modelRowId
@@ -356,7 +354,7 @@ function persistDraft() {
     localStorage.setItem(COMPOSER_KEY, JSON.stringify({
       idea: idea.value,
       kind: composeKind.value,
-      skill: composeSkill.value,
+      skills: composeSkills.value,
       firstFrame: firstFrameId.value,
       refImage: refImageIds.value,
       modelRowId: modelRowId.value,
@@ -377,7 +375,8 @@ function readHandoff() {
     if (!raw) return
     sessionStorage.removeItem('aster.creative.handoff')
     const handoff = JSON.parse(raw)
-    if (handoff.skill) composeSkill.value = handoff.skill
+    if (Array.isArray(handoff.skills)) composeSkills.value = handoff.skills.filter(Boolean)
+    else if (handoff.skill) composeSkills.value = [handoff.skill]
     if (typeof handoff.prompt === 'string' && handoff.prompt && !idea.value) idea.value = handoff.prompt
     if (handoff.kind) composeKind.value = handoff.kind
     // 从素材库带过来的首帧/参考素材
@@ -450,7 +449,12 @@ const modelOptions = computed(() => {
     for (const model of provider.models || []) {
       if (model.enabled === false) continue
       if (!(model.capabilities || []).includes(capability)) continue
-      rows.push({ value: model.id, label: `${provider.name} / ${model.displayName || model.modelId}` })
+      // 触发按钮只显示模型名；供应商作为下拉里的次级说明，避免长文本挤占工具条
+      rows.push({
+        value: model.id,
+        label: model.displayName || model.modelId,
+        hint: provider.name
+      })
     }
   }
   return rows
@@ -467,7 +471,7 @@ function syncDefaultModel() {
 watch(composeKind, syncDefaultModel)
 
 // 草稿自动保存：所有被持久化的字段声明完成后再注册（watch 会立即读取源）
-watch([idea, composeKind, composeSkill, firstFrameId, refImageIds, modelRowId, composeSize, composeSeconds], persistDraft)
+watch([idea, composeKind, composeSkills, firstFrameId, refImageIds, modelRowId, composeSize, composeSeconds], persistDraft)
 const toast = reactive({ text: '', tone: '' })
 const wfOpen = ref(false)
 const wfLoading = ref(false)
@@ -521,7 +525,10 @@ async function startFromComposer() {
   starting.value = true
   startError.value = ''
   const text = idea.value
-  const skill = composeSkill.value
+  const skillSlugs = composeSkills.value.filter(Boolean)
+  const skillNames = skills.value
+    .filter(skill => skillSlugs.includes(skill.slug))
+    .map(skill => skill.name)
   try {
     const project = await createCreativeProject({
       name: text.split('\n')[0].slice(0, 30) || '未命名作品',
@@ -536,7 +543,12 @@ async function startFromComposer() {
     }
     clearDraft()
     const handoff = { kind: composeKind.value }
-    if (skill) handoff.skill = skill
+    if (skillSlugs.length) {
+      handoff.skills = skillSlugs
+      handoff.skillNames = skillNames
+      // 兼容只认单个技能字段的旧消费方
+      handoff.skill = skillSlugs[0]
+    }
     if (composeKind.value !== 'IMAGE') handoff.prompt = text
     if (firstFrameId.value) handoff.firstFrame = firstFrameId.value
     if (refImageIds.value) handoff.refImage = refImageIds.value
@@ -805,7 +817,8 @@ onMounted(load)
 .home-tool:hover { border-color: var(--cr-text-2, var(--wb-border-strong)); color: var(--cr-text, var(--wb-text)); }
 
 .home-tool-select { width: 132px; }
-.home-tool-model { width: 200px; }
+.home-tool-model { width: 180px; }
+.home-tool-skill { width: 150px; }
 
 .home-tool-duration {
   display: inline-flex;
@@ -1059,7 +1072,8 @@ onMounted(load)
   .home-seg-item { padding: 8px 14px; white-space: nowrap; }
   .home-compose { padding: 14px 14px 12px; }
   .home-tool-select { width: 120px; }
-  .home-tool-model { width: 170px; }
+  .home-tool-model { width: 160px; }
+  .home-tool-skill { width: 140px; }
   .home-tools-right { margin-left: 0; width: 100%; }
   .home-submit { width: 100%; }
   .home-starts { grid-template-columns: 1fr; }

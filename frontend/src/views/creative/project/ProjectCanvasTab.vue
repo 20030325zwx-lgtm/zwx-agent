@@ -75,7 +75,7 @@
             <textarea v-model="selectedNode.data.prompt" rows="8" maxlength="500" placeholder="描述画面主体、动作、环境、镜头与风格" @input="markChanged" />
             <small>{{ (selectedNode.data.prompt || '').length }}/500</small>
           </label>
-          <p v-if="selectedNode.data.skillSlug" class="inspector-note">起步技能：{{ selectedNode.data.skillSlug }}。技能只作为创作上下文保留，不会自动触发计费生成。</p>
+          <p v-if="selectedNode.data.skillSlug" class="inspector-note">起步技能：{{ selectedNode.data.skillNames || selectedNode.data.skillSlug }}。技能只作为创作上下文保留，不会自动触发计费生成。</p>
           <div class="inspector-actions">
             <select v-if="selectedNode.type !== 'video_generate'" v-model="imageStyle" class="style-select" aria-label="图片风格">
               <optgroup v-for="group in styleGroups" :key="group.label" :label="group.label">
@@ -665,7 +665,12 @@ function createInitialGraph(kind, handoff) {
   const type = kind === 'VIDEO' ? 'video_generate' : 'image_generate'
   const prompt = handoff?.prompt || project.value?.description || ''
   const modelRowId = handoff?.modelRowId ? Number(handoff.modelRowId) : undefined
-  const data = { prompt, modelRowId, skillSlug: handoff?.skill || '' }
+  // 技能支持多选：slug 列表落进节点数据，名称单独保存用于展示（旧交接只有单个 skill）
+  const skillSlugs = Array.isArray(handoff?.skills) && handoff.skills.length
+    ? handoff.skills.filter(Boolean)
+    : String(handoff?.skill || '').split(',').filter(Boolean)
+  const skillNames = Array.isArray(handoff?.skillNames) ? handoff.skillNames.filter(Boolean) : []
+  const data = { prompt, modelRowId, skillSlug: skillSlugs.join(','), skillNames: skillNames.join('、') }
   if (kind === 'VIDEO' && handoff?.seconds) data.seconds = Number(handoff.seconds)
   if (kind === 'IMAGE' && handoff?.size) data.size = handoff.size
   const node = newNode(type, { x: 200, y: 140 }, data)

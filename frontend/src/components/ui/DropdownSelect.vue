@@ -1,5 +1,5 @@
 <template>
-  <div ref="root" class="ds" :class="{ 'is-block': block, 'is-open': open, [`ds-${size}`]: true }">
+  <div ref="root" class="ds" :class="{ 'is-block': block, 'is-open': open, [`ds-${size}`]: true, 'ds-pill': variant === 'pill' }">
     <button
       type="button"
       class="ds-trigger"
@@ -25,7 +25,10 @@
         @mousemove="activeIndex = index"
         @click="choose(option)"
       >
-        <span class="ds-option-label">{{ option.label }}</span>
+        <span class="ds-option-main">
+          <span class="ds-option-label">{{ option.label }}</span>
+          <small v-if="option.hint" class="ds-option-hint">{{ option.hint }}</small>
+        </span>
         <Check v-if="isSelected(option)" :size="14" />
       </li>
       <li v-if="!options.length" class="ds-empty">没有可选项</li>
@@ -45,7 +48,9 @@ const props = defineProps({
   ariaLabel: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
   block: { type: Boolean, default: false },
-  size: { type: String, default: 'md' }
+  size: { type: String, default: 'md' },
+  // default：表单式；pill：创作台工具条上的胶囊按钮
+  variant: { type: String, default: 'default' }
 })
 const emit = defineEmits(['update:modelValue', 'change'])
 
@@ -145,6 +150,33 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentClick)
 
 .ds-sm .ds-trigger { min-height: 28px; font-size: var(--wb-fs-caption, 12px); padding: 0 8px; }
 
+/* 胶囊变体：与创作台「参考素材」等工具按钮同一形态 */
+.ds-pill .ds-trigger {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cr-text-2, var(--wb-text-2, #5e626b));
+  font-size: 12.5px;
+  transition: border-color 0.16s, color 0.16s;
+}
+
+.ds-pill .ds-trigger:hover:not(:disabled),
+.ds-pill.is-open .ds-trigger {
+  border-color: var(--cr-text-2, var(--wb-border-strong, #cdcfd4));
+  color: var(--cr-text, var(--wb-text, #1f2430));
+}
+
+.ds-pill .ds-label.is-placeholder { color: var(--cr-muted, var(--wb-muted, #8d919a)); }
+
+.ds-pill .ds-menu {
+  min-width: max(100%, 220px);
+  max-width: 380px;
+  border-radius: 12px;
+  padding: 6px;
+}
+
 .ds-label {
   min-width: 0;
   overflow: hidden;
@@ -193,6 +225,23 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentClick)
   font-size: var(--wb-fs-compact, 13px);
   cursor: pointer;
 }
+
+.ds-option-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ds-option-hint {
+  overflow: hidden;
+  color: var(--wb-muted, #8a90a6);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-option.is-selected .ds-option-hint { color: inherit; opacity: 0.7; }
 
 .ds-option-label {
   min-width: 0;

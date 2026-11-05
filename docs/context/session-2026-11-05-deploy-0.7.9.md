@@ -6,7 +6,7 @@
 - 域名直连源站 `1.13.152.215`，无 CDN；外层 `aster-nginx-proxy` 配置为 `proxy_cache off`，无服务端缓存；Docker 无代理缓存目录占用。
 - 唯一缺口：`index.html`（含 SPA 回退路由）没有显式缓存头，浏览器会启发式缓存，部署后可能继续引用旧入口/旧资源。
 
-## 改动（提交 7a1d 系列）
+## 改动（提交 c9ca6ef）
 
 - `frontend/nginx.conf`：
   - `location /` 增加 `Cache-Control: no-cache`（覆盖 SPA 入口与回退路由）；

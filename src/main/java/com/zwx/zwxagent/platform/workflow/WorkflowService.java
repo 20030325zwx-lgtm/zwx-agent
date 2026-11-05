@@ -1879,14 +1879,17 @@ public class WorkflowService {
 
     /** 按创作项目筛选运行（项目详情页工作流 tab）；projectId 为 null 时不过滤。 */
     public List<WorkflowRunView> list(String tenantId, String userId, UUID projectId, int limit) {
+        // 列表只要进度与产物摘要：不取 input / graph_snapshot，避免每行都去解压 TOAST
         String sql = """
-                SELECT * FROM workflow_run WHERE tenant_id = ? AND user_id = ?
+                SELECT id, tenant_id, user_id, workflow_key, definition_version, status, current_step,
+                       steps, artifacts, error, created_at, updated_at, creative_project_id
+                FROM workflow_run WHERE tenant_id = ? AND user_id = ?
                 """ + (projectId == null ? "" : " AND creative_project_id = ? ")
                 + " ORDER BY created_at DESC LIMIT ?";
         Object[] args = projectId == null
                 ? new Object[]{tenantId, userId, Math.max(1, Math.min(limit, 50))}
                 : new Object[]{tenantId, userId, projectId, Math.max(1, Math.min(limit, 50))};
-        return jdbcTemplate.query(sql, (rs, rowNum) -> mapRow(rs), args)
+        return jdbcTemplate.query(sql, (rs, rowNum) -> mapRowSummary(rs), args)
                 .stream().map(row -> toView(row, false)).toList();
     }
 
@@ -1896,6 +1899,23 @@ public class WorkflowService {
                 (rs, rowNum) -> mapRow(rs), id, tenantId, userId);
         if (rows.isEmpty()) throw new IllegalArgumentException("工作流运行不存在");
         return rows.getFirst();
+    }
+
+    /** 列表行的映射：input / graph_snapshot 未查询，按空值填充（视图不读取这两列）。 */
+    private WorkflowRunRow mapRowSummary(java.sql.ResultSet rs) throws java.sql.SQLException {
+        java.util.UUID projectId = null;
+        Object projectRef = rs.getObject("creative_project_id");
+        if (projectRef instanceof java.util.UUID uuid) projectId = uuid;
+        return new WorkflowRunRow(rs.getString("id"), rs.getString("tenant_id"), rs.getString("user_id"),
+                rs.getString("workflow_key"), rs.getInt("definition_version"), rs.getString("status"),
+                rs.getString("current_step"),
+                parseNode(null),
+                parseNode(rs.getString("steps")),
+                parseNode(rs.getString("artifacts")),
+                rs.getString("error"),
+                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
+                null,
+                projectId);
     }
 
     private WorkflowRunRow mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {

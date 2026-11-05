@@ -36,6 +36,17 @@ public class AgentRunService {
     private static final TypeReference<List<Integer>> INT_LIST_TYPE = new TypeReference<>() {
     };
 
+    /**
+     * 列表查询列清单：刻意排除 activities / sse_events（单个 run 可达数十 KB），
+     * 会话列表、首页任务流只消费状态与进度摘要，避免每行都去解压 TOAST。
+     */
+    private static final String SLIM_COLUMNS = "id, conversation_id, tenant_id, user_id, agent_key, "
+            + "user_message_id, assistant_message_id, status, phase, waiting_reason, waiting_detail, "
+            + "background_jobs, background_deadline, prompt_versions, permission_mode, input, history_context, "
+            + "knowledge_context, rag_trace_json, token_usage, pending_confirmation, last_node, next_node, plan, "
+            + "task_results, revision, verification_status, verification_feedback, final_answer, partial_answer, "
+            + "revise_steps, engine_version, error_message, resume_count, created_at, updated_at";
+
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final ApplicationInstanceRegistry instanceRegistry;
@@ -317,22 +328,18 @@ public class AgentRunService {
     }
 
     public List<AgentRun> findScopedRuns(String tenantId, String userId, String conversationId, int limit) {
-        return jdbcTemplate.query("""
-                SELECT * FROM agent_run
-                WHERE tenant_id = ? AND user_id = ? AND conversation_id = ? AND agent_key = 'super'
-                ORDER BY created_at DESC, updated_at DESC
-                LIMIT ?
-                """, runMapper(), tenantId, userId, conversationId, Math.max(1, limit));
+        return jdbcTemplate.query("SELECT " + SLIM_COLUMNS + " FROM agent_run"
+                        + " WHERE tenant_id = ? AND user_id = ? AND conversation_id = ? AND agent_key = 'super'"
+                        + " ORDER BY created_at DESC, updated_at DESC LIMIT ?",
+                (rs, rowNum) -> readRun(rs, true), tenantId, userId, conversationId, Math.max(1, limit));
     }
 
     /** 跨会话的最近任务（首页任务流）：按更新时间倒序，过滤无输入的空 run。 */
     public List<AgentRun> findRecentRuns(String tenantId, String userId, int limit) {
-        return jdbcTemplate.query("""
-                SELECT * FROM agent_run
-                WHERE tenant_id = ? AND user_id = ? AND agent_key = 'super' AND input IS NOT NULL AND input <> ''
-                ORDER BY updated_at DESC
-                LIMIT ?
-                """, runMapper(), tenantId, userId, Math.max(1, limit));
+        return jdbcTemplate.query("SELECT " + SLIM_COLUMNS + " FROM agent_run"
+                        + " WHERE tenant_id = ? AND user_id = ? AND agent_key = 'super' AND input IS NOT NULL AND input <> ''"
+                        + " ORDER BY updated_at DESC LIMIT ?",
+                (rs, rowNum) -> readRun(rs, true), tenantId, userId, Math.max(1, limit));
     }
 
     /** 工作台概览条目：带会话标题与任务输入，供跨会话任务动态与状态统计展示。 */
@@ -420,13 +427,18 @@ public class AgentRunService {
     }
 
     private AgentRun readRun(ResultSet rs) throws SQLException {
+        return readRun(rs, false);
+    }
+
+    /** slim=true 时不读取 activities / sse_events（列表查询未选这两列），按空列表填充。 */
+    private AgentRun readRun(ResultSet rs, boolean slim) throws SQLException {
         GraphCheckpoint checkpoint = new GraphCheckpoint(
                 rs.getString("last_node"),
                 rs.getString("next_node"),
                 read(rs.getString("plan"), PLAN_TYPE),
                 read(rs.getString("task_results"), STRING_LIST_TYPE),
-                read(rs.getString("activities"), STRING_LIST_TYPE),
-                read(rs.getString("sse_events"), EVENT_LIST_TYPE),
+                slim ? List.of() : read(rs.getString("activities"), STRING_LIST_TYPE),
+                slim ? List.of() : read(rs.getString("sse_events"), EVENT_LIST_TYPE),
                 rs.getInt("revision"),
                 rs.getString("verification_status"),
                 rs.getString("verification_feedback"),

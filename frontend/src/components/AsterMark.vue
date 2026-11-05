@@ -1,6 +1,6 @@
 <template>
   <svg class="aster-mark" viewBox="0 0 32 32" width="100%" height="100%" fill="currentColor" aria-hidden="true" focusable="false">
-    <path d="M16 2C16.6 11.6 20.4 15.4 30 16 20.4 16.6 16.6 20.4 16 30 15.4 20.4 11.6 16.6 2 16 11.6 15.4 15.4 11.6 16 2Z" />
+    <g transform="translate(15.9 16) scale(0.88 1) translate(-15.9 -16)"><path d="M15.9 1.6C17 10.8 20.8 14.6 30 15.7 20.8 16.8 17 20.6 15.9 29.8 14.8 20.6 11 16.8 1.8 15.7 11 14.6 14.8 10.8 15.9 1.6Z"/></g><path opacity=".92" d="M25.4 5C25.8 7.4 26.6 8.2 29 8.6 26.6 9 25.8 9.8 25.4 12.2 25 9.8 24.2 9 21.8 8.6 24.2 8.2 25 7.4 25.4 5Z"/>
   </svg>
 </template>
 

@@ -293,6 +293,25 @@ public final class ImageStyleCatalog {
         return style != null && style.needsReference();
     }
 
+    /**
+     * 把画风注记拼进视频提示词：用户正文优先，注记按剩余预算降级；未指定/未知风格原样返回。
+     * 视频（画布节点与分镜镜头）共用，保证「界面选了画风、生成链路不漏传」。
+     */
+    public static String applyToPrompt(String prompt, String styleCode) {
+        if (prompt == null) return "";
+        String note = videoNote(styleCode);
+        if (note.isBlank()) return prompt;
+        // 跟随原片需要有效首帧，无首帧时不注入空指令（调用方先剔除）
+        int budget = 500 - prompt.length() - 1;
+        if (budget <= 0) return prompt;
+        if (note.length() > budget) {
+            Style style = optional(styleCode);
+            String shortNote = style == null ? "" : style.label() + "画风。";
+            note = shortNote.length() <= budget ? shortNote : "";
+        }
+        return note.isBlank() ? prompt : prompt + " " + note;
+    }
+
     /** 归一化：去空白、转大写；缺省为自然写实。 */
     public static String normalize(String code) {
         String value = code == null || code.isBlank() ? REALISTIC : code.trim().toUpperCase(Locale.ROOT);

@@ -149,14 +149,45 @@ public class CreativeProjectService {
                 Object value = patch.get(key);
                 String text = value == null ? "" : String.valueOf(value).trim();
                 if (text.length() > SETTINGS_VALUE_MAX) text = text.substring(0, SETTINGS_VALUE_MAX);
-                merged.put(key, text);
+                merged.put(key, validateSetting(key, text));
             }
         }
         repository.updateSettings(projectId, com.zwx.zwxagent.creative.support.CreativeJson.toJson(merged));
         return merged;
     }
 
-    public static final List<String> SETTINGS_KEYS = List.of("characters", "worldview", "style");
+    /** 视频制作设定（P0 制作视图）的服务端校验：非法值直接拒绝，界面不展示伪选项。 */
+    private static final List<String> VIDEO_ASPECTS = List.of("16:9", "9:16", "1:1");
+
+    static String validateSetting(String key, String text) {
+        return switch (key) {
+            case "videoStyle" -> text.isBlank() ? ""
+                    : com.zwx.zwxagent.creative.support.ImageStyleCatalog.normalize(text);
+            case "videoAspect" -> {
+                if (!text.isBlank() && !VIDEO_ASPECTS.contains(text)) {
+                    throw new IllegalArgumentException("画幅仅支持 16:9 / 9:16 / 1:1");
+                }
+                yield text;
+            }
+            case "videoTargetSeconds" -> {
+                if (!text.isBlank()) {
+                    try {
+                        int seconds = Integer.parseInt(text);
+                        if (seconds < 10 || seconds > 600) {
+                            throw new IllegalArgumentException("目标总时长需在 10–600 秒之间");
+                        }
+                    } catch (NumberFormatException exception) {
+                        throw new IllegalArgumentException("目标总时长需为整数秒");
+                    }
+                }
+                yield text;
+            }
+            default -> text;
+        };
+    }
+
+    public static final List<String> SETTINGS_KEYS = List.of("characters", "worldview", "style",
+            "videoStyle", "videoAspect", "videoTargetSeconds");
 
     public static String normalizeName(String name) {
         String value = name == null ? "" : name.trim();

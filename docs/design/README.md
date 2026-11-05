@@ -1,5 +1,7 @@
 # 设计文档
 
+- [视频创作整改需求说明书：完整流程、交互、样式与验收](./2026-11-05-video-creation-remediation-requirements.md)
+
 - [工作 Agent 整改详细方案：执行、交互、目标与自动化（含数据库变更）](./2026-11-05-work-agent-remediation-plan.md)
 - [自动化模块改为可配置定时任务：产品与实施规划](./2026-11-04-scheduled-tasks-module.md)
 

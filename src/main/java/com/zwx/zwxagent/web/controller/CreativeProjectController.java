@@ -144,6 +144,19 @@ public class CreativeProjectController {
                 body == null ? null : body.expectedVersion()));
     }
 
+    /** 项目设定读取（P0 制作视图）：含视频画风/画幅/目标时长等键，值统一为字符串。 */
+    @GetMapping("/projects/{projectId}/settings")
+    public Map<String, Object> settings(CurrentActor actor, @PathVariable UUID projectId) {
+        return projectService.settingsOf(actor, projectId);
+    }
+
+    /** 项目设定保存：仅合并已知键，videoStyle/画幅/时长由服务端校验（非法值 400）。 */
+    @PutMapping("/projects/{projectId}/settings")
+    public Map<String, Object> updateSettings(CurrentActor actor, @PathVariable UUID projectId,
+                                              @RequestBody(required = false) Map<String, Object> body) {
+        return projectService.updateSettings(actor, projectId, body);
+    }
+
     @PostMapping("/projects/{projectId}/drafts")
     public CreativeDraftService.DraftView createDraft(CurrentActor actor, @PathVariable UUID projectId,
                                                       @RequestBody(required = false) CreateDraftBody body) {

@@ -117,7 +117,7 @@ public class StoryContentService {
         return contentRepository.findEpisode(actor.tenantId(), actor.userId(), episodeId).orElseThrow();
     }
 
-    /** 剧集上移/下移：与相邻剧集交换顺序号（同事务，ID 不变）。 */
+    /** 剧集上移/下移：与相邻剧集交换顺序号（同事务，ID 不变；经临时号中转避免唯一索引冲突）。 */
     public List<VideoEpisodeRecord> moveEpisode(CurrentActor actor, UUID projectId, UUID episodeId, int direction) {
         var episodes = contentRepository.listEpisodes(actor.tenantId(), actor.userId(), projectId);
         int index = -1;
@@ -131,11 +131,20 @@ public class StoryContentService {
         }
         var current = episodes.get(index);
         var other = episodes.get(target);
-        transactionTemplate.executeWithoutResult(status -> {
-            contentRepository.updateEpisodeNumber(current.id(), other.episodeNumber());
-            contentRepository.updateEpisodeNumber(other.id(), current.episodeNumber());
-        });
+        swapEpisodeNumbers(current, other);
         return contentRepository.listEpisodes(actor.tenantId(), actor.userId(), projectId);
+    }
+
+    /**
+     * 顺序号交换：`uq_video_episode_number` 是立即唯一约束，两行直接互换会在第一条 UPDATE 处冲突；
+     * 先把当前行挪到临时号（1_000_000 段），再依次落位。
+     */
+    private void swapEpisodeNumbers(VideoEpisodeRecord current, VideoEpisodeRecord other) {
+        transactionTemplate.executeWithoutResult(status -> {
+            contentRepository.updateEpisodeNumber(current.id(), 1_000_000 + other.episodeNumber());
+            contentRepository.updateEpisodeNumber(other.id(), current.episodeNumber());
+            contentRepository.updateEpisodeNumber(current.id(), other.episodeNumber());
+        });
     }
 
     public void deleteEpisode(CurrentActor actor, UUID projectId, UUID episodeId) {
@@ -200,15 +209,69 @@ public class StoryContentService {
     // ---------------------------------------------------------------- 镜头
 
     public VideoShotRecord createShot(CurrentActor actor, UUID projectId, UUID sceneId, ShotRequest request) {
+        return createShot(actor, projectId, sceneId, request, null);
+    }
+
+    /**
+     * 创建镜头；`afterShotId` 非空时插入到该镜头之后（同场次整体后移，单事务）。
+     * `uq_video_shot_number` 是立即唯一约束：先整体 +1_000_000 挪出空间，插入占位后回填 -999_999。
+     */
+    public VideoShotRecord createShot(CurrentActor actor, UUID projectId, UUID sceneId,
+                                      ShotRequest request, UUID afterShotId) {
         requireScene(actor, projectId, sceneId);
+        int number;
+        if (afterShotId == null) {
+            number = contentRepository.nextShotNumber(sceneId);
+        } else {
+            var anchor = requireShot(actor, projectId, afterShotId);
+            if (!anchor.sceneId().equals(sceneId)) {
+                throw new IllegalArgumentException("插入位置镜头与目标场次不一致");
+            }
+            int afterNumber = anchor.shotNumber();
+            transactionTemplate.executeWithoutResult(status -> contentRepository.shiftShotNumbers(
+                    sceneId, afterNumber, 1_000_000));
+            number = afterNumber + 1;
+        }
         var shot = new VideoShotRecord(UUID.randomUUID(), projectId, actor.tenantId(), actor.userId(),
-                sceneId, contentRepository.nextShotNumber(sceneId),
+                sceneId, number,
                 text(request.purpose()), text(request.action()), text(request.camera()),
                 text(request.dialogue()), text(request.continuity()),
                 duration(request.durationTargetSeconds()), text(request.promptText()),
                 "DRAFT", 1L, null, null);
         contentRepository.insertShot(shot);
+        if (afterShotId != null) {
+            transactionTemplate.executeWithoutResult(status ->
+                    contentRepository.shiftShotNumbers(sceneId, 1_000_000, -999_999));
+        }
         return contentRepository.findShot(actor.tenantId(), actor.userId(), shot.id()).orElseThrow();
+    }
+
+    /** 镜头上移/下移：同场次相邻交换顺序号（同事务，ID 不变，候选关系跟随镜头）。 */
+    public List<VideoShotRecord> moveShot(CurrentActor actor, UUID projectId, UUID shotId, int direction) {
+        var shot = requireShot(actor, projectId, shotId);
+        var siblings = contentRepository.listShotsByProject(actor.tenantId(), actor.userId(), projectId).stream()
+                .filter(item -> item.sceneId().equals(shot.sceneId()))
+                .sorted(java.util.Comparator.comparingInt(VideoShotRecord::shotNumber))
+                .toList();
+        int index = -1;
+        for (int i = 0; i < siblings.size(); i++) {
+            if (siblings.get(i).id().equals(shotId)) index = i;
+        }
+        int target = index + (direction > 0 ? 1 : -1);
+        if (target < 0 || target >= siblings.size()) {
+            return siblings; // 已在边界：原样返回
+        }
+        var current = siblings.get(index);
+        var other = siblings.get(target);
+        transactionTemplate.executeWithoutResult(status -> {
+            contentRepository.updateShotNumber(current.id(), 1_000_000 + other.shotNumber());
+            contentRepository.updateShotNumber(other.id(), current.shotNumber());
+            contentRepository.updateShotNumber(current.id(), other.shotNumber());
+        });
+        return contentRepository.listShotsByProject(actor.tenantId(), actor.userId(), projectId).stream()
+                .filter(item -> item.sceneId().equals(shot.sceneId()))
+                .sorted(java.util.Comparator.comparingInt(VideoShotRecord::shotNumber))
+                .toList();
     }
 
     /** 镜头字段更新（乐观锁）：内容就绪（有 prompt 或动作细节）时置 READY，供生成按钮门禁。 */

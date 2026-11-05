@@ -106,6 +106,12 @@ const routes = [
             component: () => import('../views/creative/project/ProjectCanvasTab.vue')
           },
           {
+            // P0 制作视图：五阶段引导（画风/故事/分镜/视频/成片），VIDEO 项目默认入口
+            path: 'production',
+            name: 'CreativeProjectProduction',
+            component: () => import('../views/creative/project/ProjectProductionTab.vue')
+          },
+          {
             path: '',
             name: 'CreativeProject',
             component: () => import('../views/creative/project/ProjectEntry.vue')

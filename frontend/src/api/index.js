@@ -397,6 +397,24 @@ export const confirmStoryEpisode = (projectId, episodeId) =>
   request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}/confirm`).then(r => r.data)
 export const moveStoryEpisode = (projectId, episodeId, direction) =>
   request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}/move`, { direction }).then(r => r.data)
+export const moveStoryShot = (projectId, shotId, direction) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}/move`, { direction }).then(r => r.data)
+// 结构化分镜草稿（P0 制作视图）：生成 → 预览编辑 → 一次有效采纳
+export const ensureStoryShortfilm = projectId =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shortfilm`).then(r => r.data)
+export const createStoryboardDraft = (projectId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/storyboard-drafts`, payload).then(r => r.data)
+export const getStoryboardDraft = (projectId, draftId) =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/storyboard-drafts/${draftId}`).then(r => r.data)
+export const adoptStoryboardDraft = (projectId, draftId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/storyboard-drafts/${draftId}/adopt`, payload).then(r => r.data)
+export const discardStoryboardDraft = (projectId, draftId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/storyboard-drafts/${draftId}/discard`).then(r => r.data)
+// 项目设定（P0 制作视图）：项目默认画风/画幅/目标时长等，值统一为字符串
+export const getProjectSettings = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/settings`).then(r => r.data)
+export const updateProjectSettings = (projectId, payload) =>
+  request.put(`/ai/creative/projects/${encodeURIComponent(projectId)}/settings`, payload).then(r => r.data)
 export const deleteStoryEpisode = (projectId, episodeId) =>
   request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}`).then(r => r.data)
 export const createStoryScene = (projectId, episodeId, payload) =>
@@ -407,8 +425,9 @@ export const confirmStoryScene = (projectId, sceneId) =>
   request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/scenes/${sceneId}/confirm`).then(r => r.data)
 export const deleteStoryScene = (projectId, sceneId) =>
   request.delete(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/scenes/${sceneId}`).then(r => r.data)
-export const createStoryShot = (projectId, sceneId, payload) =>
-  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/scenes/${sceneId}/shots`, payload).then(r => r.data)
+export const createStoryShot = (projectId, sceneId, payload, afterShotId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/scenes/${sceneId}/shots`,
+    payload, { params: afterShotId ? { afterShotId } : {} }).then(r => r.data)
 export const getStoryShot = (projectId, shotId) =>
   request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}`).then(r => r.data)
 export const updateStoryShot = (projectId, shotId, payload) =>

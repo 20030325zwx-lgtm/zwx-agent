@@ -172,7 +172,7 @@ import CanvasGraphNode from './CanvasGraphNode.vue'
 import { PROJECT_CTX } from './composables'
 import {
   cancelCreativeCanvasRun, getCreativeCanvas, getCreativeJob, getCreativeAssetBlob, getCreativeAssetPlaybackUrl, getCreativeCanvasRun,
-  listCreativeAssets, listCreativeCanvasRuns, listCreativePromptImageStyles, listModelCatalog, optimizeCreativePrompt, saveCreativeCanvas,
+  getProjectSettings, listCreativeAssets, listCreativeCanvasRuns, listCreativePromptImageStyles, listModelCatalog, optimizeCreativePrompt, saveCreativeCanvas,
   selectCreativeCanvasCandidate, startCreativeCanvasRun, uploadCreativeAsset, validateCreativeCanvasRun
 } from '../../../api'
 
@@ -195,9 +195,13 @@ const models = ref([])
 const bindings = ref({})
 const optimizing = ref(false)
 // 画面风格：目录来自后端（摄影 / 3D / 插画），选中值落进节点数据随画布保存。
-// 视频节点是主要使用方（画风 + 题材预设），未选择时不注入任何风格；
-// 图片节点已有参考图时默认「跟随原片」（读取参考片镜头/光线/调色，只改写内容）。
+// 默认继承项目画风（制作视图「画风」阶段保存的 videoStyle），节点单独选择即覆盖；
+// 图片节点有参考图时仍优先「跟随原片」（读取参考片镜头/光线/调色，只改写内容）。
 const imageStyles = ref([])
+const projectStyle = ref('')
+getProjectSettings(projectId.value).then(settings => {
+  projectStyle.value = settings.videoStyle || ''
+}).catch(() => {})
 const imageStyle = computed({
   get() {
     const node = selectedNode.value
@@ -205,9 +209,9 @@ const imageStyle = computed({
     const stored = node.data.styleCode
     const hasReference = allReferenceIds.value.length > 0
     // 参考图被移除后，「跟随原片」不能继续挂在节点上
-    if (stored === 'PHOTO_MATCH' && !hasReference) return node.type === 'video_generate' ? '' : 'REALISTIC'
-    if (node.type === 'video_generate') return stored || ''
-    return stored || (hasReference ? 'PHOTO_MATCH' : 'REALISTIC')
+    if (stored === 'PHOTO_MATCH' && !hasReference) return node.type === 'video_generate' ? (projectStyle.value || '') : 'REALISTIC'
+    if (node.type === 'video_generate') return stored || projectStyle.value || ''
+    return stored || (hasReference ? 'PHOTO_MATCH' : (projectStyle.value || 'REALISTIC'))
   },
   set(code) {
     const node = selectedNode.value

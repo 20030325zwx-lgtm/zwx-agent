@@ -62,6 +62,19 @@
             {{ story.progress.value.pendingSelection }}
           </em>
         </router-link>
+        <template v-if="toolItems.length">
+          <div class="ps-rail-divider" role="separator" />
+          <router-link
+            v-for="item in toolItems"
+            :key="item.key"
+            :to="`/creative/projects/${projectId}/${item.key}`"
+            class="ps-nav-item ps-nav-tool"
+            :class="{ active: activeKey === item.key }"
+          >
+            <component :is="item.icon" :size="17" :stroke-width="1.8" />
+            <span class="ps-nav-label">{{ item.label }}</span>
+          </router-link>
+        </template>
       </nav>
 
       <main class="ps-main">
@@ -137,7 +150,7 @@
 import { computed, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, BookOpen, FileText, Images, LayoutGrid, ListChecks, RefreshCw, Users, Workflow
+  ArrowLeft, BookOpen, Clapperboard, FileText, Images, LayoutGrid, ListChecks, RefreshCw, Users, Workflow
 } from 'lucide-vue-next'
 import { getCreativeProject, getCreativeJob, listModelCatalog } from '../../../api'
 import { downloadBlob, formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta, useAssetUrls, useVideoUrls } from '../shared'
@@ -147,7 +160,7 @@ import HoldToConfirm from '../../../components/ui/HoldToConfirm.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
 import ReferenceAssetStrip from '../../../components/creative/ReferenceAssetStrip.vue'
 
-const TAB_KEYS = new Set(['canvas', 'studio', 'story', 'storyboard', 'settings', 'chapters', 'workflow', 'tasks', 'assets'])
+const TAB_KEYS = new Set(['production', 'canvas', 'studio', 'story', 'storyboard', 'settings', 'chapters', 'workflow', 'tasks', 'assets'])
 
 const route = useRoute()
 const router = useRouter()
@@ -194,20 +207,25 @@ const NAV = {
     { key: 'tasks', label: '任务', icon: ListChecks },
     { key: 'assets', label: '素材', icon: Images }
   ],
+  // P0 制作视图（2026-11-05）：剧情/分镜并入「制作」的阶段栏，设定/素材/任务降为工具入口。
+  // 旧路由（story/storyboard/settings）保留供深链接，不再出现在导航里。
   VIDEO: [
+    { key: 'production', label: '制作', icon: Clapperboard },
     { key: 'canvas', label: '画布', icon: Workflow },
-    { key: 'story', label: '剧情', icon: BookOpen },
-    { key: 'storyboard', label: '分镜', icon: LayoutGrid },
-    { key: 'settings', label: '设定', icon: Users },
-    { key: 'assets', label: '素材', icon: Images },
-    { key: 'tasks', label: '任务', icon: ListChecks },
   ]
 }
+// 工具入口：项目级资源与记录，不参与阶段推进
+const NAV_TOOLS = [
+  { key: 'settings', label: '设定', icon: Users },
+  { key: 'assets', label: '素材', icon: Images },
+  { key: 'tasks', label: '任务', icon: ListChecks },
+]
 const navItems = computed(() => NAV[project.value?.kind] || NAV.IMAGE)
+const toolItems = computed(() => (project.value?.kind === 'VIDEO' ? NAV_TOOLS : []))
 
 function defaultTab(kind) {
   if (kind === 'NOVEL') return 'chapters'
-  return 'canvas'
+  return kind === 'VIDEO' ? 'production' : 'canvas'
 }
 
 async function loadProject() {
@@ -501,6 +519,10 @@ onMounted(async () => {
 .detail-output img { width: 100%; height: auto; border-radius: 6px; display: block; }
 .detail-output-meta { display: flex; justify-content: space-between; font-size: var(--wb-fs-caption); color: var(--wb-muted); }
 .detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.ps-rail-divider { height: 1px; margin: 6px 4px; background: var(--wb-border); flex: none; }
+.ps-nav-tool { color: var(--wb-muted, #8a90a6); }
+.ps-nav-tool.active { background: var(--wb-brand-soft); color: var(--wb-brand); font-weight: 550; }
 
 @media (max-width: 1099px) {
   .ps-rail { width: 56px; flex-basis: 56px; align-items: center; }

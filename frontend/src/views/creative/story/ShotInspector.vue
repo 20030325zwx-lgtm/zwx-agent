@@ -7,9 +7,17 @@
           <span class="si-status" :class="'is-' + status">{{ statusLabel }}</span>
           <span class="cr-field-help">v{{ version }}</span>
         </div>
-        <button type="button" class="si-close" aria-label="关闭检查器" @click="$emit('close')">
-          <X :size="16" />
-        </button>
+        <div class="si-head-tools">
+          <button type="button" class="si-tool" :disabled="moving" aria-label="上移镜头"
+                  title="上移（顺序与候选跟随镜头）" @click="move(-1)">↑</button>
+          <button type="button" class="si-tool" :disabled="moving" aria-label="下移镜头"
+                  title="下移（顺序与候选跟随镜头）" @click="move(1)">↓</button>
+          <button type="button" class="si-tool" :disabled="moving || !shot.sceneId" aria-label="在此镜头后插入新镜头"
+                  title="在此镜头后插入新镜头" @click="insertAfter">＋</button>
+          <button type="button" class="si-close" aria-label="关闭检查器" @click="$emit('close')">
+            <X :size="16" />
+          </button>
+        </div>
       </header>
 
       <div class="si-body">
@@ -135,11 +143,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Check, Sparkles, X } from 'lucide-vue-next'
 import {
-  deleteShotCandidate, generateShotVideo, getStoryShot, listCreativeAssets, listShotCandidates,
-  optimizeCreativePrompt, selectShotCandidate, unselectShotCandidate, updateStoryShot, uploadShotCandidate
+  createStoryShot, deleteShotCandidate, generateShotVideo, getStoryShot, listCreativeAssets,
+  listShotCandidates, moveStoryShot, optimizeCreativePrompt, selectShotCandidate,
+  unselectShotCandidate, updateStoryShot, uploadShotCandidate
 } from '../../../api'
 import { formatDuration, useVideoUrls } from '../shared'
 import { CANDIDATE_STATUS_LABEL, SHOT_STATUS_LABEL } from '../project/helpers'
@@ -152,7 +161,7 @@ const props = defineProps({
   characters: { type: Array, default: () => [] },
   locations: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['close', 'changed'])
+const emit = defineEmits(['close', 'changed', 'inserted'])
 
 const { videoUrls, videoUrlFor } = useVideoUrls()
 const form = reactive({
@@ -171,6 +180,7 @@ const videoAssets = ref([])
 const busy = ref(false)
 const generating = ref(false)
 const optimizing = ref(false)
+const moving = ref(false)
 const error = ref('')
 const suggestion = ref('')
 const originalText = ref('')
@@ -214,7 +224,48 @@ async function reloadCandidates() {
   }
 }
 
+// 自动保存（P0 制作视图）：输入停止 800ms 后保存；失败在按钮区给出重试
+let saveTimer = null
+watch(form, () => {
+  if (!dirty.value) return
+  saveState.value = 'saving'
+  window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(save, 800)
+}, { deep: true })
+const saveState = ref('saved')
+onBeforeUnmount(() => window.clearTimeout(saveTimer))
+
+async function move(direction) {
+  if (moving.value) return
+  moving.value = true
+  error.value = ''
+  try {
+    await moveStoryShot(props.projectId, props.shot.id, direction)
+    emit('changed')
+  } catch (exception) {
+    error.value = exception.response?.data?.error || '排序失败'
+  } finally {
+    moving.value = false
+  }
+}
+
+async function insertAfter() {
+  if (moving.value || !props.shot.sceneId) return
+  moving.value = true
+  error.value = ''
+  try {
+    const created = await createStoryShot(props.projectId, props.shot.sceneId, {}, props.shot.id)
+    emit('changed')
+    emit('inserted', created)
+  } catch (exception) {
+    error.value = exception.response?.data?.error || '插入失败'
+  } finally {
+    moving.value = false
+  }
+}
+
 async function save() {
+  if (busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -226,6 +277,7 @@ async function save() {
     })
     version.value = updated.version
     status.value = updated.status
+    saveState.value = 'saved'
     Object.assign(saved, {
       purpose: form.purpose, action: form.action, camera: form.camera,
       dialogue: form.dialogue, continuity: form.continuity,
@@ -233,6 +285,7 @@ async function save() {
     })
     emit('changed')
   } catch (exception) {
+    saveState.value = 'error'
     error.value = exception.response?.data?.error || '保存失败（版本冲突时请刷新重试）'
   } finally {
     busy.value = false
@@ -385,6 +438,24 @@ onMounted(async () => {
 .si-status.is-SELECTED { color: var(--wb-success); border-color: color-mix(in srgb, var(--wb-success) 40%, transparent); }
 .si-status.is-PENDING_SELECTION { color: var(--wb-warning); border-color: color-mix(in srgb, var(--wb-warning) 40%, transparent); }
 .si-status.is-GENERATING { color: var(--wb-info); border-color: color-mix(in srgb, var(--wb-info) 40%, transparent); }
+
+.si-head-tools { display: inline-flex; align-items: center; gap: 4px; }
+.si-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  background: transparent;
+  color: var(--wb-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.si-tool:hover:not(:disabled) { background: var(--wb-fill); color: var(--wb-text); }
+.si-tool:disabled { opacity: .4; cursor: default; }
 
 .si-close {
   display: inline-flex;

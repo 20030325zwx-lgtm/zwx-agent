@@ -1245,16 +1245,7 @@ public class WorkflowService {
 
     /** 把画风注记拼进视频提示词：正文不动，注记按剩余预算降级；未指定风格原样返回。 */
     static String withVideoStyle(String prompt, String styleCode) {
-        String note = com.zwx.zwxagent.creative.support.ImageStyleCatalog.videoNote(styleCode);
-        if (note.isBlank()) return prompt;
-        int budget = com.zwx.zwxagent.creative.domain.ParameterSchema.MODEL_PROMPT_MAX - prompt.length() - 1;
-        if (budget <= 0) return prompt;
-        if (note.length() > budget) {
-            var style = com.zwx.zwxagent.creative.support.ImageStyleCatalog.optional(styleCode);
-            String shortNote = style == null ? "" : style.label() + "画风。";
-            note = shortNote.length() <= budget ? shortNote : "";
-        }
-        return note.isBlank() ? prompt : prompt + " " + note;
+        return com.zwx.zwxagent.creative.support.ImageStyleCatalog.applyToPrompt(prompt, styleCode);
     }
 
     /** imageAssetIds 参数解析：List / 逗号或空白分隔字符串 → UUID 列表（非法值报错）。 */

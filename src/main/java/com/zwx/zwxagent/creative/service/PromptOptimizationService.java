@@ -50,6 +50,7 @@ public class PromptOptimizationService {
     public static final String MODE_VIDEO_PROMPT = "VIDEO_PROMPT";
     public static final String MODE_VIDEO_STORY = "VIDEO_STORY";
     public static final String MODE_VIDEO_STORYBOARD = "VIDEO_STORYBOARD";
+    public static final String MODE_VIDEO_STORYBOARD_DRAFT = "VIDEO_STORYBOARD_DRAFT";
 
     /** 图片风格：取自风格目录；写实/漫画保留旧常量名以兼容既有调用方。 */
     public static final String IMAGE_STYLE_REALISTIC = ImageStyleCatalog.REALISTIC;
@@ -131,6 +132,24 @@ public class PromptOptimizationService {
             5. 风格约束：严格按下方「风格锚点」执行，不混入照片质感或其他画种特征，不生成文字与水印。
             【风格锚点】%s
             """ + IMAGE_COMMON_RULES;
+
+    /**
+     * 结构化拆镜草稿（2026-11-05 P0）：一次生成可校验的镜头行集合，确认后才写入正式镜头。
+     * 稳定行标识由服务端采纳时生成，草稿阶段只保顺序；模型不得编造已有 assetId。
+     */
+    private static final String SYSTEM_VIDEO_STORYBOARD_DRAFT = """
+            你是短剧分镜师。基于给定的故事/剧本与上下文，拆解为结构化分镜草稿。规则：
+            1. 每个镜头一行，字段：durationTargetSeconds（目标秒数，1-60 的整数）、
+               purpose（剧情目的）、action（画面与动作细节：主体站位、部位/方向/速度）、
+               camera（景别/角度/主运镜）、dialogue（台词或旁白，没有则空字符串）、
+               promptText（可直接提交给视频模型的生成提示词，按主体+动作+环境+镜头+光线色调+风格+质感组织）；
+            2. 相邻镜头动作承接（上一镜头结束=下一镜头开始），复杂动作拆镜；
+            3. 行数 1-40；单个短片建议 2-12 行；目标时长合计尽量贴近用户给定的总时长；
+            4. 角色/场景只引用上下文里已存在的名字，不得编造素材或 assetId；不生成文字水印；
+            5. 拆分约束无法满足时写进 missing，不要虚构。
+            只输出 JSON：{"shots":[...],"suggestions":["可选建议"],"missing":["缺失待补项"]}，
+            不要输出解释或 Markdown。
+            """;
 
     /** 跟随原片：参考图只用来提取风格要素，不复述其内容，避免把上一张的主体带进新图。 */
     private static final String SYSTEM_IMAGE_PHOTO_MATCH = """
@@ -315,6 +334,115 @@ public class PromptOptimizationService {
                 structured.changes(), structured.suggestions(), structured.missing());
     }
 
+    // ---------------------------------------------------------------- 结构化拆镜草稿（P0 制作视图）
+
+    /** 一行结构化草稿：顺序即镜号建议；确认采纳时由服务端生成稳定行标识并入镜。 */
+    public record StoryboardDraftRow(int orderNo, int durationTargetSeconds, String purpose,
+                                     String action, String camera, String dialogue, String promptText) {
+    }
+
+    /**
+     * 草稿生成结果：raw 始终保留原样（解析失败时供人工编辑）；
+     * 解析失败不抛异常返回 PARSE_FAILED 语义，由调用方决定提示文案。
+     */
+    public record StoryboardDraftResult(boolean parsed, List<StoryboardDraftRow> rows,
+                                        List<String> suggestions, List<String> missing,
+                                        String raw, String modelName, String error) {
+    }
+
+    /**
+     * 结构化拆镜（P0）：故事文本 → 可校验的镜头行草稿。与 optimize 同一套模型解析与上下文，
+     * 但不做任何写入；确认采纳由 {@code StoryboardDraftService} 负责。
+     */
+    public StoryboardDraftResult storyboardDraft(CurrentActor actor, OptimizeRequest request) {
+        String userId = actor.userId();
+        String prompt = request == null ? null : request.prompt();
+        if (prompt == null || prompt.isBlank()) {
+            throw new IllegalArgumentException("请输入要拆镜的故事内容");
+        }
+        String trimmed = prompt.trim();
+        if (trimmed.length() > PROMPT_MAX) {
+            throw CreativeException.unsupportedParameter("故事内容超过 " + PROMPT_MAX + " 个字符");
+        }
+        var context = buildContext(actor, MODE_VIDEO_STORYBOARD, request);
+        var selection = catalogService.resolveWithFallback(
+                userId, ModelCatalogService.PURPOSE_OPTIMIZE, ModelCatalogService.PURPOSE_CHAT);
+        String userContent = trimmed + (context.isBlank() ? "" : "\n\n" + context);
+        log.info("分镜草稿生成：project={} model={} provider={} storyChars={}",
+                request.projectId(), selection.config().modelName(), selection.config().provider(), trimmed.length());
+        String raw;
+        try {
+            ChatClient client = ChatClient.builder(chatModelFactory.model(selection.config())).build();
+            raw = client.prompt().system(SYSTEM_VIDEO_STORYBOARD_DRAFT).user(userContent).call().content();
+        } catch (Exception exception) {
+            throw CreativeException.optimizeFailed("分镜草稿生成失败：" + rootMessage(exception));
+        }
+        try {
+            var parsed = parseDraftRows(raw);
+            return new StoryboardDraftResult(true, parsed.rows(), parsed.suggestions(), parsed.missing(),
+                    raw, selection.config().modelName(), "");
+        } catch (CreativeException exception) {
+            // 解析失败：原故事未动，保留 raw 供人工编辑或重试
+            return new StoryboardDraftResult(false, List.of(), List.of(), List.of(),
+                    raw == null ? "" : raw, selection.config().modelName(), exception.getMessage());
+        }
+    }
+
+    record ParsedDraft(List<StoryboardDraftRow> rows, List<String> suggestions, List<String> missing) {
+    }
+
+    static final int DRAFT_MAX_ROWS = 40;
+    static final int DRAFT_MAX_SECONDS = 60;
+
+    /** 草稿行解析：非法 JSON / 行越界 / 缺关键字段如实失败，不用纯文本兜底冒充结构。 */
+    static ParsedDraft parseDraftRows(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw CreativeException.optimizeFailed("分镜格式未能解析，尚未修改已有镜头");
+        }
+        String text = raw.trim();
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw CreativeException.optimizeFailed("分镜格式未能解析，尚未修改已有镜头");
+        }
+        try {
+            var node = CreativeJson.parse(text.substring(start, end + 1));
+            var shots = node.path("shots");
+            if (!shots.isArray() || shots.isEmpty()) {
+                throw CreativeException.optimizeFailed("分镜草稿没有可用镜头行");
+            }
+            if (shots.size() > DRAFT_MAX_ROWS) {
+                throw CreativeException.optimizeFailed("分镜草稿超过 " + DRAFT_MAX_ROWS + " 行上限，请分批拆镜");
+            }
+            List<StoryboardDraftRow> rows = new ArrayList<>();
+            int index = 0;
+            for (var shot : shots) {
+                index++;
+                int seconds = shot.path("durationTargetSeconds").asInt(0);
+                if (seconds <= 0) seconds = 4;
+                seconds = Math.max(1, Math.min(seconds, DRAFT_MAX_SECONDS));
+                String action = shot.path("action").asText("").trim();
+                String promptText = shot.path("promptText").asText("").trim();
+                if (action.isBlank() && promptText.isBlank()) {
+                    throw CreativeException.optimizeFailed("第 " + index + " 行缺少画面动作与生成提示词");
+                }
+                rows.add(new StoryboardDraftRow(
+                        shot.path("orderNo").asInt(index),
+                        seconds,
+                        shot.path("purpose").asText("").trim(),
+                        action,
+                        shot.path("camera").asText("").trim(),
+                        shot.path("dialogue").asText("").trim(),
+                        promptText));
+            }
+            return new ParsedDraft(List.copyOf(rows), readList(node, "suggestions"), readList(node, "missing"));
+        } catch (CreativeException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw CreativeException.optimizeFailed("分镜格式未能解析，尚未修改已有镜头");
+        }
+    }
+
     // ---------------------------------------------------------------- 上下文组装（服务端按 ID 定向读取）
 
     /** 上下文信任边界：服务端按 ID 定向读取并校验归属，不信任客户端拼装的内容。 */
@@ -324,7 +452,13 @@ public class PromptOptimizationService {
         projectService.get(actor, projectId);
         var blocks = new StringBuilder();
         var settings = projectService.settingsOf(actor, projectId);
-        appendBlock(blocks, "作品设定", settings);
+        // videoStyle/videoAspect/videoTargetSeconds 是内部设定键（画风为编码值），
+        // 直接透传会让模型把编码抄进提示词；风格按媒介另行注入
+        var displaySettings = new java.util.LinkedHashMap<String, Object>();
+        settings.forEach((key, value) -> {
+            if (!key.startsWith("video")) displaySettings.put(key, value);
+        });
+        appendBlock(blocks, "作品设定", displaySettings);
         if (request.shotId() != null) {
             appendShotContext(blocks, actor, projectId, request.shotId());
         } else if (request.sceneId() != null) {

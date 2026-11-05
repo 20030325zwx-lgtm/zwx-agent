@@ -246,6 +246,19 @@ public class VideoStoryContentRepository {
                         """, newStatus, id, expectedStatus) > 0;
     }
 
+    /** 镜头顺序号重排（排序/插入用）：只改 shot_number，不动 version——顺序不属于镜头内容。 */
+    public boolean updateShotNumber(UUID id, int shotNumber) {
+        return jdbcTemplate.update(
+                "UPDATE video_shot SET shot_number = ?, updated_at = now() WHERE id = ?", shotNumber, id) > 0;
+    }
+
+    /** 场次内顺序号整体平移（插入镜头让位用）：仅用于唯一索引下的两段式换位，调用方包在事务里。 */
+    public void shiftShotNumbers(UUID sceneId, int aboveNumber, int delta) {
+        jdbcTemplate.update(
+                "UPDATE video_shot SET shot_number = shot_number + ? WHERE scene_id = ? AND shot_number > ?",
+                delta, sceneId, aboveNumber);
+    }
+
     public boolean deleteShot(UUID id) {
         return jdbcTemplate.update("DELETE FROM video_shot WHERE id = ?", id) > 0;
     }

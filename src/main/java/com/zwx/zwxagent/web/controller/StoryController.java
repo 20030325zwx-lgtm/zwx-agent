@@ -9,6 +9,7 @@ import com.zwx.zwxagent.creative.domain.VideoSceneRecord;
 import com.zwx.zwxagent.creative.domain.VideoShotRecord;
 import com.zwx.zwxagent.creative.story.BatchProductionService;
 import com.zwx.zwxagent.creative.story.ShotProductionService;
+import com.zwx.zwxagent.creative.story.StoryboardDraftService;
 import com.zwx.zwxagent.creative.story.StoryContentService;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -36,12 +37,14 @@ public class StoryController {
     private final StoryContentService contentService;
     private final ShotProductionService productionService;
     private final BatchProductionService batchProductionService;
+    private final StoryboardDraftService draftService;
 
     public StoryController(StoryContentService contentService, ShotProductionService productionService,
-                           BatchProductionService batchProductionService) {
+                           BatchProductionService batchProductionService, StoryboardDraftService draftService) {
         this.contentService = contentService;
         this.productionService = productionService;
         this.batchProductionService = batchProductionService;
+        this.draftService = draftService;
     }
 
     // ---------------------------------------------------------------- 工作区
@@ -127,8 +130,21 @@ public class StoryController {
     @PostMapping("/scenes/{sceneId}/shots")
     public VideoShotRecord createShot(CurrentActor actor, @PathVariable UUID projectId,
                                       @PathVariable UUID sceneId,
+                                      @RequestParam(name = "afterShotId", required = false) UUID afterShotId,
                                       @RequestBody StoryContentService.ShotRequest body) {
-        return contentService.createShot(actor, projectId, sceneId, body);
+        return contentService.createShot(actor, projectId, sceneId, body, afterShotId);
+    }
+
+    /** 镜头上移/下移（P0 制作视图）：同场次相邻交换顺序号，镜头 ID 与候选关系不变。 */
+    @PostMapping("/shots/{shotId}/move")
+    public List<VideoShotRecord> moveShot(CurrentActor actor, @PathVariable UUID projectId,
+                                          @PathVariable UUID shotId,
+                                          @RequestBody(required = false) MoveBody body) {
+        return contentService.moveShot(actor, projectId, shotId,
+                body == null || body.direction() == null ? 0 : body.direction());
+    }
+
+    public record MoveBody(Integer direction) {
     }
 
     @PatchMapping("/shots/{shotId}")
@@ -340,5 +356,53 @@ public class StoryController {
     private static UUID uuidOf(Object value) {
         if (value == null) throw new IllegalArgumentException("缺少 ID 参数");
         return UUID.fromString(String.valueOf(value));
+    }
+
+    // ---------------------------------------------------------------- 结构化分镜草稿（P0 制作视图）
+
+    /** 短片模式：幂等建立默认剧集/场次（D02），前端进入制作视图时调用。 */
+    @PostMapping("/shortfilm")
+    public StoryboardDraftService.ShortfilmView ensureShortfilm(CurrentActor actor, @PathVariable UUID projectId) {
+        return draftService.ensureShortfilm(actor, projectId);
+    }
+
+    /** 生成结构化分镜草稿：同步 LLM 调用；解析失败返回 PARSE_FAILED 草稿（保留原始输出），不改已有镜头。 */
+    @PostMapping("/storyboard-drafts")
+    public StoryboardDraftService.DraftView createStoryboardDraft(CurrentActor actor, @PathVariable UUID projectId,
+                                                                  @RequestBody(required = false) GenerateDraftBody body) {
+        return draftService.generate(actor, projectId,
+                new StoryboardDraftService.GenerateRequest(body == null ? null : body.episodeId(),
+                        body == null ? null : body.targetSeconds()));
+    }
+
+    public record GenerateDraftBody(UUID episodeId, Integer targetSeconds) {
+    }
+
+    @GetMapping("/storyboard-drafts/{draftId}")
+    public StoryboardDraftService.DraftView getStoryboardDraft(CurrentActor actor, @PathVariable UUID projectId,
+                                                               @PathVariable UUID draftId) {
+        return draftService.get(actor, projectId, draftId);
+    }
+
+    /** 确认采纳（一次有效写入）：APPEND 追加 / REPLACE_UNGENERATED 替换未生成镜头。 */
+    @PostMapping("/storyboard-drafts/{draftId}/adopt")
+    public StoryboardDraftService.AdoptResult adoptStoryboardDraft(CurrentActor actor, @PathVariable UUID projectId,
+                                                                   @PathVariable UUID draftId,
+                                                                   @RequestBody(required = false) AdoptDraftBody body) {
+        return draftService.adopt(actor, projectId, draftId,
+                new StoryboardDraftService.AdoptRequest(body == null ? null : body.mode(),
+                        body == null ? null : body.sceneId(),
+                        body == null ? null : body.expectedSourceVersion(),
+                        body != null && body.force()));
+    }
+
+    public record AdoptDraftBody(String mode, UUID sceneId, Long expectedSourceVersion, boolean force) {
+    }
+
+    @PostMapping("/storyboard-drafts/{draftId}/discard")
+    public Map<String, Object> discardStoryboardDraft(CurrentActor actor, @PathVariable UUID projectId,
+                                                      @PathVariable UUID draftId) {
+        draftService.discard(actor, projectId, draftId);
+        return Map.of("ok", true);
     }
 }

@@ -8,7 +8,9 @@ import com.zwx.zwxagent.creative.domain.VideoShotRecord;
 import com.zwx.zwxagent.creative.repository.CreativeAssetRepository;
 import com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository;
 import com.zwx.zwxagent.creative.repository.VideoStoryContentRepository;
+import com.zwx.zwxagent.creative.service.CreativeProjectService;
 import com.zwx.zwxagent.creative.service.MediaJobService;
+import com.zwx.zwxagent.creative.support.ImageStyleCatalog;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -30,6 +32,7 @@ public class ShotProductionService {
     private final VideoShotCandidateRepository candidateRepository;
     private final CreativeAssetRepository assetRepository;
     private final MediaJobService mediaJobService;
+    private final CreativeProjectService projectService;
     private final TransactionTemplate transactionTemplate;
 
     public ShotProductionService(StoryContentService contentService,
@@ -37,12 +40,14 @@ public class ShotProductionService {
                                  VideoShotCandidateRepository candidateRepository,
                                  CreativeAssetRepository assetRepository,
                                  MediaJobService mediaJobService,
+                                 CreativeProjectService projectService,
                                  TransactionTemplate transactionTemplate) {
         this.contentService = contentService;
         this.contentRepository = contentRepository;
         this.candidateRepository = candidateRepository;
         this.assetRepository = assetRepository;
         this.mediaJobService = mediaJobService;
+        this.projectService = projectService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -93,14 +98,24 @@ public class ShotProductionService {
     public VideoShotCandidateRecord submitGeneration(CurrentActor actor, UUID projectId,
                                                      VideoShotRecord shot, int seconds) {
         String prompt = shot.promptText() == null ? "" : shot.promptText().trim();
+        // 项目画风贯通（REQ-STYLE）：镜头没有单独风格时继承项目默认；正文优先、预算不足降级
+        String projectStyle = "";
+        try {
+            projectStyle = String.valueOf(projectService.settingsOf(actor, projectId)
+                    .getOrDefault("videoStyle", ""));
+        } catch (RuntimeException ignored) {
+            // 设定读取失败不阻断生成，只少风格注记
+        }
+        String styledPrompt = "PHOTO_MATCH".equalsIgnoreCase(projectStyle)
+                ? prompt : ImageStyleCatalog.applyToPrompt(prompt, projectStyle);
         var candidate = new VideoShotCandidateRecord(UUID.randomUUID(), projectId, actor.tenantId(),
-                actor.userId(), shot.id(), null, null, "GENERATED", prompt,
+                actor.userId(), shot.id(), null, null, "GENERATED", styledPrompt,
                 CandidateStatus.GENERATING.name(), null, null);
         candidateRepository.insert(candidate);
         try {
             var created = mediaJobService.create(actor, "shot-" + shot.id() + "-" + candidate.id(), projectId,
                     new MediaJobService.CreateJobRequest(projectId, "text_to_video", null,
-                            prompt, prompt, Map.of("seconds", String.valueOf(Math.max(1, seconds))),
+                            styledPrompt, styledPrompt, Map.of("seconds", String.valueOf(Math.max(1, seconds))),
                             List.of(), null, null, false));
             candidateRepository.attachJob(candidate.id(), created.jobId());
         } catch (RuntimeException exception) {

@@ -51,8 +51,10 @@
             </span>
           </div>
           <div class="batch-items">
-            <span v-for="item in view.items" :key="item.item.id" class="chip" :class="'item-' + item.item.status">
+            <span v-for="item in view.items" :key="item.item.id" class="chip" :class="'item-' + item.item.status"
+                  :title="item.item.error || ''">
               {{ item.shotLabel }}·{{ BATCH_ITEM_STATUS_LABEL[item.item.status] || item.item.status }}
+              <em v-if="item.item.error" class="chip-error">{{ item.item.error }}</em>
             </span>
           </div>
         </div>
@@ -99,7 +101,8 @@
     <ShotInspector v-if="inspectorShot" :project-id="projectId" :shot="inspectorShot"
                    :characters="story.characters.value" :locations="story.locations.value"
                    @close="inspectorShot = null"
-                   @changed="onShotChanged" />
+                   @changed="onShotChanged"
+                   @inserted="onShotInserted" />
 
     <div v-if="addShotOpen" class="cr-dialog-backdrop" @click.self="addShotOpen = false">
       <div class="cr-dialog" role="dialog" aria-modal="true" aria-labelledby="add-shot-title">
@@ -240,6 +243,12 @@ async function onShotChanged() {
   await loadBatches()
 }
 
+/** 在当前镜头之后插入（P0）：新镜头进入编辑态。 */
+async function onShotInserted(created) {
+  await story.reload()
+  inspectorShot.value = story.shots.value.find(shot => shot.id === created.id) || created
+}
+
 async function createBatch() {
   const episode = episodes.value.find(item => story.shots.value
     .some(shot => selectedShots.has(shot.id) && shot.sceneId
@@ -374,6 +383,8 @@ onBeforeUnmount(() => window.clearTimeout(batchTimer))
   color: var(--wb-text-2);
 }
 .item-DONE { color: var(--wb-success); }
+.chip-error { margin-left: 6px; font-style: normal; color: var(--wb-danger, #c94c62); font-size: 10px; }
+.chip.item-FAILED { background: color-mix(in srgb, var(--wb-danger, #c94c62) 8%, var(--wb-fill)); }
 .item-FAILED { color: var(--wb-warning); }
 .item-SUBMITTED { color: var(--wb-info); }
 

@@ -195,6 +195,39 @@ class PromptOptimizationModesTest {
                 () -> PromptOptimizationService.videoStyleNote("NOT_A_STYLE"));
     }
 
+    // ---- 结构化拆镜草稿（P0 制作视图）：可校验行集合，解析失败如实报错 ----
+
+    @Test
+    void storyboardDraftRowsParseAndClamp() {
+        var parsed = PromptOptimizationService.parseDraftRows("""
+                {"shots":[
+                  {"orderNo":1,"durationTargetSeconds":5,"purpose":"开场","action":"角色入画",
+                   "camera":"中景","dialogue":"","promptText":"雨天石桥"},
+                  {"durationTargetSeconds":999,"action":"","camera":"","dialogue":"","promptText":"背影远去"}
+                 ],
+                 "suggestions":["可拆两镜"],"missing":["服装未确认"]}
+                """);
+        Assertions.assertEquals(2, parsed.rows().size());
+        Assertions.assertEquals(5, parsed.rows().get(0).durationTargetSeconds());
+        Assertions.assertEquals(60, parsed.rows().get(1).durationTargetSeconds(), "时长必须收敛到模型上限");
+        Assertions.assertEquals("背影远去", parsed.rows().get(1).promptText());
+        Assertions.assertEquals(List.of("可拆两镜"), parsed.suggestions());
+    }
+
+    @Test
+    void storyboardDraftParseFailuresAreHonest() {
+        // 无镜头行
+        Assertions.assertThrows(com.zwx.zwxagent.creative.domain.CreativeException.class,
+                () -> PromptOptimizationService.parseDraftRows("{\"shots\":[]}"));
+        // 完全没有动作与提示词的行
+        Assertions.assertThrows(com.zwx.zwxagent.creative.domain.CreativeException.class,
+                () -> PromptOptimizationService.parseDraftRows(
+                        "{\"shots\":[{\"durationTargetSeconds\":4,\"purpose\":\"空行\"}]}"));
+        // 非 JSON 输出
+        Assertions.assertThrows(com.zwx.zwxagent.creative.domain.CreativeException.class,
+                () -> PromptOptimizationService.parseDraftRows("以下是分镜草稿……"));
+    }
+
     @Test
     void newStyleCodesNormalizeAndUnknownStillRejected() {
         Assertions.assertEquals("MACRO", PromptOptimizationService.normalizeImageStyle(" macro "));

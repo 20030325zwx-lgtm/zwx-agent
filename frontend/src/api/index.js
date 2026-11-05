@@ -412,6 +412,21 @@ export const adoptStoryboardDraft = (projectId, draftId, payload) =>
   request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/storyboard-drafts/${draftId}/adopt`, payload).then(r => r.data)
 export const discardStoryboardDraft = (projectId, draftId) =>
   request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/storyboard-drafts/${draftId}/discard`).then(r => r.data)
+// 成片（P2 最小闭环）：草稿重建/编辑、导出（幂等键）、取消/重试、历史与产物
+export const rebuildFinalCutDraft = projectId =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/final-cuts/draft`).then(r => r.data)
+export const getFinalCutDraft = projectId =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/final-cuts/draft`).then(r => r.data)
+export const listFinalCuts = (projectId, limit = 20) =>
+  request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/final-cuts`, { params: { limit } }).then(r => r.data)
+export const updateFinalCutItems = (projectId, cutId, payload) =>
+  request.patch(`/ai/creative/projects/${encodeURIComponent(projectId)}/final-cuts/${cutId}/items`, payload).then(r => r.data)
+export const exportFinalCut = (projectId, cutId, payload) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/final-cuts/${cutId}/export`, payload).then(r => r.data)
+export const cancelFinalCut = (projectId, cutId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/final-cuts/${cutId}/cancel`).then(r => r.data)
+export const retryFinalCut = (projectId, cutId) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/final-cuts/${cutId}/retry`).then(r => r.data)
 // 项目设定（P0 制作视图）：项目默认画风/画幅/目标时长等，值统一为字符串
 export const getProjectSettings = projectId =>
   request.get(`/ai/creative/projects/${encodeURIComponent(projectId)}/settings`).then(r => r.data)

@@ -2,6 +2,11 @@ FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
+# 成片导出（P2）依赖 ffmpeg/ffprobe：只在镜像层安装一次，运行期不联网
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG JAR_FILE=target/aster-agent-0.0.1-SNAPSHOT.jar
 COPY ${JAR_FILE} app.jar
 

@@ -36,6 +36,7 @@
             <StoryStage v-else-if="activeStage === 'story'" />
             <ShotBoardStage v-else-if="activeStage === 'shots'" focus="edit" />
             <ShotBoardStage v-else-if="activeStage === 'video'" focus="generate" />
+            <VideoAssemblyStage v-else-if="activeStage === 'cut'" />
             <div v-else class="stage-card cut-empty">
               <h2>成片</h2>
               <p>按镜头顺序拼接已选视频并导出 MP4 —— 将在下一期提供。</p>
@@ -54,6 +55,7 @@ import { PROJECT_CTX } from './composables'
 import StyleStage from '../../../components/creative/production/StyleStage.vue'
 import StoryStage from '../../../components/creative/production/StoryStage.vue'
 import ShotBoardStage from '../../../components/creative/production/ShotBoardStage.vue'
+import VideoAssemblyStage from '../../../components/creative/production/VideoAssemblyStage.vue'
 
 /**
  * P0 制作视图（2026-11-05）：画风 → 故事 → 分镜 → 视频 → 成片。

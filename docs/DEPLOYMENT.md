@@ -316,16 +316,18 @@ docker compose exec -T postgres psql -U zwx_agent -d zwx_agent < zwx_agent-local
 - 是否启用网页截图 MCP
 - OSS Bucket/AccessKey、DashScope Key、MinerU Token（不要发到公开频道，部署时通过安全方式提供）
 
-## 11. MinIO（自建对象存储，2026-11-04 部署）
+## 11. MinIO（自建对象存储，2026-11-04 部署 / 2026-11-05 接入应用）
 
 - **部署形态**：systemd 服务（非 Docker），二进制 `RELEASE.2025-04-22T22-12-26Z`（GitHub Releases 下载，sha256 已校验；dl.min.io 已下架社区二进制）。
 - **服务**：`systemctl status minio`；数据目录 `/opt/aster/minio-data`；API `:9000`（0.0.0.0，防火墙默认拦截）、Console `127.0.0.1:9001`。
 - **凭据**：`/opt/aster/minio.env`（root 600）；应用侧配置已追加到 `/opt/aster/.env`（MINIO_ENDPOINT=http://172.17.0.1:9000、MINIO_BUCKET=aster-media）。
 - **桶**：`aster-media` 已创建（mc 客户端 /usr/local/bin/mc，alias=aster）。
 - **nginx**：已加 9443 ssl server 块（同证书 www.zhuwenxuan.online，Host 透传，client_max_body_size 0）→ 172.17.0.1:9000；配置备份 nginx.conf.bak-minio。
-- **⚠️ 公网入口未闭环**：www 域名走腾讯 CDN，只转发 80/443，`:9443` 无法穿透。三选一：
-  1. 子域名（如 storage.zhuwenxuan.online）DNS 直解析源站（不套 CDN）→ nginx 加 server_name + certbot 签证书（推荐）；
-  2. CDN 控制台为该域名开启 9443 端口转发（若 CDN 支持）；
-  3. 防火墙放行 9000 用 HTTP 直连 IP（明文，不推荐）。
-  在此之前，图生视频的「素材公网直链」仍走阿里云 OSS；MinIO 仅内网可用。
+- **应用接入（2026-11-05）**：对象存储统一抽象 `platform/storage`，`STORAGE_PROVIDER=s3` 时
+  创作素材 / 知识库文档与图片 / 工作流产物 / 对话图片全部写入 MinIO；`STORAGE_FALLBACK_PROVIDER=oss`
+  在迁移期保证历史对象仍可读。历史对象已用 `app.storage.migrate=enabled` 全量镜像（313 个，key 不变）。
+  详见 `docs/design/2026-11-05-storage-minio-migration.md`。
+- **不再需要公网入口**：原先 4 条把预签名 URL 交给外部的链路已改为字节/base64/同源签名下载，
+  所以 minio 只在内网（`172.17.0.1:9000`）即可；`MINIO_PUBLIC_ENDPOINT` 保持留空。
+  nginx 的 9443 server 块可作为未来直链方案保留（当前未对外放通）。
 - **运维**：备份数据目录即备份存储；磁盘占用需监控（当前 38G 可用）。

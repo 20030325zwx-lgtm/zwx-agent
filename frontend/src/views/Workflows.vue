@@ -17,7 +17,7 @@
         </div>
       </header>
 
-      <p v-if="loading" class="section-hint">加载中…</p>
+      <AsterLoader v-if="loading" size="18" />
       <div v-else class="wf-grid">
         <div v-for="definition in definitions" :key="definition.key" class="wf-card">
           <div class="card-head">
@@ -145,7 +145,7 @@
               <span class="run-status" :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span>
             </button>
             <div v-if="historyDialog.expandedId === run.id" class="history-detail">
-              <p v-if="historyDialog.loadingId === run.id" class="dialog-hint">加载中…</p>
+              <AsterLoader v-if="historyDialog.loadingId === run.id" size="16" />
               <template v-else-if="historyDialog.detail">
                 <div v-for="step in historyDialog.detail.steps" :key="step.key" class="mini-step">
                   <span class="status-dot" :class="stepClass(step.status)" />
@@ -189,6 +189,7 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import AsterLoader from '../components/ui/AsterLoader.vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { Download, History, MoreHorizontal, Play, Plus, Trash2, Upload } from 'lucide-vue-next'

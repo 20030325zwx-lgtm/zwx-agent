@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
     <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png" />
-    <meta name="theme-color" content="#10131B" />
+    <meta name="theme-color" content="#F5F6FA" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Aster 智能体平台，提供情感分析、旅游规划、知识库与工具调用能力。" />
     <meta name="keywords" content="Aster,AI智能体,情感分析,旅游规划,知识库" />
@@ -16,7 +16,33 @@
     <title>Aster</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot-splash" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="46" height="46" fill="#3A3D7D">
+          <g transform="translate(-7.5 2.3) scale(1.3)">
+            <g stroke="#3A3D7D" stroke-opacity=".35" stroke-width=".85" fill="none" stroke-linecap="round">
+              <path d="M8.5 6.5 7.6 15.4 13.4 18.2 14.8 11.2Z"/>
+              <path d="M14.8 11.2 20.2 8.6 24.6 5.8 28.6 2.9"/>
+            </g>
+            <circle class="boot-star" style="animation-delay:0s" cx="8.5" cy="6.5" r="2.1"/>
+            <circle class="boot-star" style="animation-delay:.13s" cx="7.6" cy="15.4" r="2"/>
+            <circle class="boot-star" style="animation-delay:.26s" cx="13.4" cy="18.2" r="1.9"/>
+            <circle class="boot-star" style="animation-delay:.39s" cx="14.8" cy="11.2" r="1.6"/>
+            <circle class="boot-star" style="animation-delay:.52s" cx="20.2" cy="8.6" r="2.1"/>
+            <circle class="boot-star" style="animation-delay:.65s" cx="24.6" cy="5.8" r="1.9"/>
+            <circle class="boot-star" style="animation-delay:.78s" cx="28.6" cy="2.9" r="2"/>
+          </g>
+        </svg>
+        <span class="boot-word">Aster</span>
+      </div>
+    </div>
+    <style>
+      .boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#F5F6FA;z-index:9999}
+      .boot-star{opacity:.22;animation:bootTwinkle 1.9s ease-in-out infinite}
+      .boot-word{font:600 14px/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;letter-spacing:.08em;color:#3A3D7D;opacity:.85}
+      @keyframes bootTwinkle{0%,72%,100%{opacity:.22}14%{opacity:1}30%{opacity:.55}}
+      @media (prefers-reduced-motion:reduce){.boot-star{animation:none;opacity:.85}}
+    </style>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

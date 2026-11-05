@@ -13,7 +13,7 @@
       </header>
 
       <div class="act-body">
-        <p v-if="loading" class="cr-hint">加载中…</p>
+        <AsterLoader v-if="loading" size="18" />
         <template v-else>
           <section v-if="attentionJobs.length">
             <h3 class="act-group">需要处理</h3>
@@ -56,6 +56,7 @@
 
 <script setup>
 import { nextTick, onMounted, ref } from 'vue'
+import AsterLoader from '../ui/AsterLoader.vue'
 import { useRouter } from 'vue-router'
 import { X } from 'lucide-vue-next'
 import { listCreativeJobs } from '../../api'

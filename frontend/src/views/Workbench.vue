@@ -52,7 +52,7 @@
               </router-link>
             </div>
 
-            <p v-if="loading" class="section-hint">加载中…</p>
+            <AsterLoader v-if="loading" size="18" />
             <p v-else-if="!runs.length" class="section-empty">
               <Activity :size="18" /> 暂无任务运行，去「任务」页发起第一个任务
             </p>
@@ -88,7 +88,7 @@
               </router-link>
             </div>
 
-            <p v-if="loading" class="section-hint">加载中…</p>
+            <AsterLoader v-if="loading" size="18" />
             <p v-else-if="!workflowCards.length" class="section-empty">
               <Workflow :size="18" /> 还没有工作流<br />
               <span class="empty-sub">在工作流页新建后即可一键运行</span>
@@ -151,7 +151,7 @@
               <h2>工作区</h2>
               <span class="section-count">{{ projects.length }}</span>
             </div>
-            <p v-if="loading" class="section-hint">加载中…</p>
+            <AsterLoader v-if="loading" size="18" />
             <p v-else-if="!projects.length" class="section-empty">
               <FolderOpen :size="18" /> 尚未创建工作区<br />
               <span class="empty-sub">在任务页绑定本地目录即可创建</span>
@@ -177,7 +177,7 @@
               </router-link>
             </div>
 
-            <p v-if="loading" class="section-hint">加载中…</p>
+            <AsterLoader v-if="loading" size="18" />
             <p v-else-if="!knowledgeStats.total" class="section-empty">
               <Database :size="18" /> 知识库还没有资料<br />
               <span class="empty-sub">上传文档并切片后可被检索引用</span>
@@ -238,6 +238,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import AsterLoader from '../components/ui/AsterLoader.vue'
 import { Activity, ChevronRight, Database, FolderOpen, Plus, Workflow } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 import {

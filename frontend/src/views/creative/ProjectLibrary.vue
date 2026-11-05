@@ -65,7 +65,7 @@
         </div>
 
         <template v-if="scope === 'projects'">
-          <p v-if="loading && !items.length" class="cr-hint">加载中…</p>
+          <AsterLoader v-if="loading && !items.length" size="18" />
           <p v-else-if="error" class="cr-error">{{ error }}</p>
           <div v-else-if="!items.length" class="cr-empty lib-empty">
             <strong>{{ emptyTitle }}</strong>
@@ -94,7 +94,7 @@
 
         <!-- 作品视图：成功产出的聚合投影；点击回原项目任务，上下文不丢（redesign §5.2） -->
         <template v-else>
-          <p v-if="worksLoading && !works.length" class="cr-hint">加载中…</p>
+          <AsterLoader v-if="worksLoading && !works.length" size="18" />
           <p v-else-if="worksError" class="cr-error">{{ worksError }}</p>
           <div v-else-if="!works.length" class="cr-empty lib-empty">
             <strong>还没有作品</strong>
@@ -166,6 +166,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import AsterLoader from '../../components/ui/AsterLoader.vue'
 import { useRouter } from 'vue-router'
 import { LayoutGrid, List, Plus } from 'lucide-vue-next'
 import { createCreativeProject, listCreativeJobs, listCreativeProjects } from '../../api'

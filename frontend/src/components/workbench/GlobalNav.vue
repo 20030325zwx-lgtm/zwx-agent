@@ -315,7 +315,7 @@ function cycleTheme() {
   user-select: none;
 }
 
-.wb-nav-logo svg { width: 20px; height: 20px; }
+.wb-nav-logo svg { width: 24px; height: 24px; }
 
 .wb-nav-wordmark {
   color: var(--wb-text);

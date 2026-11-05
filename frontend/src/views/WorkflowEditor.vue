@@ -228,7 +228,7 @@
       </div>
       <div class="run-panel-body">
         <div class="run-list-col">
-          <p v-if="loading" class="section-hint">加载中…</p>
+          <AsterLoader v-if="loading" size="18" />
           <p v-else-if="!filteredRuns.length" class="section-hint">该工作流还没有运行记录，从右上角发起第一次运行</p>
           <div v-else class="run-list">
             <button
@@ -335,6 +335,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import AsterLoader from '../components/ui/AsterLoader.vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { Background } from '@vue-flow/background'

@@ -3,7 +3,7 @@
        @keydown.esc.stop="close">
     <div class="skd-backdrop" @click="close" />
     <aside class="skd-panel">
-      <p v-if="loading" class="cr-hint skd-loading">加载中…</p>
+      <AsterLoader v-if="loading" size="18" />
       <p v-else-if="error" class="cr-error skd-loading">
         {{ error }}
         <button type="button" class="cr-secondary" @click="load">重试</button>
@@ -69,6 +69,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
+import AsterLoader from '../ui/AsterLoader.vue'
 import { X } from 'lucide-vue-next'
 import { getCreativeSkill } from '../../api'
 

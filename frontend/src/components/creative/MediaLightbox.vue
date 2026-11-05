@@ -24,7 +24,7 @@
                     :initial="motionInitial" :animate="{ opacity: 1 }"
                     :transition="{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }"
                     :class="{ zoomed }" @click="toggleZoom" />
-        <p v-else class="lb-loading">加载中…</p>
+        <AsterLoader v-else size="20" />
 
         <button v-if="hasPrev" type="button" class="lb-nav lb-prev" aria-label="上一张" @click="step(-1)">
           <ChevronLeft :size="20" />
@@ -102,6 +102,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AsterLoader from '../ui/AsterLoader.vue'
 import { ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-vue-next'
 import { motion, useReducedMotion } from 'motion-v'
 import { getCreativeAssetThumbnail, getCreativeJob, listCreativeProjects } from '../../api'

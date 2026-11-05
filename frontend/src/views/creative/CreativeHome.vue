@@ -137,7 +137,7 @@
             <h2>最近创作</h2>
             <router-link to="/creative/library">我的创作</router-link>
           </div>
-          <p v-if="loading" class="cr-hint">加载中…</p>
+          <AsterLoader v-if="loading" size="18" />
           <p v-else-if="loadError" class="cr-error">{{ loadError }}</p>
           <div v-else-if="!projects.length" class="cr-empty home-empty">
             <strong>还没有作品</strong>
@@ -292,6 +292,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import AsterLoader from '../../components/ui/AsterLoader.vue'
 import { useRouter } from 'vue-router'
 import {
   AlertCircle, ArrowUp, BookOpen, Clapperboard, Clock, History, Image as ImageIcon, ImagePlay,

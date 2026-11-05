@@ -258,12 +258,10 @@ onBeforeUnmount(() => {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: #EDEFF9;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
-.lg-mark :deep(svg) { width: 19px; height: 19px; color: #fff; }
+.lg-mark :deep(svg) { width: 23px; height: 23px; color: #3A3D7D; }
 .lg-wordmark { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
 
 .lg-copy {
@@ -320,7 +318,7 @@ onBeforeUnmount(() => {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: #202124;
+  background: #EDEFF9;
   box-shadow: none;
 }
 .lg-mark-small :deep(svg) { width: 16px; height: 16px; }

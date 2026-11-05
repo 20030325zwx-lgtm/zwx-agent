@@ -279,24 +279,28 @@ function cycleTheme() {
   flex-direction: column;
   width: 208px;
   flex: 0 0 208px;
-  padding: 14px 10px 12px;
-  gap: 8px;
+  margin: 10px 0 10px 10px;
+  padding: 12px 9px 10px;
+  gap: 6px;
   background: var(--wb-rail);
-  border-right: 1px solid var(--wb-border);
-  transition: width 0.18s ease, flex-basis 0.18s ease;
+  border: 1px solid var(--wb-border);
+  border-radius: 22px;
+  box-shadow: var(--wb-shadow-sm);
+  transition: width 0.26s cubic-bezier(0.22, 1, 0.36, 1), flex-basis 0.26s cubic-bezier(0.22, 1, 0.36, 1);
   overflow: hidden;
 }
 
 .wb-nav.collapsed {
   width: 64px;
   flex-basis: 64px;
+  border-radius: 20px;
 }
 
 .wb-nav-brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 2px 4px 10px;
+  padding: 2px 4px 8px;
   white-space: nowrap;
   color: inherit;
   text-decoration: none;
@@ -308,11 +312,16 @@ function cycleTheme() {
   width: 36px;
   height: 36px;
   flex: 0 0 36px;
-  border-radius: 11px;
+  border-radius: 13px;
   background: var(--wb-mark-bg);
   color: var(--wb-mark-fg);
   box-shadow: inset 0 0 0 1px var(--wb-mark-ring);
   user-select: none;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wb-nav-brand:hover .wb-nav-logo {
+  transform: translateY(-1px) scale(1.03);
 }
 
 .wb-nav-logo svg { width: 24px; height: 24px; }
@@ -338,15 +347,16 @@ function cycleTheme() {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 2px 6px;
-  padding: 7px 10px;
+  margin: 0 0 4px;
+  padding: 8px 10px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 12px;
   background: transparent;
   color: var(--wb-muted);
   font-size: 12.5px;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
 }
 
 .wb-collapse:hover {
@@ -360,16 +370,16 @@ function cycleTheme() {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 2px;
-  padding: 7px 10px;
+  margin: 0;
+  padding: 8px 10px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 12px;
   background: transparent;
   color: var(--wb-muted);
   font-size: 12.5px;
   white-space: nowrap;
   cursor: pointer;
-  transition: background var(--cr-dur-fast, 140ms) var(--cr-ease, ease), color var(--cr-dur-fast, 140ms) var(--cr-ease, ease);
+  transition: background 0.18s, color 0.18s;
 }
 
 .wb-activity:hover { background: var(--wb-fill); color: var(--wb-text); }
@@ -402,13 +412,13 @@ function cycleTheme() {
   background: var(--wb-warning);
 }
 
-.wb-nav.collapsed .wb-activity { justify-content: center; padding: 7px 0; }
+.wb-nav.collapsed .wb-activity { justify-content: center; padding: 8px 0; }
 .wb-nav.collapsed .wb-activity .wb-activity-count,
-.wb-nav.collapsed .wb-activity .wb-activity-dot { position: absolute; top: 3px; right: 5px; margin: 0; }
+.wb-nav.collapsed .wb-activity .wb-activity-dot { position: absolute; top: 4px; right: 5px; margin: 0; }
 
 .wb-nav.collapsed .wb-collapse {
   justify-content: center;
-  padding: 7px 0;
+  padding: 8px 0;
 }
 
 .wb-nav-items {
@@ -432,8 +442,8 @@ function cycleTheme() {
   margin: 12px 10px 2px;
   color: var(--wb-muted);
   font-size: 11px;
-  letter-spacing: 0.04em;
-  opacity: 0.75;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
   white-space: nowrap;
 }
 
@@ -445,7 +455,7 @@ function cycleTheme() {
 }
 
 .wb-nav-item-quiet {
-  height: 34px;
+  height: 36px;
   font-size: 12.5px;
   opacity: 0.86;
 }
@@ -460,15 +470,21 @@ function cycleTheme() {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 38px;
+  height: 40px;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 13px;
   background: transparent;
   color: var(--wb-muted);
   font-size: 13px;
   white-space: nowrap;
-  transition: color 0.15s, background 0.15s;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wb-nav-item > svg {
+  flex-shrink: 0;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .wb-nav.collapsed .wb-nav-item {
@@ -481,32 +497,29 @@ function cycleTheme() {
   color: var(--wb-text);
 }
 
+.wb-nav-item:hover > svg {
+  transform: scale(1.08);
+}
+
+.wb-nav-item:active > svg {
+  transform: scale(0.96);
+}
+
 .wb-nav-item.active {
   background: var(--wb-brand-soft);
   color: var(--wb-brand);
-  font-weight: 550;
+  font-weight: 600;
 }
 
-.wb-nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: -10px;
-  top: 9px;
-  bottom: 9px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--wb-brand);
-}
-
-.wb-nav.collapsed .wb-nav-item.active::before {
-  left: -8px;
+.wb-nav-item.active > svg {
+  transform: scale(1.04);
 }
 
 .wb-nav-label {
   overflow: hidden;
   text-overflow: ellipsis;
   opacity: 1;
-  transition: opacity 0.12s;
+  transition: opacity 0.16s;
 }
 
 .wb-nav.collapsed .wb-nav-label {
@@ -517,12 +530,12 @@ function cycleTheme() {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 38px;
+  height: 40px;
   width: 100%;
   margin-top: 4px;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 13px;
   background: var(--wb-fill);
   color: var(--wb-text-2);
   font-family: inherit;
@@ -530,6 +543,7 @@ function cycleTheme() {
   text-align: left;
   cursor: pointer;
   white-space: nowrap;
+  transition: background 0.18s, color 0.18s;
 }
 
 .wb-nav-user:hover {
@@ -545,14 +559,19 @@ function cycleTheme() {
 .wb-nav-user-badge {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
   border-radius: 50%;
   background: var(--wb-brand-gradient, linear-gradient(135deg, #2e6be6, #22c3be));
   color: #fff;
   font-size: 12px;
   font-weight: 600;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wb-nav-user:hover .wb-nav-user-badge {
+  transform: scale(1.06);
 }
 
 .wb-nav.collapsed .wb-nav-user .wb-nav-label {
@@ -664,5 +683,24 @@ function cycleTheme() {
 /* 折叠态悬浮提示：折叠时隐藏文字，悬停显示原生 title 兜底 */
 .wb-nav.collapsed .wb-nav-item:hover {
   background: var(--wb-fill);
+}
+
+/* 减少动态效果：保留状态变化，去掉缩放与位移 */
+@media (prefers-reduced-motion: reduce) {
+  .wb-nav,
+  .wb-nav-item,
+  .wb-nav-item > svg,
+  .wb-nav-logo,
+  .wb-nav-user-badge {
+    transition: none;
+  }
+
+  .wb-nav-brand:hover .wb-nav-logo,
+  .wb-nav-item:hover > svg,
+  .wb-nav-item:active > svg,
+  .wb-nav-item.active > svg,
+  .wb-nav-user:hover .wb-nav-user-badge {
+    transform: none;
+  }
 }
 </style>

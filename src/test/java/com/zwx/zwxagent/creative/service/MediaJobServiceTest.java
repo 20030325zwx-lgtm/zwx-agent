@@ -141,15 +141,35 @@ class MediaJobServiceTest {
                 "test/video-reference/" + videoReferenceAssetId + ".png");
     }
 
+
+    /**
+     * 兼容同 JVM 缓存的调度器上下文：MediaJobSchedulerTest 的调度线程可能在两次删除之间
+     * 再写 attempt 行，导致外键冲突。这里重试清理，最终不一致时把冲突行一并删掉。
+     */
+    private void deleteJobsWithRetry() throws InterruptedException {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                jdbcTemplate.update("DELETE FROM media_job WHERE user_id = ?", TEST_USER);
+                return;
+            } catch (org.springframework.dao.DataIntegrityViolationException exception) {
+                Thread.sleep(2000);
+                jdbcTemplate.update("DELETE FROM media_job_attempt WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
+            }
+        }
+        // 兜底：只删未被引用的行，避免污染共享测试库
+        jdbcTemplate.update("DELETE FROM media_job WHERE user_id = ? AND NOT EXISTS "
+                + "(SELECT 1 FROM media_job_attempt a WHERE a.job_id = media_job.id)", TEST_USER);
+    }
+
     @AfterAll
-    void cleanUpTestData() {
+    void cleanUpTestData() throws InterruptedException {
         jdbcTemplate.update("DELETE FROM media_job_event WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         // 真实调度链会写 attempt/output/asset_ref：清理需按外键依赖顺序，否则残留行导致删除失败
         jdbcTemplate.update("DELETE FROM media_job_attempt WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job_output WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_job_asset_ref WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
         jdbcTemplate.update("DELETE FROM video_batch_item WHERE job_id IN (SELECT id FROM media_job WHERE user_id = ?)", TEST_USER);
-        jdbcTemplate.update("DELETE FROM media_job WHERE user_id = ?", TEST_USER);
+        deleteJobsWithRetry();
         jdbcTemplate.update("DELETE FROM creative_asset WHERE user_id = ?", TEST_USER);
         jdbcTemplate.update("DELETE FROM creative_project WHERE user_id = ?", TEST_USER);
         jdbcTemplate.update("DELETE FROM media_model_profile WHERE model_row_id IN (?, ?)",

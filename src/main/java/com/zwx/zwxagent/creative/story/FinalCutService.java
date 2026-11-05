@@ -118,7 +118,7 @@ public class FinalCutService {
     public VideoFinalCutRecord updateItems(CurrentActor actor, UUID projectId, UUID cutId,
                                            UpdateItemsRequest request) {
         var cut = get(actor, projectId, cutId);
-        if (!cut.draft()) throw new IllegalArgumentException("只有草稿可以编辑片段");
+        if (!cut.isDraft()) throw new IllegalArgumentException("只有草稿可以编辑片段");
         List<VideoFinalCutItem> items = new ArrayList<>();
         Set<UUID> seenAssets = new HashSet<>();
         for (ItemInput input : request == null ? List.<ItemInput>of() : request.items()) {
@@ -150,7 +150,7 @@ public class FinalCutService {
     /** 提交导出：幂等键相同直接返回已有运行（双击/重试不重复渲染）；片段冻结为快照。 */
     public VideoFinalCutRecord export(CurrentActor actor, UUID projectId, UUID draftId, ExportRequest request) {
         var draft = get(actor, projectId, draftId);
-        if (!draft.draft()) throw new IllegalArgumentException("请从成片草稿发起导出");
+        if (!draft.isDraft()) throw new IllegalArgumentException("请从成片草稿发起导出");
         if (draft.items().isEmpty()) throw new IllegalArgumentException("草稿没有片段，先完成选片或手动加入素材");
         String size = request == null || request.outputSize() == null || request.outputSize().isBlank()
                 ? "1280x720" : request.outputSize().trim().toLowerCase(Locale.ROOT);
@@ -180,7 +180,7 @@ public class FinalCutService {
 
     public VideoFinalCutRecord cancel(CurrentActor actor, UUID projectId, UUID cutId) {
         var cut = get(actor, projectId, cutId);
-        if (!cut.running()) throw new IllegalArgumentException("该导出不在进行中");
+        if (!cut.isRunning()) throw new IllegalArgumentException("该导出不在进行中");
         cutRepository.markCancelled(cutId);
         return get(actor, projectId, cutId);
     }

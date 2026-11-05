@@ -20,11 +20,11 @@ public record VideoFinalCutRecord(UUID id, UUID projectId, String tenantId, Stri
                                     String displayName, Long durationMs) {
     }
 
-    public boolean draft() {
+    public boolean isDraft() {
         return "DRAFT".equals(status);
     }
 
-    public boolean running() {
+    public boolean isRunning() {
         return "PREPARING".equals(status) || "PROCESSING".equals(status) || "UPLOADING".equals(status);
     }
 }

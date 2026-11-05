@@ -95,8 +95,6 @@ const doneStages = computed(() => {
 })
 
 const videoStyle = computed(() => ctx.projectStyle?.value || '')
-watch(() => project.value?.id, () => { /* Shell 在路由切换时统一刷新设定 */ }, { immediate: true })
-
 const missingStage = computed(() => STAGES.find(stage => !doneStages.value.has(stage.key))?.key || 'cut')
 const missingHint = computed(() => {
   const shots = story.shots.value

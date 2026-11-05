@@ -11,6 +11,22 @@
           {{ project.status === 'ACTIVE' ? '进行中' : '已归档' }}
         </span>
       </div>
+      <!-- 画布模式把项目导航并进标题栏：少一条通栏分隔线，画布多拿 42px 竖向空间 -->
+      <nav v-if="activeKey === 'canvas'" class="ps-tabs" aria-label="项目导航">
+        <router-link
+          v-for="item in navItems"
+          :key="item.key"
+          :to="`/creative/projects/${projectId}/${item.key}`"
+          class="ps-tab"
+          :class="{ active: activeKey === item.key }"
+        >
+          <component :is="item.icon" :size="14" :stroke-width="1.8" />
+          <span>{{ item.label }}</span>
+          <em v-if="item.key === 'storyboard' && story.progress.value.pendingSelection" class="ps-tab-badge">
+            {{ story.progress.value.pendingSelection }}
+          </em>
+        </router-link>
+      </nav>
       <div v-if="isVideo && activeKey !== 'canvas'" class="ps-progress" aria-label="制作进度">
         <span class="ps-metric">镜头 <em>{{ story.progress.value.total }}</em></span>
         <span class="ps-metric">已选片 <em>{{ story.progress.value.selected }}</em></span>
@@ -492,14 +508,24 @@ onMounted(async () => {
   .ps-nav-item { justify-content: center; padding: 0; }
   .ps-progress { display: none; }
 }
-/* The canvas owns the center; project sections become a slim horizontal strip. */
+/* The canvas owns the center; project sections become pills in the title bar. */
 .ps-shell.canvas-mode { min-width: 0; overflow: hidden; }
 .canvas-mode .ps-body { flex-direction: column; overflow: hidden; }
-.canvas-mode .ps-rail { width: auto; flex: 0 0 42px; flex-direction: row; align-items: center; padding: 0 20px; gap: 16px; border-right: 0; border-bottom: 1px solid var(--wb-border); overflow: auto; }
-.canvas-mode .ps-nav-item { height: 42px; padding: 0 4px; border-radius: 0; font-size: 12px; }
-.canvas-mode .ps-nav-item.active { background: transparent; box-shadow: inset 0 -2px var(--wb-brand); }
-.canvas-mode .ps-nav-item.active::before { display: none; }
+.canvas-mode .ps-rail { display: none; }
 .canvas-mode .ps-main { padding: 0; min-width: 0; min-height: 0; overflow: hidden; display: flex; }
-.canvas-mode .ps-name { font-size: 14px; max-width: 420px; }
+.canvas-mode .ps-name { font-size: 14px; max-width: 320px; }
+.ps-tabs { display: flex; align-items: center; gap: 2px; margin-left: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ps-tabs::-webkit-scrollbar { display: none; }
+.ps-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--wb-radius); color: var(--wb-text-2); font-size: 12px; text-decoration: none; white-space: nowrap; }
+.ps-tab:hover { background: var(--wb-fill); color: var(--wb-text); }
+.ps-tab.active { background: var(--wb-brand-soft); color: var(--wb-brand); font-weight: 550; }
+.ps-tab-badge { font-style: normal; font-size: 10px; line-height: 16px; padding: 0 5px; border-radius: 999px; background: var(--wb-warning); color: #fff; }
+
+@media (max-width: 1099px) {
+  /* 窄屏优先保住导航：隐去类型与状态标记，标签页可横向滚动 */
+  .canvas-mode .cr-kind-badge,
+  .canvas-mode .ps-title .cr-status { display: none; }
+  .canvas-mode .ps-tabs { margin-left: 0; }
+}
 
 </style>

@@ -782,7 +782,7 @@ watch(() => activeCanvasRun.value?.run?.status, schedulePoll)
 
 /* Center-first canvas. The inspector floats over the canvas instead of taking a second column. */
 .canvas-page { width: 100%; height: 100%; min-width: 0; overflow: hidden; --wb-text-muted: var(--wb-muted, #81899a); }
-.canvas-toolbar { height: 50px; min-height: 50px; padding: 0 18px; }
+.canvas-toolbar { height: 48px; min-height: 48px; padding: 0 18px; border-bottom: 0; background: transparent; }
 .canvas-save { display: inline-flex; align-items: center; gap: 5px; margin-left: 6px; font-size: 10px; }
 .canvas-save i { width: 5px; height: 5px; border-radius: 50%; background: #71a68c; }
 .canvas-save.saving i { background: #d6ad5c; }

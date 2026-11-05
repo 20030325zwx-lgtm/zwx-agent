@@ -53,6 +53,14 @@ const loading = ref(false)
 const error = ref('')
 let requestSequence = 0
 
+// 渲染器注册模块按需加载：首次打开文档预览时才拉取 file-viewer 渲染器资源，
+// 避免首屏被 PDF/Word/韩文/iWork 等大体积渲染器拖慢（此前插件会把它们注入入口 HTML）。
+let renderersReady = null
+const ensureRenderers = () => {
+  if (!renderersReady) renderersReady = import('virtual:file-viewer-renderers').catch(() => null)
+  return renderersReady
+}
+
 const load = async () => {
   const documentId = props.documentId
   if (!documentId) {
@@ -66,7 +74,11 @@ const load = async () => {
   error.value = ''
   file.value = null
   try {
-    const blob = await getAgentKnowledgeDocumentFile(props.agentKey, documentId)
+    // 文件下载与渲染器注册并行加载，打开预览时才付出这部分体积成本
+    const [blob] = await Promise.all([
+      getAgentKnowledgeDocumentFile(props.agentKey, documentId),
+      ensureRenderers()
+    ])
     if (sequence !== requestSequence) return
     const name = props.filename || 'document'
     file.value = new File([blob], name, { type: props.contentType || blob.type || 'application/octet-stream' })

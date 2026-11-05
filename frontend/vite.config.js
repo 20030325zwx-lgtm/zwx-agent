@@ -6,7 +6,7 @@ import path from 'path'
 // https://vitejs.dev/config/
 export default defineConfig({
   base: process.env.VITE_DESKTOP === 'true' ? './' : '/',
-  plugins: [vue(), fileViewerRenderers({ copyAssets: true })],
+  plugins: [vue(), fileViewerRenderers({ copyAssets: true, inject: false, chunkStrategy: 'none' })],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src')

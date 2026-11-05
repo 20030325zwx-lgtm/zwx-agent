@@ -1,6 +1,7 @@
 # 数据表结构与查询效率审计（2026-11-05）
 
-状态：审计完成，未做任何变更。结论：**索引设计整体已经比较到位**，问题集中在
+状态：**已全部实施并上线**（0.7.14 + PostgreSQL 参数重启，2026-11-05）。实施结果见文末第 7 节。
+审计结论：**索引设计整体已经比较到位**，问题集中在
 「宽 JSONB 列被列表/轮询无差别拉取」「知识库向量表用 `json` 类型导致过滤无法走索引」「模糊搜索缺 trigram」
 以及实例参数仍是默认值。以下按收益排序，附证据与改法。
 
@@ -114,3 +115,22 @@ hnsw.ef_search = 100         (默认 40，知识检索召回可调)
 - 本次仅审计，未改动任何表、索引或配置。
 - 所有「行数很少但 seq_scan 很高」的表不必处理，planner 选 seq scan 是正确的；
   上面的建议只针对「过滤/排序无索引可用」或「无谓拉取大字段」这两类真实放大项。
+
+
+## 7. 实施记录（2026-11-05，0.7.14）
+
+| 项 | 落地内容 | 验证 |
+| --- | --- | --- |
+| P0-1 | `WorkflowService.list` 改窄列（去掉 input/graph_snapshot）；`AgentRunService.findScopedRuns/findRecentRuns` 用 `SLIM_COLUMNS`（排除 activities/sse_events，单行约省 11KB） | 线上 workflow 列表 160ms、runs/recent 75ms |
+| P1-1 | `V42`：`pg_trgm` + `idx_creative_asset_name_trgm`、`idx_creative_project_name_trgm`、`idx_creative_project_desc_trgm` | 索引存在；`q=海报` 查询 114ms |
+| P1-2 | `V42`：`idx_creative_asset_owner_active`（`status <> 'DELETED'` 部分索引） | EXPLAIN 走该索引 |
+| P1-4 | `V42`：`idx_agent_run_user_message`、`idx_agent_run_assistant_message`、`idx_creative_asset_link_target` | 索引存在 |
+| P1-5 | `V42`：`agent_tool_confirmation.created_at/decided_at` → `timestamptz` | 类型核对通过 |
+| P0-3 | `V43`：backfill + `next_dispatch_at DEFAULT now()`；索引改 `(engine_version, control_state, next_dispatch_at, id) WHERE phase='QUEUED'`；claim SQL 去掉 `COALESCE` | `enable_seqscan=off` 下为 **Index Only Scan，无 Sort** |
+| P0-2 | `KnowledgeVectorSchemaInitializer`：metadata json→jsonb（实测 23ms）+ `idx_kv_scope`、`idx_kv_document`、`idx_kv_content_trgm`、`idx_kv_metadata_gin`；不走 Flyway（新库表由 PgVectorStore 运行时创建） | 类型 jsonb、4 个索引就绪 |
+| P2 | compose：`shared_buffers=768MB`、`work_mem=16MB`、`maintenance_work_mem=256MB`、`effective_cache_size=3GB`、`random_page_cost=1.1`、`effective_io_concurrency=200`、postgres `mem_limit=2g`；`shared_preload_libraries=pg_stat_statements` + 扩展已建；`ALTER DATABASE ... hnsw.ef_search=100` | 参数与 `pg_stat_statements` 均核对生效 |
+
+- 未采纳：删除 `uq_creative_project_identity` / `uq_agent_run_owner_composite` —— 前者是多个子表复合外键的依赖，
+  后者服务于 owner+fencing 的条件更新，删除会带来无谓风险。
+- PostgreSQL 重启期间派发器出现一次瞬时 `DataAccessResourceFailureException`（连接重建），属预期，已自愈。
+- 数据库备份：发布脚本在检测到迁移变更时自动 `pg_dump`（本次已备份）。

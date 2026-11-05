@@ -1,0 +1,39 @@
+日期：2026-11-05
+主题：发布时前端产物互踩（ENOTEMPTY / dist/index.html 缺失 / 线上资产不一致）
+
+问题现象
+- 一键发布脚本在 0.7.11 首轮末尾报：
+  grep: frontend/dist/index.html: No such file or directory → 本地资产取空 → 发布未生效判定失败。
+- 强制重发时 vite build 直接失败：
+  error during build: ENOTEMPTY: directory not empty, rmdir '.../frontend/dist/vendor'。
+- 现象随机（有时成功、有时产物缺失），且本地 dist 与线上产物哈希不一致（BG-eDxCG vs EGM0VR1M）。
+
+影响范围
+- 发布流程本身：可能打包陈旧或残缺的 dist 进镜像，导致线上页面与提交不一致；
+- 本地开发：vite dev 启动时会往 dist 写文件，与任何并发构建冲突。
+
+原因
+- @file-viewer/vite-plugin 的 configureServer 钩子在 dev server 启动时会把渲染器资源
+  （vendor/*、flyfish-viewer-assets.json）复制进 build.outDir（即 dist），用于 dev 下的静态资源中间件。
+- 发布脚本先 `npm run build`，随后 `launchctl kickstart` 重启 dev server；dev 启动即写 dist，
+  如果此时另有构建（本次是两个会话同时在跑构建）在 emptyOutDir/写盘，就会互相踩踏：
+  build 清目录时 dev 正在写 → ENOTEMPTY；build 清完目录后 index.html 尚未生成 → 检查取空。
+- 附带发现：同一份源码在不同 vite 依赖缓存状态下产出的 chunk 哈希可能不同，因此"本地 vs 线上"
+  必须比对同一次构建的产物，不能用历史 dist 判断。
+
+解决方式
+- 一键脚本（deploy/scripts/deploy-to-server.sh，未入库）：
+  1. 构建前先停本地 dev server（SIGTERM），构建完成后再 kickstart，消除 dist 并发写入；
+  2. 构建后校验 dist/index.html 存在且 mtime 不早于本次构建，否则直接失败；
+  3. 资产比对改用绝对路径并加 `${VAR}` 花括号（避免 set -u 与全角标点被解析成变量名的一部分）。
+- 重新完整构建并发布，线上/本地资产哈希一致（assets/index-EGM0VR1M.js）。
+
+验证结果
+- 0.7.11（重建版）发布成功：线上=本地=index-EGM0VR1M.js，容器内 ProjectCanvasTab 分块含新功能文案，
+  导航圆角样式 CSS 分块（index-BvTCC6_2.css）两端一致；公网 /api/health ok。
+- 本地 dev server 与后端健康检查正常。
+
+后续注意事项
+- 不要在 dev server 运行且正在写 dist 时执行 vite build；脚本已内置停/启，手工构建时同理。
+- 多会话并行在同一工作区构建仍会互踩，发布前确认无其他构建在跑。
+- 版本号按状态文件递增；本次因失败重试复用了同一版本标签（0.7.11 的镜像内容以最后一次构建为准）。

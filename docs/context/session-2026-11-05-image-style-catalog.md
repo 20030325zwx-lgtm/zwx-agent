@@ -65,11 +65,23 @@ DashScope 原生协议默认走 text-generation 端点，带图片会报 `url er
 - 前端 `npm run build` 通过；浏览器冒烟 `frontend/tests/canvas-browser-smoke.cjs`（Playwright + Chrome，全 API mock）
   通过，新增断言：分组数 2、无参考图默认自然写实、跟随原片禁用、切换电影感后提示语与 `imageStyle` 正确提交。
 
+## 发布记录（0.7.11）
+
+- 提交：bf7af13（图标缓存）→ 6f4f1f8（后端风格目录 + 多模态修复）→ e6ff32b（画布风格下拉 + 冒烟）→
+  c6ca4a4（另一会话的左侧导航悬浮圆角样式，随本次一并发布）。
+- 镜像：aster-backend:0.7.11 / aster-frontend:0.7.11，md5 双端校验一致；无迁移，备份 `.env`；双层 nginx 已 reload。
+- 线上核对：`IMAGE_TAG=0.7.11`、backend healthy、公网 `/api/health` ok、
+  线上入口 `assets/index-EGM0VR1M.js` 与本机 dist 完全一致、容器内 ProjectCanvasTab 分块含「跟随原片/摄影风格」。
+- 首轮发布暴露了发布脚本与 dev server 抢写 dist 的竞态（ENOTEMPTY、资产校验取空），已修脚本并重建发布，
+  详见 `docs/bugs/bug-2026-11-05-deploy-dist-race.txt`。
+
 ## 遗留
 
 - 风格仍为固定目录，暂不支持用户自定义一词/一句话风格（可后续加 `styleNote`）。
 - 参考图只用于风格分析，不参与内容重绘；多图时只取前两张。
 - 旧数据库里若节点未保存风格选择，加载后按「有参考图→跟随原片」动态决定，不写回草稿（避免无关改动触发版本冲突）。
+- 工作区存在未跟踪的 `frontend/src/components/workbench/GlobalNav 2.vue`（疑似访达复制产生的重名副本），
+  非本次改动生成，未处理。
 
 ## 环境注意事项
 

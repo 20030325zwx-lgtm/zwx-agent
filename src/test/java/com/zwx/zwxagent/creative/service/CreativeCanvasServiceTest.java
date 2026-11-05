@@ -282,6 +282,112 @@ class CreativeCanvasServiceTest {
     }
 
     @Test
+    void upToRerunsAncestorWhosePromptChangedSinceLastSuccess() throws Exception {
+        var graph = readGraph("""
+                {"nodes":[
+                  {"id":"a","type":"image_generate","data":{"label":"A","prompt":"新提示词","modelRowId":7}},
+                  {"id":"b","type":"image_generate","data":{"label":"B","prompt":"第二幕","modelRowId":7}},
+                  {"id":"c","type":"video_generate","data":{"label":"C","prompt":"成片","modelRowId":9}}],
+                 "edges":[{"source":"a","target":"b","sourceHandle":"flow-out","targetHandle":"flow-in"},
+                   {"source":"b","target":"c","sourceHandle":"flow-out","targetHandle":"flow-in"}]}
+                """);
+        var jdbc = mock(JdbcTemplate.class);
+        var workflows = mock(WorkflowService.class);
+        var service = spy(new CreativeCanvasService(jdbc, mapper, mock(CreativeProjectService.class), workflows));
+        var actor = new CurrentActor("user", "tenant", "test", Role.USER);
+        var project = java.util.UUID.randomUUID();
+        doReturn(new CreativeCanvasService.CanvasView(project, graph, mapper.createObjectNode(), 1, null))
+                .when(service).get(actor, project);
+        when(jdbc.queryForList(anyString(), any(Object[].class))).thenAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            if (args.length == 4) {
+                return java.util.List.of(java.util.Map.of("media_type", "IMAGE", "status", "READY"));
+            }
+            String key = (String) args[4];
+            String snapshot = switch (key) {
+                case "a" -> "{\"prompt\":\"旧提示词\",\"modelRowId\":7,\"size\":\"1024*1024\"}";
+                case "b" -> "{\"prompt\":\"第二幕\",\"modelRowId\":7,\"size\":\"1024*1024\"}";
+                default -> "{}";
+            };
+            return java.util.List.of(java.util.Map.of("status",
+                    "c".equals(key) ? "PENDING" : "SUCCEEDED", "message", "",
+                    "output", "{\"assetId\":\"00000000-0000-0000-0000-00000000000a\"}",
+                    "snapshot_params", snapshot));
+        });
+        var validation = service.validateRun(actor, project,
+                new CreativeCanvasService.RunRequest("up_to", "c", 1L, "k"));
+        Assertions.assertEquals(2, validation.executableNodes(), "配置已变更的祖先 A 必须重跑，未变更的 B 跳过，加上目标 C");
+        Assertions.assertTrue(validation.warnings().stream().anyMatch(w -> w.contains("检测到配置变更")),
+                "配置变更需在验证警告中提示");
+    }
+
+    @Test
+    void upToPropagatesStalenessAlongImageEdges() throws Exception {
+        var graph = readGraph("""
+                {"nodes":[
+                  {"id":"a","type":"image_generate","data":{"label":"A","prompt":"新提示词","modelRowId":7}},
+                  {"id":"b","type":"image_edit","data":{"label":"B","prompt":"改色","modelRowId":7}}],
+                 "edges":[{"source":"a","target":"b","sourceHandle":"media-out","targetHandle":"image-in"}]}
+                """);
+        var jdbc = mock(JdbcTemplate.class);
+        var service = spy(new CreativeCanvasService(jdbc, mapper, mock(CreativeProjectService.class), mock(WorkflowService.class)));
+        var actor = new CurrentActor("user", "tenant", "test", Role.USER);
+        var project = java.util.UUID.randomUUID();
+        doReturn(new CreativeCanvasService.CanvasView(project, graph, mapper.createObjectNode(), 1, null))
+                .when(service).get(actor, project);
+        when(jdbc.queryForList(anyString(), any(Object[].class))).thenAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            if (args.length == 4) {
+                return java.util.List.of(java.util.Map.of("media_type", "IMAGE", "status", "READY"));
+            }
+            String key = (String) args[4];
+            String snapshot = "a".equals(key)
+                    ? "{\"prompt\":\"旧提示词\",\"modelRowId\":7,\"size\":\"1024*1024\"}"
+                    : "{\"prompt\":\"改色\",\"modelRowId\":7,\"size\":\"1024*1024\",\"imageAssetIds\":[\"{{a.assetId}}\"]}";
+            return java.util.List.of(java.util.Map.of("status", "SUCCEEDED", "message", "",
+                    "output", "{\"assetId\":\"00000000-0000-0000-0000-00000000000a\"}",
+                    "snapshot_params", snapshot));
+        });
+        var validation = service.validateRun(actor, project,
+                new CreativeCanvasService.RunRequest("up_to", "b", 1L, "k"));
+        Assertions.assertEquals(2, validation.executableNodes(),
+                "图片依赖的上游重跑后，下游已成功结果也过期，必须一起重跑");
+    }
+
+    @Test
+    void upToSkipsAncestorsWhoseConfigStillMatchesSnapshot() throws Exception {
+        var graph = readGraph("""
+                {"nodes":[
+                  {"id":"a","type":"image_generate","data":{"label":"A","prompt":"猫","modelRowId":7}},
+                  {"id":"b","type":"video_generate","data":{"label":"B","prompt":"推镜","modelRowId":9}}],
+                 "edges":[{"source":"a","target":"b","sourceHandle":"media-out","targetHandle":"image-in"}]}
+                """);
+        var jdbc = mock(JdbcTemplate.class);
+        var service = spy(new CreativeCanvasService(jdbc, mapper, mock(CreativeProjectService.class), mock(WorkflowService.class)));
+        var actor = new CurrentActor("user", "tenant", "test", Role.USER);
+        var project = java.util.UUID.randomUUID();
+        doReturn(new CreativeCanvasService.CanvasView(project, graph, mapper.createObjectNode(), 1, null))
+                .when(service).get(actor, project);
+        when(jdbc.queryForList(anyString(), any(Object[].class))).thenAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            if (args.length == 4) {
+                return java.util.List.of(java.util.Map.of("media_type", "IMAGE", "status", "READY"));
+            }
+            String key = (String) args[4];
+            String snapshot = "a".equals(key)
+                    ? "{\"prompt\":\"猫\",\"modelRowId\":7,\"size\":\"1024*1024\"}"
+                    : "{\"prompt\":\"推镜\",\"modelRowId\":9,\"seconds\":5,\"imageAssetIds\":[\"{{a.assetId}}\"]}";
+            return java.util.List.of(java.util.Map.of("status", "SUCCEEDED", "message", "",
+                    "output", "{\"assetId\":\"00000000-0000-0000-0000-00000000000a\"}",
+                    "snapshot_params", snapshot));
+        });
+        var validation = service.validateRun(actor, project,
+                new CreativeCanvasService.RunRequest("up_to", "b", 1L, "k"));
+        Assertions.assertEquals(1, validation.executableNodes(), "配置未变的已成功祖先继续复用");
+        Assertions.assertTrue(validation.warnings().isEmpty());
+    }
+
+    @Test
     void upToAlwaysRerunsSelectedNodeEvenWhenItAlreadySucceeded() throws Exception {
         var graph = readGraph("""
                 {"nodes":[

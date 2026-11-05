@@ -99,12 +99,18 @@ public class CreativeCanvasService {
     public ValidationView validateRun(CurrentActor actor, UUID projectId, RunRequest request) {
         CanvasView canvas = requireRevision(actor, projectId, request);
         String scope = normalizeScope(request.scope());
-        Set<String> skips = resolveUpToSkips(actor, projectId, canvas.graph(), scope, request.nodeId());
+        UpToPlan plan = resolveUpToPlan(actor, projectId, canvas.graph(), scope, request.nodeId());
+        Set<String> skips = plan.skips();
         PreparedGraph prepared = prepareGraph(
                 withVerifiedParents(actor, projectId, canvas.graph(), scope, request.nodeId(), skips), scope, request.nodeId(), skips);
         validateAssets(actor, prepared.literalAssetIds());
-        List<String> warnings = prepared.nodeIds().size() > 6
-                ? List.of("本次将生成 " + prepared.nodeIds().size() + " 个媒体节点，请确认模型费用") : List.of();
+        List<String> warnings = new ArrayList<>();
+        if (!plan.reRunLabels().isEmpty()) {
+            warnings.add("检测到配置变更，将重新执行并更新下游：" + String.join("、", plan.reRunLabels()));
+        }
+        if (prepared.nodeIds().size() > 6) {
+            warnings.add("本次将生成 " + prepared.nodeIds().size() + " 个媒体节点，请确认模型费用");
+        }
         return new ValidationView(prepared.nodeIds().size(), warnings);
     }
 
@@ -116,7 +122,8 @@ public class CreativeCanvasService {
         }
         CanvasView canvas = requireRevision(actor, projectId, request);
         String scope = normalizeScope(request.scope());
-        Set<String> skips = resolveUpToSkips(actor, projectId, canvas.graph(), scope, request.nodeId());
+        UpToPlan plan = resolveUpToPlan(actor, projectId, canvas.graph(), scope, request.nodeId());
+        Set<String> skips = plan.skips();
         PreparedGraph prepared = prepareGraph(
                 withVerifiedParents(actor, projectId, canvas.graph(), scope, request.nodeId(), skips), scope, request.nodeId(), skips);
         validateAssets(actor, prepared.literalAssetIds());
@@ -418,22 +425,28 @@ public class CreativeCanvasService {
         }
     }
 
-    // For up_to runs: skip ancestors whose latest persisted execution SUCCEEDED (their output is
-    // re-attached by withVerifiedParents), block while an ancestor is still generating, and re-run
-    // everything else (failed, cancelled, skipped or never executed).
-    private Set<String> resolveUpToSkips(CurrentActor actor, UUID projectId, JsonNode graph,
-                                         String scope, String nodeId) {
-        if (!"up_to".equals(scope)) return Set.of();
+    /**
+     * up_to 执行计划：已成功且配置未变的祖先跳过（withVerifiedParents 复用其产物）；
+     * 配置与上次运行快照不一致的祖先（提示词/模型/尺寸/新增参考图）重新执行，
+     * 并沿内容边（提示词/图片，不含执行顺序边）向下传播——上游产物变化时下游结果即过期。
+     * 处于生成中的祖先阻断执行；失败/取消/未运行的一律重跑。
+     */
+    private UpToPlan resolveUpToPlan(CurrentActor actor, UUID projectId, JsonNode graph,
+                                     String scope, String nodeId) {
+        if (!"up_to".equals(scope)) return new UpToPlan(Set.of(), List.of());
         Map<String, JsonNode> nodes = new LinkedHashMap<>();
         graph.path("nodes").forEach(node -> nodes.put(node.path("id").asText(), node));
         List<JsonNode> edges = new ArrayList<>();
         graph.path("edges").forEach(edges::add);
+        Set<String> candidates = includedNodes(nodes, edges, scope, nodeId, Set.of());
         Set<String> skips = new LinkedHashSet<>();
-        for (String id : includedNodes(nodes, edges, scope, nodeId, Set.of())) {
+        Set<String> stale = new LinkedHashSet<>();
+        for (String id : candidates) {
             Map<String, Object> row = latestExecution(actor, projectId, id);
             String status = row == null ? "" : String.valueOf(row.get("status"));
             if ("SUCCEEDED".equals(status)) {
-                skips.add(id);
+                if (configChangedSinceRun(id, nodes, edges, row)) stale.add(id);
+                else skips.add(id);
             } else if ("RUNNING".equals(status)) {
                 Object message = row.get("message");
                 String hint = message == null ? "" : String.valueOf(message).trim();
@@ -441,7 +454,68 @@ public class CreativeCanvasService {
                         + (hint.isBlank() ? "" : "（" + hint + "）") + "，请等待完成后再执行");
             }
         }
-        return skips;
+        // 内容依赖传播：上游重跑会改变提示词拼接或参考图，下游已成功结果随即过期
+        boolean propagated = true;
+        while (propagated) {
+            propagated = false;
+            for (String id : candidates) {
+                if (!skips.contains(id) || stale.contains(id)) continue;
+                for (JsonNode edge : edges) {
+                    if (!id.equals(edge.path("target").asText())) continue;
+                    JsonNode parent = nodes.get(edge.path("source").asText());
+                    if (parent == null || isFlowEdge(edge, parent.path("type").asText())) continue;
+                    if (stale.contains(parent.path("id").asText())) {
+                        stale.add(id);
+                        skips.remove(id);
+                        propagated = true;
+                        break;
+                    }
+                }
+            }
+        }
+        skips.remove(nodeId); // 选中节点始终重跑
+        return new UpToPlan(skips, stale.stream().map(id -> label(nodes.get(id))).toList());
+    }
+
+    /** 草稿配置与最近一次成功运行的快照参数是否不一致（提示词/模型/尺寸/新增参考图）。 */
+    private boolean configChangedSinceRun(String id, Map<String, JsonNode> nodes, List<JsonNode> edges,
+                                          Map<String, Object> row) {
+        Object snapshot = row.get("snapshot_params");
+        if (snapshot == null || "null".equals(String.valueOf(snapshot))) return false;
+        JsonNode params;
+        try {
+            params = read(String.valueOf(snapshot));
+        } catch (Exception ignored) {
+            return false;
+        }
+        JsonNode node = nodes.get(id);
+        String currentPrompt = effectivePrompt(id, nodes, edges, new HashSet<>());
+        if (!currentPrompt.equals(params.path("prompt").asText(""))) return true;
+        if (node.path("data").path("modelRowId").asLong(0) != params.path("modelRowId").asLong(0)) return true;
+        if ("video_generate".equals(node.path("type").asText())) {
+            if (node.path("data").path("seconds").asInt(5) != params.path("seconds").asInt(5)) return true;
+        } else if (!node.path("data").path("size").asText("1024*1024")
+                .equals(params.path("size").asText("1024*1024"))) {
+            return true;
+        }
+        Set<String> expectedReferences = new LinkedHashSet<>();
+        node.path("data").path("referenceAssetIds").forEach(item -> expectedReferences.add(item.asText()));
+        for (JsonNode edge : edges) {
+            if (!id.equals(edge.path("target").asText())) continue;
+            JsonNode parent = nodes.get(edge.path("source").asText());
+            if (parent == null || !"asset_input".equals(parent.path("type").asText())) continue;
+            if (isFlowEdge(edge, parent.path("type").asText()) || isTextEdge(edge, parent.path("type").asText())) continue;
+            parent.path("data").path("assetIds").forEach(item -> expectedReferences.add(item.asText()));
+        }
+        Set<String> snapshotLiterals = new LinkedHashSet<>();
+        params.path("imageAssetIds").forEach(item -> {
+            String value = item.asText();
+            if (!value.startsWith("{{")) snapshotLiterals.add(value);
+        });
+        return !snapshotLiterals.containsAll(expectedReferences);
+    }
+
+    record UpToPlan(Set<String> skips, List<String> reRunLabels) {
     }
 
     // Trust persisted executions, never the status/selectedAssetId submitted in the browser draft.
@@ -463,7 +537,9 @@ public class CreativeCanvasService {
 
     private Map<String, Object> latestExecution(CurrentActor actor, UUID projectId, String nodeId) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT step->>'status' AS status, step->>'message' AS message, step->>'output' AS output
+                SELECT step->>'status' AS status, step->>'message' AS message, step->>'output' AS output,
+                       (SELECT n->'params' FROM jsonb_array_elements(w.graph_snapshot->'nodes') AS n
+                         WHERE n->>'key' = step->>'key' LIMIT 1)::text AS snapshot_params
                 FROM creative_canvas_run c JOIN workflow_run w ON w.id = c.workflow_run_id
                 CROSS JOIN LATERAL jsonb_array_elements(w.steps) AS step
                 WHERE c.project_id = ? AND c.tenant_id = ? AND c.user_id = ? AND step->>'key' = ?

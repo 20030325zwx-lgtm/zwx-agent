@@ -51,7 +51,6 @@
 <script setup>
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { PROJECT_CTX } from './composables'
-import { getProjectSettings } from '../../../api'
 import StyleStage from '../../../components/creative/production/StyleStage.vue'
 import StoryStage from '../../../components/creative/production/StoryStage.vue'
 import ShotBoardStage from '../../../components/creative/production/ShotBoardStage.vue'
@@ -74,7 +73,7 @@ const STAGES = [
   { key: 'cut', label: '成片' }
 ]
 const stages = STAGES
-const targetSeconds = ref(0)
+const targetSeconds = computed(() => ctx.projectTargetSeconds?.value || 0)
 
 const activeStage = computed(() => {
   const stage = ctx.route?.query?.stage
@@ -93,17 +92,8 @@ const doneStages = computed(() => {
   return done
 })
 
-const videoStyle = ref('')
-watch(() => project.value?.id, loadSettings, { immediate: true })
-
-async function loadSettings() {
-  if (!projectId.value) return
-  try {
-    const settings = await getProjectSettings(projectId.value)
-    videoStyle.value = settings.videoStyle || ''
-    targetSeconds.value = Number(settings.videoTargetSeconds) || 0
-  } catch { /* 阶段栏完成度尽力而为 */ }
-}
+const videoStyle = computed(() => ctx.projectStyle?.value || '')
+watch(() => project.value?.id, () => { /* Shell 在路由切换时统一刷新设定 */ }, { immediate: true })
 
 const missingStage = computed(() => STAGES.find(stage => !doneStages.value.has(stage.key))?.key || 'cut')
 const missingHint = computed(() => {
@@ -117,8 +107,8 @@ const missingHint = computed(() => {
 })
 
 function onStyleSaved(saved) {
-  videoStyle.value = saved.videoStyle || ''
-  targetSeconds.value = Number(saved.videoTargetSeconds) || 0
+  if (ctx.projectStyle) ctx.projectStyle.value = saved.videoStyle || ''
+  if (ctx.projectTargetSeconds) ctx.projectTargetSeconds.value = Number(saved.videoTargetSeconds) || 0
 }
 
 function goStage(key) {

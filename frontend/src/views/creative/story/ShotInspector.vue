@@ -6,6 +6,7 @@
           <strong class="si-title">第 {{ shot.shotNumber }} 镜</strong>
           <span class="si-status" :class="'is-' + status">{{ statusLabel }}</span>
           <span class="cr-field-help">v{{ version }}</span>
+          <span class="si-save" :class="saveState">{{ saveLabel }}</span>
         </div>
         <div class="si-head-tools">
           <button type="button" class="si-tool" :disabled="moving" aria-label="上移镜头"
@@ -56,7 +57,10 @@
                   <span v-if="view.asset" class="cr-field-help">
                     {{ view.asset.width }}×{{ view.asset.height }} · {{ formatDuration(view.asset.durationMs) }}
                   </span>
-                  <span v-else class="cr-field-help">{{ view.candidate.source === 'UPLOAD' ? '上传' : '生成' }}</span>
+                  <span class="cr-field-help">{{ view.candidate.source === 'UPLOAD' ? '上传' : '生成' }}
+                    · {{ formatTime(view.candidate.createdAt) }}</span>
+                  <span v-if="isOutdated(view.candidate)" class="si-outdated"
+                        title="该候选基于当时的提示词/画风生成，与当前镜头设定不同">较早设定</span>
                 </span>
                 <span class="si-meta-actions">
                   <button v-if="view.candidate.status === 'CANDIDATE'" type="button" class="cr-primary"
@@ -118,39 +122,60 @@
         </section>
 
         <section class="si-section">
-          <div class="si-section-head"><h3>剧情意图</h3></div>
-          <textarea v-model="form.purpose" class="cr-textarea" rows="2" maxlength="20000"
-                    placeholder="观众此刻应理解什么，发生什么变化"></textarea>
-          <h4 class="si-sub">动作 / 表演</h4>
-          <textarea v-model="form.action" class="cr-textarea" rows="3" maxlength="20000"
-                    placeholder="动作部位、方向、速度、幅度；用可见动作表达情绪"></textarea>
-          <div class="si-row">
-            <label class="cr-field"><span class="cr-field-label"><span>景别 / 机位 / 运镜</span></span>
-              <input v-model="form.camera" class="cr-input" maxlength="200" /></label>
-            <label class="cr-field"><span class="cr-field-label"><span>目标时长（秒）</span></span>
-              <input v-model.number="form.durationTargetSeconds" class="cr-input" type="number" min="1" max="60" /></label>
+          <div class="si-section-head">
+            <h3>模型参数</h3>
+            <span class="cr-field-help">生成提交时按此执行</span>
           </div>
-          <h4 class="si-sub">对白 / 声音意图</h4>
-          <textarea v-model="form.dialogue" class="cr-textarea" rows="2" maxlength="20000"
-                    placeholder="台词、说话人、停顿；能力未验证时保留为后期制作要求"></textarea>
-          <h4 class="si-sub">衔接 / 连续性</h4>
-          <textarea v-model="form.continuity" class="cr-textarea" rows="2" maxlength="20000"
-                    placeholder="上一镜头结束与下一镜头开始的承接；服装/道具/天气"></textarea>
+          <dl class="si-params">
+            <div><dt>视频模型</dt><dd>{{ videoModelLabel }}</dd></div>
+            <div><dt>时长</dt><dd>{{ form.durationTargetSeconds }} 秒（档位支持以模型能力为准）</dd></div>
+            <div><dt>画风</dt><dd>{{ styleLabel }}</dd></div>
+          </dl>
         </section>
+
+        <details class="si-advanced">
+          <summary>高级剧情字段</summary>
+          <div class="si-advanced-body">
+            <label class="cr-field"><span class="cr-field-label"><span>剧情目的</span></span>
+              <textarea v-model="form.purpose" class="cr-textarea" rows="2" maxlength="20000"
+                        placeholder="观众此刻应理解什么，发生什么变化"></textarea>
+            </label>
+            <label class="cr-field"><span class="cr-field-label"><span>动作 / 表演</span></span>
+              <textarea v-model="form.action" class="cr-textarea" rows="3" maxlength="20000"
+                        placeholder="动作部位、方向、速度、幅度；用可见动作表达情绪"></textarea>
+            </label>
+            <div class="si-row">
+              <label class="cr-field"><span class="cr-field-label"><span>景别 / 机位 / 运镜</span></span>
+                <input v-model="form.camera" class="cr-input" maxlength="200" /></label>
+              <label class="cr-field"><span class="cr-field-label"><span>目标时长（秒）</span></span>
+                <input v-model.number="form.durationTargetSeconds" class="cr-input" type="number" min="1" max="60" /></label>
+            </div>
+            <label class="cr-field"><span class="cr-field-label"><span>对白 / 声音意图</span></span>
+              <textarea v-model="form.dialogue" class="cr-textarea" rows="2" maxlength="20000"
+                        placeholder="台词、说话人、停顿；能力未验证时保留为后期制作要求"></textarea>
+            </label>
+            <label class="cr-field"><span class="cr-field-label"><span>衔接 / 连续性</span></span>
+              <textarea v-model="form.continuity" class="cr-textarea" rows="2" maxlength="20000"
+                        placeholder="上一镜头结束与下一镜头开始的承接；服装/道具/天气"></textarea>
+            </label>
+          </div>
+        </details>
       </div>
     </aside>
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Check, Sparkles, X } from 'lucide-vue-next'
 import {
   createStoryShot, deleteShotCandidate, generateShotVideo, getStoryShot, listCreativeAssets,
   listShotCandidates, moveStoryShot, optimizeCreativePrompt, selectShotCandidate,
   unselectShotCandidate, updateStoryShot, uploadShotCandidate
 } from '../../../api'
-import { formatDuration, useVideoUrls } from '../shared'
+import { formatDuration, formatTime, useVideoUrls } from '../shared'
+import { PROJECT_CTX } from '../project/composables'
+import { listCreativePromptImageStyles } from '../../../api'
 import { CANDIDATE_STATUS_LABEL, SHOT_STATUS_LABEL } from '../project/helpers'
 import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
@@ -161,6 +186,13 @@ const props = defineProps({
   characters: { type: Array, default: () => [] },
   locations: { type: Array, default: () => [] }
 })
+// 模型参数区与「较早设定」标记需要目录与绑定：来自 Shell 的上下文，避免再发一遍目录请求
+const ctx = inject(PROJECT_CTX)
+let styleCatalogPromise = null
+const styleCatalog = ref([])
+styleCatalogPromise = styleCatalogPromise || listCreativePromptImageStyles()
+  .then(list => { styleCatalog.value = Array.isArray(list) ? list : [] })
+  .catch(() => {})
 const emit = defineEmits(['close', 'changed', 'inserted'])
 
 const { videoUrls, videoUrlFor } = useVideoUrls()
@@ -198,6 +230,28 @@ const dirty = computed(() => form.purpose !== saved.purpose
 const canGenerate = computed(() =>
   ['DRAFT', 'READY'].includes(status.value) && form.promptText.trim().length > 0)
 const statusLabel = computed(() => SHOT_STATUS_LABEL[status.value] || status.value)
+const saveLabel = computed(() => ({ saved: '已保存', saving: '保存中…', error: '保存失败' }[saveState.value] || ''))
+const videoModelLabel = computed(() => {
+  const binding = ctx?.videoBinding?.value
+  if (!binding?.modelName) return '未绑定（到 设置 → 模型绑定 配置）'
+  return `${binding.providerName || ''} / ${binding.modelName}`.replace(/^\s*\/\s*/, '')
+})
+const styleLabel = computed(() => {
+  // 展示当前实际生效的风格：镜头覆盖 > 项目默认
+  let code = ''
+  try {
+    const stored = props.shot.styleCode
+    code = stored || ctx?.projectStyle?.value || ''
+  } catch { code = '' }
+  if (!code) return '未指定'
+  return styleCatalog.value.find(style => style.code === code)?.label || code
+})
+// 候选基于当时的提示词/画风生成：与当前镜头提示词不同即视为较早设定（不阻止采用）
+function isOutdated(candidate) {
+  const generated = (candidate.promptText || '').trim()
+  const current = (props.shot.promptText || '').trim()
+  return Boolean(generated) && current && generated !== current
+}
 
 const candidateLabel = candidate => CANDIDATE_STATUS_LABEL[candidate.status] || candidate.status
 const videoAssetOptions = computed(() => videoAssets.value.map(asset => ({
@@ -437,8 +491,19 @@ onMounted(async () => {
 }
 .si-status.is-SELECTED { color: var(--wb-success); border-color: color-mix(in srgb, var(--wb-success) 40%, transparent); }
 .si-status.is-PENDING_SELECTION { color: var(--wb-warning); border-color: color-mix(in srgb, var(--wb-warning) 40%, transparent); }
+.si-outdated { padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, #d6ad5c 18%, transparent); color: #a35914; font-size: 10px; }
+.si-params { margin: 0; display: grid; gap: 5px; font-size: 12px; }
+.si-params div { display: grid; grid-template-columns: 72px 1fr; gap: 8px; }
+.si-params dt { color: var(--wb-muted); }
+.si-params dd { margin: 0; color: var(--wb-text); word-break: break-word; }
+.si-advanced { border-top: 1px solid var(--wb-border); padding-top: 10px; margin-top: 4px; }
+.si-advanced summary { cursor: pointer; color: var(--wb-muted); font-size: 12px; }
+.si-advanced-body { display: grid; gap: 10px; margin-top: 10px; }
 .si-status.is-GENERATING { color: var(--wb-info); border-color: color-mix(in srgb, var(--wb-info) 40%, transparent); }
 
+.si-save { font-size: 11px; color: var(--wb-muted); }
+.si-save.saving { color: #b4693a; }
+.si-save.error { color: var(--wb-danger, #c94c62); }
 .si-head-tools { display: inline-flex; align-items: center; gap: 4px; }
 .si-tool {
   display: inline-flex;

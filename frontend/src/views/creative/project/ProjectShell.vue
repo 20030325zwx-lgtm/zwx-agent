@@ -152,7 +152,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, BookOpen, Clapperboard, FileText, Images, LayoutGrid, ListChecks, RefreshCw, Users, Workflow
 } from 'lucide-vue-next'
-import { getCreativeProject, getCreativeJob, listModelCatalog } from '../../../api'
+import { getCreativeProject, getCreativeJob, getProjectSettings, listModelCatalog } from '../../../api'
 import { downloadBlob, formatBytes, formatTime, kindLabel, retryNeedsRiskAcknowledgement, statusMeta, useAssetUrls, useVideoUrls } from '../shared'
 import { blockedText, isVideoJob, sourceLabel } from './helpers'
 import { PROJECT_CTX, useProjectJobs, useStoryWorkspace } from './composables'
@@ -186,6 +186,9 @@ function showToast(text, tone = '') {
 
 const jobsStore = useProjectJobs(projectId, showToast)
 const isVideo = computed(() => project.value?.kind === 'VIDEO')
+// 项目画风：制作视图保存后全局生效（画布节点/镜头生成默认继承），这里只读提供
+const projectStyle = ref('')
+const projectTargetSeconds = ref(0)
 const story = useStoryWorkspace(projectId, isVideo)
 
 const activeKey = computed(() => {
@@ -239,7 +242,14 @@ async function loadProject() {
     return
   }
   await Promise.all([loadCatalog(), jobsStore.load()])
-  if (isVideo.value) await story.reload()
+  if (isVideo.value) {
+    await story.reload()
+    try {
+      const settings = await getProjectSettings(projectId.value)
+      projectStyle.value = settings.videoStyle || ''
+      projectTargetSeconds.value = Number(settings.videoTargetSeconds) || 0
+    } catch { /* 设定读取失败不阻断 */ }
+  }
 }
 
 async function loadCatalog() {
@@ -310,6 +320,8 @@ provide(PROJECT_CTX, {
   imageProtocol,
   jobsStore,
   story,
+  projectStyle,
+  projectTargetSeconds,
   showToast,
   openJob,
   urls,
@@ -317,6 +329,15 @@ provide(PROJECT_CTX, {
   videoUrlFor,
   route,
   router
+})
+
+// 路由切换时刷新项目画风：制作视图保存后，画布/检查器无需整页刷新即可继承
+watch(() => route.path, () => {
+  if (!isVideo.value) return
+  getProjectSettings(projectId.value).then(settings => {
+    projectStyle.value = settings.videoStyle || ''
+    projectTargetSeconds.value = Number(settings.videoTargetSeconds) || 0
+  }).catch(() => {})
 })
 
 // 产物预览地址在 Shell 预取：任务抽屉、快速生成结果卡与素材卡共用同一份缓存

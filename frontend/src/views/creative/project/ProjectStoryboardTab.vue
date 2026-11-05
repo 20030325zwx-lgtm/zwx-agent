@@ -72,6 +72,12 @@
         <div class="sb-tools">
           <DropdownSelect v-model="sceneFilter" class="sb-scene" size="sm" :options="sceneOptions"
                           placeholder="全部场次" aria-label="按场次筛选" />
+          <div class="sb-view-toggle" role="radiogroup" aria-label="视图切换">
+            <button type="button" :class="{ on: viewMode === 'card' }" aria-label="卡片视图"
+                    @click="viewMode = 'card'">卡片</button>
+            <button type="button" :class="{ on: viewMode === 'table' }" aria-label="表格视图"
+                    @click="viewMode = 'table'">表格</button>
+          </div>
           <button type="button" class="cr-ghost" @click="toggleSelectAll">
             {{ allSelected ? '取消全选' : '全选可生成' }}
           </button>
@@ -82,6 +88,47 @@
         还没有镜头。先在「剧情」页建场次，再回到这里「加镜头」并写提示词。
       </p>
       <p v-else-if="!visibleShots.length" class="cr-empty">当前筛选下没有镜头。</p>
+      <div v-else-if="viewMode === 'table'" class="sb-table-wrap">
+        <table class="sb-table">
+          <thead>
+            <tr>
+              <th class="col-check"><input type="checkbox" :checked="allSelected" aria-label="全选可生成"
+                                           @change="toggleSelectAll" /></th>
+              <th class="col-no">序号</th>
+              <th class="col-preview">预览</th>
+              <th class="col-seconds">时长</th>
+              <th class="col-action">画面与动作</th>
+              <th class="col-lines">台词摘要</th>
+              <th class="col-assets">候选素材</th>
+              <th class="col-status">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="view in cardViews" :key="view.shot.id" class="sb-row"
+                :class="{ checked: selectedShots.has(view.shot.id) }" @click="openInspector(view.shot)">
+              <td class="col-check" @click.stop>
+                <input v-if="selectableShots.some(item => item.id === view.shot.id)" type="checkbox"
+                       :checked="selectedShots.has(view.shot.id)" :aria-label="`选择 ${itemLabel(view.shot)}`"
+                       @change="toggleSelect(view.shot.id)" />
+              </td>
+              <td class="col-no">{{ sceneLabelOf(view.shot) }}·{{ String(view.shot.shotNumber).padStart(2, '0') }}</td>
+              <td class="col-preview">
+                <video v-if="view.assetId && previewUrl(view)" :src="previewUrl(view)" muted preload="metadata"
+                       :aria-label="`${itemLabel(view.shot)} 预览`"></video>
+                <span v-else class="cell-placeholder">{{ view.assetId ? '加载中…' : '未生成' }}</span>
+              </td>
+              <td class="col-seconds">{{ view.shot.durationTargetSeconds }}s</td>
+              <td class="col-action">
+                <strong>{{ view.shot.purpose || '—' }}</strong>
+                <p>{{ view.shot.action || view.shot.camera || '' }}</p>
+              </td>
+              <td class="col-lines">{{ view.shot.dialogue || '—' }}</td>
+              <td class="col-assets">{{ assetSummary(view) }}</td>
+              <td class="col-status"><span class="cell-status">{{ SHOT_STATUS_LABEL[view.shot.status] || view.shot.status }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-else class="sb-grid">
         <ShotCard
           v-for="view in cardViews"
@@ -131,7 +178,7 @@ import {
   createStoryBatch, createStoryShot, getStoryBatch, listStoryBatches, retryStoryBatch, stopStoryBatch
 } from '../../../api'
 import { PROJECT_CTX } from './composables'
-import { BATCH_ITEM_STATUS_LABEL, BATCH_STATUS_LABEL } from './helpers'
+import { BATCH_ITEM_STATUS_LABEL, BATCH_STATUS_LABEL, SHOT_STATUS_LABEL } from './helpers'
 import ShotCard from '../../../components/creative/project/ShotCard.vue'
 import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 import ShotInspector from '../story/ShotInspector.vue'
@@ -148,7 +195,20 @@ const batches = ref([])
 const batchViews = ref([])
 const addShotOpen = ref(false)
 const addShotScene = ref('')
+const viewMode = ref(localStorage.getItem('aster.storyboard.view') === 'table' ? 'table' : 'card')
 let batchTimer = null
+watch(viewMode, value => {
+  try { localStorage.setItem('aster.storyboard.view', value) } catch { /* 无痕模式忽略 */ }
+})
+function itemLabel(shot) {
+  return `${sceneLabelOf(shot)}·${String(shot.shotNumber).padStart(2, '0')}`
+}
+function assetSummary(view) {
+  const candidates = view.candidates || []
+  if (!candidates.length) return '—'
+  const selected = candidates.filter(item => item.status === 'SELECTED').length
+  return selected ? `已采用 ${selected} / 共 ${candidates.length}` : `共 ${candidates.length}`
+}
 
 const shots = computed(() => story.shots.value)
 const scenes = computed(() => story.scenes.value)
@@ -372,6 +432,29 @@ onBeforeUnmount(() => window.clearTimeout(batchTimer))
 .batch-STOPPED { color: var(--wb-muted); }
 .batch-progress { color: var(--wb-muted); font-size: var(--wb-fs-caption); }
 .batch-progress em { font-style: normal; color: var(--wb-warning); }
+.sb-view-toggle { display: inline-flex; border: 1px solid var(--wb-border); border-radius: 7px; overflow: hidden; }
+.sb-view-toggle button { height: 26px; padding: 0 10px; border: 0; background: transparent; color: var(--wb-muted); font-size: 11px; cursor: pointer; }
+.sb-view-toggle button.on { background: var(--wb-brand-soft, rgb(102 84 199 / 12%)); color: var(--wb-brand, #6466d5); }
+.sb-table-wrap { border: 1px solid var(--wb-border); border-radius: 10px; background: var(--wb-surface); overflow: auto; max-height: calc(100vh - 320px); }
+.sb-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sb-table th { position: sticky; top: 0; z-index: 1; background: var(--wb-surface-2, #f2f3f5); color: var(--wb-muted); font-weight: 500; text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--wb-border); white-space: nowrap; }
+.sb-table td { padding: 8px 10px; border-bottom: 1px solid var(--wb-border); vertical-align: top; }
+.sb-row { cursor: pointer; }
+.sb-row:hover { background: var(--wb-fill, #f5f6fa); }
+.sb-row.checked { background: var(--wb-brand-soft, rgb(102 84 199 / 8%)); }
+.col-check { width: 48px; text-align: center; }
+.col-no { width: 96px; white-space: nowrap; }
+.col-preview { width: 144px; }
+.col-preview video { width: 144px; height: 81px; object-fit: cover; border-radius: 6px; background: var(--cr-media-stage, #101113); display: block; }
+.col-seconds { width: 72px; white-space: nowrap; }
+.col-action { min-width: 220px; }
+.col-action strong { display: block; font-weight: 550; color: var(--wb-text); }
+.col-action p { margin: 3px 0 0; color: var(--wb-muted); font-size: 11px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.col-lines { width: 160px; color: var(--wb-text-2); max-width: 160px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.col-assets { width: 144px; color: var(--wb-text-2); white-space: nowrap; }
+.col-status { width: 104px; }
+.cell-status { padding: 2px 8px; border-radius: 999px; background: var(--wb-fill); font-size: 11px; }
+.cell-placeholder { display: flex; align-items: center; justify-content: center; width: 144px; height: 81px; border-radius: 6px; background: var(--cr-media-stage, #101113); color: var(--wb-muted); font-size: 11px; }
 .batch-actions { margin-left: auto; display: flex; gap: 6px; }
 .batch-items { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 

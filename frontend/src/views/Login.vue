@@ -91,6 +91,12 @@
           </span>
         </label>
 
+        <label class="lg-remember">
+          <input v-model="remember" type="checkbox" :disabled="loading" @change="forgetWhenUnchecked" />
+          <span>记住密码</span>
+          <small>仅保存在本机浏览器，公共设备请勿勾选</small>
+        </label>
+
         <p v-if="error" class="lg-error" role="alert">{{ error }}</p>
 
         <button class="lg-submit" type="submit" :disabled="loading">
@@ -115,13 +121,49 @@ import { reduceMotion } from '../design/apply-tokens'
 
 const router = useRouter()
 
-// 仅开发模式（vite dev）才预填账号密码：生产构建一律留空，
-// 防止 VITE_DEFAULT_ADMIN_* 被内联进公开 JS 包（参见 docs/bugs/bug-2026-11-03-login-secret-bundle.txt）
+// 仅开发模式（vite dev）才预填用户名：生产构建一律留空，
+// 防止 VITE_DEFAULT_ADMIN_* 被内联进公开 JS 包（参见 docs/bugs/bug-2026-11-03-login-secret-bundle.txt）。
+// 密码永远不预填；勾选「记住密码」后由本机浏览器自行保存。
 const devPrefill = import.meta.env.DEV
-const defaultAdminUsername = devPrefill ? (import.meta.env.VITE_DEFAULT_ADMIN_USERNAME || '') : ''
-const defaultAdminPassword = devPrefill ? (import.meta.env.VITE_DEFAULT_ADMIN_PASSWORD || '') : ''
-const username = ref(defaultAdminUsername)
-const password = ref(defaultAdminPassword)
+const defaultAdminUsername = devPrefill ? (import.meta.env.VITE_DEFAULT_ADMIN_USERNAME || 'admin') : ''
+
+// 记住密码：只做 Base64 编码存放，属于本机便利功能而非加密，
+// 浏览器本地存储可被同源脚本读取——公共设备上不要勾选。
+const REMEMBER_KEY = 'aster.login.remembered'
+
+const readRemembered = () => {
+  try {
+    const raw = localStorage.getItem(REMEMBER_KEY)
+    if (!raw || !raw.startsWith('v1:')) return null
+    const binary = atob(raw.slice(3))
+    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+    const saved = JSON.parse(new TextDecoder().decode(bytes))
+    return typeof saved?.username === 'string' ? saved : null
+  } catch (error) {
+    return null
+  }
+}
+
+const rememberCredentials = (name, secret) => {
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify({ username: name, password: secret }))
+    let binary = ''
+    bytes.forEach(byte => { binary += String.fromCharCode(byte) })
+    localStorage.setItem(REMEMBER_KEY, `v1:${btoa(binary)}`)
+  } catch (error) {
+    // 隐私模式等场景写入失败时静默降级为不记住
+  }
+}
+
+const remembered = readRemembered()
+const username = ref(remembered?.username || defaultAdminUsername)
+const password = ref(remembered?.password || '')
+const remember = ref(!!remembered)
+
+// 取消勾选即刻清除本机保存的密码，避免「以为没记住、实际还留着」
+const forgetWhenUnchecked = () => {
+  if (!remember.value) localStorage.removeItem(REMEMBER_KEY)
+}
 const passwordVisible = ref(false)
 const error = ref('')
 const loading = ref(false)
@@ -139,6 +181,8 @@ const submit = async () => {
   error.value = ''
   try {
     await login(username.value, password.value)
+    if (remember.value) rememberCredentials(username.value, password.value)
+    else localStorage.removeItem(REMEMBER_KEY)
     const redirect = router.currentRoute.value.query.redirect
     await router.replace(typeof redirect === 'string' && redirect.startsWith('/') ? redirect : '/')
   } catch (requestError) {
@@ -426,6 +470,30 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .lg-eye:hover { background: #e9e8e4; color: #202124; }
+
+.lg-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -2px;
+  color: #52545a;
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.lg-remember input {
+  width: 15px;
+  height: 15px;
+  accent-color: #6654c7;
+  cursor: pointer;
+}
+
+.lg-remember small {
+  margin-left: auto;
+  color: #9a9da6;
+  font-size: 11px;
+}
 
 .lg-error {
   margin: 0;

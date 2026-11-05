@@ -10,13 +10,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.regex.Pattern;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -42,7 +45,11 @@ public class AuthController {
         this.registrationEnabled = registrationEnabled;
     }
 
-    public record AuthRequest(@NotBlank String username, @NotBlank String password) {
+    public record AuthRequest(@NotBlank String username, @NotBlank String password, String role) {
+        /** 登录/注册沿用两参数构造，管理员开户可额外指定角色。 */
+        public AuthRequest(String username, String password) {
+            this(username, password, null);
+        }
     }
 
     public record AuthResponse(String token, String username, String tenantId, String role) {
@@ -74,7 +81,7 @@ public class AuthController {
     }
 
     /**
-     * 管理员开户：为无人值守场景（评测/后台任务）预置隔离账号。
+     * 管理员开户：为无人值守场景（评测/后台任务）预置隔离账号，也供「用户管理」添加账号。
      * 公共注册仍受 registration-enabled 控制；本接口必须携带管理员 JWT。
      */
     @PostMapping("/users")
@@ -92,11 +99,56 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists");
         }
         AppUser user = userRepository.insert(actor.tenantId(), username,
-                passwordEncoder.encode(request.password()), Role.USER);
-        return new UserView(user.id(), user.username(), user.tenantId(), user.role().name());
+                passwordEncoder.encode(request.password()), resolveInviteRole(request.role()));
+        return toUserView(user);
     }
 
-    public record UserView(String id, String username, String tenantId, String role) {
+    /** 管理员查看本租户账号列表。 */
+    @GetMapping("/users")
+    public List<UserView> listUsers(CurrentActor actor) {
+        actor.requireAdmin();
+        return userRepository.findByTenant(actor.tenantId()).stream().map(this::toUserView).toList();
+    }
+
+    /**
+     * 管理员删除本租户账号：不允许删除自己，也不允许删掉租户内最后一个管理员。
+     * 只删除账号本身；该账号产生的会话、运行等历史数据保留。
+     */
+    @DeleteMapping("/users/{id}")
+    public void deleteUser(CurrentActor actor, @PathVariable String id) {
+        actor.requireAdmin();
+        if (actor.userId().equals(id)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot delete the signed-in account");
+        }
+        AppUser target = userRepository.findById(id)
+                .filter(user -> actor.tenantId().equals(user.tenantId()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        if (target.role() == Role.ADMIN
+                && userRepository.countByTenantAndRole(actor.tenantId(), Role.ADMIN) <= 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "At least one administrator must remain");
+        }
+        userRepository.deleteById(id, actor.tenantId());
+    }
+
+    public record UserView(String id, String username, String tenantId, String role, String status) {
+    }
+
+    private UserView toUserView(AppUser user) {
+        return new UserView(user.id(), user.username(), user.tenantId(), user.role().name(), user.status());
+    }
+
+    private Role resolveInviteRole(String rawRole) {
+        if (rawRole == null || rawRole.isBlank()) return Role.USER;
+        Role role;
+        try {
+            role = Role.valueOf(rawRole.trim().toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown role");
+        }
+        if (role != Role.USER && role != Role.ADMIN) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only USER or ADMIN can be provisioned");
+        }
+        return role;
     }
 
     @PostMapping("/token")

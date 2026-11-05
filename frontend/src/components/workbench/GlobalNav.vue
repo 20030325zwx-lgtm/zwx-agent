@@ -66,33 +66,81 @@
         <component :is="themeIcon" :size="18" :stroke-width="1.9" />
         <span class="wb-nav-label">{{ themeShort }}</span>
       </button>
-      <router-link to="/settings/model" class="wb-nav-item" title="设置" aria-label="设置">
+      <router-link to="/settings/model" class="wb-nav-item" title="模型设置" aria-label="模型设置">
         <Settings :size="19" :stroke-width="1.9" />
-        <span class="wb-nav-label">设置</span>
+        <span class="wb-nav-label">模型设置</span>
       </router-link>
-      <div class="wb-nav-user" :title="userName">
+      <router-link
+        v-if="isAdmin"
+        to="/users"
+        class="wb-nav-item"
+        title="用户管理"
+        aria-label="用户管理"
+      >
+        <Users :size="19" :stroke-width="1.9" />
+        <span class="wb-nav-label">用户管理</span>
+      </router-link>
+      <button
+        ref="userTrigger"
+        type="button"
+        class="wb-nav-item wb-nav-user"
+        :title="userName"
+        :aria-expanded="userMenuOpen"
+        aria-haspopup="menu"
+        aria-label="账号菜单"
+        @click.stop="toggleUserMenu"
+      >
         <span class="wb-nav-user-badge">{{ userInitial }}</span>
         <span class="wb-nav-label">{{ userName }}</span>
-      </div>
+      </button>
     </div>
+
+    <!-- 账号菜单：个人信息 + 退出登录；固定定位，避免被导航栏 overflow 裁剪 -->
+    <Teleport to="body">
+      <div
+        v-if="userMenuOpen"
+        ref="userMenu"
+        class="wb-user-popover"
+        role="menu"
+        :style="userMenuStyle"
+      >
+        <p class="wb-user-section">个人信息</p>
+        <div class="wb-user-card">
+          <span class="wb-nav-user-badge large">{{ userInitial }}</span>
+          <div class="wb-user-copy">
+            <strong>{{ userName }}</strong>
+            <small>{{ roleLabel }}</small>
+          </div>
+        </div>
+        <dl class="wb-user-meta">
+          <div><dt>账号</dt><dd>{{ userName }}</dd></div>
+          <div><dt>角色</dt><dd>{{ roleLabel }}</dd></div>
+        </dl>
+        <button class="wb-user-logout" type="button" role="menuitem" @click="handleLogout">
+          <LogOut :size="15" :stroke-width="1.9" />
+          <span>退出登录</span>
+        </button>
+      </div>
+    </Teleport>
   </nav>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog,
+  Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog, LogOut,
   PanelLeftClose, PanelLeftOpen, Workflow, Palette, FolderOpen, Images, Sparkles,
-  Activity
+  Activity, Users
 } from 'lucide-vue-next'
 import AsterMark from '../AsterMark.vue'
 import ActivityDrawer from '../creative/ActivityDrawer.vue'
 import { resolvedTheme, themeMode, setThemeMode } from '../../design/apply-tokens'
 import { useCreativeActivity } from '../../views/creative/activity'
-import { getCurrentUser } from '../../api/auth'
+import { getCurrentUser, logout } from '../../api/auth'
 
 const route = useRoute()
+const router = useRouter()
 const { activeCount, attentionCount } = useCreativeActivity()
 const activityOpen = ref(false)
 const activityTitle = computed(() => (
@@ -114,8 +162,16 @@ function handleViewportChange() {
   if (window.innerWidth < NARROW_BREAKPOINT) collapsed.value = true
   else collapsed.value = storedCollapsed
 }
-onMounted(() => window.addEventListener('resize', handleViewportChange))
-onBeforeUnmount(() => window.removeEventListener('resize', handleViewportChange))
+onMounted(() => {
+  window.addEventListener('resize', handleViewportChange)
+  document.addEventListener('click', closeUserMenu)
+  document.addEventListener('keydown', handleKeydown)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleViewportChange)
+  document.removeEventListener('click', closeUserMenu)
+  document.removeEventListener('keydown', handleKeydown)
+})
 
 // 一级导航（redesign §3.1）：创作 / 我的创作 / 素材库 / 技能 4 项；
 // 任务页退为「全部生成记录」深层入口（活动抽屉可直达），系统模块收进「更多」。
@@ -137,6 +193,51 @@ const items = [...primaryItems, ...secondaryItems]
 const user = computed(() => getCurrentUser() || {})
 const userName = computed(() => user.value?.username || '本机用户')
 const userInitial = computed(() => (userName.value || 'A').slice(0, 1).toUpperCase())
+const isAdmin = computed(() => user.value?.role === 'ADMIN')
+const roleLabel = computed(() => ({
+  ADMIN: '管理员',
+  REVIEWER: '审核员',
+  WORKFLOW: '工作流账号',
+  USER: '成员'
+}[user.value?.role] || '成员'))
+
+// 账号菜单：fixed 定位到头像上方，折叠态也不会被导航栏裁剪
+const userTrigger = ref(null)
+const userMenu = ref(null)
+const userMenuOpen = ref(false)
+const userMenuStyle = reactive({ left: '8px', bottom: '8px' })
+
+function toggleUserMenu() {
+  if (userMenuOpen.value) {
+    userMenuOpen.value = false
+    return
+  }
+  const rect = userTrigger.value?.getBoundingClientRect()
+  if (!rect) return
+  const width = 240
+  userMenuStyle.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`
+  userMenuStyle.bottom = `${Math.max(8, window.innerHeight - rect.top + 8)}px`
+  userMenuOpen.value = true
+}
+
+function closeUserMenu(event) {
+  if (!userMenuOpen.value) return
+  const target = event.target
+  if (userTrigger.value?.contains(target) || userMenu.value?.contains(target)) return
+  userMenuOpen.value = false
+}
+
+function handleKeydown(event) {
+  if (event.key === 'Escape') userMenuOpen.value = false
+}
+
+function handleLogout() {
+  userMenuOpen.value = false
+  logout()
+  router.replace({ name: 'Login' })
+}
+
+watch(() => route.fullPath, () => { userMenuOpen.value = false })
 
 const themeIcon = computed(() => {
   if (themeMode.value === 'system') return MonitorCog
@@ -417,11 +518,23 @@ function cycleTheme() {
   align-items: center;
   gap: 10px;
   height: 38px;
+  width: 100%;
   margin-top: 4px;
   padding: 0 10px;
+  border: 0;
   border-radius: 10px;
   background: var(--wb-fill);
+  color: var(--wb-text-2);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
   white-space: nowrap;
+}
+
+.wb-nav-user:hover {
+  background: var(--wb-fill-hover);
+  color: var(--wb-text);
 }
 
 .wb-nav.collapsed .wb-nav-user {
@@ -444,6 +557,108 @@ function cycleTheme() {
 
 .wb-nav.collapsed .wb-nav-user .wb-nav-label {
   display: none;
+}
+
+/* 账号菜单（Teleport 到 body，样式沿用 wb 令牌） */
+.wb-user-popover {
+  position: fixed;
+  z-index: 120;
+  width: 240px;
+  padding: 12px;
+  border: 1px solid var(--wb-border);
+  border-radius: 12px;
+  background: var(--wb-surface);
+  box-shadow: var(--wb-shadow-md);
+}
+
+.wb-user-section {
+  margin: 0 2px 8px;
+  color: var(--wb-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.wb-user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--wb-surface-2);
+}
+
+.wb-nav-user-badge.large {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  font-size: 14px;
+}
+
+.wb-user-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wb-user-copy strong {
+  overflow: hidden;
+  color: var(--wb-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-user-copy small {
+  color: var(--wb-muted);
+  font-size: 11.5px;
+}
+
+.wb-user-meta {
+  display: grid;
+  gap: 6px;
+  margin: 10px 2px 12px;
+}
+
+.wb-user-meta div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.wb-user-meta dt {
+  color: var(--wb-muted);
+}
+
+.wb-user-meta dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--wb-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-user-logout {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--wb-danger);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.wb-user-logout:hover {
+  background: rgba(226, 61, 90, 0.1);
 }
 
 /* 折叠态悬浮提示：折叠时隐藏文字，悬停显示原生 title 兜底 */

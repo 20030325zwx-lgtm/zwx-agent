@@ -60,3 +60,25 @@ export const register = async (username, password) => {
 }
 
 export const logout = () => clearSession()
+
+// 管理员用户管理：authClient 与主请求实例分离，这里显式带令牌/桌面回环令牌
+const authHeaders = () => {
+  const headers = { ...localTokenHeader() }
+  const token = getToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
+export const listUsers = async () => {
+  const { data } = await authClient.get('/auth/users', { headers: authHeaders() })
+  return data
+}
+
+export const createUser = async ({ username, password, role }) => {
+  const { data } = await authClient.post('/auth/users', { username, password, role }, { headers: authHeaders() })
+  return data
+}
+
+export const deleteUser = async userId => {
+  await authClient.delete(`/auth/users/${userId}`, { headers: authHeaders() })
+}

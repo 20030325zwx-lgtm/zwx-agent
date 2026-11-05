@@ -181,6 +181,16 @@ const routes = [
         }
       },
       {
+        // 管理员用户管理：入口只在全局导航对 ADMIN 展示，接口侧同样做管理员校验
+        path: 'users',
+        name: 'UserManagement',
+        component: () => import('../views/UserManagement.vue'),
+        meta: {
+          title: '用户管理 - Aster',
+          description: '管理员添加与删除本租户账号。'
+        }
+      },
+      {
         // 设置中心：统一分类外壳，内部页面逐步迁移为工作台样式
         path: 'settings',
         component: () => import('../components/workbench/SettingsLayout.vue'),

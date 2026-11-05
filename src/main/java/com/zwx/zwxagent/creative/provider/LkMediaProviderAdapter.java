@@ -34,6 +34,9 @@ import java.util.Map;
 @Component
 public class LkMediaProviderAdapter implements MediaProviderAdapter {
 
+    /** 平台 base64 图片上限 10MB（gk-video-3.5 契约）。 */
+    private static final long MAX_BASE64_IMAGE_BYTES = 10L * 1024 * 1024;
+
     private static final String DEFAULT_ASPECT_RATIO = "16:9";
     private static final String DEFAULT_RESOLUTION = "720p";
     private static final String DEFAULT_DURATION = "5";
@@ -63,19 +66,30 @@ public class LkMediaProviderAdapter implements MediaProviderAdapter {
         return send(model, input, reference);
     }
 
+    /** 首帧引用：优先用可公网读取的 URL；没有 URL 时按平台契约改传 data:base64（≤10MB）。 */
+    private static String referenceImage(ReferenceAsset reference) {
+        String externalUrl = reference.externalUrl();
+        if (externalUrl != null && !externalUrl.isBlank()) return externalUrl;
+        byte[] bytes = reference.bytes();
+        if (bytes == null || bytes.length == 0 || bytes.length > MAX_BASE64_IMAGE_BYTES) return null;
+        String mime = reference.mimeType() == null || reference.mimeType().isBlank()
+                ? "image/png" : reference.mimeType();
+        return "data:" + mime + ";base64," + java.util.Base64.getEncoder().encodeToString(bytes);
+    }
+
     private SubmitResult send(ResolvedMediaModel model, InputSnapshot input, ReferenceAsset reference) {
         if (reference == null) {
             return SubmitResult.rejected("REFERENCE_REQUIRED",
                     "该视频模型只支持图生视频：请提供一张首帧图片（参考素材）后再提交");
         }
-        String externalUrl = reference.externalUrl();
-        if (externalUrl == null || externalUrl.isBlank()) {
-            return SubmitResult.rejected("REFERENCE_URL_UNAVAILABLE",
-                    "该视频模型需要供应商可读取的首帧图链接；当前素材使用本地存储，请启用 OSS 后重试");
+        String imageReference = referenceImage(reference);
+        if (imageReference == null) {
+            return SubmitResult.rejected("REFERENCE_UNAVAILABLE",
+                    "首帧图不可用：对象存储未提供可读取地址，且图片超过 10MB 的 base64 上限");
         }
         var params = new LinkedHashMap<String, Object>();
         List<String> images = new ArrayList<>();
-        images.add(externalUrl);
+        images.add(imageReference);
         params.put("images", images);
         String seconds = String.valueOf(input.parameters().getOrDefault("seconds", "")).trim();
         params.put("duration", seconds.isBlank() ? DEFAULT_DURATION : seconds);

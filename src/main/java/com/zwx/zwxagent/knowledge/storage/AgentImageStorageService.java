@@ -1,8 +1,6 @@
 package com.zwx.zwxagent.knowledge.storage;
 
-import com.aliyun.oss.HttpMethod;
-import com.aliyun.oss.model.GeneratePresignedUrlRequest;
-import com.aliyun.oss.model.ObjectMetadata;
+import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -20,17 +18,14 @@ public class AgentImageStorageService {
     private static final List<String> ALLOWED_TYPES = List.of(
             "image/jpeg", "image/png", "image/gif", "image/webp");
 
-    private final OssClientProvider ossClientProvider;
-    private final String bucket;
+    private final ObjectStorage storage;
     private final long maxBytes;
     private final long signedUrlSeconds;
 
-    public AgentImageStorageService(OssClientProvider ossClientProvider,
-                                    @Value("${app.oss.bucket}") String bucket,
+    public AgentImageStorageService(ObjectStorage storage,
                                     @Value("${app.image.max-bytes:10485760}") long maxBytes,
                                     @Value("${app.image.signed-url-seconds:900}") long signedUrlSeconds) {
-        this.ossClientProvider = ossClientProvider;
-        this.bucket = bucket;
+        this.storage = storage;
         this.maxBytes = maxBytes;
         this.signedUrlSeconds = signedUrlSeconds;
     }
@@ -41,32 +36,37 @@ public class AgentImageStorageService {
         String contentType = file.getContentType().toLowerCase(Locale.ROOT);
         String objectKey = agentKey + "/" + conversationId + "/" + UUID.randomUUID() + extension(contentType);
         try (InputStream inputStream = file.getInputStream()) {
-            ObjectMetadata metadata = new ObjectMetadata();
-            metadata.setContentLength(file.getSize());
-            metadata.setContentType(contentType);
-            ossClientProvider.getClient().putObject(bucket, objectKey, inputStream, metadata);
+            storage.put(objectKey, contentType, inputStream, file.getSize());
             return new AgentImageUpload(objectKey);
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to store image", exception);
         }
     }
 
-    public String presignedReadUrl(String agentKey, String conversationId, String objectKey) {
+    /** 外部可达的读地址：对象存储没有公网入口时返回空，由调用方改用字节直传。 */
+    public java.util.Optional<String> presignedReadUrl(String agentKey, String conversationId, String objectKey) {
         validateObjectKey(agentKey, conversationId, objectKey);
         try {
-            GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(bucket, objectKey, HttpMethod.GET);
-            request.setExpiration(new Date(System.currentTimeMillis() + signedUrlSeconds * 1000));
-            return ossClientProvider.getClient().generatePresignedUrl(request).toString();
+            return storage.presignedGetUrl(objectKey, java.time.Duration.ofSeconds(signedUrlSeconds), null);
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to create image read URL", exception);
+        }
+    }
+
+    /** 读取图片字节（图片理解改走视觉模型直传，不再依赖存储公网地址）。 */
+    public byte[] readBytes(String agentKey, String conversationId, String objectKey) {
+        validateObjectKey(agentKey, conversationId, objectKey);
+        try (var in = storage.open(objectKey)) {
+            return in.readAllBytes();
+        } catch (java.io.IOException exception) {
+            throw new IllegalStateException("Unable to read image", exception);
         }
     }
 
     public AgentImageContent getImage(String agentKey, String conversationId, String objectKey) {
         validateObjectKey(agentKey, conversationId, objectKey);
         try {
-            var object = ossClientProvider.getClient().getObject(bucket, objectKey);
-            return new AgentImageContent(object.getObjectContent(), object.getObjectMetadata().getContentType());
+            return new AgentImageContent(storage.open(objectKey), mimeTypeOf(objectKey));
         } catch (Exception exception) {
             throw new IllegalArgumentException("Image not found", exception);
         }
@@ -111,6 +111,15 @@ public class AgentImageStorageService {
         } catch (java.io.IOException exception) {
             throw new IllegalArgumentException("Unable to read image", exception);
         }
+    }
+
+    /** 对象键按上传时生成的扩展名推回 MIME，避免额外一次元数据查询。 */
+    public static String mimeTypeOf(String objectKey) {
+        String lower = objectKey == null ? "" : objectKey.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".gif")) return "image/gif";
+        return "image/jpeg";
     }
 
     private String extension(String contentType) {

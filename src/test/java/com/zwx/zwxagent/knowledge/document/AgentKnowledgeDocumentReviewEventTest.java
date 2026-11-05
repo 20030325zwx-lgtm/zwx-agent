@@ -23,7 +23,7 @@ class AgentKnowledgeDocumentReviewEventTest {
                                                   AgentKnowledgeReviewLogService reviewLogService,
                                                   N8nResumeNotifier resumeNotifier) {
         return new AgentKnowledgeDocumentService(
-                mock(com.zwx.zwxagent.knowledge.storage.OssClientProvider.class), "zwx-agent", jdbcTemplate,
+                mock(com.zwx.zwxagent.platform.storage.ObjectStorage.class), jdbcTemplate,
                 mock(org.springframework.ai.vectorstore.VectorStore.class), new MyTokenTextSplitter(),
                 mock(DocumentParsingModule.class), mock(DoclingServeChunkingService.class), mock(MineruDocumentParser.class),
                 mock(MineruBlockParser.class), mock(StructuredKnowledgeChunker.class),

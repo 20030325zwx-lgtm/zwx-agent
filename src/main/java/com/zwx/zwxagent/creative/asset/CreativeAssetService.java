@@ -8,7 +8,7 @@ import com.zwx.zwxagent.creative.repository.CreativeAssetRepository;
 import com.zwx.zwxagent.creative.repository.CreativeProjectRepository;
 import com.zwx.zwxagent.creative.repository.MediaJobAssetRefRepository;
 import com.zwx.zwxagent.creative.repository.MediaJobRepository;
-import com.zwx.zwxagent.creative.storage.MediaStorage;
+import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import org.springframework.stereotype.Service;
 
@@ -62,7 +62,7 @@ public class CreativeAssetService {
     private final CreativeProjectRepository projectRepository;
     private final MediaJobRepository jobRepository;
     private final MediaJobAssetRefRepository assetRefRepository;
-    private final MediaStorage storage;
+    private final ObjectStorage storage;
     private final com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository candidateRepository;
     private final com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository resourceRepository;
     private final long videoMaxBytes;
@@ -71,7 +71,7 @@ public class CreativeAssetService {
                                 CreativeProjectRepository projectRepository,
                                 MediaJobRepository jobRepository,
                                 MediaJobAssetRefRepository assetRefRepository,
-                                MediaStorage storage,
+                                ObjectStorage storage,
                                 com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository candidateRepository,
                                 com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository resourceRepository,
                                 @org.springframework.beans.factory.annotation.Value(
@@ -304,7 +304,7 @@ public class CreativeAssetService {
     }
 
     /** 缩略图失败不影响原件：生成失败只记录日志级别信息并继续。 */
-    public static void putThumbnailBestEffort(MediaStorage storage, String objectKey, String mimeType,
+    public static void putThumbnailBestEffort(ObjectStorage storage, String objectKey, String mimeType,
                                               byte[] bytes) {
         byte[] thumbnail = ThumbnailEncoder.encode(bytes);
         if (thumbnail == null) return;

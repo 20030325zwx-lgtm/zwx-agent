@@ -70,15 +70,31 @@ class LkMediaProviderAdapterTest {
     }
 
     @Test
-    void missingPublicReferenceUrlIsRejectedBeforeProviderCall() {
+    void missingPublicReferenceUrlFallsBackToBase64DataUri() {
+        UUID assetId = UUID.randomUUID();
+        var input = new InputSnapshot(ParameterSchema.IMAGE_TO_VIDEO, "测试", Map.of(), List.of(assetId));
+
+        // 自建 MinIO 无公网入口时不再直接拒绝：按平台契约改传 data:base64
+        var result = new LkMediaProviderAdapter().submit(model(), input, "sub-1",
+                Map.of(assetId, new MediaProviderAdapter.ReferenceAsset(new byte[]{1, 2, 3}, "image/png", null)));
+
+        Assertions.assertEquals(MediaProviderAdapter.SubmitOutcome.ACCEPTED, result.outcome());
+        Assertions.assertEquals(1, submitCount.get());
+        JsonNode body = CreativeJson.parse(requestBody.get());
+        Assertions.assertEquals("data:image/png;base64,AQID",
+                body.path("params").path("images").get(0).asText());
+    }
+
+    @Test
+    void referenceWithoutUrlOrBytesIsRejectedBeforeProviderCall() {
         UUID assetId = UUID.randomUUID();
         var input = new InputSnapshot(ParameterSchema.IMAGE_TO_VIDEO, "测试", Map.of(), List.of(assetId));
 
         var result = new LkMediaProviderAdapter().submit(model(), input, "sub-1",
-                Map.of(assetId, new MediaProviderAdapter.ReferenceAsset(new byte[]{1}, "image/png", null)));
+                Map.of(assetId, new MediaProviderAdapter.ReferenceAsset(new byte[0], "image/png", null)));
 
         Assertions.assertEquals(MediaProviderAdapter.SubmitOutcome.REJECTED, result.outcome());
-        Assertions.assertEquals("REFERENCE_URL_UNAVAILABLE", result.errorCode());
+        Assertions.assertEquals("REFERENCE_UNAVAILABLE", result.errorCode());
         Assertions.assertEquals(0, submitCount.get());
     }
 

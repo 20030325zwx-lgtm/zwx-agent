@@ -41,8 +41,8 @@ import java.util.concurrent.CountDownLatch;
 @SpringBootTest(properties = {
         "creative.scheduler.enabled=false",
         "creative.ingest.backend=storage",
-        "creative.storage.backend=local",
-        "creative.storage.local-dir=target/creative-test-media",
+        "app.storage.provider=local",
+        "app.storage.local-dir=target/creative-test-media",
         "creative.download.allow-local=true"
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -78,7 +78,7 @@ class MediaJobSchedulerTest {
     private JdbcTemplate jdbcTemplate;
 
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
-    private com.zwx.zwxagent.creative.storage.LocalMediaStorage localStorage;
+    private com.zwx.zwxagent.platform.storage.LocalObjectStorage localStorage;
 
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private com.zwx.zwxagent.creative.repository.CreativeAssetRepository assetRepository;

@@ -34,17 +34,20 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final UserRepository userRepository;
     private final PlaybackSignatureService playbackSignatures;
+    private final ArtifactSignatureService artifactSignatures;
     private final String loopbackToken;
     private final String localUsername;
 
     public JwtAuthFilter(JwtService jwtService,
                          UserRepository userRepository,
                          PlaybackSignatureService playbackSignatures,
+                         ArtifactSignatureService artifactSignatures,
                          @Value("${app.desktop.loopback-token:}") String loopbackToken,
                          @Value("${app.security.admin-username:admin}") String localUsername) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
         this.playbackSignatures = playbackSignatures;
+        this.artifactSignatures = artifactSignatures;
         this.loopbackToken = loopbackToken == null ? "" : loopbackToken.trim();
         this.localUsername = localUsername;
     }
@@ -70,6 +73,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             if (SecurityContextHolder.getContext().getAuthentication() == null) {
                 playbackActor(request).ifPresent(this::install);
             }
+            // 工作流产物同源下载（2026-11-05）：对象存储改内网后由本服务流式返回，
+            // <img>/<a> 同样带不了 Authorization，用 ?artifact= 短时效签名装配归属者身份。
+            if (SecurityContextHolder.getContext().getAuthentication() == null) {
+                artifactActor(request).ifPresent(this::install);
+            }
         }
         filterChain.doFilter(request, response);
     }
@@ -89,6 +97,17 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             return Optional.empty();
         }
         return playbackSignatures.verify(assetId, request.getParameter("playback"))
+                .flatMap(access -> userRepository.findById(access.userId()))
+                .map(user -> new CurrentActor(user.id(), user.tenantId(), user.username(), user.role()));
+    }
+
+    /** 校验 ?artifact= 签名（绑定对象键）并装配归属者身份；只对产物下载端点生效。 */
+    private Optional<CurrentActor> artifactActor(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod())) return Optional.empty();
+        String uri = request.getRequestURI().substring(request.getContextPath().length());
+        if (uri == null || !uri.equals("/ai/workflows/artifacts/content")) return Optional.empty();
+        String key = request.getParameter("key");
+        return artifactSignatures.verify(key, request.getParameter("artifact"))
                 .flatMap(access -> userRepository.findById(access.userId()))
                 .map(user -> new CurrentActor(user.id(), user.tenantId(), user.username(), user.role()));
     }

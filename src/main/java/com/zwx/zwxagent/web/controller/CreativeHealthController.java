@@ -1,6 +1,6 @@
 package com.zwx.zwxagent.web.controller;
 
-import com.zwx.zwxagent.creative.storage.MediaStorage;
+import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import com.zwx.zwxagent.platform.settings.ModelCatalogService;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,7 +22,7 @@ public class CreativeHealthController {
 
     private final JdbcTemplate jdbcTemplate;
     private final ModelCatalogService catalogService;
-    private final MediaStorage storage;
+    private final ObjectStorage storage;
     private final com.zwx.zwxagent.creative.service.MediaModelResolver mediaModelResolver;
 
     @Value("${creative.submissions-enabled:true}")
@@ -31,7 +31,7 @@ public class CreativeHealthController {
     private boolean schedulerEnabled;
 
     public CreativeHealthController(JdbcTemplate jdbcTemplate, ModelCatalogService catalogService,
-                                    MediaStorage storage,
+                                    ObjectStorage storage,
                                     com.zwx.zwxagent.creative.service.MediaModelResolver mediaModelResolver) {
         this.jdbcTemplate = jdbcTemplate;
         this.catalogService = catalogService;

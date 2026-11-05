@@ -8,7 +8,6 @@ import com.zwx.zwxagent.capability.mcp.McpServerConfigurationService;
 import com.zwx.zwxagent.capability.mcp.McpTools;
 import com.zwx.zwxagent.capability.tools.UrlAccessPolicy;
 import com.zwx.zwxagent.capability.tools.WebSearchTool;
-import com.zwx.zwxagent.knowledge.storage.OssClientProvider;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
 import com.zwx.zwxagent.platform.settings.ModelCatalogService;
 import lombok.extern.slf4j.Slf4j;
@@ -163,8 +162,7 @@ public class WorkflowService {
     private final ModelCatalogService modelCatalogService;
     private final DynamicChatModelFactory chatModelFactory;
     private final UrlAccessPolicy urlAccessPolicy;
-    private final OssClientProvider ossClientProvider;
-    private final String ossBucket;
+    private final com.zwx.zwxagent.platform.security.ArtifactSignatureService artifactSignatures;
     private final String searchProvider;
     private final String searchApiKey;
     private final boolean allowLocalEndpoints;
@@ -172,7 +170,7 @@ public class WorkflowService {
     private final com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService;
     private final com.zwx.zwxagent.creative.asset.CreativeAssetService creativeAssetService;
     private final com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository;
-    private final com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage;
+    private final com.zwx.zwxagent.platform.storage.ObjectStorage mediaStorage;
     private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
     private final com.zwx.zwxagent.creative.novel.NovelChapterService novelChapterService;
     private final com.zwx.zwxagent.creative.repository.NovelChapterRepository novelChapterRepository;
@@ -192,8 +190,7 @@ public class WorkflowService {
                            ModelCatalogService modelCatalogService,
                            DynamicChatModelFactory chatModelFactory,
                            UrlAccessPolicy urlAccessPolicy,
-                           OssClientProvider ossClientProvider,
-                           @Value("${app.oss.bucket}") String ossBucket,
+                           com.zwx.zwxagent.platform.security.ArtifactSignatureService artifactSignatures,
                            @Value("${search-api.provider:baidu}") String searchProvider,
                            @Value("${search-api.api-key:}") String searchApiKey,
                            @Value("${app.config.allow-local-model-endpoints:false}") boolean allowLocalEndpoints,
@@ -201,7 +198,7 @@ public class WorkflowService {
                            com.zwx.zwxagent.creative.service.CreativeProjectService creativeProjectService,
                            com.zwx.zwxagent.creative.asset.CreativeAssetService creativeAssetService,
                            com.zwx.zwxagent.creative.repository.CreativeAssetRepository creativeAssetRepository,
-                           com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage,
+                           com.zwx.zwxagent.platform.storage.ObjectStorage mediaStorage,
                            org.springframework.transaction.support.TransactionTemplate transactionTemplate,
                            com.zwx.zwxagent.creative.novel.NovelChapterService novelChapterService,
                            com.zwx.zwxagent.creative.repository.NovelChapterRepository novelChapterRepository) {
@@ -211,8 +208,7 @@ public class WorkflowService {
         this.modelCatalogService = modelCatalogService;
         this.chatModelFactory = chatModelFactory;
         this.urlAccessPolicy = urlAccessPolicy;
-        this.ossClientProvider = ossClientProvider;
-        this.ossBucket = ossBucket;
+        this.artifactSignatures = artifactSignatures;
         this.searchProvider = searchProvider;
         this.searchApiKey = searchApiKey;
         this.allowLocalEndpoints = allowLocalEndpoints;
@@ -929,19 +925,15 @@ public class WorkflowService {
     }
 
     /**
-     * 图片理解：联网图片与 OSS 素材走 MCP URL；本地存储素材改走视觉模型（字节直传），
-     * 使桌面端不依赖公网可达地址。两条路径失败都保留原有降级行为。
+     * 图片理解（2026-11-05）：联网图片仍交给 MCP；素材一律读字节直传视觉模型，
+     * 不再生成存储预签名 URL —— 自建 MinIO 只有内网地址，第三方无法回源。
      */
     private NodeResult understandImage(RunContext context, String image, String imageAssetId, String question) {
         String assetId = resolveAssetId(image, imageAssetId);
         if (assetId == null) {
             return understandImageViaMcp(context.tenantId(), image, question);
         }
-        var asset = requireAsset(context, assetId);
-        if (asset.storageBackend() == com.zwx.zwxagent.creative.domain.StorageBackend.OSS) {
-            return understandImageViaMcp(context.tenantId(), presignedAssetUrl(asset), question);
-        }
-        return understandLocalAsset(context, asset, question);
+        return understandLocalAsset(context, requireAsset(context, assetId), question);
     }
 
     private NodeResult understandImageViaMcp(String tenantId, String imageUrl, String question) {
@@ -1520,12 +1512,6 @@ public class WorkflowService {
         return host.contains(":") || host.matches("\\d{1,3}(\\.\\d{1,3}){3}");
     }
 
-    /** OSS 素材 → 10 分钟预签名 URL（不暴露对象键给工作流输出）。 */
-    private String presignedAssetUrl(com.zwx.zwxagent.creative.domain.CreativeAssetRecord asset) {
-        return ossClientProvider.getClient().generatePresignedUrl(ossBucket, asset.objectKey(),
-                java.util.Date.from(Instant.now().plusSeconds(600))).toString();
-    }
-
     private byte[] readAssetBytes(RunContext context, String imageAssetId) throws Exception {
         String assetId = resolveAssetId(null, imageAssetId);
         if (assetId == null) throw new IllegalArgumentException("素材 ID 为空");
@@ -1813,11 +1799,7 @@ public class WorkflowService {
 
     private Artifact storeArtifact(RunContext context, String type, String name, String contentType,
                                    byte[] bytes, String objectKey) {
-        var metadata = new com.aliyun.oss.model.ObjectMetadata();
-        metadata.setContentLength((long) bytes.length);
-        metadata.setContentType(contentType);
-        ossClientProvider.getClient().putObject(ossBucket, objectKey,
-                new java.io.ByteArrayInputStream(bytes), metadata);
+        mediaStorage.putBytes(objectKey, contentType, bytes);
         Artifact artifact = new Artifact(type, name, objectKey);
         context.artifacts().add(artifact);
         jdbcTemplate.update("UPDATE workflow_run SET artifacts = ?::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -1833,15 +1815,16 @@ public class WorkflowService {
         if (!objectKey.startsWith("workflow/" + userId + "/" + runId + "/")) {
             throw new IllegalArgumentException("无权访问该产物");
         }
-        var request = new com.aliyun.oss.model.GeneratePresignedUrlRequest(ossBucket, objectKey,
-                com.aliyun.oss.HttpMethod.GET);
-        request.setExpiration(java.util.Date.from(Instant.now().plus(Duration.ofHours(2))));
+        // 走本服务同源签名下载：对象存储（自建 MinIO）没有公网入口，浏览器不能直连
+        String token = artifactSignatures.issue(tenantId, userId, objectKey);
+        StringBuilder url = new StringBuilder("/api/ai/workflows/artifacts/content?key=")
+                .append(java.net.URLEncoder.encode(objectKey, java.nio.charset.StandardCharsets.UTF_8))
+                .append("&artifact=").append(java.net.URLEncoder.encode(token, java.nio.charset.StandardCharsets.UTF_8));
         if (downloadName != null && !downloadName.isBlank()) {
-            request.addQueryParameter("response-content-disposition",
-                    "attachment; filename*=UTF-8''" + java.net.URLEncoder.encode(downloadName,
-                            java.nio.charset.StandardCharsets.UTF_8));
+            url.append("&download=").append(java.net.URLEncoder.encode(downloadName,
+                    java.nio.charset.StandardCharsets.UTF_8));
         }
-        return ossClientProvider.getClient().generatePresignedUrl(request).toString();
+        return url.toString();
     }
 
     // ---------------------------------------------------------------- 状态持久化

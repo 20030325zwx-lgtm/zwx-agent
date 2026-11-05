@@ -20,7 +20,7 @@ class AgentKnowledgeDocumentVectorBatchTest {
 
     private AgentKnowledgeDocumentService service(VectorStore vectorStore) {
         AgentKnowledgeDocumentService documentService = new AgentKnowledgeDocumentService(
-                mock(com.zwx.zwxagent.knowledge.storage.OssClientProvider.class), "zwx-agent",
+                mock(com.zwx.zwxagent.platform.storage.ObjectStorage.class),
                 mock(org.springframework.jdbc.core.JdbcTemplate.class), vectorStore, new MyTokenTextSplitter(),
                 mock(DocumentParsingModule.class), mock(DoclingServeChunkingService.class), mock(MineruDocumentParser.class),
                 mock(MineruBlockParser.class), mock(StructuredKnowledgeChunker.class),

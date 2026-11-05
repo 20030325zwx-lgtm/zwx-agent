@@ -1,7 +1,7 @@
 package com.zwx.zwxagent.creative.asset;
 
 import com.zwx.zwxagent.creative.repository.CreativeAssetRepository;
-import com.zwx.zwxagent.creative.storage.LocalMediaStorage;
+import com.zwx.zwxagent.platform.storage.LocalObjectStorage;
 import com.zwx.zwxagent.creative.domain.CreativeConflictException;
 import com.zwx.zwxagent.creative.repository.CreativeProjectRepository;
 import com.zwx.zwxagent.creative.repository.MediaJobAssetRefRepository;
@@ -26,13 +26,13 @@ import java.util.UUID;
 
 /**
  * A14–A17（C06）：上传校验（签名/大小/像素）、软删除与引用互锁、本地存储往返与越界拒绝。
- * 独立构建服务栈（LocalMediaStorage + 临时目录 + 独立 JDBC 连接），不依赖 Spring 上下文。
+ * 独立构建服务栈（LocalObjectStorage + 临时目录 + 独立 JDBC 连接），不依赖 Spring 上下文。
  */
 class CreativeAssetServiceTest {
 
     private static final String TEST_USER = "creative-asset-test-user";
     private static Creds creds;
-    private static LocalMediaStorage storage;
+    private static LocalObjectStorage storage;
     private static CreativeAssetService assetService;
     private static JdbcTemplate jdbcTemplate;
     private static CurrentActor actor;
@@ -56,7 +56,7 @@ class CreativeAssetServiceTest {
         Assumptions.assumeTrue(creds != null, "未找到 PostgreSQL 连接配置，跳过素材验证");
         var dataSource = new DriverManagerDataSource(creds.baseUrl(), creds.username(), creds.password());
         jdbcTemplate = new JdbcTemplate(dataSource);
-        storage = new LocalMediaStorage(Files.createTempDirectory("creative-asset-test"));
+        storage = new LocalObjectStorage(Files.createTempDirectory("creative-asset-test"));
         assetService = new CreativeAssetService(
                 new CreativeAssetRepository(jdbcTemplate),
                 new CreativeProjectRepository(jdbcTemplate),
@@ -147,7 +147,7 @@ class CreativeAssetServiceTest {
             Assertions.assertArrayEquals(payload, in.readAllBytes());
         }
         storage.delete(key);
-        Assertions.assertThrows(IllegalStateException.class, () -> storage.size(key));
+        Assertions.assertThrows(com.zwx.zwxagent.platform.storage.ObjectNotFoundException.class, () -> storage.size(key));
     }
 
     @Test

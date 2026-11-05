@@ -1,7 +1,6 @@
 package com.zwx.zwxagent.knowledge.document;
 
-import com.aliyun.oss.OSS;
-import com.zwx.zwxagent.knowledge.storage.OssClientProvider;
+import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -25,9 +24,9 @@ import static org.mockito.Mockito.when;
 
 class AgentKnowledgeDocumentUploadIdempotencyTest {
 
-    private AgentKnowledgeDocumentService service(OssClientProvider ossClientProvider, JdbcTemplate jdbcTemplate) {
+    private AgentKnowledgeDocumentService service(ObjectStorage storage, JdbcTemplate jdbcTemplate) {
         return new AgentKnowledgeDocumentService(
-                ossClientProvider, "zwx-agent", jdbcTemplate, mock(VectorStore.class), new MyTokenTextSplitter(),
+                storage, jdbcTemplate, mock(VectorStore.class), new MyTokenTextSplitter(),
                 mock(DocumentParsingModule.class), mock(DoclingServeChunkingService.class), mock(MineruDocumentParser.class),
                 mock(MineruBlockParser.class), mock(StructuredKnowledgeChunker.class),
                 new com.fasterxml.jackson.databind.ObjectMapper(), "mineru", mock(PlatformTransactionManager.class),
@@ -46,8 +45,7 @@ class AgentKnowledgeDocumentUploadIdempotencyTest {
 
     @Test
     void retryWithSameIdempotencyKeyReturnsExistingDocumentWithoutTouchingOss() {
-        OssClientProvider ossClientProvider = mock(OssClientProvider.class);
-        OSS oss = mock(OSS.class);
+        ObjectStorage storage = mock(ObjectStorage.class);
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         when(jdbcTemplate.query(contains("idempotency_key = ?"), any(RowMapper.class), any(), any(), any()))
                 .thenReturn(List.of("existing-id"));
@@ -55,20 +53,18 @@ class AgentKnowledgeDocumentUploadIdempotencyTest {
                 any(RowMapper.class), any(), any(), any()))
                 .thenReturn(existingDocument());
 
-        AgentKnowledgeDocument result = service(ossClientProvider, jdbcTemplate)
+        AgentKnowledgeDocument result = service(storage, jdbcTemplate)
                 .upload("default", "test", file(), "admin", null, false, "n8n-exec-1");
 
         assertThat(result.id()).isEqualTo("existing-id");
-        verify(oss, never()).putObject(any(String.class), any(String.class), any(java.io.InputStream.class), any());
+        verify(storage, never()).putBytes(any(String.class), any(String.class), any(byte[].class));
         verify(jdbcTemplate, never()).update(contains("INSERT INTO agent_knowledge_document"), any(Object[].class));
     }
 
     @Test
     void insertRaceOnIdempotencyKeyReturnsWinnerDocument() {
-        OssClientProvider ossClientProvider = mock(OssClientProvider.class);
-        OSS oss = mock(OSS.class);
+        ObjectStorage storage = mock(ObjectStorage.class);
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(ossClientProvider.getClient()).thenReturn(oss);
         when(jdbcTemplate.query(contains("idempotency_key = ?"), any(RowMapper.class), any(), any(), any()))
                 .thenReturn(List.of())                              // 首查未命中
                 .thenReturn(List.of("winner-id"));                  // 冲突后重查命中
@@ -87,7 +83,7 @@ class AgentKnowledgeDocumentUploadIdempotencyTest {
                 .thenReturn(new AgentKnowledgeDocument("winner-id", "default", "test", "sample.md", "READY", 1, null,
                         Instant.now(), null, "sample", 2, "READY", null, null, null, "admin"));
 
-        AgentKnowledgeDocument result = service(ossClientProvider, jdbcTemplate)
+        AgentKnowledgeDocument result = service(storage, jdbcTemplate)
                 .upload("default", "test", file(), "admin", null, false, "n8n-exec-1");
 
         assertThat(result.id()).isEqualTo("winner-id");
@@ -95,10 +91,8 @@ class AgentKnowledgeDocumentUploadIdempotencyTest {
 
     @Test
     void blankIdempotencyKeyBehavesLikeNoKey() {
-        OssClientProvider ossClientProvider = mock(OssClientProvider.class);
-        OSS oss = mock(OSS.class);
+        ObjectStorage storage = mock(ObjectStorage.class);
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(ossClientProvider.getClient()).thenReturn(oss);
         when(jdbcTemplate.query(contains("lifecycle_status = 'ACTIVE'"), any(RowMapper.class), any(), any(), any()))
                 .thenReturn(List.of());
         when(jdbcTemplate.queryForObject(contains("COALESCE(MAX(version_no)"), eq(Integer.class), any(), any(), any()))
@@ -111,7 +105,7 @@ class AgentKnowledgeDocumentUploadIdempotencyTest {
                 .thenReturn(new AgentKnowledgeDocument("new-id", "default", "test", "sample.md", "PENDING", 0, null,
                         Instant.now(), null, "sample", 1, "INDEXING", null, null, null, "admin"));
 
-        service(ossClientProvider, jdbcTemplate).upload("default", "test", file(), "admin", null, false, "  ");
+        service(storage, jdbcTemplate).upload("default", "test", file(), "admin", null, false, "  ");
 
         verify(jdbcTemplate, never()).query(contains("idempotency_key = ?"), any(RowMapper.class), any(), any(), any());
         verify(jdbcTemplate).update(contains("INSERT INTO agent_knowledge_document"), any(Object[].class));

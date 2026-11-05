@@ -7,7 +7,7 @@ import com.zwx.zwxagent.creative.domain.MediaJobOutputRecord;
 import com.zwx.zwxagent.creative.domain.MediaJobRecord;
 import com.zwx.zwxagent.creative.repository.CreativeAssetRepository;
 import com.zwx.zwxagent.creative.repository.MediaJobOutputRepository;
-import com.zwx.zwxagent.creative.storage.MediaStorage;
+import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -26,11 +26,11 @@ public class StorageAssetIngestService implements AssetIngestService {
 
     private final CreativeAssetRepository assetRepository;
     private final MediaJobOutputRepository outputRepository;
-    private final MediaStorage storage;
+    private final ObjectStorage storage;
 
     public StorageAssetIngestService(CreativeAssetRepository assetRepository,
                                      MediaJobOutputRepository outputRepository,
-                                     MediaStorage storage) {
+                                     ObjectStorage storage) {
         this.assetRepository = assetRepository;
         this.outputRepository = outputRepository;
         this.storage = storage;
@@ -95,8 +95,10 @@ public class StorageAssetIngestService implements AssetIngestService {
     }
 
     private com.zwx.zwxagent.creative.domain.StorageBackend storageBackend() {
-        return "LOCAL".equalsIgnoreCase(storage.backend())
-                ? com.zwx.zwxagent.creative.domain.StorageBackend.LOCAL
-                : com.zwx.zwxagent.creative.domain.StorageBackend.OSS;
+        return switch (storage.backend() == null ? "" : storage.backend().toUpperCase(java.util.Locale.ROOT)) {
+            case "LOCAL" -> com.zwx.zwxagent.creative.domain.StorageBackend.LOCAL;
+            case "S3" -> com.zwx.zwxagent.creative.domain.StorageBackend.S3;
+            default -> com.zwx.zwxagent.creative.domain.StorageBackend.OSS;
+        };
     }
 }

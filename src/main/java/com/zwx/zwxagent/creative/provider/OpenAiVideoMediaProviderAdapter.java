@@ -53,8 +53,10 @@ public class OpenAiVideoMediaProviderAdapter implements MediaProviderAdapter {
         ReferenceAsset reference = referenceAssets.values().iterator().next();
         String externalUrl = reference == null ? null : reference.externalUrl();
         if (externalUrl == null || externalUrl.isBlank()) {
+            // 该供应商只接受 URL（不支持 base64）：自建 MinIO 无公网入口时明确提示，而不是把内网地址发出去
             return MediaProviderAdapter.SubmitResult.rejected("REFERENCE_URL_UNAVAILABLE",
-                    "图生视频需要供应商可读取的临时素材链接；当前素材使用本地存储，请启用 OSS 后重试");
+                    "图生视频需要供应商可公网读取的首帧链接；当前对象存储未配置公网入口，"
+                            + "请为该供应商配置支持 base64 首帧的模型，或为对象存储开启公网地址");
         }
         var payload = basePayload(model, input);
         payload.put("input_reference", externalUrl);

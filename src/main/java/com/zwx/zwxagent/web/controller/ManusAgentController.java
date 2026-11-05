@@ -17,7 +17,6 @@ import com.zwx.zwxagent.chat.conversation.AgentConversationMessage;
 import com.zwx.zwxagent.chat.conversation.AgentConversationService;
 import com.zwx.zwxagent.chat.conversation.AgentConversationSummary;
 import com.zwx.zwxagent.chat.conversation.ConversationLockManager;
-import com.zwx.zwxagent.knowledge.image.ImageAnalysisService;
 import com.zwx.zwxagent.knowledge.retrieval.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.knowledge.retrieval.AgentKnowledgeRagService;
 import com.zwx.zwxagent.knowledge.storage.AgentImageStorageService;
@@ -115,7 +114,7 @@ public class ManusAgentController {
     private AgentImageStorageService agentImageStorageService;
 
     @Resource
-    private ImageAnalysisService imageAnalysisService;
+    private com.zwx.zwxagent.knowledge.image.VisionAnalysisService visionAnalysisService;
 
     @Resource
     private AgentConversationService agentConversationService;
@@ -314,8 +313,10 @@ public class ManusAgentController {
                 for (String key : imageObjectKeys) {
                     imageIndex++;
                     try {
-                        String imageUrl = agentImageStorageService.presignedReadUrl(SUPER_AGENT_KEY, conversationId, key);
-                        var analysis = imageAnalysisService.analyze(actor.tenantId(), imageUrl, message);
+                        // 对象存储已切内网 MinIO：改为字节直传视觉模型，不再让第三方回源拉图
+                        byte[] imageBytes = agentImageStorageService.readBytes(SUPER_AGENT_KEY, conversationId, key);
+                        var analysis = visionAnalysisService.analyze(actor.userId(), imageBytes,
+                                com.zwx.zwxagent.knowledge.storage.AgentImageStorageService.mimeTypeOf(key), message);
                         if (analysis.available()) {
                             contexts.append("[图片 ").append(imageIndex).append(" 分析]\n")
                                     .append(analysis.contextBlock()).append("\n\n");

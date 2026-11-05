@@ -1,7 +1,6 @@
 package com.zwx.zwxagent.knowledge.document;
 
-import com.aliyun.oss.model.ObjectMetadata;
-import com.zwx.zwxagent.knowledge.storage.OssClientProvider;
+import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -35,8 +34,7 @@ public class AgentKnowledgeDocumentService {
     // DashScope embedding 单次最多 25 条文本，超过会直接报 "The input texts limit 25"。
     private static final int BATCH_SIZE = 25;
     private static final String DEFAULT_CATEGORY_NAME = "默认分类";
-    private final OssClientProvider ossClientProvider;
-    private final String bucket;
+    private final ObjectStorage storage;
     private final JdbcTemplate jdbcTemplate;
     private final VectorStore vectorStore;
     private final MyTokenTextSplitter textSplitter;
@@ -58,8 +56,7 @@ public class AgentKnowledgeDocumentService {
     @Value("${app.knowledge.index.embedding-parallelism:1}")
     int embeddingParallelism = 1;
 
-    public AgentKnowledgeDocumentService(OssClientProvider ossClientProvider,
-                                         @Value("${app.oss.bucket}") String bucket, JdbcTemplate jdbcTemplate,
+    public AgentKnowledgeDocumentService(ObjectStorage storage, JdbcTemplate jdbcTemplate,
                                          @Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore,
                                          MyTokenTextSplitter textSplitter, DocumentParsingModule documentParsingModule,
                                          DoclingServeChunkingService doclingChunkingService,
@@ -72,8 +69,7 @@ public class AgentKnowledgeDocumentService {
                                          AgentKnowledgeReviewLogService reviewLogService,
                                          N8nResumeNotifier resumeNotifier,
                                          N8nReviewEventNotifier reviewEventNotifier) {
-        this.ossClientProvider = ossClientProvider;
-        this.bucket = bucket;
+        this.storage = storage;
         this.jdbcTemplate = jdbcTemplate;
         this.vectorStore = vectorStore;
         this.textSplitter = textSplitter;
@@ -134,10 +130,9 @@ public class AgentKnowledgeDocumentService {
         String id = UUID.randomUUID().toString();
         String objectKey = "knowledge/" + tenantId + "/" + agentKey + "/" + id + "-" + filename;
         try {
-            ObjectMetadata metadata = new ObjectMetadata();
-            metadata.setContentLength(content.length);
-            metadata.setContentType(filename.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain; charset=UTF-8");
-            ossClientProvider.getClient().putObject(bucket, objectKey, new ByteArrayInputStream(content), metadata);
+            String contentType = filename.toLowerCase().endsWith(".pdf")
+                    ? "application/pdf" : "text/plain; charset=UTF-8";
+            storage.putBytes(objectKey, contentType, content);
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to store knowledge document", exception);
         }
@@ -208,7 +203,7 @@ public class AgentKnowledgeDocumentService {
         jdbcTemplate.update("DELETE FROM agent_knowledge_document WHERE id = ?", documentId);
         for (String objectKey : objectKeys) {
             try {
-                ossClientProvider.getClient().deleteObject(bucket, objectKey);
+                storage.delete(objectKey);
             } catch (Exception ignored) {
             }
         }
@@ -221,22 +216,11 @@ public class AgentKnowledgeDocumentService {
     }
 
     private void deleteObjectsByPrefix(String prefix) {
-        String marker = null;
-        while (true) {
-            com.aliyun.oss.model.ListObjectsRequest request = new com.aliyun.oss.model.ListObjectsRequest(bucket)
-                    .withPrefix(prefix)
-                    .withMaxKeys(1000);
-            if (marker != null && !marker.isBlank()) request.setMarker(marker);
-            com.aliyun.oss.model.ObjectListing listing = ossClientProvider.getClient().listObjects(request);
-            for (com.aliyun.oss.model.OSSObjectSummary summary : listing.getObjectSummaries()) {
-                try {
-                    ossClientProvider.getClient().deleteObject(bucket, summary.getKey());
-                } catch (Exception ignored) {
-                }
+        for (String key : storage.listKeys(prefix)) {
+            try {
+                storage.delete(key);
+            } catch (Exception ignored) {
             }
-            if (!listing.isTruncated()) break;
-            marker = listing.getNextMarker();
-            if (marker == null || marker.isBlank()) break;
         }
     }
 
@@ -257,7 +241,7 @@ public class AgentKnowledgeDocumentService {
             StoredDocument stored = queryStoredDocument(documentId, false);
             originalLifecycle = stored.lifecycleStatus();
             byte[] bytes;
-            try (var object = ossClientProvider.getClient().getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
+            try (var input = storage.open(stored.objectKey())) {
                 bytes = input.readAllBytes();
             }
             Map<String, Object> sourceMetadata = new HashMap<>();
@@ -438,10 +422,7 @@ public class AgentKnowledgeDocumentService {
             if (name.isBlank()) continue;
             String key = base + name;
             try {
-                ObjectMetadata metadata = new ObjectMetadata();
-                metadata.setContentLength(entry.getValue().length);
-                metadata.setContentType(contentType(name));
-                ossClientProvider.getClient().putObject(bucket, key, new ByteArrayInputStream(entry.getValue()), metadata);
+                storage.putBytes(key, contentType(name), entry.getValue());
                 objectKeys.put(entry.getKey(), key);
             } catch (Exception exception) {
                 log.warn("Unable to persist MinerU result file; documentId={}, file={}, reason={}",
@@ -455,10 +436,7 @@ public class AgentKnowledgeDocumentService {
                     "jsonFileCount", result.countFiles(".json"),
                     "htmlFileCount", result.countFiles(".html"),
                     "capturedAt", java.time.Instant.now().toString()));
-            ObjectMetadata metadata = new ObjectMetadata();
-            metadata.setContentLength(manifest.length);
-            metadata.setContentType("application/json; charset=UTF-8");
-            ossClientProvider.getClient().putObject(bucket, manifestKey, new ByteArrayInputStream(manifest), metadata);
+            storage.putBytes(manifestKey, "application/json; charset=UTF-8", manifest);
         } catch (Exception exception) {
             log.warn("Unable to persist MinerU manifest; documentId={}, reason={}", documentId, safeMessage(exception));
         }
@@ -684,7 +662,7 @@ public class AgentKnowledgeDocumentService {
         validateScope(tenantId, agentKey);
         StoredDocument stored = queryStoredDocument(documentId, true);
         String sourceContent = "";
-        try (var object = ossClientProvider.getClient().getObject(bucket, stored.objectKey()); var input = object.getObjectContent()) {
+        try (var input = storage.open(stored.objectKey())) {
             sourceContent = documentParsingModule.parse(input.readAllBytes(), stored.filename()).content();
         } catch (Exception exception) {
             org.slf4j.LoggerFactory.getLogger(AgentKnowledgeDocumentService.class)
@@ -859,8 +837,7 @@ public class AgentKnowledgeDocumentService {
         if (!tenantId.equals(stored.tenantId()) || !agentKey.equals(stored.agentKey())) {
             throw new IllegalArgumentException("Document does not exist in the current scope");
         }
-        try (var object = ossClientProvider.getClient().getObject(bucket, stored.objectKey());
-             var input = object.getObjectContent()) {
+        try (var input = storage.open(stored.objectKey())) {
             return new DocumentFile(input.readAllBytes(), stored.filename(), contentType(stored.filename()));
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to read knowledge document", exception);

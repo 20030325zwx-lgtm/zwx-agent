@@ -61,7 +61,7 @@ public class MediaJobScheduler {
     private final TransactionTemplate transactionTemplate;
     private final Map<String, MediaProviderAdapter> adapters;
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
-    private final com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage;
+    private final com.zwx.zwxagent.platform.storage.ObjectStorage mediaStorage;
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @Value("${creative.scheduler.enabled:false}")
@@ -104,7 +104,7 @@ public class MediaJobScheduler {
                              AssetIngestService ingestService, ConfigSecretCipher secretCipher,
                              TransactionTemplate transactionTemplate, List<MediaProviderAdapter> adapters,
                              org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
-                             com.zwx.zwxagent.creative.storage.MediaStorage mediaStorage,
+                             com.zwx.zwxagent.platform.storage.ObjectStorage mediaStorage,
                              io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         this.jobRepository = jobRepository;
         this.eventRepository = eventRepository;

@@ -37,3 +37,14 @@
 - 服务器部署需重建 backend 镜像（新增 apt ffmpeg 层，构建会变慢几分钟）。
 - `app.final-cut.*` 可配：ffmpeg/ffprobe 路径、轮询间隔、超时分钟数、enabled 开关。
 - 视频约束期间生成的测试全部是 mock/本地合成，无任何计费。
+
+## 部署验收（0.7.16，2026-11-06 03:0x）
+
+- 提交 ef1e118 / fc771ac / 8da5b26 / a29aaf8 / 4de1521 已推送并部署 0.7.16：
+  backend healthy、公网 health OK、前端资产哈希一致（index-aImWQSKr.js）。
+- 迁移：V44/V45/V46 全部 success；DB 备份 backups/backup-2026-11-06-0259.sql。
+- 服务器 backend 容器内实测 ffmpeg 8.0.1 + /usr/bin/ffprobe 可用。
+- 全量回归仅剩 3 个与本次无关的失败：ToolGuardHookTest、MediaJobSchedulerTest（既有）、
+  PgVectorVectorStoreConfigTest（DashScope 欠费，用户明确暂不处理知识库 embedding）。
+- 新增修复：MediaJobServiceTest 清理兼容同 JVM 调度线程干扰（重试删除）；
+  VideoFinalCutRecord 的 running/draft 辅助方法改为 isXxx 才能被 Jackson 序列化（取消按钮/轮询依赖它）。

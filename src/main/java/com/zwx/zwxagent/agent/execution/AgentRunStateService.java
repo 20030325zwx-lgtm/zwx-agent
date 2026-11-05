@@ -129,8 +129,10 @@ public class AgentRunStateService {
                     state_version = state_version + 1, next_dispatch_at = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE id = (SELECT id FROM agent_run
                             WHERE phase = 'QUEUED' AND engine_version = 2 AND control_state = 'NONE'
-                              AND (next_dispatch_at IS NULL OR next_dispatch_at <= NOW())
-                            ORDER BY COALESCE(next_dispatch_at, created_at), id
+                              AND next_dispatch_at <= NOW()
+                            -- 与 idx_agent_run_queue(engine_version, control_state, next_dispatch_at, id) 对齐：
+                            -- 保持纯列排序才能直接复用索引顺序，避免全扫 + 排序
+                            ORDER BY next_dispatch_at, id
                             FOR UPDATE SKIP LOCKED LIMIT 1)
                 RETURNING id, tenant_id, user_id, conversation_id, user_message_id, fencing_token,
                           resume_count, input, history_context, knowledge_context, permission_mode,

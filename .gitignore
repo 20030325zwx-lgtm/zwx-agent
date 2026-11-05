@@ -61,3 +61,7 @@ services/*/src/main/resources/static/
 # 独立中台服务的前端依赖与构建产物（Docker 内构建）
 services/*/frontend/node_modules/
 services/*/frontend/dist/
+
+# 本地一键部署脚本与状态（含服务器凭据，禁止入库）
+/deploy/scripts/deploy-to-server.sh
+/deploy/scripts/.deploy-state

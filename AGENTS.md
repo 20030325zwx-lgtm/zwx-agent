@@ -66,3 +66,17 @@ launchctl kickstart -k "gui/$(id -u)/com.zwx.yu-ai-agent.frontend"
 launchctl kill SIGTERM "gui/$(id -u)/com.zwx.yu-ai-agent.backend"
 launchctl kill SIGTERM "gui/$(id -u)/com.zwx.yu-ai-agent.frontend"
 ```
+
+### One-Click Deploy (local script, intentionally NOT committed)
+
+`deploy/scripts/deploy-to-server.sh` is a local-only one-click script that rebuilds and restarts local services and publishes the changed backend/frontend images to the cloud server (`/opt/aster`, `https://www.zhuwenxuan.online`). It is git-ignored via `.gitignore` and contains the server SSH credentials for password fallback, so it must never be committed, copied into documentation, or shared.
+
+Usage (from the repository root):
+
+```sh
+./deploy/scripts/deploy-to-server.sh              # auto-detect changes since last publish and deploy
+./deploy/scripts/deploy-to-server.sh --force     # rebuild/redeploy everything (version +1)
+./deploy/scripts/deploy-to-server.sh --local-only # rebuild/restart local services only
+```
+
+Behavior: detects changed services from `git diff` against the SHA stored in `deploy/scripts/.deploy-state`; takes a DB backup when Flyway migrations changed; builds linux/amd64 images, uploads with md5 verification, updates `IMAGE_TAG`, recreates only the changed containers, reloads both nginx layers (`aster-frontend-1` and `aster-nginx-proxy`), and verifies internal + public health. The script never touches `src/main/resources/application-local.yml`.

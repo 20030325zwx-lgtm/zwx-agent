@@ -9,6 +9,7 @@ import com.zwx.zwxagent.creative.domain.VideoLocationRecord;
 import com.zwx.zwxagent.creative.domain.VideoSceneRecord;
 import com.zwx.zwxagent.creative.domain.VideoShotCandidateRecord;
 import com.zwx.zwxagent.creative.domain.VideoShotRecord;
+import com.zwx.zwxagent.creative.repository.CreativeAssetRepository;
 import com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository;
 import com.zwx.zwxagent.creative.repository.VideoStoryContentRepository;
 import com.zwx.zwxagent.creative.repository.VideoStoryResourceRepository;
@@ -38,17 +39,20 @@ public class StoryContentService {
     private final VideoStoryContentRepository contentRepository;
     private final VideoStoryResourceRepository resourceRepository;
     private final VideoShotCandidateRepository candidateRepository;
+    private final CreativeAssetRepository assetRepository;
     private final TransactionTemplate transactionTemplate;
 
     public StoryContentService(CreativeProjectService projectService,
                                VideoStoryContentRepository contentRepository,
                                VideoStoryResourceRepository resourceRepository,
                                VideoShotCandidateRepository candidateRepository,
+                               CreativeAssetRepository assetRepository,
                                TransactionTemplate transactionTemplate) {
         this.projectService = projectService;
         this.contentRepository = contentRepository;
         this.resourceRepository = resourceRepository;
         this.candidateRepository = candidateRepository;
+        this.assetRepository = assetRepository;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -237,7 +241,9 @@ public class StoryContentService {
                 text(request.purpose()), text(request.action()), text(request.camera()),
                 text(request.dialogue()), text(request.continuity()),
                 duration(request.durationTargetSeconds()), text(request.promptText()),
-                "DRAFT", 1L, null, null);
+                "DRAFT", 1L, null, null,
+                normalizeShotStyle(request.styleCode()),
+                request.referenceAssetIds() == null ? List.of() : request.referenceAssetIds());
         contentRepository.insertShot(shot);
         if (afterShotId != null) {
             transactionTemplate.executeWithoutResult(status ->
@@ -283,10 +289,13 @@ public class StoryContentService {
                     + "），请刷新后重试；你的编辑未覆盖他人改动");
         }
         boolean ready = shot.confirmedReady() || !text(request.promptText()).isBlank();
+        String styleCode = normalizeShotStyle(request.styleCode());
+        String referenceJson = validateShotReference(actor, request.referenceAssetIds());
         if (!contentRepository.updateShotFields(shotId, expectedVersion,
                 text(request.purpose()), text(request.action()), text(request.camera()),
                 text(request.dialogue()), text(request.continuity()),
-                duration(request.durationTargetSeconds()), text(request.promptText()))) {
+                duration(request.durationTargetSeconds()), text(request.promptText()),
+                styleCode, referenceJson)) {
             throw new CreativeConflictException("镜头已被其他页面修改，请刷新后重试");
         }
         if (ready && "DRAFT".equals(shot.status())) {
@@ -523,8 +532,46 @@ public class StoryContentService {
                                String goal, String conflict, String entryState, String exitState) {
     }
 
+    /** 镜头画风覆盖校验：空=继承项目；非空必须是目录编码（跟随原片对无首帧的镜头无意义，一并拒绝）。 */
+    private String normalizeShotStyle(String styleCode) {
+        String value = styleCode == null ? "" : styleCode.trim().toUpperCase(java.util.Locale.ROOT);
+        if (value.isEmpty()) return "";
+        if ("PHOTO_MATCH".equals(value)) {
+            throw new IllegalArgumentException("镜头画风不支持「跟随原片」，请留空继承项目或选择其他风格");
+        }
+        com.zwx.zwxagent.creative.support.ImageStyleCatalog.require(value);
+        return value;
+    }
+
+    /** 首帧参考校验：最多 1 个，必须是本人已就绪的图片素材；返回落库 JSON。 */
+    private String validateShotReference(CurrentActor actor, java.util.List<UUID> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) return "[]";
+        java.util.List<UUID> distinct = assetIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (distinct.size() > 1) {
+            throw new IllegalArgumentException("首帧参考最多 1 张图片");
+        }
+        for (UUID assetId : distinct) {
+            var asset = assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId)
+                    .orElseThrow(() -> new IllegalArgumentException("素材不存在或无权使用：" + assetId));
+            if (!"IMAGE".equals(asset.mediaType())) {
+                throw new IllegalArgumentException("首帧参考必须是图片素材");
+            }
+            if (!"READY".equals(asset.status().name())) {
+                throw new IllegalArgumentException("首帧参考图片尚未就绪：" + assetId);
+            }
+        }
+        return com.zwx.zwxagent.creative.support.CreativeJson.toJson(distinct);
+    }
+
     public record ShotRequest(String purpose, String action, String camera, String dialogue,
-                              String continuity, Integer durationTargetSeconds, String promptText) {
+                              String continuity, Integer durationTargetSeconds, String promptText,
+                              String styleCode, List<UUID> referenceAssetIds) {
+
+        /** 兼容旧调用方（7 参构造）：画风继承项目、无首帧。 */
+        public ShotRequest(String purpose, String action, String camera, String dialogue,
+                           String continuity, Integer durationTargetSeconds, String promptText) {
+            this(purpose, action, camera, dialogue, continuity, durationTargetSeconds, promptText, "", List.of());
+        }
     }
 
     public record ResourceRequest(String name, String appearance, String personality, String notes,

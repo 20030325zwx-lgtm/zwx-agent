@@ -397,6 +397,8 @@ export const confirmStoryEpisode = (projectId, episodeId) =>
   request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}/confirm`).then(r => r.data)
 export const moveStoryEpisode = (projectId, episodeId, direction) =>
   request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/episodes/${episodeId}/move`, { direction }).then(r => r.data)
+export const preflightStoryGeneration = (projectId, shotIds) =>
+  request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/generate-preflight`, { shotIds }).then(r => r.data)
 export const moveStoryShot = (projectId, shotId, direction) =>
   request.post(`/ai/creative/projects/${encodeURIComponent(projectId)}/story/shots/${shotId}/move`, { direction }).then(r => r.data)
 // 结构化分镜草稿（P0 制作视图）：生成 → 预览编辑 → 一次有效采纳

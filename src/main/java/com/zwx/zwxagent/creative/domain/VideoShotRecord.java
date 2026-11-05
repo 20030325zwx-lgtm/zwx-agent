@@ -12,7 +12,13 @@ public record VideoShotRecord(UUID id, UUID projectId, String tenantId, String u
                               String purpose, String action, String camera, String dialogue,
                               String continuity, int durationTargetSeconds, String promptText,
                               String status, long version,
-                              Instant createdAt, Instant updatedAt) {
+                              Instant createdAt, Instant updatedAt,
+                              String styleCode, java.util.List<UUID> referenceAssetIds) {
+
+    /** 首帧参考：最多 1 个；空列表 = 文生视频。 */
+    public UUID firstReference() {
+        return referenceAssetIds == null || referenceAssetIds.isEmpty() ? null : referenceAssetIds.getFirst();
+    }
 
     public boolean confirmedReady() {
         return ShotStatus.READY.name().equals(status) || ShotStatus.GENERATING.name().equals(status)

@@ -10,6 +10,7 @@ import com.zwx.zwxagent.creative.repository.VideoShotCandidateRepository;
 import com.zwx.zwxagent.creative.repository.VideoStoryContentRepository;
 import com.zwx.zwxagent.creative.service.CreativeProjectService;
 import com.zwx.zwxagent.creative.service.MediaJobService;
+import com.zwx.zwxagent.creative.service.MediaModelResolver;
 import com.zwx.zwxagent.creative.support.ImageStyleCatalog;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import org.springframework.stereotype.Service;
@@ -33,6 +34,7 @@ public class ShotProductionService {
     private final CreativeAssetRepository assetRepository;
     private final MediaJobService mediaJobService;
     private final CreativeProjectService projectService;
+    private final MediaModelResolver mediaModelResolver;
     private final TransactionTemplate transactionTemplate;
 
     public ShotProductionService(StoryContentService contentService,
@@ -41,6 +43,7 @@ public class ShotProductionService {
                                  CreativeAssetRepository assetRepository,
                                  MediaJobService mediaJobService,
                                  CreativeProjectService projectService,
+                                 MediaModelResolver mediaModelResolver,
                                  TransactionTemplate transactionTemplate) {
         this.contentService = contentService;
         this.contentRepository = contentRepository;
@@ -48,6 +51,7 @@ public class ShotProductionService {
         this.assetRepository = assetRepository;
         this.mediaJobService = mediaJobService;
         this.projectService = projectService;
+        this.mediaModelResolver = mediaModelResolver;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -98,7 +102,7 @@ public class ShotProductionService {
     public VideoShotCandidateRecord submitGeneration(CurrentActor actor, UUID projectId,
                                                      VideoShotRecord shot, int seconds) {
         String prompt = shot.promptText() == null ? "" : shot.promptText().trim();
-        // 项目画风贯通（REQ-STYLE）：镜头没有单独风格时继承项目默认；正文优先、预算不足降级
+        // 画风贯通（REQ-STYLE）：镜头覆盖 > 项目默认；跟随原片对无首帧的镜头不注入空指令
         String projectStyle = "";
         try {
             projectStyle = String.valueOf(projectService.settingsOf(actor, projectId)
@@ -106,23 +110,113 @@ public class ShotProductionService {
         } catch (RuntimeException ignored) {
             // 设定读取失败不阻断生成，只少风格注记
         }
-        String styledPrompt = "PHOTO_MATCH".equalsIgnoreCase(projectStyle)
-                ? prompt : ImageStyleCatalog.applyToPrompt(prompt, projectStyle);
+        java.util.List<UUID> references = shot.referenceAssetIds() == null
+                ? List.of() : shot.referenceAssetIds().stream().filter(java.util.Objects::nonNull).distinct().toList();
+        String effectiveStyle = shot.styleCode() == null || shot.styleCode().isBlank()
+                ? projectStyle : shot.styleCode();
+        if ("PHOTO_MATCH".equalsIgnoreCase(effectiveStyle) && references.isEmpty()) {
+            effectiveStyle = "PHOTO_MATCH".equalsIgnoreCase(projectStyle) ? "" : projectStyle;
+        }
+        String styledPrompt = ImageStyleCatalog.applyToPrompt(prompt, effectiveStyle);
         var candidate = new VideoShotCandidateRecord(UUID.randomUUID(), projectId, actor.tenantId(),
                 actor.userId(), shot.id(), null, null, "GENERATED", styledPrompt,
                 CandidateStatus.GENERATING.name(), null, null);
         candidateRepository.insert(candidate);
         try {
+            String operation = references.isEmpty()
+                    ? com.zwx.zwxagent.creative.domain.ParameterSchema.TEXT_TO_VIDEO
+                    : com.zwx.zwxagent.creative.domain.ParameterSchema.IMAGE_TO_VIDEO;
             var created = mediaJobService.create(actor, "shot-" + shot.id() + "-" + candidate.id(), projectId,
-                    new MediaJobService.CreateJobRequest(projectId, "text_to_video", null,
+                    new MediaJobService.CreateJobRequest(projectId, operation, null,
                             styledPrompt, styledPrompt, Map.of("seconds", String.valueOf(Math.max(1, seconds))),
-                            List.of(), null, null, false));
+                            references, null, null, false));
             candidateRepository.attachJob(candidate.id(), created.jobId());
         } catch (RuntimeException exception) {
             candidateRepository.delete(candidate.id());
             throw exception;
         }
         return candidateRepository.findById(actor.tenantId(), actor.userId(), candidate.id()).orElseThrow();
+    }
+
+    // ---------------------------------------------------------------- 生成预检（P1：纯校验，不创建任务、不调用模型）
+
+    public record PreflightItem(UUID shotId, int shotNumber, boolean ok, String reason,
+                                String operation, int seconds, int references) {
+    }
+
+    public record PreflightResult(String modelName, String adapterKey, List<PreflightItem> items,
+                                  int readyCount, String costNote) {
+    }
+
+    /**
+     * 生成预检（需求 §9.2-4）：逐镜给出可提交/阻塞原因、实际 operation（首帧决定）、秒数与任务数；
+     * 费用没有可靠来源时如实返回「费用未知」，不显示 0。预检本身不调用媒体生成模型。
+     */
+    public PreflightResult preflight(CurrentActor actor, UUID projectId, List<UUID> shotIds) {
+        var all = contentRepository.listShotsByProject(actor.tenantId(), actor.userId(), projectId)
+                .stream().collect(java.util.stream.Collectors.toMap(VideoShotRecord::id, shot -> shot));
+        String projectStyle = "";
+        try {
+            projectStyle = String.valueOf(projectService.settingsOf(actor, projectId)
+                    .getOrDefault("videoStyle", ""));
+        } catch (RuntimeException ignored) {
+            // 预检阶段读不到设定不视为错误
+        }
+        String projectProvider = null;
+        String projectModel = null;
+        List<PreflightItem> items = new java.util.ArrayList<>();
+        int ready = 0;
+        for (UUID shotId : shotIds == null ? List.<UUID>of() : shotIds.stream().distinct().toList()) {
+            var shot = all.get(shotId);
+            if (shot == null) {
+                items.add(new PreflightItem(shotId, 0, false, "镜头不存在或无权访问", "text_to_video", 0, 0));
+                continue;
+            }
+            java.util.List<UUID> references = shot.referenceAssetIds() == null
+                    ? List.of() : shot.referenceAssetIds().stream().filter(java.util.Objects::nonNull).distinct().toList();
+            String operation = references.isEmpty()
+                    ? com.zwx.zwxagent.creative.domain.ParameterSchema.TEXT_TO_VIDEO
+                    : com.zwx.zwxagent.creative.domain.ParameterSchema.IMAGE_TO_VIDEO;
+            int seconds = Math.max(1, shot.durationTargetSeconds());
+            String reason = null;
+            if (!com.zwx.zwxagent.creative.domain.ShotStatus.DRAFT.name().equals(shot.status())
+                    && !com.zwx.zwxagent.creative.domain.ShotStatus.READY.name().equals(shot.status())) {
+                reason = "镜头状态为 " + shot.status() + "，不能重复提交";
+            }
+            if (reason == null && (shot.promptText() == null || shot.promptText().isBlank())) {
+                reason = "缺少提示词";
+            }
+            if (reason == null) {
+                try {
+                    assetReferenceCheck(actor, references);
+                } catch (RuntimeException exception) {
+                    reason = exception.getMessage();
+                }
+            }
+            if (reason == null) {
+                try {
+                    var resolved = mediaModelResolver.resolve(actor.userId(), null, operation);
+                    projectModel = resolved.modelName();
+                    projectProvider = resolved.adapterKey();
+                } catch (RuntimeException exception) {
+                    reason = exception.getMessage();
+                }
+            }
+            if (reason == null) ready++;
+            items.add(new PreflightItem(shotId, shot.shotNumber(), reason == null, reason,
+                    operation, seconds, references.size()));
+        }
+        return new PreflightResult(projectModel, projectProvider, items, ready, "费用未知（以供应商账单为准）");
+    }
+
+    private void assetReferenceCheck(CurrentActor actor, List<UUID> references) {
+        for (UUID assetId : references) {
+            var asset = assetRepository.findByIdForOwner(actor.tenantId(), actor.userId(), assetId)
+                    .orElseThrow(() -> new IllegalArgumentException("首帧素材不存在或无权使用"));
+            if (!"IMAGE".equals(asset.mediaType()) || !"READY".equals(asset.status().name())) {
+                throw new IllegalArgumentException("首帧素材必须是已就绪的图片");
+            }
+        }
     }
 
     /** 上传已有视频作为候选（显式操作，不生成、不计费）。 */

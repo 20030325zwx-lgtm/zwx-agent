@@ -13,7 +13,7 @@
             <Plus :size="14" /> 加镜头
           </button>
           <button type="button" class="cr-primary" :disabled="!selectedShots.size || busy"
-                  @click="createBatch">
+                  @click="startBatchPreflight">
             批量生成（{{ selectedShots.size }}）
           </button>
           <button type="button" class="cr-ghost" :disabled="story.loading.value" @click="story.reload()">
@@ -151,6 +151,36 @@
                    @changed="onShotChanged"
                    @inserted="onShotInserted" />
 
+    <!-- 生成预检确认（P1）：范围、模型、费用未知与逐镜阻塞原因 -->
+    <div v-if="preflightOpen && preflight" class="cr-dialog-backdrop" @click.self="preflightOpen = false">
+      <div class="cr-dialog preflight-dialog" role="dialog" aria-modal="true" aria-label="生成预检">
+        <h2>生成预检</h2>
+        <dl class="pf-meta">
+          <div><dt>范围</dt><dd>{{ preflightScopeLabel }} · {{ preflightOkItems.length }} 镜可提交</dd></div>
+          <div><dt>模型</dt><dd>{{ preflight.modelName ? `${preflight.modelName}` : '未绑定视频模型' }}</dd></div>
+          <div><dt>任务数</dt><dd>{{ preflightOkItems.length }} 个（每镜一个候选）</dd></div>
+          <div><dt>费用</dt><dd>{{ preflight.costNote }}</dd></div>
+        </dl>
+        <p v-if="preflightBlocked.length" class="pf-blocked">
+          {{ preflightBlocked.length }} 个镜头被阻塞，将不会提交：
+        </p>
+        <ul class="pf-list">
+          <li v-for="item in preflightBlocked" :key="item.shotId">
+            <span>{{ item.shotNumber ? `镜 ${String(item.shotNumber).padStart(2, '0')}` : '未知镜头' }}</span>
+            <em>{{ item.reason }}</em>
+          </li>
+        </ul>
+        <p class="pf-hint">提交前请确认当前修改已保存；已提交的任务仍可能完成并计费。</p>
+        <div class="cr-dialog-actions">
+          <button type="button" class="cr-secondary" @click="preflightOpen = false">返回修改</button>
+          <button type="button" class="cr-primary" :disabled="!preflightOkItems.length || busy"
+                  @click="confirmBatch">
+            提交 {{ preflightOkItems.length }} 镜
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="addShotOpen" class="cr-dialog-backdrop" @click.self="addShotOpen = false">
       <div class="cr-dialog" role="dialog" aria-modal="true" aria-labelledby="add-shot-title">
         <h2 id="add-shot-title">加镜头</h2>
@@ -175,7 +205,8 @@
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Plus, RefreshCw } from 'lucide-vue-next'
 import {
-  createStoryBatch, createStoryShot, getStoryBatch, listStoryBatches, retryStoryBatch, stopStoryBatch
+  createStoryBatch, createStoryShot, getStoryBatch, listStoryBatches, preflightStoryGeneration,
+  retryStoryBatch, stopStoryBatch
 } from '../../../api'
 import { PROJECT_CTX } from './composables'
 import { BATCH_ITEM_STATUS_LABEL, BATCH_STATUS_LABEL, SHOT_STATUS_LABEL } from './helpers'
@@ -309,20 +340,45 @@ async function onShotInserted(created) {
   inspectorShot.value = story.shots.value.find(shot => shot.id === created.id) || created
 }
 
-async function createBatch() {
-  const episode = episodes.value.find(item => story.shots.value
-    .some(shot => selectedShots.has(shot.id) && shot.sceneId
-      && item.id === scenes.value.find(scene => scene.id === shot.sceneId)?.episodeId))
+// 批量生成（P1）：先预检（纯校验，不创建任务、不调用模型），确认面板列出范围/模型/费用与阻塞项
+const preflight = ref(null)
+const preflightOpen = ref(false)
+const preflightBusy = ref(false)
+
+async function startBatchPreflight() {
+  if (!selectedShots.size) return
   busy.value = true
   error.value = ''
   try {
-    await createStoryBatch(projectId.value, {
-      shotIds: [...selectedShots],
-      scopeLabel: episode ? `第 ${episode.episodeNumber} 集《${episode.title}》` : ''
-    })
+    preflight.value = await preflightStoryGeneration(projectId.value, [...selectedShots])
+    preflightOpen.value = true
+  } catch (exception) {
+    error.value = exception.response?.data?.error || '预检失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+const preflightOkItems = computed(() => (preflight.value?.items || []).filter(item => item.ok))
+const preflightBlocked = computed(() => (preflight.value?.items || []).filter(item => !item.ok))
+const preflightScopeLabel = computed(() => {
+  const episode = episodes.value.find(item => story.shots.value
+    .some(shot => selectedShots.has(shot.id) && shot.sceneId
+      && item.id === scenes.value.find(scene => scene.id === shot.sceneId)?.episodeId))
+  return episode ? `第 ${episode.episodeNumber} 集《${episode.title}》` : '所选镜头'
+})
+
+async function confirmBatch() {
+  const readyIds = preflightOkItems.value.map(item => item.shotId)
+  if (!readyIds.length) return
+  busy.value = true
+  try {
+    await createStoryBatch(projectId.value, { shotIds: readyIds, scopeLabel: preflightScopeLabel.value })
+    preflightOpen.value = false
     selectedShots.clear()
-    showToast('批次已创建，调度器会按并发逐个提交', 'success')
+    showToast(`批次已创建（${readyIds.length} 镜），调度器会按并发逐个提交`, 'success')
     await loadBatches()
+    await story.reload()
   } catch (exception) {
     error.value = exception.response?.data?.error || '批次创建失败'
   } finally {
@@ -466,6 +522,17 @@ onBeforeUnmount(() => window.clearTimeout(batchTimer))
   color: var(--wb-text-2);
 }
 .item-DONE { color: var(--wb-success); }
+.preflight-dialog { width: min(560px, calc(100vw - 48px)); max-height: calc(100vh - 64px); overflow: auto; }
+.preflight-dialog h2 { margin: 0 0 10px; font-size: 15px; }
+.pf-meta { margin: 0 0 10px; display: grid; gap: 6px; font-size: 12px; }
+.pf-meta div { display: grid; grid-template-columns: 56px 1fr; gap: 8px; }
+.pf-meta dt { color: var(--wb-muted); }
+.pf-meta dd { margin: 0; word-break: break-word; }
+.pf-blocked { margin: 8px 0 4px; color: var(--wb-danger, #c94c62); font-size: 12px; }
+.pf-list { margin: 0 0 10px; padding: 0; list-style: none; display: grid; gap: 5px; font-size: 12px; }
+.pf-list li { display: grid; grid-template-columns: 80px 1fr; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--wb-fill); }
+.pf-list em { font-style: normal; color: var(--wb-text-2); word-break: break-word; }
+.pf-hint { margin: 0 0 4px; color: var(--wb-muted); font-size: 11px; }
 .chip-error { margin-left: 6px; font-style: normal; color: var(--wb-danger, #c94c62); font-size: 10px; }
 .chip.item-FAILED { background: color-mix(in srgb, var(--wb-danger, #c94c62) 8%, var(--wb-fill)); }
 .item-FAILED { color: var(--wb-warning); }

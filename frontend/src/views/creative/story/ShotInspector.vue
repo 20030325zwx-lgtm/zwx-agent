@@ -129,8 +129,33 @@
           <dl class="si-params">
             <div><dt>视频模型</dt><dd>{{ videoModelLabel }}</dd></div>
             <div><dt>时长</dt><dd>{{ form.durationTargetSeconds }} 秒（档位支持以模型能力为准）</dd></div>
-            <div><dt>画风</dt><dd>{{ styleLabel }}</dd></div>
           </dl>
+        </section>
+
+        <section class="si-section">
+          <div class="si-section-head">
+            <h3>首帧参考</h3>
+            <span class="cr-field-help">有首帧走图生视频；模型不支持文生视频时必须设置</span>
+          </div>
+          <div v-if="frameAsset" class="si-frame">
+            <span>{{ frameAsset.displayName || '首帧图片' }}</span>
+            <button type="button" class="cr-ghost" @click="setImageFrame('')">移除</button>
+          </div>
+          <p v-else class="cr-field-help">未设置首帧；将按文生视频提交。</p>
+          <div class="si-frame-actions">
+            <DropdownSelect :model-value="frameAssetId" :options="imageAssetOptions" block
+                            placeholder="从素材选择首帧…" aria-label="选择首帧图片" @change="setImageFrame" />
+            <label class="cr-ghost si-upload-frame">
+              上传图片
+              <input type="file" accept="image/*" @change="uploadFrame" />
+            </label>
+          </div>
+        </section>
+
+        <section class="si-section">
+          <div class="si-section-head"><h3>画风</h3><span class="cr-field-help">当前生效：{{ styleLabel }}</span></div>
+          <DropdownSelect v-model="form.styleCode" :options="styleOptions" block
+                          placeholder="继承项目默认" aria-label="镜头画风覆盖" />
         </section>
 
         <details class="si-advanced">
@@ -170,8 +195,8 @@ import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } fr
 import { Check, Sparkles, X } from 'lucide-vue-next'
 import {
   createStoryShot, deleteShotCandidate, generateShotVideo, getStoryShot, listCreativeAssets,
-  listShotCandidates, moveStoryShot, optimizeCreativePrompt, selectShotCandidate,
-  unselectShotCandidate, updateStoryShot, uploadShotCandidate
+  listShotCandidates, moveStoryShot, optimizeCreativePrompt, preflightStoryGeneration,
+  selectShotCandidate, unselectShotCandidate, updateStoryShot, uploadCreativeAsset, uploadShotCandidate
 } from '../../../api'
 import { formatDuration, formatTime, useVideoUrls } from '../shared'
 import { PROJECT_CTX } from '../project/composables'
@@ -203,7 +228,9 @@ const form = reactive({
   dialogue: props.shot.dialogue || '',
   continuity: props.shot.continuity || '',
   durationTargetSeconds: props.shot.durationTargetSeconds || 4,
-  promptText: props.shot.promptText || ''
+  promptText: props.shot.promptText || '',
+  styleCode: props.shot.styleCode || '',
+  referenceAssetIds: [...(props.shot.referenceAssetIds || [])]
 })
 const version = ref(props.shot.version)
 const status = ref(props.shot.status)
@@ -226,7 +253,9 @@ const dirty = computed(() => form.purpose !== saved.purpose
   || form.dialogue !== saved.dialogue
   || form.continuity !== saved.continuity
   || form.promptText !== saved.promptText
-  || form.durationTargetSeconds !== saved.durationTargetSeconds)
+  || form.durationTargetSeconds !== saved.durationTargetSeconds
+  || form.styleCode !== saved.styleCode
+  || JSON.stringify(form.referenceAssetIds) !== JSON.stringify(saved.referenceAssetIds))
 const canGenerate = computed(() =>
   ['DRAFT', 'READY'].includes(status.value) && form.promptText.trim().length > 0)
 const statusLabel = computed(() => SHOT_STATUS_LABEL[status.value] || status.value)
@@ -238,14 +267,41 @@ const videoModelLabel = computed(() => {
 })
 const styleLabel = computed(() => {
   // 展示当前实际生效的风格：镜头覆盖 > 项目默认
-  let code = ''
-  try {
-    const stored = props.shot.styleCode
-    code = stored || ctx?.projectStyle?.value || ''
-  } catch { code = '' }
+  const code = effectiveStyleCode.value
   if (!code) return '未指定'
   return styleCatalog.value.find(style => style.code === code)?.label || code
 })
+const effectiveStyleCode = computed(() => form.styleCode || ctx?.projectStyle?.value || '')
+const styleOptions = computed(() => ([
+  { value: '', label: '继承项目默认' },
+  ...styleCatalog.value.filter(style => style.code !== 'PHOTO_MATCH')
+    .map(style => ({ value: style.code, label: `${style.label}（${style.category}）` }))
+]))
+const imageAssets = ref([])
+const frameAssetId = computed(() => form.referenceAssetIds[0] || '')
+const frameAsset = computed(() => imageAssets.value.find(asset => asset.id === frameAssetId.value) || null)
+const imageAssetOptions = computed(() => imageAssets.value.map(asset => ({
+  value: asset.id, label: asset.displayName || asset.id.slice(0, 8)
+})))
+async function uploadFrame(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    const asset = await uploadCreativeAsset(props.projectId, file)
+    await setImageFrame(asset.id)
+  } catch (exception) {
+    error.value = exception.response?.data?.error || '首帧上传失败'
+  } finally { event.target.value = '' }
+}
+async function setImageFrame(assetId) {
+  form.referenceAssetIds = assetId ? [assetId] : []
+  markDirtyAndSave()
+}
+function markDirtyAndSave() {
+  saveState.value = 'saving'
+  window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(save, 500)
+}
 // 候选基于当时的提示词/画风生成：与当前镜头提示词不同即视为较早设定（不阻止采用）
 function isOutdated(candidate) {
   const generated = (candidate.promptText || '').trim()
@@ -261,6 +317,13 @@ const videoAssetOptions = computed(() => videoAssets.value.map(asset => ({
 function assetUrl(candidate) {
   if (!candidate.assetId) return ''
   return videoUrls[candidate.assetId]?.url || ''
+}
+
+async function loadImageAssets() {
+  try {
+    const result = await listCreativeAssets({ projectId: props.projectId, mediaType: 'IMAGE', limit: 50 })
+    imageAssets.value = (result.items || [])
+  } catch { imageAssets.value = [] }
 }
 
 async function reloadCandidates() {
@@ -327,7 +390,8 @@ async function save() {
       expectedVersion: version.value,
       purpose: form.purpose, action: form.action, camera: form.camera,
       dialogue: form.dialogue, continuity: form.continuity,
-      durationTargetSeconds: form.durationTargetSeconds, promptText: form.promptText
+      durationTargetSeconds: form.durationTargetSeconds, promptText: form.promptText,
+      styleCode: form.styleCode, referenceAssetIds: form.referenceAssetIds
     })
     version.value = updated.version
     status.value = updated.status
@@ -335,7 +399,8 @@ async function save() {
     Object.assign(saved, {
       purpose: form.purpose, action: form.action, camera: form.camera,
       dialogue: form.dialogue, continuity: form.continuity,
-      durationTargetSeconds: form.durationTargetSeconds, promptText: form.promptText
+      durationTargetSeconds: form.durationTargetSeconds, promptText: form.promptText,
+      styleCode: form.styleCode, referenceAssetIds: [...form.referenceAssetIds]
     })
     emit('changed')
   } catch (exception) {
@@ -372,11 +437,22 @@ async function adopt() {
   await save()
 }
 
+async function preflightThisShot() {
+  const result = await preflightStoryGeneration(props.projectId, [props.shot.id])
+  return result.items?.[0] || { ok: false, reason: '预检不可用' }
+}
+
 async function generate() {
   if (dirty.value) await save()
   generating.value = true
   error.value = ''
   try {
+    const item = await preflightThisShot()
+    if (!item.ok) {
+      error.value = `无法提交：${item.reason || '预检未通过'}` + (item.operation === 'text_to_video'
+        ? '（当前模型可能只支持图生视频，可在下方「首帧参考」设置一张首帧图）' : '')
+      return
+    }
     await generateShotVideo(props.projectId, props.shot.id, {
       expectedVersion: version.value,
       seconds: Math.min(form.durationTargetSeconds || 4, 60)
@@ -435,6 +511,7 @@ async function addUpload(assetId) {
 }
 
 onMounted(async () => {
+  loadImageAssets()
   await reloadCandidates()
   try {
     const data = await listCreativeAssets({ projectId: props.projectId, mediaType: 'VIDEO', limit: 50 })

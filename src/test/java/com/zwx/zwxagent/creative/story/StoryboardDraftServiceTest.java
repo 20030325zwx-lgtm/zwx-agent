@@ -72,7 +72,7 @@ class StoryboardDraftServiceTest {
 
     private VideoShotRecord newShot() {
         return new VideoShotRecord(UUID.randomUUID(), projectId, "t", "u", sceneId, 1,
-                "", "", "", "", "", 4, "", "DRAFT", 1L, null, null);
+                "", "", "", "", "", 4, "", "DRAFT", 1L, null, null, "", java.util.List.of());
     }
 
     private TransactionTemplate txThatRunsCallback() {

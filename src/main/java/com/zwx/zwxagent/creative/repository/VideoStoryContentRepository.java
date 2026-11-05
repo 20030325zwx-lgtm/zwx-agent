@@ -1,6 +1,7 @@
 package com.zwx.zwxagent.creative.repository;
 
 import com.zwx.zwxagent.creative.domain.VideoEpisodeRecord;
+import com.zwx.zwxagent.creative.support.CreativeJson;
 import com.zwx.zwxagent.creative.domain.VideoSceneRecord;
 import com.zwx.zwxagent.creative.domain.VideoShotRecord;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -172,8 +173,9 @@ public class VideoStoryContentRepository {
         jdbcTemplate.update("""
                         INSERT INTO video_shot (id, project_id, tenant_id, user_id, scene_id, shot_number,
                                                 purpose, action, camera, dialogue, continuity,
-                                                duration_target_seconds, prompt_text, status, version)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                duration_target_seconds, prompt_text, status, version,
+                                                style_code, reference_asset_ids)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                         """,
                 ps -> {
                     ps.setObject(1, shot.id());
@@ -191,6 +193,9 @@ public class VideoStoryContentRepository {
                     ps.setString(13, shot.promptText());
                     ps.setString(14, shot.status());
                     ps.setLong(15, shot.version());
+                    ps.setString(16, shot.styleCode() == null ? "" : shot.styleCode());
+                    ps.setString(17, CreativeJson.toJson(
+                            shot.referenceAssetIds() == null ? List.of() : shot.referenceAssetIds()));
                 });
     }
 
@@ -221,13 +226,15 @@ public class VideoStoryContentRepository {
      */
     public boolean updateShotFields(UUID id, long expectedVersion, String purpose, String action,
                                     String camera, String dialogue, String continuity,
-                                    int durationTargetSeconds, String promptText) {
+                                    int durationTargetSeconds, String promptText,
+                                    String styleCode, String referenceAssetIdsJson) {
         return jdbcTemplate.update("""
                         UPDATE video_shot SET purpose = ?, action = ?, camera = ?, dialogue = ?, continuity = ?,
-                            duration_target_seconds = ?, prompt_text = ?, version = version + 1, updated_at = now()
+                            duration_target_seconds = ?, prompt_text = ?, style_code = ?,
+                            reference_asset_ids = ?::jsonb, version = version + 1, updated_at = now()
                         WHERE id = ? AND version = ?
                         """, purpose, action, camera, dialogue, continuity, durationTargetSeconds,
-                promptText, id, expectedVersion) > 0;
+                promptText, styleCode, referenceAssetIdsJson, id, expectedVersion) > 0;
     }
 
     /** 状态与版本推进（生成受理/失败回退等），带乐观锁条件。 */
@@ -324,7 +331,22 @@ public class VideoStoryContentRepository {
                 rs.getString("status"),
                 rs.getLong("version"),
                 toInstant(rs.getTimestamp("created_at")),
-                toInstant(rs.getTimestamp("updated_at")));
+                toInstant(rs.getTimestamp("updated_at")),
+                rs.getString("style_code"),
+                parseUuidList(rs.getString("reference_asset_ids")));
+    }
+
+    private static java.util.List<java.util.UUID> parseUuidList(String json) {
+        if (json == null || json.isBlank()) return java.util.List.of();
+        try {
+            java.util.List<String> raw = com.zwx.zwxagent.creative.support.CreativeJson.fromJson(
+                    json, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>() { });
+            if (raw == null) return java.util.List.of();
+            return raw.stream().filter(v -> v != null && !v.isBlank())
+                    .map(java.util.UUID::fromString).toList();
+        } catch (Exception exception) {
+            return java.util.List.of();
+        }
     }
 
     private static Instant toInstant(Timestamp timestamp) {

@@ -152,14 +152,16 @@ public class StoryController {
                                       @PathVariable UUID shotId,
                                       @RequestBody UpdateShotBody body) {
         var request = new StoryContentService.ShotRequest(body.purpose(), body.action(), body.camera(),
-                body.dialogue(), body.continuity(), body.durationTargetSeconds(), body.promptText());
+                body.dialogue(), body.continuity(), body.durationTargetSeconds(), body.promptText(),
+                body.styleCode(), body.referenceAssetIds());
         return contentService.updateShot(actor, projectId, shotId,
                 body.expectedVersion() == null ? -1 : body.expectedVersion(), request);
     }
 
     public record UpdateShotBody(Long expectedVersion, String purpose, String action, String camera,
                                  String dialogue, String continuity, Integer durationTargetSeconds,
-                                 String promptText) {
+                                 String promptText, String styleCode,
+                                 java.util.List<UUID> referenceAssetIds) {
     }
 
     @DeleteMapping("/shots/{shotId}")
@@ -356,6 +358,17 @@ public class StoryController {
     private static UUID uuidOf(Object value) {
         if (value == null) throw new IllegalArgumentException("缺少 ID 参数");
         return UUID.fromString(String.valueOf(value));
+    }
+
+    /** 生成预检（P1）：逐镜可提交/阻塞原因、模型与任务数；纯校验，不创建任务、不调用模型。 */
+    @PostMapping("/generate-preflight")
+    public ShotProductionService.PreflightResult generatePreflight(CurrentActor actor, @PathVariable UUID projectId,
+                                                                   @RequestBody PreflightBody body) {
+        return productionService.preflight(actor, projectId,
+                body == null ? List.of() : body.shotIds());
+    }
+
+    public record PreflightBody(java.util.List<UUID> shotIds) {
     }
 
     // ---------------------------------------------------------------- 结构化分镜草稿（P0 制作视图）

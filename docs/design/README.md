@@ -1,5 +1,7 @@
 # 设计文档
 
+- [视频创作整改 P1/P2 实施记录：预检、画风覆盖/首帧、最小成片闭环](./2026-11-06-video-production-p1-p2.md)
+- [视频创作整改 P0 实施记录：制作视图、结构化拆镜](./2026-11-06-video-production-p0.md)
 - [视频创作整改需求说明书：完整流程、交互、样式与验收](./2026-11-05-video-creation-remediation-requirements.md)
 
 - [工作 Agent 整改详细方案：执行、交互、目标与自动化（含数据库变更）](./2026-11-05-work-agent-remediation-plan.md)

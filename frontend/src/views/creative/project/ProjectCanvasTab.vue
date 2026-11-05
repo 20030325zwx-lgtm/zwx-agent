@@ -11,10 +11,13 @@
         <button class="canvas-icon" type="button" title="适应画布" @click="fitView"><Scan :size="16" /></button>
         <span class="canvas-divider" />
         <select v-model="runScope" class="run-scope" aria-label="运行范围"><option value="node">当前节点</option><option value="up_to">执行到此节点</option><option value="from_here">从此继续</option><option value="all">整条流程</option></select>
-        <button v-if="activeCanvasRun && ['RUNNING', 'WAITING_EXTERNAL', 'WAITING_SELECTION'].includes(activeCanvasRun.run?.status)"
+        <button v-if="runActive"
                 class="canvas-tool" type="button" :disabled="busyNode" @click="cancelRun">停止</button>
-        <button class="canvas-run" type="button" :title="runBlockedReason" :disabled="busyNode || !!runBlockedReason || (runScope === 'all' ? !nodes.some(isGenerationNode) : !canRun)" @click="runCanvas(runScope)">
-          <Spinner v-if="busyNode" /><Play v-else :size="14" />{{ busyNode ? '提交中' : runScopeLabel }}
+        <button class="canvas-run" type="button"
+                :title="runActive ? '正在执行，请等待本次运行完成后再次生成' : runBlockedReason"
+                :disabled="busyNode || runActive || !!runBlockedReason || (runScope === 'all' ? !nodes.some(isGenerationNode) : !canRun)"
+                @click="runCanvas(runScope)">
+          <Spinner v-if="busyNode || runActive" /><Play v-else :size="14" />{{ busyNode ? '提交中' : runActive ? '正在执行' : runScopeLabel }}
         </button>
       </div>
     </header>
@@ -101,8 +104,8 @@
             <p v-if="!compatibleAssets.length" class="inspector-empty">暂无可用图片素材</p>
           </div>
           <div class="inspector-run">
-            <button class="canvas-tool run-to-here" type="button" :disabled="busyNode || !canRun || !!upToBlocked"
-                    :title="upToBlocked || (canRun ? '自动跳过已成功的上级节点' : '请先完善本节点的提示词与模型')" @click="runCanvas('up_to')">
+            <button class="canvas-tool run-to-here" type="button" :disabled="busyNode || runActive || !canRun || !!upToBlocked"
+                    :title="runActive ? '正在执行，请等待本次运行完成后再次生成' : (upToBlocked || (canRun ? '自动跳过已成功的上级节点' : '请先完善本节点的提示词与模型'))" @click="runCanvas('up_to')">
               <Play :size="14" />{{ upToLabel }}
             </button>
             <p class="inspector-note">自动跳过已成功的上级节点，从缺失处执行到此节点。</p>
@@ -237,6 +240,9 @@ const nodeOutputs = computed(() => selectedNode.value?.data.candidates?.length
 const canRun = computed(() => selectedNode.value && isGenerationNode(selectedNode.value)
   && !!effectiveNodePrompt.value.trim() && !!selectedNode.value.data.modelRowId)
 const runBlockedReason = computed(() => dependencyIssue(selectedId.value, nodes.value, edges.value, runScope.value))
+// 运行进行中（含后台媒体等待与选片等待）：运行按钮禁用并显示「正在执行」，防止重复提交与重复计费
+const runActive = computed(() => !!activeCanvasRun.value
+  && ['RUNNING', 'WAITING_EXTERNAL', 'WAITING_SELECTION'].includes(activeCanvasRun.value.run?.status))
 const upToBlocked = computed(() => selectedNode.value && isGenerationNode(selectedNode.value)
   ? dependencyIssue(selectedId.value, nodes.value, edges.value, 'up_to') : '')
 const upToLabel = computed(() => activeCanvasRun.value && ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(activeCanvasRun.value.run?.status)

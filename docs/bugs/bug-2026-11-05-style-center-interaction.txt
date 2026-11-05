@@ -1,0 +1,32 @@
+日期：2026-11-05
+主题：风格中心面板的交互问题（滚轮关闭、依赖参考图的风格置灰）
+
+问题现象：
+1. 打开风格中心后，鼠标滚轮滚动列表（滚到顶部/底部继续滚），面板直接消失。
+2. 未接入参考图时，「跟随原片」以灰色卡片出现在列表里，点「应用」无反应；
+   用户反馈「选择了风格没有参考图肯定不行」，看起来像风格不可用，而不是缺少参考图。
+
+影响范围：
+- 创作画布检查器的风格中心（图片 / 视频节点共用）。
+- 仅前端交互，不涉及生成结果与数据。
+
+原因：
+1. 面板用 Teleport + fixed 定位，打开时监听 window 的 scroll（capture）；
+   列表滚到边界后滚动链会冒泡到外层滚动容器，命中关闭逻辑。
+2. 依赖参考图的风格（needsReference）仍参与列表渲染，只是按钮 disabled。
+
+解决方式：
+1. 不再在滚动时关闭面板，改为用 requestAnimationFrame 重新计算面板位置跟随触发按钮；
+   `.sc-body` 加 `overscroll-behavior: contain` 阻止滚动链。
+2. 未接入参考图时，直接把 needsReference 的风格从列表、分类计数、搜索结果中过滤掉，
+   底栏改为提示「接入参考图后可用「跟随原片」」。
+3. 补充兜底：参考图被移除后，节点上残留的 PHOTO_MATCH 不再展示（视频回空、图片回自然写实）；
+   后端提交视频时，无参考图则忽略 PHOTO_MATCH 注记。
+
+验证：
+- 本地 `npm run build` 通过；backend 重启后 `/api/health`=ok。
+- 相关单测（WorkflowVideoStyleTest / PromptOptimizationModesTest / CreativeCanvasServiceTest）通过。
+
+后续注意：
+- 面板是固定定位，滚动/缩放时靠 place() 跟随；新增弹层时不要再把 scroll 当成关闭手势。
+- 需要参考图的风格以后若增加，继续复用 needsReference，不要再单独写禁用态。

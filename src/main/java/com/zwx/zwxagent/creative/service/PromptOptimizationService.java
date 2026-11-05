@@ -103,6 +103,35 @@ public class PromptOptimizationService {
             【风格锚点】%s
             """ + IMAGE_COMMON_RULES;
 
+    /**
+     * 3D 渲染骨架（2026-11-05）：造型/材质/灯光/渲染/镜头五段，
+     * 具体取向（卡通、国漫、黏土、手办）由风格锚点注入。
+     */
+    private static final String SYSTEM_IMAGE_CG_TEMPLATE = """
+            你是 3D 渲染方向的文生图提示词编辑。把用户描述改写为一段可直接生成「3D 渲染画面」的中文提示词，规范：
+            1. 造型：比例与体积关系、轮廓特征、服装与道具的立体结构，风格化程度按锚点执行；
+            2. 材质：皮肤次表面散射、毛发/布料的蓬松与垂坠、金属/玻璃/陶瓷的反射与粗糙度；
+            3. 灯光：主光方向与软硬、环境光与补光、体积光与轮廓光，控制高光形状；
+            4. 渲染：景深与虚化、轻微辉光或色差、干净通透的配色，画面像电影级 CG 而非照片；
+            5. 镜头：等效焦段与机位、构图纵深，避免平铺直叙的正面展示；
+            6. 风格约束：严格按下方「风格锚点」执行，不混入其他渲染取向，不出现文字与水印。
+            【风格锚点】%s
+            """ + IMAGE_COMMON_RULES;
+
+    /**
+     * 2D 插画骨架（2026-11-05）：媒介/线条/上色/构图四段，
+     * 漫画、日系动画、国风、水彩、油画、水墨、像素、线稿共用，差异全在锚点。
+     */
+    private static final String SYSTEM_IMAGE_ILLUSTRATION_TEMPLATE = """
+            你是插画方向的文生图提示词编辑。把用户描述改写为一段可直接生成「2D 插画」的中文提示词，规范：
+            1. 媒介：先确定画种与工具（赛璐璐动画、工笔、岩彩、水彩、油画、水墨、像素、铅笔线稿），全图统一；
+            2. 线条：勾线的粗细与收放、轮廓强调程度；无勾线的画种说明笔触与块面关系；
+            3. 上色：上色方式（平涂/晕染/厚涂/抖动渐变）、色板与明暗层次、高光处理；
+            4. 构图：透视与景别、留白与视觉重心，动作姿态有支撑点；
+            5. 风格约束：严格按下方「风格锚点」执行，不混入照片质感或其他画种特征，不生成文字与水印。
+            【风格锚点】%s
+            """ + IMAGE_COMMON_RULES;
+
     /** 跟随原片：参考图只用来提取风格要素，不复述其内容，避免把上一张的主体带进新图。 */
     private static final String SYSTEM_IMAGE_PHOTO_MATCH = """
             你是摄影风格分析与文生图提示词编辑。用户会附带一张参考照片和一段文字描述，规则：
@@ -147,8 +176,9 @@ public class PromptOptimizationService {
             """;
 
     /**
-     * imageStyle 只在 IMAGE 模式生效（缺省写实）；referenceAssetIds 供「跟随原片」读取参考图，
-     * 服务端按 ID 校验归属后读取，不信任客户端传入的图片内容或地址。
+     * imageStyle 在 IMAGE 模式决定图片风格骨架；在 VIDEO_PROMPT 模式作为画面风格注记
+     * 写进 [风格]/[质感]（空值表示不指定，保持原有自由发挥）。referenceAssetIds 供「跟随原片」
+     * 读取参考图，服务端按 ID 校验归属后读取，不信任客户端传入的图片内容或地址。
      */
     public record OptimizeRequest(String prompt, String mode, UUID projectId,
                                   UUID episodeId, UUID sceneId, UUID shotId, String imageStyle,
@@ -215,6 +245,13 @@ public class PromptOptimizationService {
                 case MODE_VIDEO_STORYBOARD -> SYSTEM_VIDEO_STORYBOARD;
                 default -> SYSTEM_VIDEO_PROMPT;
             };
+            // 视频画风（2026-11-05）：只影响 [风格]/[质感] 两个要素，不改主体、动作与运镜
+            String styleNote = MODE_VIDEO_PROMPT.equals(mode)
+                    ? videoStyleNote(request.imageStyle()) : "";
+            if (!styleNote.isBlank()) {
+                system = system + "\n【画面风格】" + styleNote
+                        + "\n把该风格写进 [风格] 与 [质感]，不要改变用户指定的主体、动作、运镜与台词。";
+            }
             userContent = trimmed + (context.isBlank() ? "" : "\n\n" + context);
         }
         List<ReferenceImage> referenceImages = matchReference
@@ -494,13 +531,27 @@ public class PromptOptimizationService {
         }
     }
 
+    /** 视频画风注记：未指定返回空串；非法编码照常显式拒绝。 */
+    static String videoStyleNote(String imageStyle) {
+        if (imageStyle == null || imageStyle.isBlank()) return "";
+        return ImageStyleCatalog.videoNote(normalizeImageStyle(imageStyle));
+    }
+
     static String imageSystemPrompt(String imageStyle) {
         String style = normalizeImageStyle(imageStyle);
         return switch (style) {
             case IMAGE_STYLE_COMIC -> SYSTEM_IMAGE_COMIC;
             case IMAGE_STYLE_PHOTO_MATCH -> SYSTEM_IMAGE_PHOTO_MATCH;
             case IMAGE_STYLE_REALISTIC -> SYSTEM_IMAGE_REALISTIC;
-            default -> SYSTEM_IMAGE_PHOTO_TEMPLATE.formatted(ImageStyleCatalog.require(style).rubric());
+            default -> {
+                ImageStyleCatalog.Style entry = ImageStyleCatalog.require(style);
+                String template = switch (entry.group()) {
+                    case ImageStyleCatalog.GROUP_CG -> SYSTEM_IMAGE_CG_TEMPLATE;
+                    case ImageStyleCatalog.GROUP_ILLUSTRATION -> SYSTEM_IMAGE_ILLUSTRATION_TEMPLATE;
+                    default -> SYSTEM_IMAGE_PHOTO_TEMPLATE;
+                };
+                yield template.formatted(entry.rubric());
+            }
         };
     }
 

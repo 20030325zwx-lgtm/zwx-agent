@@ -1197,11 +1197,20 @@ public class WorkflowService {
         if (prompt == null || prompt.isBlank()) {
             throw new IllegalArgumentException("视频生成提示词为空");
         }
+        // 画面风格（2026-11-05）：画布上选中的风格在提交前拼进提示词，保证不改提示词也能生效；
+        // 用户原文优先，剩余预算不足时降级为「风格名画风」而不是截断正文。
+        java.util.List<UUID> referenceAssetIds = parseAssetIdList(params.get("imageAssetIds"));
+        String styleCode = text(params.get("styleCode"));
+        // 跟随原片依赖首帧/参考图，无参考图时忽略，避免注入一句无从执行的风格要求
+        if (com.zwx.zwxagent.creative.support.ImageStyleCatalog.PHOTO_MATCH.equals(styleCode)
+                && referenceAssetIds.isEmpty()) {
+            styleCode = null;
+        }
+        prompt = withVideoStyle(prompt, styleCode);
         if (prompt.length() > com.zwx.zwxagent.creative.domain.ParameterSchema.MODEL_PROMPT_MAX) {
             throw new IllegalArgumentException("提示词超过模型上限 "
                     + com.zwx.zwxagent.creative.domain.ParameterSchema.MODEL_PROMPT_MAX + " 个字符");
         }
-        java.util.List<UUID> referenceAssetIds = parseAssetIdList(params.get("imageAssetIds"));
         String operation = referenceAssetIds.isEmpty()
                 ? com.zwx.zwxagent.creative.domain.ParameterSchema.TEXT_TO_VIDEO
                 : com.zwx.zwxagent.creative.domain.ParameterSchema.IMAGE_TO_VIDEO;
@@ -1232,6 +1241,20 @@ public class WorkflowService {
                         """,
                 context.id(), node.key(), created.jobId());
         return NodeResult.waiting("视频生成中（任务 " + created.jobId() + "）");
+    }
+
+    /** 把画风注记拼进视频提示词：正文不动，注记按剩余预算降级；未指定风格原样返回。 */
+    static String withVideoStyle(String prompt, String styleCode) {
+        String note = com.zwx.zwxagent.creative.support.ImageStyleCatalog.videoNote(styleCode);
+        if (note.isBlank()) return prompt;
+        int budget = com.zwx.zwxagent.creative.domain.ParameterSchema.MODEL_PROMPT_MAX - prompt.length() - 1;
+        if (budget <= 0) return prompt;
+        if (note.length() > budget) {
+            var style = com.zwx.zwxagent.creative.support.ImageStyleCatalog.optional(styleCode);
+            String shortNote = style == null ? "" : style.label() + "画风。";
+            note = shortNote.length() <= budget ? shortNote : "";
+        }
+        return note.isBlank() ? prompt : prompt + " " + note;
     }
 
     /** imageAssetIds 参数解析：List / 逗号或空白分隔字符串 → UUID 列表（非法值报错）。 */

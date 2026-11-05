@@ -93,20 +93,40 @@ class PromptOptimizationModesTest {
     // ---- 摄影风格目录（2026-11-05）：每种取向一份风格锚点，跟随原片走视觉输入 ----
 
     @Test
-    void catalogExposesPhotographyLooksAndSingleReferenceStyle() {
+    void catalogExposesStylesGroupedByMediumWithMetadata() {
         var views = ImageStyleCatalog.views();
         Assertions.assertEquals(views.size(),
                 views.stream().map(ImageStyleCatalog.View::code).distinct().count(), "风格编码不能重复");
-        Assertions.assertEquals(List.of(
-                        "PHOTO_MATCH", "REALISTIC", "FILM_PORTRAIT", "BLACK_WHITE", "DOCUMENTARY", "CINEMATIC",
-                        "LANDSCAPE", "PRODUCT", "RETRO_CCD", "JAPANESE_FRESH", "MOODY_NIGHT", "MACRO", "COMIC"),
-                views.stream().map(ImageStyleCatalog.View::code).toList());
+        Assertions.assertEquals(30, views.size(), "风格目录规模：摄影 18 + 3D 4 + 插画 8");
         Assertions.assertEquals(List.of("PHOTO_MATCH"),
                 views.stream().filter(ImageStyleCatalog.View::needsReference)
                         .map(ImageStyleCatalog.View::code).toList(),
                 "只有跟随原片依赖参考图");
         Assertions.assertTrue(views.stream().allMatch(view ->
-                !view.label().isBlank() && !view.hint().isBlank() && !view.group().isBlank()));
+                !view.label().isBlank() && !view.hint().isBlank() && !view.group().isBlank()
+                        && !view.category().isBlank() && !view.tags().isEmpty()
+                        && view.tags().stream().noneMatch(String::isBlank)
+                        && view.accent().size() == 2));
+
+        Assertions.assertEquals(18, views.stream().filter(view -> ImageStyleCatalog.GROUP_PHOTO.equals(view.group())).count());
+        Assertions.assertEquals(4, views.stream().filter(view -> ImageStyleCatalog.GROUP_CG.equals(view.group())).count());
+        Assertions.assertEquals(8, views.stream().filter(view -> ImageStyleCatalog.GROUP_ILLUSTRATION.equals(view.group())).count());
+
+        // 已保存的画布节点里可能存着旧编码，必须继续可用
+        List<String> legacyCodes = List.of("PHOTO_MATCH", "REALISTIC", "FILM_PORTRAIT", "BLACK_WHITE",
+                "DOCUMENTARY", "CINEMATIC", "LANDSCAPE", "PRODUCT", "RETRO_CCD", "JAPANESE_FRESH",
+                "MOODY_NIGHT", "MACRO", "COMIC");
+        List<String> codes = views.stream().map(ImageStyleCatalog.View::code).toList();
+        Assertions.assertTrue(codes.containsAll(legacyCodes), "旧风格编码不能删除");
+
+        // 预览图与目录一一对应：缺图会让风格中心出现空卡片
+        var previewDir = java.nio.file.Path.of("frontend/public/style-previews");
+        Assertions.assertTrue(java.nio.file.Files.isDirectory(previewDir), "缺少风格预览图目录");
+        for (var view : views) {
+            Assertions.assertEquals("/style-previews/" + view.code() + ".jpg", view.cover());
+            Assertions.assertTrue(java.nio.file.Files.isRegularFile(previewDir.resolve(view.code() + ".jpg")),
+                    view.code() + " 缺少预览图");
+        }
     }
 
     @Test
@@ -121,7 +141,7 @@ class PromptOptimizationModesTest {
                 default -> {
                     Assertions.assertFalse(style.rubric().isBlank(), style.code() + " 缺少风格锚点");
                     Assertions.assertTrue(prompt.contains(style.rubric()), style.code() + " 的锚点未注入");
-                    Assertions.assertTrue(prompt.contains("【风格锚点】"), style.code() + " 未使用摄影骨架");
+                    Assertions.assertTrue(prompt.contains("【风格锚点】"), style.code() + " 未使用骨架模板");
                 }
             }
         }
@@ -137,6 +157,42 @@ class PromptOptimizationModesTest {
         Assertions.assertTrue(match.contains("不复述参考片"));
         Assertions.assertTrue(match.contains("只输出 JSON"));
         Assertions.assertFalse(match.contains("Portra 400"), "跟随原片不应预置某个具体胶片取向");
+    }
+
+    // ---- 媒介骨架（2026-11-05）：摄影/3D/2D 各走一套规范化流程，风格差异只在锚点 ----
+
+    @Test
+    void eachMediumUsesItsOwnSkeleton() {
+        String photo = PromptOptimizationService.imageSystemPrompt("FILM_PORTRAIT");
+        Assertions.assertTrue(photo.contains("摄影方向"), "真实拍摄走摄影骨架");
+        Assertions.assertTrue(photo.contains("等效焦段"));
+
+        String cg = PromptOptimizationService.imageSystemPrompt("PIXAR_3D");
+        Assertions.assertTrue(cg.contains("3D 渲染方向"), "3D 风格走渲染骨架");
+        Assertions.assertTrue(cg.contains("次表面散射"));
+        Assertions.assertFalse(cg.contains("皮肤质感（毛孔"), "3D 骨架不应套用写实皮肤要求");
+
+        String illustration = PromptOptimizationService.imageSystemPrompt("WATERCOLOR");
+        Assertions.assertTrue(illustration.contains("2D 插画"), "插画风格走 2D 骨架");
+        Assertions.assertTrue(illustration.contains("湿画法晕染"));
+
+        Assertions.assertTrue(PromptOptimizationService.imageSystemPrompt("NOIR_THRILLER").contains("冷青绿"));
+        Assertions.assertTrue(PromptOptimizationService.imageSystemPrompt("GUOMAN_2D").contains("岩彩"));
+        Assertions.assertTrue(PromptOptimizationService.imageSystemPrompt("CLAY_STOPMOTION").contains("指纹"));
+    }
+
+    // ---- 视频画风（2026-11-05）：同一份风格目录复用到视频提示词，未选则不注入 ----
+
+    @Test
+    void videoStyleNoteIsCompactAndOptional() {
+        Assertions.assertEquals("", PromptOptimizationService.videoStyleNote(null));
+        Assertions.assertEquals("", PromptOptimizationService.videoStyleNote("   "));
+        String note = PromptOptimizationService.videoStyleNote("cinematic");
+        Assertions.assertTrue(note.startsWith("电影感："));
+        Assertions.assertTrue(note.contains("宽银幕"));
+        Assertions.assertTrue(PromptOptimizationService.videoStyleNote("PHOTO_MATCH").contains("首帧"));
+        Assertions.assertThrows(IllegalArgumentException.class,
+                () -> PromptOptimizationService.videoStyleNote("NOT_A_STYLE"));
     }
 
     @Test

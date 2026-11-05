@@ -77,20 +77,13 @@
           </label>
           <p v-if="selectedNode.data.skillSlug" class="inspector-note">起步技能：{{ selectedNode.data.skillNames || selectedNode.data.skillSlug }}。技能只作为创作上下文保留，不会自动触发计费生成。</p>
           <div class="inspector-actions">
-            <select v-if="selectedNode.type !== 'video_generate'" v-model="imageStyle" class="style-select" aria-label="图片风格">
-              <optgroup v-for="group in styleGroups" :key="group.label" :label="group.label">
-                <option v-for="style in group.items" :key="style.code" :value="style.code"
-                        :disabled="style.needsReference && !allReferenceIds.length">
-                  {{ style.label }}{{ style.needsReference && !allReferenceIds.length ? '（需参考图）' : '' }}
-                </option>
-              </optgroup>
-            </select>
+            <ImageStyleCenter v-model="imageStyle" :styles="imageStyles" :has-reference="allReferenceIds.length > 0" />
             <button class="optimize-button" type="button" :disabled="optimizing || !selectedNode.data.prompt?.trim()" @click="optimizePrompt">
               <Sparkles :size="14" />{{ optimizing ? '优化中' : '优化提示词' }}
             </button>
             <button v-if="optimizedPrompt" class="inline-action" type="button" @click="adoptPrompt">采用建议</button>
           </div>
-          <p v-if="selectedNode.type !== 'video_generate' && selectedStyle" class="style-hint">{{ selectedStyle.hint }}</p>
+          <p v-if="selectedStyle" class="style-hint">{{ selectedStyle.hint }}</p>
           <p v-if="optimizedPrompt" class="optimized-preview">{{ optimizedPrompt }}</p>
           <details v-if="incomingBindings.some(binding => binding.kind === 'text')" class="effective-prompt"><summary>查看实际发送的提示词 · {{ effectiveNodePrompt.length }}/500</summary><p>{{ effectiveNodePrompt }}</p></details>
           <div v-if="selectedNode.type !== 'video_generate'" class="inspector-row">
@@ -173,6 +166,7 @@ import { connectionKind, connectionError, effectivePrompt, normalizeConnection, 
 import { Controls } from '@vue-flow/controls'
 import { AlertCircle, Check, Clapperboard, FileText, Film, Image, ImagePlus, Play, Plus, PanelLeft, Scan, Sparkles, Trash2, Undo2, Upload, WandSparkles, X } from 'lucide-vue-next'
 import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
+import ImageStyleCenter from '../../../components/creative/ImageStyleCenter.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
 import CanvasGraphNode from './CanvasGraphNode.vue'
 import { PROJECT_CTX } from './composables'
@@ -200,28 +194,27 @@ const assetLoading = ref(false)
 const models = ref([])
 const bindings = ref({})
 const optimizing = ref(false)
-// 图片提示词优化风格：目录来自后端（摄影取向 + 漫画），并按节点记忆选择；
-// 节点已有参考图时默认「跟随原片」（读取参考片镜头/光线/调色，只改写内容）。
+// 画面风格：目录来自后端（摄影 / 3D / 插画），选中值落进节点数据随画布保存。
+// 视频节点是主要使用方（画风 + 题材预设），未选择时不注入任何风格；
+// 图片节点已有参考图时默认「跟随原片」（读取参考片镜头/光线/调色，只改写内容）。
 const imageStyles = ref([])
-const nodeStyles = reactive(new Map())
-const styleGroups = computed(() => {
-  const groups = []
-  for (const style of imageStyles.value) {
-    const label = { photo: '摄影风格', illustration: '插画风格' }[style.group] || '其他风格'
-    let group = groups.find(item => item.label === label)
-    if (!group) { group = { label, items: [] }; groups.push(group) }
-    group.items.push(style)
-  }
-  return groups
-})
 const imageStyle = computed({
   get() {
-    const stored = nodeStyles.get(selectedId.value)
+    const node = selectedNode.value
+    if (!node) return 'REALISTIC'
+    const stored = node.data.styleCode
     const hasReference = allReferenceIds.value.length > 0
-    if (stored === 'PHOTO_MATCH' && !hasReference) return 'REALISTIC'
+    // 参考图被移除后，「跟随原片」不能继续挂在节点上
+    if (stored === 'PHOTO_MATCH' && !hasReference) return node.type === 'video_generate' ? '' : 'REALISTIC'
+    if (node.type === 'video_generate') return stored || ''
     return stored || (hasReference ? 'PHOTO_MATCH' : 'REALISTIC')
   },
-  set(code) { if (selectedId.value) nodeStyles.set(selectedId.value, code) }
+  set(code) {
+    const node = selectedNode.value
+    if (!node) return
+    node.data.styleCode = code
+    markChanged()
+  }
 })
 const selectedStyle = computed(() => imageStyles.value.find(style => style.code === imageStyle.value) || null)
 const optimizedPrompt = ref('')
@@ -501,9 +494,10 @@ async function optimizePrompt() {
       prompt: selectedNode.value.data.prompt,
       mode: type === 'video_generate' ? 'VIDEO_PROMPT' : 'IMAGE',
       projectId: projectId.value,
-      imageStyle: type === 'video_generate' ? null : style,
+      // 视频的画风同样参与优化：把风格锚点写进 [风格]/[质感] 两个要素；未选则不注入
+      imageStyle: style || null,
       // 跟随原片只读取参考图做风格分析（服务端按 ID 校验归属并限制张数）
-      referenceAssetIds: type === 'video_generate' ? [] : (style === 'PHOTO_MATCH' ? allReferenceIds.value : [])
+      referenceAssetIds: type !== 'video_generate' && style === 'PHOTO_MATCH' ? allReferenceIds.value : []
     })
     optimizedPrompt.value = result.optimizedPrompt || ''
   } catch (error) { actionError.value = error.response?.data?.error || '提示词优化失败' }
@@ -641,8 +635,8 @@ async function loadImageStyles() {
   // 目录接口不可用时保留最小可用集，不阻断提示词优化
   if (!imageStyles.value.length) {
     imageStyles.value = [
-      { code: 'REALISTIC', label: '自然写实', group: 'photo', hint: '通用真实照片质感', needsReference: false },
-      { code: 'COMIC', label: '漫画插画', group: 'illustration', hint: '墨线描边＋赛璐璐平涂', needsReference: false }
+      { code: 'REALISTIC', label: '自然写实', group: 'photo', category: '通用', hint: '通用真实照片质感', tags: ['写实'], accent: ['#b9c3cc', '#6d7b88'], needsReference: false },
+      { code: 'COMIC', label: '漫画插画', group: 'illustration', category: '动漫', hint: '墨线描边＋赛璐璐平涂', tags: ['漫画'], accent: ['#f0d9a8', '#2b2b2b'], needsReference: false }
     ]
   }
 }
@@ -763,7 +757,6 @@ watch(() => activeCanvasRun.value?.run?.status, schedulePoll)
 .inspector-field textarea { min-height: 76px; line-height: 1.55; }
 .inspector-field small { justify-self: end; }
 .inspector-actions,.inspector-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 13px; }
-.style-select { height: 26px; padding: 0 6px; border: 1px solid var(--wb-border); border-radius: 6px; background: var(--wb-bg); color: var(--wb-text); font-size: 11px; }
 .style-hint { margin: -2px 0 2px; color: var(--wb-text-muted); font-size: 10px; line-height: 1.5; }
 .optimize-button,.inline-action { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: #2563eb; font-size: 11px; cursor: pointer; }
 .optimize-button:disabled { opacity: .5; cursor: default; }

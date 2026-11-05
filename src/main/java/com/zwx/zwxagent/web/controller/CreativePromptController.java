@@ -35,8 +35,8 @@ public class CreativePromptController {
         return optimizationService.optimize(actor, request);
     }
 
-    /** 图片风格目录：前端下拉的唯一来源（分组、文案、是否依赖参考图）。 */
-    @GetMapping("/image-styles")
+    /** 画面风格目录（图片与视频共用）：前端风格中心的唯一来源（分组、题材、标签、是否依赖参考图）。 */
+    @GetMapping({"/image-styles", "/styles"})
     public List<ImageStyleCatalog.View> imageStyles() {
         return ImageStyleCatalog.views();
     }

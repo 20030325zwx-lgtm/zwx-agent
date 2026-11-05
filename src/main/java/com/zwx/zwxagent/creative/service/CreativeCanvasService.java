@@ -309,8 +309,14 @@ public class CreativeCanvasService {
             params.put("prompt", prompt);
             params.put("modelRowId", modelRowId);
             if (!references.isEmpty()) params.put("imageAssetIds", references);
-            if ("video_generate".equals(type)) params.put("seconds", data.path("seconds").asInt(5));
-            else params.put("size", data.path("size").asText("1024*1024"));
+            if ("video_generate".equals(type)) {
+                params.put("seconds", data.path("seconds").asInt(5));
+                // 视频画风随节点保存：提交前由 WorkflowService 拼进提示词，未选则不注入
+                String styleCode = data.path("styleCode").asText("").trim();
+                if (!styleCode.isBlank()) params.put("styleCode", styleCode);
+            } else {
+                params.put("size", data.path("size").asText("1024*1024"));
+            }
             String workflowType = "video_generate".equals(type) ? "media_video_generate"
                     : references.isEmpty() && !"image_edit".equals(type) ? "media_image_generate" : "media_image_edit";
             workflowNodes.add(new WorkflowService.GraphNodeDef(id, workflowType, label(node), params,
@@ -494,6 +500,8 @@ public class CreativeCanvasService {
         if (node.path("data").path("modelRowId").asLong(0) != params.path("modelRowId").asLong(0)) return true;
         if ("video_generate".equals(node.path("type").asText())) {
             if (node.path("data").path("seconds").asInt(5) != params.path("seconds").asInt(5)) return true;
+            if (!node.path("data").path("styleCode").asText("").trim()
+                    .equals(params.path("styleCode").asText(""))) return true;
         } else if (!node.path("data").path("size").asText("1024*1024")
                 .equals(params.path("size").asText("1024*1024"))) {
             return true;

@@ -41,7 +41,8 @@
                 </div>
                 <div v-else-if="view.candidate.status === 'FAILED'" class="si-media-state is-failed">
                   <span>生成失败</span>
-                  <em>{{ view.jobError || '未返回可用结果' }}</em>
+                  <em :title="view.jobErrorRaw || ''">{{ view.jobError || '未返回可用结果' }}</em>
+                  <small v-if="view.jobErrorHint" class="si-error-hint">{{ view.jobErrorHint }}</small>
                   <button type="button" class="cr-secondary" :disabled="generating" @click="generate">
                     重新生成（计费）
                   </button>
@@ -448,6 +449,9 @@ async function generate() {
   error.value = ''
   try {
     const item = await preflightThisShot()
+    if (item.ok && item.adjusted) {
+      ctx?.showToast?.(`时长按模型档位调整为 ${item.effectiveSeconds} 秒`, 'success')
+    }
     if (!item.ok) {
       error.value = `无法提交：${item.reason || '预检未通过'}` + (item.operation === 'text_to_video'
         ? '（当前模型可能只支持图生视频，可在下方「首帧参考」设置一张首帧图）' : '')
@@ -568,6 +572,7 @@ onMounted(async () => {
 }
 .si-status.is-SELECTED { color: var(--wb-success); border-color: color-mix(in srgb, var(--wb-success) 40%, transparent); }
 .si-status.is-PENDING_SELECTION { color: var(--wb-warning); border-color: color-mix(in srgb, var(--wb-warning) 40%, transparent); }
+.si-error-hint { display: block; margin-top: 3px; color: var(--wb-muted); font-size: 10px; }
 .si-outdated { padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, #d6ad5c 18%, transparent); color: #a35914; font-size: 10px; }
 .si-params { margin: 0; display: grid; gap: 5px; font-size: 12px; }
 .si-params div { display: grid; grid-template-columns: 72px 1fr; gap: 8px; }

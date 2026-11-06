@@ -159,11 +159,24 @@
           <div><dt>范围</dt><dd>{{ preflightScopeLabel }} · {{ preflightOkItems.length }} 镜可提交</dd></div>
           <div><dt>模型</dt><dd>{{ preflight.modelName ? `${preflight.modelName}` : '未绑定视频模型' }}</dd></div>
           <div><dt>任务数</dt><dd>{{ preflightOkItems.length }} 个（每镜一个候选）</dd></div>
-          <div><dt>费用</dt><dd>{{ preflight.costNote }}</dd></div>
+          <div><dt>费用</dt><dd>
+            <strong v-if="preflight.estimatedTotal">{{ preflight.estimatedTotal }}</strong>
+            <span v-else>费用未知</span>
+            <span class="pf-cost-note">{{ preflight.costNote }}</span>
+          </dd></div>
+          <div v-if="preflight.adjustedCount"><dt>时长</dt><dd>
+            {{ preflight.adjustedCount }} 个镜头的时长将按模型档位自动调整（成片按实际时长计算）
+          </dd></div>
         </dl>
         <p v-if="preflightBlocked.length" class="pf-blocked">
           {{ preflightBlocked.length }} 个镜头被阻塞，将不会提交：
         </p>
+        <ul v-if="preflightAdjusted.length" class="pf-list">
+          <li v-for="item in preflightAdjusted" :key="'adj-' + item.shotId" class="pf-adjusted">
+            <span>{{ `镜 ${String(item.shotNumber).padStart(2, '0')}` }}</span>
+            <em>{{ item.requestedSeconds }}s → {{ item.effectiveSeconds }}s（模型档位）· {{ item.estimatedCost }}</em>
+          </li>
+        </ul>
         <ul class="pf-list">
           <li v-for="item in preflightBlocked" :key="item.shotId">
             <span>{{ item.shotNumber ? `镜 ${String(item.shotNumber).padStart(2, '0')}` : '未知镜头' }}</span>
@@ -361,6 +374,7 @@ async function startBatchPreflight() {
 
 const preflightOkItems = computed(() => (preflight.value?.items || []).filter(item => item.ok))
 const preflightBlocked = computed(() => (preflight.value?.items || []).filter(item => !item.ok))
+const preflightAdjusted = computed(() => (preflight.value?.items || []).filter(item => item.ok && item.adjusted))
 const preflightScopeLabel = computed(() => {
   const episode = episodes.value.find(item => story.shots.value
     .some(shot => selectedShots.has(shot.id) && shot.sceneId
@@ -533,6 +547,8 @@ onBeforeUnmount(() => window.clearTimeout(batchTimer))
 .pf-list li { display: grid; grid-template-columns: 80px 1fr; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--wb-fill); }
 .pf-list em { font-style: normal; color: var(--wb-text-2); word-break: break-word; }
 .pf-hint { margin: 0 0 4px; color: var(--wb-muted); font-size: 11px; }
+.pf-cost-note { display: block; margin-top: 3px; color: var(--wb-muted); font-size: 10px; }
+.pf-list li.pf-adjusted { background: color-mix(in srgb, #d6ad5c 12%, var(--wb-fill)); }
 .chip-error { margin-left: 6px; font-style: normal; color: var(--wb-danger, #c94c62); font-size: 10px; }
 .chip.item-FAILED { background: color-mix(in srgb, var(--wb-danger, #c94c62) 8%, var(--wb-fill)); }
 .item-FAILED { color: var(--wb-warning); }

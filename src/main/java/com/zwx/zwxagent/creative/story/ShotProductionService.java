@@ -28,6 +28,9 @@ import java.util.UUID;
 @Service
 public class ShotProductionService {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(ShotProductionService.class);
+
     private final StoryContentService contentService;
     private final VideoStoryContentRepository contentRepository;
     private final VideoShotCandidateRepository candidateRepository;
@@ -35,7 +38,10 @@ public class ShotProductionService {
     private final MediaJobService mediaJobService;
     private final CreativeProjectService projectService;
     private final MediaModelResolver mediaModelResolver;
+    private final com.zwx.zwxagent.creative.repository.MediaModelProfileRepository profileRepository;
     private final TransactionTemplate transactionTemplate;
+    @org.springframework.beans.factory.annotation.Value("${app.pricing.usd-cny-rate:7.2}")
+    private double usdCnyRate;
 
     public ShotProductionService(StoryContentService contentService,
                                  VideoStoryContentRepository contentRepository,
@@ -44,6 +50,7 @@ public class ShotProductionService {
                                  MediaJobService mediaJobService,
                                  CreativeProjectService projectService,
                                  MediaModelResolver mediaModelResolver,
+                                 com.zwx.zwxagent.creative.repository.MediaModelProfileRepository profileRepository,
                                  TransactionTemplate transactionTemplate) {
         this.contentService = contentService;
         this.contentRepository = contentRepository;
@@ -52,6 +59,7 @@ public class ShotProductionService {
         this.mediaJobService = mediaJobService;
         this.projectService = projectService;
         this.mediaModelResolver = mediaModelResolver;
+        this.profileRepository = profileRepository;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -61,8 +69,12 @@ public class ShotProductionService {
     public record SelectRequest(UUID candidateId, Long expectedVersion) {
     }
 
-    /** 候选视图：候选本体 + 关联任务状态 + 产物摘要（镜头检查器直接展示分辨率与时长）。 */
+    /**
+     * 候选视图：候选本体 + 关联任务状态 + 产物摘要（镜头检查器直接展示分辨率与时长）。
+     * jobError 是给用户的可读原因，jobErrorRaw 保留供应商原文供诊断。
+     */
     public record CandidateView(VideoShotCandidateRecord candidate, String jobStatus, String jobError,
+                                String jobErrorRaw, String jobErrorHint,
                                 VideoShotCandidateRepository.CandidateAsset asset) {
     }
 
@@ -118,17 +130,29 @@ public class ShotProductionService {
             effectiveStyle = "PHOTO_MATCH".equalsIgnoreCase(projectStyle) ? "" : projectStyle;
         }
         String styledPrompt = ImageStyleCatalog.applyToPrompt(prompt, effectiveStyle);
+        String operation = references.isEmpty()
+                ? com.zwx.zwxagent.creative.domain.ParameterSchema.TEXT_TO_VIDEO
+                : com.zwx.zwxagent.creative.domain.ParameterSchema.IMAGE_TO_VIDEO;
+        // 时长按模型档位收敛（与预检同一规则）：避免提交供应商不支持的秒数被拒
+        int effectiveSeconds = Math.max(1, seconds);
+        try {
+            var resolved = mediaModelResolver.resolve(actor.userId(), null, operation);
+            int snapped = snapSeconds(effectiveSeconds, secondsSlots(resolved.parameterSchema()));
+            if (snapped != effectiveSeconds) {
+                log.info("镜头时长按模型档位调整：shot={} {}s → {}s", shot.id(), effectiveSeconds, snapped);
+                effectiveSeconds = snapped;
+            }
+        } catch (RuntimeException ignored) {
+            // 解析失败交给 MediaJobService 给出明确错误
+        }
         var candidate = new VideoShotCandidateRecord(UUID.randomUUID(), projectId, actor.tenantId(),
                 actor.userId(), shot.id(), null, null, "GENERATED", styledPrompt,
                 CandidateStatus.GENERATING.name(), null, null);
         candidateRepository.insert(candidate);
         try {
-            String operation = references.isEmpty()
-                    ? com.zwx.zwxagent.creative.domain.ParameterSchema.TEXT_TO_VIDEO
-                    : com.zwx.zwxagent.creative.domain.ParameterSchema.IMAGE_TO_VIDEO;
             var created = mediaJobService.create(actor, "shot-" + shot.id() + "-" + candidate.id(), projectId,
                     new MediaJobService.CreateJobRequest(projectId, operation, null,
-                            styledPrompt, styledPrompt, Map.of("seconds", String.valueOf(Math.max(1, seconds))),
+                            styledPrompt, styledPrompt, Map.of("seconds", String.valueOf(effectiveSeconds)),
                             references, null, null, false));
             candidateRepository.attachJob(candidate.id(), created.jobId());
         } catch (RuntimeException exception) {
@@ -140,12 +164,15 @@ public class ShotProductionService {
 
     // ---------------------------------------------------------------- 生成预检（P1：纯校验，不创建任务、不调用模型）
 
+    /** 单镜预检：requestedSeconds 与 effectiveSeconds 不同表示按模型档位自动调整（不阻塞）。 */
     public record PreflightItem(UUID shotId, int shotNumber, boolean ok, String reason,
-                                String operation, int seconds, int references) {
+                                String operation, int requestedSeconds, int effectiveSeconds,
+                                boolean adjusted, int references, String estimatedCost) {
     }
 
+    /** 整批预检：费用按模型单价 × 秒数估算；单价缺失时明确「费用未知」。 */
     public record PreflightResult(String modelName, String adapterKey, List<PreflightItem> items,
-                                  int readyCount, String costNote) {
+                                  int readyCount, int adjustedCount, String estimatedTotal, String costNote) {
     }
 
     /**
@@ -162,14 +189,20 @@ public class ShotProductionService {
         } catch (RuntimeException ignored) {
             // 预检阶段读不到设定不视为错误
         }
-        String projectProvider = null;
+        String projectAdapter = null;
         String projectModel = null;
+        java.util.List<Integer> slots = List.of();
+        java.math.BigDecimal unitPrice = null;
+        String unit = "";
+        String currency = "USD";
         List<PreflightItem> items = new java.util.ArrayList<>();
         int ready = 0;
+        int adjusted = 0;
         for (UUID shotId : shotIds == null ? List.<UUID>of() : shotIds.stream().distinct().toList()) {
             var shot = all.get(shotId);
             if (shot == null) {
-                items.add(new PreflightItem(shotId, 0, false, "镜头不存在或无权访问", "text_to_video", 0, 0));
+                items.add(new PreflightItem(shotId, 0, false, "镜头不存在或无权访问", "text_to_video",
+                        0, 0, false, 0, ""));
                 continue;
             }
             java.util.List<UUID> references = shot.referenceAssetIds() == null
@@ -177,7 +210,8 @@ public class ShotProductionService {
             String operation = references.isEmpty()
                     ? com.zwx.zwxagent.creative.domain.ParameterSchema.TEXT_TO_VIDEO
                     : com.zwx.zwxagent.creative.domain.ParameterSchema.IMAGE_TO_VIDEO;
-            int seconds = Math.max(1, shot.durationTargetSeconds());
+            int requested = Math.max(1, shot.durationTargetSeconds());
+            int effective = requested;
             String reason = null;
             if (!com.zwx.zwxagent.creative.domain.ShotStatus.DRAFT.name().equals(shot.status())
                     && !com.zwx.zwxagent.creative.domain.ShotStatus.READY.name().equals(shot.status())) {
@@ -197,16 +231,84 @@ public class ShotProductionService {
                 try {
                     var resolved = mediaModelResolver.resolve(actor.userId(), null, operation);
                     projectModel = resolved.modelName();
-                    projectProvider = resolved.adapterKey();
+                    projectAdapter = resolved.adapterKey();
+                    slots = secondsSlots(resolved.parameterSchema());
+                    var profile = profileRepository.findByModelRowId(resolved.modelRowId()).orElse(null);
+                    var price = profile == null ? null : profile.priceMetadata();
+                    if (price != null) {
+                        unit = String.valueOf(price.getOrDefault("unit", ""));
+                        currency = String.valueOf(price.getOrDefault("currency", "USD"));
+                        Object value = price.get("price");
+                        if (value instanceof Number number) unitPrice = java.math.BigDecimal.valueOf(number.doubleValue());
+                    }
                 } catch (RuntimeException exception) {
                     reason = exception.getMessage();
                 }
             }
-            if (reason == null) ready++;
+            if (reason == null) {
+                effective = snapSeconds(requested, slots);
+                if (effective != requested) adjusted++;
+                ready++;
+            }
+            String itemCost = estimatedCost(unitPrice, unit, effective);
             items.add(new PreflightItem(shotId, shot.shotNumber(), reason == null, reason,
-                    operation, seconds, references.size()));
+                    operation, requested, effective, effective != requested, references.size(), itemCost));
         }
-        return new PreflightResult(projectModel, projectProvider, items, ready, "费用未知（以供应商账单为准）");
+        String total = totalCost(items, unitPrice, unit, currency);
+        String note = unitPrice == null
+                ? "费用未知（该模型未配置单价，以供应商账单为准）"
+                : ("按 " + currency + " " + unitPrice.stripTrailingZeros().toPlainString()
+                        + ("second".equalsIgnoreCase(unit) ? "/秒" : "/次") + " 估算，实际以供应商账单为准");
+        return new PreflightResult(projectModel, projectAdapter, items, ready, adjusted, total, note);
+    }
+
+    /** 模型支持的秒数档位（schema 的 seconds.allowedValues）；空 = 未声明，按原值提交。 */
+    static java.util.List<Integer> secondsSlots(com.zwx.zwxagent.creative.domain.ParameterSchema schema) {
+        if (schema == null || schema.parameters() == null) return List.of();
+        return schema.parameters().stream()
+                .filter(spec -> "seconds".equals(spec.name()))
+                .flatMap(spec -> spec.allowedValues().stream())
+                .map(value -> {
+                    try { return Integer.valueOf(value.trim()); } catch (RuntimeException ignored) { return null; }
+                })
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .toList();
+    }
+
+    /** 收敛到最近的合法档位（等距取较大值，保证内容完整）；无档位声明时原样返回。 */
+    static int snapSeconds(int requested, java.util.List<Integer> slots) {
+        if (slots == null || slots.isEmpty()) return requested;
+        int best = slots.getFirst();
+        for (int slot : slots) {
+            int distance = Math.abs(slot - requested);
+            int bestDistance = Math.abs(best - requested);
+            if (distance < bestDistance || (distance == bestDistance && slot > best)) best = slot;
+        }
+        return best;
+    }
+
+    private static String estimatedCost(java.math.BigDecimal unitPrice, String unit, int effectiveSeconds) {
+        if (unitPrice == null) return "";
+        var value = "second".equalsIgnoreCase(unit)
+                ? unitPrice.multiply(java.math.BigDecimal.valueOf(effectiveSeconds))
+                : unitPrice;
+        return "$" + value.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+    }
+
+    private String totalCost(List<PreflightItem> items, java.math.BigDecimal unitPrice, String unit, String currency) {
+        if (unitPrice == null) return "";
+        java.math.BigDecimal total = java.math.BigDecimal.ZERO;
+        for (PreflightItem item : items) {
+            if (!item.ok()) continue;
+            total = total.add("second".equalsIgnoreCase(unit)
+                    ? unitPrice.multiply(java.math.BigDecimal.valueOf(item.effectiveSeconds()))
+                    : unitPrice);
+        }
+        String usd = "$" + total.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+        if (!"USD".equalsIgnoreCase(currency)) return usd;
+        var cny = total.multiply(java.math.BigDecimal.valueOf(usdCnyRate)).setScale(0, java.math.RoundingMode.HALF_UP);
+        return usd + "（≈ ¥" + cny.toPlainString() + "）";
     }
 
     private void assetReferenceCheck(CurrentActor actor, List<UUID> references) {
@@ -290,14 +392,20 @@ public class ShotProductionService {
     public List<CandidateView> candidates(CurrentActor actor, UUID projectId, UUID shotId) {
         contentService.getShot(actor, projectId, shotId);
         return candidateRepository.listByShotWithJob(actor.tenantId(), actor.userId(), shotId).stream()
-                .map(row -> new CandidateView(row.candidate(), row.jobStatus(), row.jobError(), row.asset()))
+                .map(row -> toCandidateView(row))
                 .toList();
+    }
+
+    private CandidateView toCandidateView(VideoShotCandidateRepository.CandidateWithJob row) {
+        var humanized = com.zwx.zwxagent.creative.support.MediaErrorMessages.humanize(row.jobError());
+        return new CandidateView(row.candidate(), row.jobStatus(), humanized.message(),
+                humanized.raw(), humanized.hint(), row.asset());
     }
 
     // ---------------------------------------------------------------- 内部
 
     private CandidateView toView(VideoShotCandidateRecord candidate) {
-        return new CandidateView(candidate, null, null, null);
+        return new CandidateView(candidate, null, null, null, null, null);
     }
 
     private static void assertVersion(VideoShotRecord shot, Long expectedVersion) {

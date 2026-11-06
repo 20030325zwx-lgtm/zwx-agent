@@ -75,3 +75,16 @@
   （后续可用于预检费用估算，当前预检仍显示「费用未知」）。
 - 备选仍启用：sd_2.5_special_1080p（$0.85/秒）、sd_2.0_special_720p（$0.60/秒）；
   更便宜的 sd_mini_special_720p（$0.12/秒）未启用。
+
+## 第一层主链路打磨（2026-11-06 下午）
+
+- **时长档位**：Seedance 档案（26/34/36）的 seconds.allowedValues 设为 ["5","10"]；
+  预检与提交都按档位收敛（`snapSeconds`，等距取较大值），预检回显 requested→effective 与调整数量。
+- **预检费用**：读 `media_model_profile.price_metadata`（unit=second, price=0.25, USD），
+  单镜 `$0.25×秒`、整批合计并折算人民币（`app.pricing.usd-cny-rate` 默认 7.2）；
+  单价缺失时如实「费用未知」。
+- **失败可读化**：新增 `MediaErrorMessages`（时长/尺寸/审核/余额/渠道/鉴权/限流/超时），
+  CandidateView 增加 jobErrorRaw + jobErrorHint；检查器失败块显示可读原因 + 下一步，原文进 title。
+- 前端：批量预检面板显示费用估算与调整明细；单镜提交时长被调整时 toast 提示。
+- 测试：预检档位/费用用例、错误映射用例通过；本地已重启（jar 已更新）。
+- 待用户跑一条真实生成（约 ¥7–9）验证 Seedance 受理与回写。

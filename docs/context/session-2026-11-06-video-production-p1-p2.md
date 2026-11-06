@@ -48,3 +48,12 @@
   PgVectorVectorStoreConfigTest（DashScope 欠费，用户明确暂不处理知识库 embedding）。
 - 新增修复：MediaJobServiceTest 清理兼容同 JVM 调度线程干扰（重试删除）；
   VideoFinalCutRecord 的 running/draft 辅助方法改为 isXxx 才能被 Jackson 序列化（取消按钮/轮询依赖它）。
+
+## 视频模型切换（2026-11-06 白天，用户指示）
+
+- `video_generation` 用户绑定从 `gk-video-3.5`（街影，仅图生视频）切到
+  **`sd_2.5_special_1080p`（KKAI 视频中转站，Seedance 2.5，openai-video 适配器，t2v+i2v 均 true）**。
+- 未做真实生成验证（按用户之前约束不擅自调用计费接口）；首次生成由用户验收。
+- 备选：`sd_2.0_special_720p`（row 34）已启用，可随时改绑；`sd_*_with_video_ref` 系列未启用。
+- 待观察：Seedance 时长档位（常见 5/10 秒）若与镜头 1–60 自由秒数冲突，
+  首条失败后按模型能力收敛镜头时长选项。

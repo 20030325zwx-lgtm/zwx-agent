@@ -64,3 +64,14 @@
 - 追加 **SYSTEM 级视频默认绑定**（owner_id=''）：任何账号在无个人绑定时默认走 Seedance 2.5 1080p；
   个人绑定与系统绑定同值，无冲突。
 - 无环境变量级模型覆盖（application.yml / compose 均无视频模型 env）；绑定变更 ≤30s 生效（解析缓存 TTL）。
+
+## 视频默认模型再切换（2026-11-06）
+
+- 用户指定默认换成 **`sd_2.0_fast_special_720p`**（KKAI 视频中转站，$0.25/秒）：
+  启用模型行、按 row 34 复制 openai-video 能力档案（t2v+i2v 均 true），
+  SYSTEM 与 USER 两级 `video_generation` 绑定均已指向它。
+- 计费口径修正：Seedance 系列在中转站是 **按秒**（`billing_unit=second`，group_ratio=1），
+  不是按次；`media_model_profile.price_metadata` 已记录 `{"unit":"second","price":0.25,"currency":"USD"}`
+  （后续可用于预检费用估算，当前预检仍显示「费用未知」）。
+- 备选仍启用：sd_2.5_special_1080p（$0.85/秒）、sd_2.0_special_720p（$0.60/秒）；
+  更便宜的 sd_mini_special_720p（$0.12/秒）未启用。

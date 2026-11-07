@@ -146,3 +146,24 @@
   （部署脚本对未变更服务本就如此重标签，内容等价）。
   另：browser-mcp / artifact-mcp 的 0.7.20 tag 缺失是历史遗留（两服务从未在该服务器启动，无影响）。
 - 服务器 nginx 无 proxy_cache；`index.html` 已是 `Cache-Control: no-cache`，无需清 HTTP 缓存。
+
+## 仓库文件夹改名：yu-ai-agent → aster（2026-11-07 晚，用户拍板）
+
+- 新路径 **`/Users/zhuwenxuan/Desktop/agent/aster`**（与产品名 Aster 对齐；pom artifactId、
+  前端 package.json、服务器容器本就是 aster-*，无需改）。
+- 同步迁移的引用：
+  - launchd 4 个任务改 label `com.zwx.yu-ai-agent.*` → `com.zwx.aster.*`（backend/frontend/
+    eval/data），日志名 `/tmp/yu-ai-agent-*.log` → `/tmp/aster-*.log`；
+  - `~/.aster/start-eval.sh` / `start-data.sh` 第 3 行 cd 路径；
+  - `deploy/scripts/deploy-to-server.sh`（本地私有，3 处 kickstart/kill label）；
+  - `desktop/scripts/verify-desktop-chain.sh`（2 处硬编码路径）；
+  - `AGENTS.md`（路径 + label + 日志名 + 本地容器名）、`docs/DEPLOYMENT.md`（pg_dump 容器名）。
+- 本地 Docker 容器 `yu-ai-agent-postgres` 在线 `docker rename` → `aster-postgres`（无重启，
+  非 compose 管理）。
+- 验证：backend health ok、前端 200、eval(8140)/data(8141) 正常启动、旧 label 清零；
+  git 仓库/remote 不受影响。
+- **不改**：历史 session 摘要与 bug 记录中的旧路径（档案性质）；`flyfish-viewer-assets.json`
+  （未入库生成物，dev 启动自动重生成）；`com.aster.ssh-tunnel`（不引用仓库路径）。
+- 环境注意事项：改名后 ZCode 旧工作区路径失效，**新会话请从 `/Users/zhuwenxuan/Desktop/agent/aster`
+  打开项目**；改名会话期间在旧路径留了壳目录 `yu-ai-agent/.cwd-shim`（仅为该会话 shell 存活用），
+  新会话稳定后可删除。

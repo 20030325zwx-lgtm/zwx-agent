@@ -285,7 +285,7 @@ docker compose exec -T postgres pg_dump -U zwx_agent -d zwx_agent > backup-$(dat
 
 ```bash
 # 本地
-docker exec yu-ai-agent-postgres pg_dump -U zwx_agent -d zwx_agent > zwx_agent-local.sql
+docker exec aster-postgres pg_dump -U zwx_agent -d zwx_agent > zwx_agent-local.sql
 
 # 上传到服务器后
 docker compose exec -T postgres psql -U zwx_agent -d zwx_agent < zwx_agent-local.sql

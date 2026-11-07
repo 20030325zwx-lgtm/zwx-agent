@@ -1,7 +1,7 @@
 #!/bin/sh
 # 阶段 D 端到端验证：按 main.cjs 的序列本机模拟（initdb -> single 建库 -> pg 启动 -> desktop profile 后端 -> 回环令牌认证）
 set -eu
-PGSERVER=${1:-/Users/zhuwenxuan/Desktop/agent/yu-ai-agent/desktop/pgserver}
+PGSERVER=${1:-/Users/zhuwenxuan/Desktop/agent/aster/desktop/pgserver}
 USER_DATA=/tmp/aster-desktop-userdata
 PG_PORT=15433
 BACKEND_PORT=18233
@@ -34,7 +34,7 @@ echo "==> 3. 启动 PostgreSQL（端口 $PG_PORT）"
 echo "    ok"
 
 echo "==> 4. 启动后端（desktop profile，端口 $BACKEND_PORT）"
-DYLD_LIBRARY_PATH= /usr/libexec/java_home -v 21 --exec java -jar /Users/zhuwenxuan/Desktop/agent/yu-ai-agent/target/aster-agent-0.0.1-SNAPSHOT.jar \
+DYLD_LIBRARY_PATH= /usr/libexec/java_home -v 21 --exec java -jar /Users/zhuwenxuan/Desktop/agent/aster/target/aster-agent-0.0.1-SNAPSHOT.jar \
   --spring.profiles.active=desktop \
   --server.port=$BACKEND_PORT \
   --management.server.port=18234 \

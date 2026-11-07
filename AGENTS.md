@@ -30,7 +30,7 @@
 
 - Backend: Spring Boot at `http://127.0.0.1:8123/api`; health check: `GET /health` returns `ok`.
 - Frontend: Vite at `http://127.0.0.1:3000/`; it defaults to the local backend API.
-- PostgreSQL + pgvector: production database reached through the SSH tunnel (`127.0.0.1:15432` -> server 5432); a local Docker container (`yu-ai-agent-postgres`) may exist but is not the datasource in `application-local.yml`.
+- PostgreSQL + pgvector: production database reached through the SSH tunnel (`127.0.0.1:15432` -> server 5432); a local Docker container (`aster-postgres`) may exist but is not the datasource in `application-local.yml`.
 - Object storage: local backend shares the SERVER's MinIO (bucket `aster-media`) through the same SSH tunnel (`127.0.0.1:19000` -> server 9000), configured in `application-local.yml` under `app.storage.s3`. Do not point local media storage at a separate local MinIO/directory.
 
 ## Start and Restart
@@ -54,17 +54,17 @@ Use the local service log monitor when starting long-running processes if it is 
 When a shell-launched background process does not survive after the terminal command exits, use user-level `launchctl` jobs instead. Run these commands from any shell (replace an existing job with `launchctl remove` first if needed):
 
 ```sh
-launchctl submit -l com.zwx.yu-ai-agent.backend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/yu-ai-agent && exec /usr/bin/java -jar target/aster-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local > /tmp/yu-ai-agent-backend.log 2>&1'
-launchctl submit -l com.zwx.yu-ai-agent.frontend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/yu-ai-agent/frontend && exec /usr/local/bin/node node_modules/vite/bin/vite.js --host 127.0.0.1 > /tmp/yu-ai-agent-frontend.log 2>&1'
+launchctl submit -l com.zwx.aster.backend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/aster && exec /usr/bin/java -jar target/aster-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local > /tmp/aster-backend.log 2>&1'
+launchctl submit -l com.zwx.aster.frontend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/aster/frontend && exec /usr/local/bin/node node_modules/vite/bin/vite.js --host 127.0.0.1 > /tmp/aster-frontend.log 2>&1'
 ```
 
 Restart or stop them with:
 
 ```sh
-launchctl kickstart -k "gui/$(id -u)/com.zwx.yu-ai-agent.backend"
-launchctl kickstart -k "gui/$(id -u)/com.zwx.yu-ai-agent.frontend"
-launchctl kill SIGTERM "gui/$(id -u)/com.zwx.yu-ai-agent.backend"
-launchctl kill SIGTERM "gui/$(id -u)/com.zwx.yu-ai-agent.frontend"
+launchctl kickstart -k "gui/$(id -u)/com.zwx.aster.backend"
+launchctl kickstart -k "gui/$(id -u)/com.zwx.aster.frontend"
+launchctl kill SIGTERM "gui/$(id -u)/com.zwx.aster.backend"
+launchctl kill SIGTERM "gui/$(id -u)/com.zwx.aster.frontend"
 ```
 
 ### One-Click Deploy (local script, intentionally NOT committed)

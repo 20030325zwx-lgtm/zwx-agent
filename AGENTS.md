@@ -30,8 +30,8 @@
 
 - Backend: Spring Boot at `http://127.0.0.1:8123/api`; health check: `GET /health` returns `ok`.
 - Frontend: Vite at `http://127.0.0.1:3000/`; it defaults to the local backend API.
-- PostgreSQL + pgvector: Docker container `yu-ai-agent-postgres`, exposed on `127.0.0.1:5432`.
-- MinIO: Docker container `yu-ai-agent-minio`, exposed on `127.0.0.1:9000` (API) and `127.0.0.1:9001` (console).
+- PostgreSQL + pgvector: production database reached through the SSH tunnel (`127.0.0.1:15432` -> server 5432); a local Docker container (`yu-ai-agent-postgres`) may exist but is not the datasource in `application-local.yml`.
+- Object storage: local backend shares the SERVER's MinIO (bucket `aster-media`) through the same SSH tunnel (`127.0.0.1:19000` -> server 9000), configured in `application-local.yml` under `app.storage.s3`. Do not point local media storage at a separate local MinIO/directory.
 
 ## Start and Restart
 

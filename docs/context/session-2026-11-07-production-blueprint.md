@@ -29,6 +29,25 @@
   `normalizeConnection` 保留已存标签；成片节点标题带「缺 N 镜」（按镜头无已选片段计算）；
   画风节点补画幅/目标时长；分镜行视频 `preload="none"`。均为前端改动，后端无变化。
 
+## 统一存储：本地共用服务器 MinIO（2026-11-07 下午，用户拍板）
+
+用户方向：服务器与本地必须用同一套存储（服务器 MinIO）。落地：
+
+- 本地 SSH 隧道（`com.aster.ssh-tunnel` launchd 任务）新增转发 `127.0.0.1:19000 → 服务器 9000`。
+- `application-local.yml`（git-ignored，增量修改经用户明确要求）新增 `app.storage.provider=s3`
+  + `app.storage.s3.endpoint=http://127.0.0.1:19000`，凭据与服务器 `.env` 同款（不回显）。
+  注意该文件打进 jar：改完必须 `mvn package` 再重启才生效。
+- 端到端验证：本地后端上传测试素材（201）→ 读回 70 字节 → 服务器共享库该素材行
+  `storage_backend=S3` → 测试素材已删除。本地零存量迁移负担（`~/.aster/creative-media` 为空）。
+- 移除了另一会话遗留的 5 个未接线文件（`creative/storage/` 的 MediaStorage 抽象：
+  OSS/本地目录双实现），与「统一 MinIO」方向冲突；现有 `platform/storage` 的
+  ObjectStorage 链路（provider=s3 即 MinIO）就是正解，无需第二套抽象。
+- **待用户操作**：阿里云安全组放行 **9443** 端口（MinIO 预签名公网入口
+  `https://www.zhuwenxuan.online:9443`，nginx 已就绪但公网连不通）。放行后服务器
+  `.env` 追加 `MINIO_PUBLIC_ENDPOINT=https://www.zhuwenxuan.online:9443` 并重启
+  backend——在此之前，服务器端签发的素材 URL host 是 172.17.0.1:9000，公网浏览器
+  打不开（本地开发经隧道不受影响）。
+
 ## 遗留
 
 - 用户今晚真实生成验收（Seedance 首条 ¥7–9 + 成片导出）后，蓝图里的镜头/成片节点

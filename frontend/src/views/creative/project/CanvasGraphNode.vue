@@ -1,5 +1,48 @@
 <template>
-  <article class="graph-card" :class="[{ active: selected }, 'kind-' + type]" :aria-label="data.label">
+  <!-- 制作蓝图节点：只读展示五阶段编排（画风/故事/镜头/成片），只有执行端口 -->
+  <article v-if="type === 'pipeline_stage'" class="pipeline-card" :class="[{ active: selected }, 'stage-' + data.kind]"
+           :aria-label="data.label">
+    <Handle v-if="data.kind !== 'STYLE'" id="flow-in" type="target" :position="Position.Left" class="port port-flow" :style="{ top: '50%' }" aria-label="执行输入" />
+    <Handle id="flow-out" type="source" :position="Position.Right" class="port port-flow" :style="{ top: '50%' }" aria-label="执行输出" />
+    <header class="pl-head">
+      <span class="pl-mark"><component :is="plIcon" :size="14" /></span>
+      <small>{{ plStageName }}</small>
+      <span v-if="plStatus" class="pl-status" :class="plStatus.tone">{{ plStatus.label }}</span>
+    </header>
+    <h3 class="pl-title">{{ data.label }}</h3>
+
+    <div v-if="data.kind === 'STYLE'" class="pl-style">
+      <div class="pl-swatch" :style="{ background: swatchGradient }" />
+      <p class="pl-note">{{ data.text || '未指定画风，生成时保持自由发挥' }}</p>
+    </div>
+
+    <p v-else-if="data.kind === 'STORY'" class="pl-story">{{ data.text || '还没有写故事' }}</p>
+
+    <template v-else-if="data.kind === 'SHOT'">
+      <div v-if="plPreviewUrl" class="pl-media">
+        <video :src="plPreviewUrl" muted preload="metadata" class="nodrag nopan" @mouseenter="$event.target.play().catch(() => {})" @mouseleave="$event.target.pause()"></video>
+      </div>
+      <p v-else class="pl-story pl-prompt">{{ data.text || '还没有提示词' }}</p>
+      <div class="pl-meta">
+        <span v-if="data.durationSeconds">目标 {{ data.durationSeconds }}s</span>
+        <span v-if="data.assetId">已选片段</span>
+      </div>
+    </template>
+
+    <template v-else>
+      <div v-if="plPreviewUrl" class="pl-media">
+        <video :src="plPreviewUrl" controls preload="metadata" class="nodrag nopan"></video>
+      </div>
+      <p v-else class="pl-story">完成选片并导出后，成片会在这里播放</p>
+      <div class="pl-meta">
+        <span v-if="data.clipCount !== undefined">{{ data.clipCount }} 个片段</span>
+        <span v-if="data.durationSeconds">{{ data.durationSeconds }}s</span>
+      </div>
+    </template>
+    <footer class="pl-foot">{{ data.footer || '' }}</footer>
+  </article>
+
+  <article v-else class="graph-card" :class="[{ active: selected }, 'kind-' + type]" :aria-label="data.label">
     <header class="card-head">
       <span class="type-mark"><component :is="typeIcon" :size="16" /></span>
       <div><small>{{ typeLabel }}</small><strong>{{ data.label || typeLabel }}</strong></div>
@@ -37,10 +80,24 @@
 <script setup>
 import { computed, inject } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
-import { Clapperboard, FileText, Image, ImagePlus, WandSparkles, Play } from 'lucide-vue-next'
+import { Clapperboard, FileText, Film, Image, ImagePlus, Palette, ScrollText, WandSparkles, Play } from 'lucide-vue-next'
 const props = defineProps({ id: String, type: String, data: Object, selected: Boolean })
 const presentation = inject('canvasPresentation', null)
 const generation = computed(() => ['image_generate', 'image_edit', 'video_generate'].includes(props.type))
+
+// —— 制作蓝图节点（pipeline_stage）——
+const plIcon = computed(() => ({ STYLE: Palette, STORY: ScrollText, SHOT: Film, FINAL_CUT: Clapperboard })[props.data?.kind] || Film)
+const plStageName = computed(() => ({ STYLE: '阶段 1 · 画风', STORY: '阶段 2 · 故事', SHOT: '阶段 3/4 · 镜头', FINAL_CUT: '阶段 5 · 成片' })[props.data?.kind] || '制作蓝图')
+const plStatus = computed(() => ({
+  DRAFT: { label: '草稿', tone: 'idle' }, READY: { label: '待生成', tone: 'idle' },
+  GENERATING: { label: '生成中', tone: 'working' }, PENDING_SELECTION: { label: '待选片', tone: 'working' },
+  SELECTED: { label: '已选片', tone: 'done' }
+})[props.data?.shotStatus] || null)
+const swatchGradient = computed(() => {
+  const [from, to] = props.data?.accent || ['#6654c7', '#9a80cc']
+  return `linear-gradient(135deg, ${from}, ${to})`
+})
+const plPreviewUrl = computed(() => presentation?.assetUrl(props.data?.assetId) || '')
 const typeLabel = computed(() => ({ start: '流程起点', asset_input: '素材', text_input: '文本', image_generate: '图片生成', image_edit: '图片编辑', video_generate: '视频生成' })[props.type])
 const typeIcon = computed(() => ({ start: Play, asset_input: ImagePlus, text_input: FileText, image_generate: Image, image_edit: WandSparkles, video_generate: Clapperboard })[props.type])
 const summary = computed(() => props.type === 'start' ? '从这里开始。下游节点将在全部上级完成后依次执行。' : props.type === 'text_input' ? props.data.text || '写下要传给下游的内容…'
@@ -53,6 +110,30 @@ const statusLabel = computed(() => ({ PENDING: '等待', QUEUED: '排队', RUNNI
 </script>
 
 <style scoped>
+/* —— 制作蓝图节点 —— */
+.pipeline-card { width: 236px; position: relative; box-sizing: border-box; border: 1px solid var(--wb-border, #e3e6ed); border-radius: 12px; background: var(--wb-surface, #fff); color: var(--wb-text, #232735); box-shadow: 0 3px 12px rgb(25 35 60 / 5%); overflow: hidden; }
+.pipeline-card.active { border-color: #6674e8; box-shadow: 0 0 0 3px rgb(102 116 232 / 10%), 0 6px 20px rgb(25 35 60 / 7%); }
+.pl-head { display: flex; align-items: center; gap: 7px; padding: 10px 12px 0; }
+.pl-mark { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: #eef0ff; color: #6167c7; }
+.stage-SHOT .pl-mark, .stage-FINAL_CUT .pl-mark { background: #fff2e7; color: #b9773e; }
+.stage-STORY .pl-mark { background: #f0edf9; color: #8970ba; }
+.pl-head small { flex: 1; font-size: 9px; color: var(--wb-muted, #7b8190); }
+.pl-status { font-size: 9px; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.pl-status.idle { background: var(--wb-bg, #f1f2f6); color: var(--wb-muted, #7b8190); }
+.pl-status.working { background: #fdf1de; color: #a35914; }
+.pl-status.done { background: #e8f4ec; color: #18794e; }
+.pl-title { margin: 7px 12px 0; font-size: 13px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-style { padding: 0 12px 10px; }
+.pl-swatch { height: 44px; border-radius: 8px; margin-top: 9px; }
+.pl-note { margin: 8px 0 0; font-size: 10px; line-height: 1.55; color: var(--wb-text-2, #646c7c); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pl-story { margin: 9px 12px 0; font-size: 10px; line-height: 1.65; color: var(--wb-text-2, #646c7c); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; min-height: 40px; white-space: pre-wrap; }
+.pl-prompt { -webkit-line-clamp: 3; }
+.pl-media { margin: 9px 12px 0; height: 108px; border-radius: 8px; background: var(--cr-media-stage, #101113); overflow: hidden; }
+.pl-media video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pl-meta { display: flex; justify-content: space-between; gap: 8px; margin: 7px 12px 0; font-size: 9px; color: var(--wb-muted, #8d95a3); }
+.pl-meta :only-child { margin-left: auto; }
+.pl-foot { margin-top: 9px; padding: 7px 12px; border-top: 1px dashed var(--wb-border, #e8eaf0); color: var(--wb-muted, #9da5b3); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .graph-card { width: 268px; position: relative; box-sizing: border-box; border: 1px solid var(--wb-border, #e3e6ed); border-radius: 12px; background: var(--wb-surface, #fff); color: var(--wb-text, #232735); box-shadow: 0 3px 12px rgb(25 35 60 / 5%); }
 .graph-card.active { border-color: #6674e8; box-shadow: 0 0 0 3px rgb(102 116 232 / 10%), 0 6px 20px rgb(25 35 60 / 7%); }
 .graph-card.kind-start { width: 180px; }

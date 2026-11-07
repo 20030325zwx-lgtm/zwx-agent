@@ -8,6 +8,9 @@
           <p class="stage-sub">按镜头顺序拼接已选视频并导出 MP4；顺序与源镜头排序分别保存。</p>
         </div>
         <div class="head-actions">
+          <button type="button" class="cr-ghost" title="把画风→故事→分镜→视频→成片的编排流程生成为画布节点链" @click="sendToCanvas">
+            在画布生成制作蓝图
+          </button>
           <button type="button" class="cr-ghost" :disabled="syncing" @click="rebuild">
             {{ syncing ? '同步中…' : '从镜头重新同步' }}
           </button>
@@ -147,6 +150,12 @@ function runStatus(run) {
 }
 function clipUrl(item) { return item.assetId ? (ctx.videoUrls?.[item.assetId]?.url || '') : '' }
 function runUrl(run) { return run.outputAssetId ? (ctx.videoUrls?.[run.outputAssetId]?.url || '') : '' }
+
+/** 跳到画布并自动把五阶段编排流程落成节点链（画布页消费这个交接标记）。 */
+function sendToCanvas() {
+  sessionStorage.setItem('aster.creative.blueprint', '1')
+  ctx.router?.push(`/creative/projects/${projectId.value}/canvas`)
+}
 
 onMounted(async () => {
   await refresh()

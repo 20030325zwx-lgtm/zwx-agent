@@ -29,9 +29,12 @@ public class CreativeCanvasService {
     private static final int MAX_EDGES = 120;
     private static final int MAX_JSON_CHARS = 1_000_000;
     private static final Set<String> NODE_TYPES = Set.of(
-            "start", "asset_input", "text_input", "image_generate", "image_edit", "video_generate");
+            "start", "asset_input", "text_input", "image_generate", "image_edit", "video_generate",
+            "pipeline_stage");
     private static final Set<String> GENERATION_TYPES = Set.of(
             "image_generate", "image_edit", "video_generate");
+    /** 制作蓝图节点形态（只读展示）：画风 / 故事 / 镜头 / 成片。 */
+    private static final Set<String> PIPELINE_KINDS = Set.of("STYLE", "STORY", "SHOT", "FINAL_CUT");
 
     public record CanvasView(UUID projectId, JsonNode graph, JsonNode viewport, long revision,
                              Instant updatedAt) {}
@@ -623,6 +626,7 @@ public class CreativeCanvasService {
                 throw new IllegalArgumentException("画布节点标识无效或重复");
             }
             if (!NODE_TYPES.contains(type)) throw new IllegalArgumentException("不支持的画布节点类型：" + type);
+            if ("pipeline_stage".equals(type)) validatePipelineNode(node);
             types.put(id, type);
         }
         if (types.values().stream().filter("start"::equals).count() != 1) {
@@ -638,6 +642,10 @@ public class CreativeCanvasService {
                 throw new IllegalArgumentException("连线引用了不存在的节点");
             }
             if ("start".equals(types.get(target))) throw new IllegalArgumentException("开始节点不能有上级节点");
+            boolean pipelineEdge = "pipeline_stage".equals(types.get(source)) || "pipeline_stage".equals(types.get(target));
+            if (pipelineEdge && !"flow-out".equals(edge.path("sourceHandle").asText())) {
+                throw new IllegalArgumentException("制作蓝图节点为只读展示，只参与执行顺序连线");
+            }
             boolean flowEdge = isFlowEdge(edge, types.get(source));
             if (!flowEdge && !GENERATION_TYPES.contains(types.get(target))) {
                 throw new IllegalArgumentException("连线目标必须是生成节点");
@@ -673,6 +681,24 @@ public class CreativeCanvasService {
             }
         }
         if (visited != ids.size()) throw new IllegalArgumentException("画布存在循环依赖");
+    }
+
+    /** 制作蓝图节点：形态必须已知，引用素材时必须是合法 UUID，文案截断在展示安全范围。 */
+    private static void validatePipelineNode(JsonNode node) {
+        JsonNode data = node.path("data");
+        String kind = data.path("kind").asText("");
+        if (!PIPELINE_KINDS.contains(kind)) {
+            throw new IllegalArgumentException("制作蓝图节点缺少有效阶段类型：" + kind);
+        }
+        String assetId = data.path("assetId").asText("");
+        if (!assetId.isBlank()) {
+            try { UUID.fromString(assetId); }
+            catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException("制作蓝图节点引用的素材 ID 无效");
+            }
+        }
+        String text = data.path("text").asText("");
+        if (text.length() > 2000) throw new IllegalArgumentException("制作蓝图节点内容过长");
     }
 
     private static int jsonLength(JsonNode node, ObjectMapper mapper) {

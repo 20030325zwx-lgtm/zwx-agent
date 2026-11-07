@@ -7,6 +7,10 @@
         <span class="canvas-save" :class="saveState"><i />{{ saveLabel }}</span>
       </div>
       <div class="canvas-actions">
+        <button v-if="project?.kind === 'VIDEO'" class="canvas-tool" type="button" :disabled="blueprintBusy"
+                title="把制作五阶段编排流程（画风→故事→分镜→视频→成片）生成为画布节点链" @click="buildProductionBlueprint">
+          <Layers :size="15" />{{ blueprintBusy ? '同步中…' : '制作蓝图' }}
+        </button>
         <button class="canvas-icon" type="button" title="撤销" :disabled="!undoStack.length" @click="undo"><Undo2 :size="16" /></button>
         <button class="canvas-icon" type="button" title="适应画布" @click="fitView"><Scan :size="16" /></button>
         <span class="canvas-divider" />
@@ -162,9 +166,9 @@ import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
-import { connectionKind, connectionError, effectivePrompt, normalizeConnection, isGenerationNode, ensureStart, dependencyIssue, siblingConnection } from './canvasGraph'
+import { connectionKind, connectionError, effectivePrompt, normalizeConnection, isGenerationNode, isPipelineStage, ensureStart, dependencyIssue, siblingConnection } from './canvasGraph'
 import { Controls } from '@vue-flow/controls'
-import { AlertCircle, Check, Clapperboard, FileText, Film, Image, ImagePlus, Play, Plus, PanelLeft, Scan, Sparkles, Trash2, Undo2, Upload, WandSparkles, X } from 'lucide-vue-next'
+import { AlertCircle, Check, Clapperboard, FileText, Film, Image, ImagePlus, Layers, Play, Plus, PanelLeft, Scan, Sparkles, Trash2, Undo2, Upload, WandSparkles, X } from 'lucide-vue-next'
 import DropdownSelect from '../../../components/ui/DropdownSelect.vue'
 import ImageStyleCenter from '../../../components/creative/ImageStyleCenter.vue'
 import Spinner from '../../../components/ui/Spinner.vue'
@@ -172,7 +176,8 @@ import CanvasGraphNode from './CanvasGraphNode.vue'
 import { PROJECT_CTX } from './composables'
 import {
   cancelCreativeCanvasRun, getCreativeCanvas, getCreativeJob, getCreativeAssetBlob, getCreativeAssetPlaybackUrl, getCreativeCanvasRun,
-  getProjectSettings, listCreativeAssets, listCreativeCanvasRuns, listCreativePromptImageStyles, listModelCatalog, optimizeCreativePrompt, saveCreativeCanvas,
+  getFinalCutDraft, getProjectSettings, getStoryWorkspace, listCreativeAssets, listCreativeCanvasRuns, listCreativePromptImageStyles,
+  listFinalCuts, listModelCatalog, optimizeCreativePrompt, saveCreativeCanvas,
   selectCreativeCanvasCandidate, startCreativeCanvasRun, uploadCreativeAsset, validateCreativeCanvasRun
 } from '../../../api'
 
@@ -241,7 +246,7 @@ let dirtyAgain = false
 let savePromise = null
 let hydrating = false
 const { setViewport } = useVueFlow()
-const nodeTypes = Object.fromEntries(['start', 'asset_input', 'text_input', 'image_generate', 'image_edit', 'video_generate'].map(type => [type, markRaw(CanvasGraphNode)]))
+const nodeTypes = Object.fromEntries(['start', 'asset_input', 'text_input', 'image_generate', 'image_edit', 'video_generate', 'pipeline_stage'].map(type => [type, markRaw(CanvasGraphNode)]))
 
 const selectedNode = computed(() => nodes.value.find(node => node.id === selectedId.value) || null)
 const modelOptionsFor = type => {
@@ -684,6 +689,87 @@ function createInitialGraph(kind, handoff) {
   edges.value = graph.edges
   selectedId.value = node.id
 }
+// —— 制作蓝图：把五阶段编排（画风→故事→分镜→视频→成片）落成画布节点链 ——
+// 节点为只读展示（pipeline_stage）：镜头节点直接播放已选片段，成片节点播放导出的 MP4；
+// 数据全部来自项目设定/剧情工作区/成片草稿与导出历史，可重复「同步」并保留拖过的位置。
+const blueprintBusy = ref(false)
+
+async function buildProductionBlueprint() {
+  if (blueprintBusy.value) return
+  blueprintBusy.value = true
+  actionError.value = ''
+  try {
+    await loadImageStyles()
+    const [settings, workspace, cut, runs] = await Promise.all([
+      getProjectSettings(projectId.value).catch(() => null),
+      getStoryWorkspace(projectId.value).catch(() => null),
+      getFinalCutDraft(projectId.value).catch(() => null),
+      listFinalCuts(projectId.value, 10).catch(() => [])
+    ])
+    const style = imageStyles.value.find(item => item.code === settings?.videoStyle) || null
+    const episode = (workspace?.episodes || [])[0] || null
+    const script = episode?.script || ''
+    const exported = (runs || []).find(run => run.status === 'COMPLETED') || null
+    const cutItems = cut?.cut?.items || []
+    const stages = [
+      { id: 'bp-style', kind: 'STYLE', label: style?.label || '未指定画风', accent: style?.accent,
+        text: style?.hint || '', footer: '项目默认画风 · 生成时自动注入' },
+      { id: 'bp-story', kind: 'STORY', label: episode?.title || '剧情故事', text: script,
+        footer: script ? `${script.length} 字剧本` : '还没有写故事' }
+    ]
+    for (const shot of workspace?.shots || []) {
+      const selected = (workspace.candidatesByShot?.[shot.id] || []).find(item => item.status === 'SELECTED')
+      stages.push({ id: `bp-shot-${shot.id}`, kind: 'SHOT', label: `镜${String(shot.shotNumber).padStart(2, '0')}`,
+        shotStatus: shot.status, assetId: selected?.assetId || '', durationSeconds: shot.durationTargetSeconds,
+        text: shot.promptText || shot.action || '', footer: shot.camera ? `运镜 · ${shot.camera}` : '镜头' })
+    }
+    stages.push({ id: 'bp-final', kind: 'FINAL_CUT', label: '成片',
+      assetId: exported?.outputAssetId || '', clipCount: cutItems.length,
+      durationSeconds: exported ? Math.round((exported.outputDurationMs || 0) / 1000) : undefined,
+      footer: exported ? `已导出 · ${exported.outputSize || '1280x720'}` : cutItems.length ? `已选 ${cutItems.length} 段 · 未导出` : '尚未导出' })
+    const created = applyBlueprint(stages)
+    for (const stage of stages) if (stage.assetId) await loadAssetPreview(stage.assetId)
+    await nextTick()
+    fitView()
+    ctx.showToast?.(`制作蓝图已同步：${created.length} 个阶段节点`, 'success')
+  } catch (error) {
+    actionError.value = error.response?.data?.error || '制作蓝图生成失败'
+  } finally { blueprintBusy.value = false }
+}
+
+function applyBlueprint(stages) {
+  undoStack.value.push(JSON.stringify(graphSnapshot()))
+  const previous = new Map(nodes.value.filter(node => node.type === 'pipeline_stage').map(node => [node.id, node]))
+  const removed = new Set(previous.keys())
+  const keptNodes = nodes.value.filter(node => !removed.has(node.id))
+  const keptEdges = edges.value.filter(edge => !removed.has(edge.source) && !removed.has(edge.target))
+  const hasContent = keptNodes.length > 0
+  const baseX = hasContent ? Math.min(...keptNodes.map(node => node.position?.x || 0)) : 40
+  const baseY = hasContent ? Math.max(...keptNodes.map(node => (node.position?.y || 0) + 340)) + 150 : 90
+  const takenIds = new Set(keptNodes.map(node => node.id))
+  const created = stages.map((stage, index) => {
+    let id = stage.id
+    while (takenIds.has(id)) id = `${stage.id}-${Math.random().toString(36).slice(2, 6)}`
+    takenIds.add(id)
+    return { id, type: 'pipeline_stage',
+      position: previous.get(stage.id)?.position || { x: baseX + (index % 5) * 296, y: baseY + Math.floor(index / 5) * 260 },
+      data: { ...stage } }
+  })
+  // 链式执行连线：开始 → 画风 → … → 成片；开始节点不存在时由 ensureStart 统一补齐
+  const chain = created.slice(1).map((node, index) => ({
+    id: crypto.randomUUID(), source: created[index].id, target: node.id,
+    sourceHandle: 'flow-out', targetHandle: 'flow-in', label: '执行顺序'
+  }))
+  const start = keptNodes.find(node => node.type === 'start')
+  if (start) chain.push({ id: crypto.randomUUID(), source: start.id, target: created[0].id,
+    sourceHandle: 'flow-out', targetHandle: 'flow-in', label: '执行顺序' })
+  const graph = ensureStart({ nodes: [...keptNodes, ...created], edges: [...keptEdges, ...chain] })
+  nodes.value = graph.nodes
+  edges.value = graph.edges
+  markChanged()
+  return created
+}
+
 async function loadCanvas() {
   hydrating = true
   let upgraded = false
@@ -711,7 +797,7 @@ async function loadCanvas() {
   finally { hydrating = false }
   await Promise.all([loadAssets(), loadModels(), loadImageStyles()])
   for (const node of nodes.value) {
-    for (const id of [...(node.data.assetIds || []), ...(node.data.referenceAssetIds || []), ...(node.data.outputAssetIds || []), node.data.selectedAssetId].filter(Boolean)) await loadAssetPreview(id)
+    for (const id of [...(node.data.assetIds || []), ...(node.data.referenceAssetIds || []), ...(node.data.outputAssetIds || []), node.data.selectedAssetId, node.data.assetId].filter(Boolean)) await loadAssetPreview(id)
     if (node.data.jobId) await refreshJob(node)
   }
   try {
@@ -719,6 +805,11 @@ async function loadCanvas() {
     const latest = runs.find(item => ['RUNNING', 'WAITING_EXTERNAL', 'WAITING_SELECTION'].includes(item.run?.status)) || runs[0]
     if (latest) await applyCanvasRun(latest)
   } catch { /* 旧数据库尚未迁移时仍允许编辑草稿 */ }
+  // 制作视图「成片」阶段跳转过来：自动把五阶段编排流程落成画布节点链
+  if (sessionStorage.getItem('aster.creative.blueprint')) {
+    sessionStorage.removeItem('aster.creative.blueprint')
+    await buildProductionBlueprint()
+  }
   if (!revision.value || upgraded) { await nextTick(); fitView(); markChanged() }
   nodes.value.forEach(node => { node.selected = node.id === selectedId.value })
   schedulePoll()

@@ -437,4 +437,52 @@ class CreativeCanvasServiceTest {
         Assertions.assertTrue(error.getMessage().contains("等待选择一个候选结果"));
         verifyNoInteractions(workflows);
     }
+
+    @Test
+    void acceptsProductionBlueprintChainAndKeepsItOutOfExecutablePlan() throws Exception {
+        var graph = readGraph("""
+                {"nodes":[
+                  {"id":"bp-style","type":"pipeline_stage","position":{"x":0,"y":0},
+                   "data":{"kind":"STYLE","label":"都市情感","text":"霓虹雨夜","accent":["#6654c7","#9a80cc"]}},
+                  {"id":"bp-shot-1","type":"pipeline_stage","position":{"x":300,"y":0},
+                   "data":{"kind":"SHOT","label":"镜01","shotStatus":"SELECTED","assetId":"00000000-0000-0000-0000-00000000000a"}},
+                  {"id":"bp-final","type":"pipeline_stage","position":{"x":600,"y":0},
+                   "data":{"kind":"FINAL_CUT","label":"成片"}}],
+                 "edges":[
+                  {"source":"bp-style","target":"bp-shot-1","sourceHandle":"flow-out","targetHandle":"flow-in"},
+                  {"source":"bp-shot-1","target":"bp-final","sourceHandle":"flow-out","targetHandle":"flow-in"}]}
+                """);
+        Assertions.assertDoesNotThrow(() -> CreativeCanvasService.validate(
+                new CreativeCanvasService.SaveRequest(graph, null, 0L), mapper));
+        // 蓝图节点不进入可执行计划：整图没有生成节点时不可运行
+        var error = Assertions.assertThrows(IllegalArgumentException.class,
+                () -> CreativeCanvasService.prepareGraph(graph, "all", null));
+        Assertions.assertTrue(error.getMessage().contains("没有可运行的生成节点"));
+    }
+
+    @Test
+    void rejectsBlueprintNodesThatFeedGenerationOrCarryBadPayload() throws Exception {
+        var feeding = readGraph("""
+                {"nodes":[
+                  {"id":"bp-style","type":"pipeline_stage","data":{"kind":"STYLE"}},
+                  {"id":"g","type":"image_generate","data":{"label":"生图","prompt":"猫","modelRowId":7}}],
+                 "edges":[
+                  {"source":"bp-style","target":"g","sourceHandle":"media-out","targetHandle":"image-in"}]}
+                """);
+        var error = Assertions.assertThrows(IllegalArgumentException.class, () -> CreativeCanvasService.validate(
+                new CreativeCanvasService.SaveRequest(feeding, null, 0L), mapper));
+        Assertions.assertTrue(error.getMessage().contains("只参与执行顺序连线"));
+
+        var unknownKind = readGraph("""
+                {"nodes":[{"id":"bp-x","type":"pipeline_stage","data":{"kind":"TITLE"}}],"edges":[]}
+                """);
+        Assertions.assertThrows(IllegalArgumentException.class, () -> CreativeCanvasService.validate(
+                new CreativeCanvasService.SaveRequest(unknownKind, null, 0L), mapper));
+
+        var badAsset = readGraph("""
+                {"nodes":[{"id":"bp-x","type":"pipeline_stage","data":{"kind":"SHOT","assetId":"not-a-uuid"}}],"edges":[]}
+                """);
+        Assertions.assertThrows(IllegalArgumentException.class, () -> CreativeCanvasService.validate(
+                new CreativeCanvasService.SaveRequest(badAsset, null, 0L), mapper));
+    }
 }

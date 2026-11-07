@@ -1,4 +1,6 @@
 export const isGenerationNode = node => ['image_generate', 'image_edit', 'video_generate'].includes(node?.type)
+// 制作蓝图节点（画风/故事/镜头/成片）：只读展示编排流程，不参与手动连线
+export const isPipelineStage = node => node?.type === 'pipeline_stage'
 export function connectionKind(edge, nodes) {
   const source = nodes.find(node => node.id === edge.source)
   if (edge.sourceHandle === 'flow-out' || source?.type === 'start') return 'flow'
@@ -27,6 +29,7 @@ export function connectionError(connection, nodes, edges) {
   const target = nodes.find(node => node.id === connection.target)
   if (!source || !target || target.type === 'start') return '开始节点不能连接上级节点'
   if (source.id === target.id) return '节点不能连接自身'
+  if (isPipelineStage(source) || isPipelineStage(target)) return '制作蓝图节点为只读展示，不能手动连线'
   const kind = connectionKind(connection, nodes)
   if (kind !== 'flow' && !isGenerationNode(target)) return '素材和提示词只能连接到生成节点'
   if (kind === 'flow' && connection.targetHandle !== 'flow-in') return '执行端口只能连接执行输入'

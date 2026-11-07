@@ -103,6 +103,19 @@
 - 若日后出现真实定时创作需求（如每天自动出 N 张候选图），再做聚焦的定时任务 MVP
   （schedule 表 + 调度器 + 两种动作：跑画布流程 / 定时生成，约 1–1.5 天）。
 
+## 定时任务专项上线（2026-11-07 深夜，对标 ZCode automations）
+
+- 定位变更：不做"定时生图"，做**到点拉起智能体无人值守干活**——指令直达 ReActAgent 运行时，
+  权限五档/工具确认挂起/配额/轨迹全部复用现成底座。设计详见
+  `docs/design/2026-11-07-agent-scheduled-tasks.md`。
+- 交付：V47/V48（agent_scheduled_task + fire）、ScheduleTimes（Asia/Shanghai 纯函数）、
+  AgentScheduleRepository（SKIP LOCKED 认领，双实例安全）、AgentScheduleService/Runner/Controller、
+  前端 /schedules 页面（列表/新建/历史/待确认置顶/立即运行）+ 导航「定时任务」。
+- 端到端实测：DAILY next_run_at 计算 ✓、run-now 智能体真跑并回复 ✓、ONCE +90s 调度器自动触发
+  +跑完自动禁用 ✓、中转站 429 时失败如实落 fire 不影响调度 ✓。单测 ScheduleTimesTest 5/5。
+- 已知现象：中转站高峰期 429（code 1305），定时运行的模型调用会重试 3 次后如实失败，
+  属供应商侧限流；MediaErrorMessages 未覆盖 code 1305（后续可加规则）。
+
 ## 遗留
 
 - 用户今晚真实生成验收（Seedance 首条 ¥7–9 + 成片导出）后，蓝图里的镜头/成片节点

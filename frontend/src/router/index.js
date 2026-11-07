@@ -41,6 +41,15 @@ const routes = [
         }
       },
       {
+        path: 'schedules',
+        name: 'AgentSchedules',
+        component: () => import('../views/schedules/Schedules.vue'),
+        meta: {
+          title: '定时任务 - Aster',
+          description: '到点拉起智能体，按指令无人值守自主干活。'
+        }
+      },
+      {
         path: 'workflows',
         name: 'Workflows',
         component: () => import('../views/Workflows.vue'),

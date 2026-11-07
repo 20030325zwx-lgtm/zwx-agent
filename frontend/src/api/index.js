@@ -614,3 +614,18 @@ export const reportSignal = (event, subjectType, subjectId, props = {}) => {
     console.debug('信号上报失败（忽略）', event, exception)
   })
 }
+// 定时任务（智能体无人值守）：到点以指令拉起一次运行
+export const listAgentSchedules = () =>
+  request.get('/ai/schedules').then(response => response.data)
+export const createAgentSchedule = payload =>
+  request.post('/ai/schedules', payload).then(response => response.data)
+export const updateAgentSchedule = (id, payload) =>
+  request.patch(`/ai/schedules/${encodeURIComponent(id)}`, payload).then(response => response.data)
+export const setAgentScheduleEnabled = (id, enabled) =>
+  request.post(`/ai/schedules/${encodeURIComponent(id)}/enable`, { enabled }).then(response => response.data)
+export const deleteAgentSchedule = id =>
+  request.delete(`/ai/schedules/${encodeURIComponent(id)}`).then(response => response.data)
+export const runAgentScheduleNow = id =>
+  request.post(`/ai/schedules/${encodeURIComponent(id)}/run-now`).then(response => response.data)
+export const listAgentScheduleFires = (id, limit = 20) =>
+  request.get(`/ai/schedules/${encodeURIComponent(id)}/fires`, { params: { limit } }).then(response => response.data)

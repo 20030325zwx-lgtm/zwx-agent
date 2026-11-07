@@ -40,3 +40,10 @@
 
 - 蓝图节点 id 固定（bp-*），再同步按 id 替换并保留拖动位置；用户手动删除后同步即恢复。
 - `sessionStorage('aster.creative.blueprint')` 是跨 tab 交接标记，画布 loadCanvas 消费后即清除。
+- **服务器镜像清理教训（2026-11-07）**：手动 `docker rmi` 旧版本镜像时，必须保留
+  `/opt/aster/.env` 的 `IMAGE_TAG` 所引用的 tag（compose 全部服务都用 `${IMAGE_TAG}`）。
+  未变更服务不重建容器，运行镜像落后于 IMAGE_TAG（如 backend 跑 0.7.19、IMAGE_TAG=0.7.20），
+  旧 tag 被删会让下次容器重建失败。恢复方式：`docker tag <运行中镜像> aster-xxx:${IMAGE_TAG}`
+  （部署脚本对未变更服务本就如此重标签，内容等价）。
+  另：browser-mcp / artifact-mcp 的 0.7.20 tag 缺失是历史遗留（两服务从未在该服务器启动，无影响）。
+- 服务器 nginx 无 proxy_cache；`index.html` 已是 `Cache-Control: no-cache`，无需清 HTTP 缓存。

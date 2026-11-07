@@ -43,7 +43,9 @@ export function useProjectJobs(projectId, showToast) {
   }
 
   async function refreshDetails() {
-    const targets = jobs.value
+    // 详情只补活跃任务（进行中/待恢复）：历史任务打开抽屉时按需拉取，避免每次开项目 N+1
+    const targets = jobs.value.filter(job => isJobActive(job.status))
+    if (!targets.length) return
     const results = await Promise.allSettled(targets.map(job => getCreativeJob(job.jobId)))
     const next = { ...details.value }
     results.forEach((result, index) => {

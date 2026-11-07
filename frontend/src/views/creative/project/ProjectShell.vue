@@ -234,11 +234,18 @@ function defaultTab(kind) {
 async function loadProject() {
   pageError.value = ''
   try {
-    project.value = await getCreativeProject(projectId.value)
+    // 10 秒兜底：任何原因（后端重启窗口/代理抖动）导致的挂起都转为可重试错误，
+    // 不让项目页无限空白卡死——「刷新」按钮随时可重试。
+    const detail = await Promise.race([
+      getCreativeProject(projectId.value),
+      new Promise((resolve, reject) => setTimeout(
+        () => reject(new Error('项目加载超时，请点击右上角「刷新」重试')), 10000))
+    ])
+    project.value = detail
   } catch (exception) {
     pageError.value = exception.response?.status === 404
       ? '创作项目不存在或无权访问'
-      : (exception.response?.data?.error || `项目加载失败：${exception.message || '未知错误'}`)
+      : (exception.response?.data?.error || exception.message || `项目加载失败：${exception.message || '未知错误'}`)
     return
   }
   await Promise.all([loadCatalog(), jobsStore.load()])

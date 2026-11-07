@@ -89,6 +89,59 @@ public class AgentRunCheckpointStore {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.getFirst());
     }
 
+    /**
+     * 追加一份图检查点投影（v2 权威快照）：state_json 即 GraphCheckpointJson 编码，
+     * content_hash 由 {@link #append} 计算，恢复时必须先验哈希再使用。
+     */
+    public UUID appendGraphCheckpoint(String runId, String tenantId, String userId,
+                                      com.zwx.zwxagent.agent.graph.GraphCheckpoint checkpoint,
+                                      long lastEventSeq, String reason) {
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, Object> state = com.zwx.zwxagent.agent.graph.GraphCheckpointJson.write(checkpoint);
+        Map<String, Object> summary = com.zwx.zwxagent.agent.graph.GraphCheckpointJson.summary(checkpoint);
+        return append(runId, tenantId, userId, null,
+                com.zwx.zwxagent.agent.graph.GraphCheckpointJson.SCHEMA_VERSION, checkpoint.revision(),
+                state, summary, lastEventSeq, null, reason);
+    }
+
+    /**
+     * 读最新 v2 快照并校验 content_hash。
+     *
+     * @return empty 表示无快照或哈希不符（调用方回退到 agent_run 行内列）
+     */
+    public Optional<com.zwx.zwxagent.agent.graph.GraphCheckpoint> latestGraphCheckpoint(
+            String runId, String tenantId, String userId) {
+        return latest(runId, tenantId, userId).flatMap(row -> {
+            if (!sha256Hex(row.stateJson()).equals(row.contentHash())) {
+                log.warn("v2 检查点哈希不符，回退行内快照；runId={}, checkpointNo={}", runId, row.checkpointNo());
+                return Optional.empty();
+            }
+            try {
+                return Optional.of(com.zwx.zwxagent.agent.graph.GraphCheckpointJson.read(mapper, row.stateJson()));
+            } catch (Exception exception) {
+                log.warn("v2 检查点反序列化失败，回退行内快照；runId={}", runId, exception);
+                return Optional.empty();
+            }
+        });
+    }
+
+    /** run 终态收口：仅保留最新一条检查点（追加式存储的保留策略）。 */
+    public void pruneToLatest(String runId) {
+        try {
+            int deleted = jdbc.update("""
+                    DELETE FROM agent_run_checkpoint
+                    WHERE run_id = ?
+                      AND checkpoint_no < (SELECT MAX(checkpoint_no) FROM agent_run_checkpoint
+                                           WHERE run_id = ?)
+                    """, runId, runId);
+            if (deleted > 0) {
+                log.debug("v2 检查点已收口保留最新；runId={}, deleted={}", runId, deleted);
+            }
+        } catch (Exception exception) {
+            log.warn("v2 检查点收口失败（不影响主流程）；runId={}", runId, exception);
+        }
+    }
+
     private String writeJson(Object value) {
         try {
             return mapper.writeValueAsString(value);

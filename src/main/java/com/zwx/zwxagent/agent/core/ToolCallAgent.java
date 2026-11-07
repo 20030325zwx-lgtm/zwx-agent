@@ -52,6 +52,12 @@ public class ToolCallAgent extends ReActAgent {
 
     private List<ToolExecution> lastToolExecutions = List.of();
 
+    /**
+     * 思考阶段文本增量回调：图编排注入，模型生成内容实时转 SSE「think-delta」事件；
+     * 为 null 时 think() 走既有阻塞 .call() 路径，行为与历史版本完全一致（评测/定时任务/程序内调用）。
+     */
+    private volatile java.util.function.Consumer<String> thinkTextSink;
+
     private static final int THINK_MAX_ATTEMPTS = 3;
     private static final long THINK_RETRY_BASE_MILLIS = 1000;
 
@@ -128,70 +134,98 @@ public class ToolCallAgent extends ReActAgent {
         // 2、调用 AI 大模型，获取工具调用结果
         List<Message> messageList = getMessageList();
         Prompt prompt = new Prompt(messageList, this.chatOptions);
+        java.util.function.Consumer<String> sink = thinkTextSink;
+        if (sink == null) {
+            return thinkBlocking(prompt);
+        }
+        return thinkStreaming(prompt, sink);
+    }
+
+    /** 既有阻塞路径：一次性拿到完整响应，行为与历史版本一致。 */
+    private boolean thinkBlocking(Prompt prompt) {
         try {
-            ChatResponse chatResponse = getChatClient().prompt(prompt)
-                    .system(getSystemPrompt())
-                    .toolCallbacks(availableTools)
-                    .call()
-                    .chatResponse();
-            // 记录响应，用于等下 Act
-            this.toolCallChatResponse = chatResponse;
-            // 3、解析工具调用结果，获取要调用的工具
-            // 助手消息
-            AssistantMessage assistantMessage = chatResponse.getResult().getOutput();
-            // 获取要调用的工具列表
-            List<AssistantMessage.ToolCall> toolCallList = assistantMessage.getToolCalls();
-            // 输出提示信息
-            String result = assistantMessage.getText();
-            log.info("{} received model response, chars={}", getName(), result == null ? 0 : result.length());
-            log.info(getName() + "选择了 " + toolCallList.size() + " 个工具来使用");
-            String toolCallInfo = toolCallList.stream()
-                    .map(toolCall -> String.format("工具名称：%s，参数字符数：%d", toolCall.name(),
-                            toolCall.arguments() == null ? 0 : toolCall.arguments().length()))
-                    .collect(Collectors.joining("\n"));
-            log.info(toolCallInfo);
-            // 如果不需要调用工具，返回 false
-            if (toolCallList.isEmpty()) {
-                // 只有不调用工具时，才需要手动记录助手消息
-                getMessageList().add(assistantMessage);
-                return false;
-            } else {
-                lastStepUsedTool = true;
-                // 需要调用工具时，无需记录助手消息，因为调用工具时会自动记录
-                return true;
-            }
+            ChatResponse chatResponse = chatSpec(prompt).call().chatResponse();
+            return absorbThinkResponse(chatResponse);
         } catch (Exception e) {
-            // 瞬时故障（限流、网络抖动）先重试；重试耗尽后显式失败。
-            // 不把错误文案写入记忆，避免污染后续轮次的上下文。
-            for (int attempt = 1; attempt < THINK_MAX_ATTEMPTS; attempt++) {
-                try {
-                    Thread.sleep(THINK_RETRY_BASE_MILLIS * (1L << (attempt - 1)));
-                    ChatResponse retried = getChatClient().prompt(prompt)
-                            .system(getSystemPrompt())
-                            .toolCallbacks(availableTools)
-                            .call()
-                            .chatResponse();
-                    this.toolCallChatResponse = retried;
-                    AssistantMessage retriedMessage = retried.getResult().getOutput();
-                    List<AssistantMessage.ToolCall> retriedCalls = retriedMessage.getToolCalls();
-                    log.info(getName() + "第 " + (attempt + 1) + " 次尝试成功");
-                    if (retriedCalls.isEmpty()) {
-                        getMessageList().add(retriedMessage);
-                        return false;
-                    }
-                    lastStepUsedTool = true;
-                    return true;
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (Exception retryError) {
-                    log.warn(getName() + "第 " + (attempt + 1) + " 次尝试失败：" + retryError.getMessage());
-                }
-            }
-            log.error(getName() + "的思考过程在重试后仍然失败：" + e.getMessage());
-            lastThinkFailed = true;
+            return retryThink(() -> chatSpec(prompt).call().chatResponse(), null, e);
+        }
+    }
+
+    /** 流式路径：文本增量实时回调，工具调用 delta 由 ThinkStreamAggregator 聚合为等价响应。 */
+    private boolean thinkStreaming(Prompt prompt, java.util.function.Consumer<String> sink) {
+        java.util.function.BooleanSupplier stopCheck =
+                () -> getStopReason() != null || getState() != AgentState.RUNNING;
+        try {
+            ChatResponse chatResponse = ThinkStreamAggregator.collect(chatSpec(prompt).stream().chatResponse(), sink,
+                    stopCheck);
+            return absorbThinkResponse(chatResponse);
+        } catch (Exception e) {
+            return retryThink(() -> ThinkStreamAggregator.collect(chatSpec(prompt).stream().chatResponse(), sink,
+                    stopCheck), sink, e);
+        }
+    }
+
+    /** 组装模型调用规格；系统提示词为空时不调用 .system(null)（DefaultChatClient 对空文本直接抛异常）。 */
+    private org.springframework.ai.chat.client.ChatClient.ChatClientRequestSpec chatSpec(Prompt prompt) {
+        var spec = getChatClient().prompt(prompt).toolCallbacks(availableTools);
+        if (StrUtil.isNotBlank(getSystemPrompt())) {
+            spec = spec.system(getSystemPrompt());
+        }
+        return spec;
+    }
+
+    /** 统一处理聚合/阻塞响应：记录消息并判定是否进入行动阶段。 */
+    private boolean absorbThinkResponse(ChatResponse chatResponse) {
+        // 记录响应，用于等下 Act
+        this.toolCallChatResponse = chatResponse;
+        // 解析工具调用结果，获取要调用的工具
+        AssistantMessage assistantMessage = chatResponse.getResult().getOutput();
+        List<AssistantMessage.ToolCall> toolCallList = assistantMessage.getToolCalls();
+        String result = assistantMessage.getText();
+        log.info("{} received model response, chars={}", getName(), result == null ? 0 : result.length());
+        log.info(getName() + "选择了 " + toolCallList.size() + " 个工具来使用");
+        String toolCallInfo = toolCallList.stream()
+                .map(toolCall -> String.format("工具名称：%s，参数字符数：%d", toolCall.name(),
+                        toolCall.arguments() == null ? 0 : toolCall.arguments().length()))
+                .collect(Collectors.joining("\n"));
+        log.info(toolCallInfo);
+        if (toolCallList.isEmpty()) {
+            // 只有不调用工具时，才需要手动记录助手消息
+            getMessageList().add(assistantMessage);
             return false;
         }
+        lastStepUsedTool = true;
+        // 需要调用工具时，无需记录助手消息，因为调用工具时会自动记录
+        return true;
+    }
+
+    /** 瞬时故障（限流、网络抖动）重试；重试耗尽后显式失败，错误文案不写入记忆。 */
+    private boolean retryThink(java.util.function.Supplier<ChatResponse> call,
+                               java.util.function.Consumer<String> sink, Exception initialError) {
+        Exception first = initialError;
+        for (int attempt = 1; attempt < THINK_MAX_ATTEMPTS; attempt++) {
+            // 事件日志如实记录重试（assistant/attempt），审计与修尾据此还原失败链
+            if (AgentHooks.pipeline() != null) {
+                AgentHooks.pipeline().fireOnThinkRetry(currentRunContext(), first);
+            }
+            try {
+                Thread.sleep(THINK_RETRY_BASE_MILLIS * (1L << (attempt - 1)));
+                if (sink != null) {
+                    sink.accept("\n\n（模型连接中断，正在重试…）\n\n");
+                }
+                ChatResponse retried = call.get();
+                return absorbThinkResponse(retried);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception retryError) {
+                if (first == null) first = retryError;
+                log.warn(getName() + "第 " + (attempt + 1) + " 次尝试失败：" + retryError.getMessage());
+            }
+        }
+        log.error(getName() + "的思考过程在重试后仍然失败：" + (first == null ? "" : first.getMessage()));
+        lastThinkFailed = true;
+        return false;
     }
 
     /**

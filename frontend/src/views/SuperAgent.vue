@@ -384,6 +384,7 @@ const mapMessage = message => ({
   isUser: message.role === 'USER',
   time: new Date(message.createdAt).getTime(),
   activities: [],
+  thinking: null,
   toolCalls: [],
   status: message.status,
   runId: message.executionRunId,
@@ -929,7 +930,7 @@ const sendMessage = async payload => {
   cancelActiveStream()
   activeTurnStart = messages.value.length
   addMessage(message, true, imageObjectKeys)
-  messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], toolCalls: [], startedAt: Date.now() })
+  messages.value.push({ content: '', isUser: false, time: Date.now(), activities: [], thinking: null, toolCalls: [], startedAt: Date.now() })
   const answerIndex = messages.value.length - 1
   activeAnswerIndex.value = answerIndex
   activeRun.value = normalizeRun({ status: 'RUNNING', canCancel: true, input: message, createdAt: new Date().toISOString() }, answerIndex)
@@ -994,9 +995,28 @@ const attachManusStream = (stream, answerIndex) => {
       console.error('Unable to parse run token usage:', error)
     }
   })
+  stream.addEventListener('think-delta', event => {
+    const answer = messages.value[answerIndex]
+    if (!answer) return
+    try {
+      const delta = JSON.parse(event.data || '{}')
+      if (!delta.text) return
+      if (!answer.thinking || answer.thinking.workerKey !== (delta.workerKey || '')) {
+        answer.thinking = { agent: delta.agent || '', workerKey: delta.workerKey || '', text: '' }
+      }
+      // 只保留滚动尾部，避免长思考把消息对象撑大
+      answer.thinking.text = (answer.thinking.text + delta.text).slice(-400)
+    } catch (error) { console.error('Unable to parse think delta:', error) }
+  })
   stream.addEventListener('activity', event => {
     const answer = messages.value[answerIndex]
     if (!answer) return
+    // 思考片段随活动事件折叠入轨：该 worker 的下一轮思考重新开始累计
+    if (answer.thinking?.text) {
+      answer.activities.push({ phase: 'work', agent: answer.thinking.agent, summary: `思考片段：${answer.thinking.text.slice(-160)}`,
+        workerKey: answer.thinking.workerKey, detail: answer.thinking.text, at: Date.now() })
+      answer.thinking = null
+    }
     const activity = parseActivity(event.data || '')
     answer.activities.push({ phase: activity.phase, agent: activity.agent, summary: activity.summary,
       workerKey: activity.workerKey, detail: activity.detail, at: Date.now() })
@@ -1010,7 +1030,7 @@ const attachManusStream = (stream, answerIndex) => {
   })
   stream.addEventListener('interrupted', () => {
     const answer = messages.value[answerIndex]
-    if (answer) answer.status = 'INTERRUPTED'
+    if (answer) { answer.status = 'INTERRUPTED'; answer.thinking = null }
     if (activeRun.value) {
       activeRun.value.status = 'INTERRUPTED'
       activeRun.value.canCancel = false
@@ -1040,8 +1060,15 @@ const attachManusStream = (stream, answerIndex) => {
   stream.onmessage = event => {
     if (event.data === '[DONE]') { finishStream(); return }
     if (event.data && messages.value[answerIndex]) {
-      if (!messages.value[answerIndex].content) setCompanion('speaking', '正在组织回答')
-      messages.value[answerIndex].content += event.data
+      // 正式回答开始流式输出：残余思考片段折叠入轨并清空活区
+      const answer = messages.value[answerIndex]
+      if (answer.thinking?.text) {
+        answer.activities.push({ phase: 'work', agent: answer.thinking.agent, summary: `思考片段：${answer.thinking.text.slice(-160)}`,
+          workerKey: answer.thinking.workerKey, detail: answer.thinking.text, at: Date.now() })
+        answer.thinking = null
+      }
+      if (!answer.content) setCompanion('speaking', '正在组织回答')
+      answer.content += event.data
     }
   }
   stream.onerror = error => handleManusStreamError(answerIndex, error)
@@ -1056,7 +1083,7 @@ const handleManusStreamError = (answerIndex, error) => {
     connectionStatus.value = 'error'
     const reason = error.message || '触发用量配额限制，请稍后再试'
     if (answer && !answer.content) answer.content = reason
-    if (answer) answer.status = 'FAILED'
+    if (answer) { answer.status = 'FAILED'; answer.thinking = null }
     sealActiveAnswer()
     if (activeRun.value) {
       activeRun.value.status = 'FAILED'
@@ -1089,12 +1116,13 @@ const handleManusStreamError = (answerIndex, error) => {
     activeRun.value.canResume = !!answer?.runId
   }
   if (answer && !answer.content) answer.content = '连接异常，正在恢复历史消息...'
-  if (answer) answer.status = 'FAILED'
+  if (answer) { answer.status = 'FAILED'; answer.thinking = null }
   setTimeout(() => { finishStream().catch(error => console.error(error)) }, 1500)
 }
 const finishStream = async () => {
   if (companionState.value === 'error') settleCompanion('error', '连接异常，已恢复历史记录', 3200)
   else settleCompanion('done', '任务完成')
+  messages.value.forEach(answer => { if (answer.thinking) answer.thinking = null })
   if (activeRun.value) {
     if (!['FAILED', 'INTERRUPTED'].includes(activeRun.value.status)) activeRun.value.status = 'COMPLETED'
     activeRun.value.canCancel = false

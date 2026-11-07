@@ -50,17 +50,20 @@ public class AgentRunService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final ApplicationInstanceRegistry instanceRegistry;
+    private final com.zwx.zwxagent.agent.execution.store.AgentRunCheckpointStore checkpointStore;
 
     public AgentRunService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
-        this(jdbcTemplate, objectMapper, null);
+        this(jdbcTemplate, objectMapper, null, null);
     }
 
     @Autowired
     public AgentRunService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
-                           ApplicationInstanceRegistry instanceRegistry) {
+                           ApplicationInstanceRegistry instanceRegistry,
+                           com.zwx.zwxagent.agent.execution.store.AgentRunCheckpointStore checkpointStore) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.instanceRegistry = instanceRegistry;
+        this.checkpointStore = checkpointStore;
     }
 
     public String start(String conversationId, String tenantId, String userId, String agentKey,
@@ -194,6 +197,10 @@ public class AgentRunService {
                 """, status, status, backgroundJobs, status, status, status, status,
                 backgroundJobs, backgroundJobs, answer, answer, error, assistantMessageId, runId);
         endAssignment(runId, status + (backgroundJobs > 0 ? " · 后台任务 " + backgroundJobs : ""));
+        // 最终态收口追加式快照：仅保留最新一条（INTERRUPTED 保留全部，恢复与诊断仍需要历史）
+        if ("COMPLETED".equals(status) && checkpointStore != null) {
+            checkpointStore.pruneToLatest(runId);
+        }
     }
 
     private int countActiveMediaJobs(String runId) {

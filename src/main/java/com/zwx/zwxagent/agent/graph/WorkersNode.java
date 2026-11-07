@@ -52,21 +52,31 @@ public class WorkersNode implements NodeAction {
     private final Map<String, List<ToolCallAgent>> activeWorkers = new ConcurrentHashMap<>();
     private final Map<String, List<FutureTask<WorkerOutcome>>> activeTasks = new ConcurrentHashMap<>();
 
-    /** 逐步采集工具调用的子 agent：每次 step 后把工具执行转成语义事件。 */
+    /** 逐步采集工具调用的子 agent：每次 step 后把工具执行转成语义事件；思考文本增量实时外送。 */
     private static class GraphWorker extends ToolCallAgent {
         final WorkerRole role;
         final String title;
         final String workerKey;
         final List<ActivityEvent> events = new ArrayList<>();
         final Consumer<ActivityEvent> activitySink;
+        final ThinkDeltaCoalescer thinkCoalescer;
 
         GraphWorker(ToolCallback[] tools, WorkerRole role, String title, String workerKey,
-                    Consumer<ActivityEvent> activitySink) {
+                    Consumer<ActivityEvent> activitySink, Consumer<ThinkDeltaEvent> thinkDeltaSink) {
             super(tools);
             this.role = role;
             this.title = title;
             this.workerKey = workerKey;
             this.activitySink = activitySink;
+            // 思考增量经合流器降频（≥120 字符或 250ms 一条），避免逐 token 打满 SSE 历史
+            this.thinkCoalescer = thinkDeltaSink == null ? null
+                    : new ThinkDeltaCoalescer(text -> thinkDeltaSink.accept(
+                            new ThinkDeltaEvent(workerKey, role.displayName(), text)));
+            setThinkTextSink(thinkCoalescer);
+        }
+
+        void flushThinkBuffer() {
+            if (thinkCoalescer != null) thinkCoalescer.flush();
         }
 
         @Override
@@ -123,6 +133,7 @@ public class WorkersNode implements NodeAction {
                 ? java.util.UUID.randomUUID().toString() : context.conversationId();
         String runId = state.value(GraphState.RUN_ID, "");
         Consumer<ActivityEvent> activitySink = context == null ? null : context.activitySink();
+        Consumer<ThinkDeltaEvent> thinkDeltaSink = context == null ? null : context.thinkDeltaSink();
         ToolCallback[] tools = context == null ? new ToolCallback[0] : context.tools();
         if (context != null && stopCheck.getAsBoolean()) {
             return Map.of(GraphState.ACTIVITIES, List.of("收到停止信号，跳过剩余子任务"));
@@ -207,7 +218,7 @@ public class WorkersNode implements NodeAction {
                 streamEvent(activitySink, startEvent);
                 FutureTask<WorkerOutcome> task = new FutureTask<>(() ->
                         runWorker(step, stepNumber, tools, verificationFeedback, workerClient, stopCheck,
-                                context, runKey, runId, activitySink, originalRequest, upstream));
+                                context, runKey, runId, activitySink, thinkDeltaSink, originalRequest, upstream));
                 futures.add(task);
                 futureIndex.put(task, index);
                 activeTasks.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(task);
@@ -366,6 +377,7 @@ public class WorkersNode implements NodeAction {
     private WorkerOutcome runWorker(PlanStep step, int stepNumber, ToolCallback[] allTools,
                                     String feedback, ChatClient workerClient, BooleanSupplier stopCheck,
                                     RunContext runContext, String runKey, String runId, Consumer<ActivityEvent> activitySink,
+                                    Consumer<ThinkDeltaEvent> thinkDeltaSink,
                                     String originalRequest, String upstreamContext) {
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             return WorkerOutcome.stopped(step.title());
@@ -375,7 +387,7 @@ public class WorkersNode implements NodeAction {
         boolean webSearchEnabled = runContext == null || runContext.webSearchEnabled();
         ToolCallback[] roleTools = filterTools(allTools, role);
         String workerKey = "worker-" + stepNumber + "-" + role.key();
-        GraphWorker worker = new GraphWorker(roleTools, role, step.title(), workerKey, activitySink);
+        GraphWorker worker = new GraphWorker(roleTools, role, step.title(), workerKey, activitySink, thinkDeltaSink);
         if (runContext != null && runContext.tenantId() != null) {
             worker.setRunIdentity(new com.zwx.zwxagent.agent.core.AgentRunIdentity(
                     runContext.tenantId(), runContext.userId(), "super", runContext.conversationId()));
@@ -417,6 +429,8 @@ public class WorkersNode implements NodeAction {
                     + (knowledge.isBlank() ? "" : "\n\n" + knowledgePrompt(knowledge));
             log.info("启动 {}：{}", worker.getName(), step.title());
             String runLog = worker.run(taskPrompt);
+            // 冲掉思考增量的残余缓冲，保证流式文本完整送达后再发完成事件
+            worker.flushThinkBuffer();
             String summary = lastAssistantText(worker).isBlank()
                     ? compact(runLog)
                     : lastAssistantText(worker);

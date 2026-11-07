@@ -96,6 +96,16 @@ public class AgentHookPipeline {
         }
     }
 
+    public void fireOnThinkRetry(AgentRunContext context, Exception error) {
+        for (AgentHook hook : hooks.values()) {
+            try {
+                hook.onThinkRetry(context, error);
+            } catch (Exception exception) {
+                log.warn("[agent-hook] onThinkRetry 由 {} 抛出，已跳过：{}", hook.id(), exception.getMessage());
+            }
+        }
+    }
+
     /** 顺序执行 beforeToolCalls；观察/转换型异常跳过该 hook，HookAbortException 向上传播。 */
     public void fireBeforeToolCalls(AgentRunContext context, List<PlannedToolCall> plannedCalls) {
         for (AgentHook hook : hooks.values()) {

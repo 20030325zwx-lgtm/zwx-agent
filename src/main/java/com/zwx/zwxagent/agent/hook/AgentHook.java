@@ -28,6 +28,10 @@ public interface AgentHook {
     default void afterThink(AgentRunContext context, boolean toolCallPlanned) {
     }
 
+    /** 模型调用失败进入重试（指数退避前触发）；观察型，用于事件日志的 assistant/attempt。 */
+    default void onThinkRetry(AgentRunContext context, Exception error) {
+    }
+
     /** 可修改或移除计划中的工具调用；抛 HookAbortException 则本 step 受控短路。 */
     default void beforeToolCalls(AgentRunContext context, List<PlannedToolCall> plannedCalls) {
     }

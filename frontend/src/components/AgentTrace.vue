@@ -11,6 +11,10 @@
         <ChevronDown :size="13" class="trace-chevron" :class="{ rotated: expanded }" />
       </button>
     </header>
+    <div v-if="message.thinking?.text" class="think-live" aria-live="polite">
+      <span class="think-agent">{{ message.thinking.agent || '思考中' }}<span class="think-ellipsis">正在输出…</span></span>
+      <span class="think-text">{{ message.thinking.text }}</span>
+    </div>
     <div v-if="expanded && entries.length" class="trace-body">
       <nav v-if="workers.length" class="chain-tabs" aria-label="调用链范围">
         <button type="button" :class="{ active: selectedWorkerKey === 'all' }" @click="selectedWorkerKey = 'all'">全部</button>
@@ -165,6 +169,27 @@ const tone = computed(() => {
 
 .trace-chevron { color: var(--wb-muted); transition: transform 0.15s ease; }
 .trace-chevron.rotated { transform: rotate(180deg); }
+
+/* worker 思考流式活区：与「已深度思考」面板同风格，文本只显示滚动尾部 */
+.think-live {
+  display: grid;
+  gap: 3px;
+  margin: 4px 0 2px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--wb-fill) 55%, transparent);
+}
+.think-agent { display: flex; align-items: center; gap: 6px; color: var(--wb-muted); font-size: 11px; font-weight: 600; }
+.think-ellipsis { font-weight: 450; color: var(--wb-brand); animation: trace-blink 1.05s ease-in-out infinite; }
+.think-text {
+  max-height: 110px;
+  overflow-y: auto;
+  color: var(--wb-text-2);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .trace-body { margin-top: 5px; border-left: 1px solid var(--wb-border); padding-left: 12px; }
 .chain-tabs { display: flex; gap: 3px; max-width: 100%; overflow-x: auto; padding: 0 0 8px; }
 .chain-tabs button { flex: 0 0 auto; border: 0; border-radius: 6px; padding: 4px 8px; background: transparent; color: var(--wb-muted); font-size: 11px; cursor: pointer; }

@@ -165,6 +165,8 @@ public class ManusAgentController {
     @Resource
     private com.zwx.zwxagent.agent.execution.store.AgentRunInputStore agentRunInputStore;
     @Resource
+    private com.zwx.zwxagent.agent.execution.store.AgentRunCheckpointStore checkpointStore;
+    @Resource
     private com.zwx.zwxagent.agent.execution.AgentExecutionTraceService agentExecutionTraceService;
 
     @Resource
@@ -771,10 +773,13 @@ public class ManusAgentController {
             throw exception;
         }
         McpTools activeMcpTools = mcpTools;
-        com.zwx.zwxagent.agent.graph.GraphCheckpoint checkpoint = run.checkpoint() == null
-                ? new com.zwx.zwxagent.agent.graph.GraphCheckpoint(
-                        null, null, List.of(), List.of(), List.of(), List.of(), 0, null, null, null, null)
-                : run.checkpoint();
+        // v2 追加式快照优先（权威 + hash 校验），无快照或校验不符时回退 agent_run 行内列（展示缓存）
+        com.zwx.zwxagent.agent.graph.GraphCheckpoint checkpoint = checkpointStore
+                .latestGraphCheckpoint(actor.tenantId(), actor.userId(), runId)
+                .orElseGet(() -> run.checkpoint() == null
+                        ? new com.zwx.zwxagent.agent.graph.GraphCheckpoint(
+                                null, null, List.of(), List.of(), List.of(), List.of(), 0, null, null, null, null)
+                        : run.checkpoint());
         String resumeFrom = com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.resumeNode(checkpoint);
         org.slf4j.LoggerFactory.getLogger(ManusAgentController.class).debug(
                 "resume manus run; runId={}, lastNode={}, resumeFrom={}, planSize={}, resultSize={}",

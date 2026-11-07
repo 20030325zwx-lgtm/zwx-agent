@@ -75,6 +75,10 @@ public class ManusGraphOrchestrator {
     @org.springframework.beans.factory.annotation.Value("${app.agent.sse-replay-retention-seconds:120}")
     private long replayRetentionSeconds = 120;
 
+    /** worker 思考阶段流式开关：关闭后 thinkDeltaSink 不注入，worker 走阻塞模型调用。 */
+    @org.springframework.beans.factory.annotation.Value("${app.agent.worker-think-stream:true}")
+    private boolean workerThinkStream = true;
+
     private final ChatModel chatModel;
     private final Executor workerExecutor;
     private final AgentRunService agentRunService;
@@ -85,7 +89,13 @@ public class ManusGraphOrchestrator {
     private final com.zwx.zwxagent.agent.observability.ModelIoService modelIo;
     private final com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
     private final com.zwx.zwxagent.agent.execution.PromptSource promptSource;
+    private final com.zwx.zwxagent.agent.execution.store.AgentRunCheckpointStore checkpointStore;
+    private final com.zwx.zwxagent.agent.execution.store.RunEventLog runEventLog;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** v2 追加式快照开关：开启后每次节点完成同时写 agent_run_checkpoint（权威）与 agent_run 行内列（展示缓存）。 */
+    @org.springframework.beans.factory.annotation.Value("${app.agent.checkpoint.v2:true}")
+    private boolean checkpointV2 = true;
 
     private CompiledGraph compiledGraph;
 
@@ -95,7 +105,7 @@ public class ManusGraphOrchestrator {
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
                                   @org.springframework.beans.factory.annotation.Qualifier("graphWorkerExecutor")
                                   Executor workerExecutor) {
-        this(dashscopeChatModel, workerExecutor, null, null, null, null, null, null, null, null);
+        this(dashscopeChatModel, workerExecutor, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -109,7 +119,9 @@ public class ManusGraphOrchestrator {
                                   com.zwx.zwxagent.capability.tools.PermissionService permissionService,
                                   com.zwx.zwxagent.agent.observability.ModelIoService modelIo,
                                   com.zwx.zwxagent.agent.observability.AgentMetrics metrics,
-                                  com.zwx.zwxagent.agent.execution.PromptSource promptSource) {
+                                  com.zwx.zwxagent.agent.execution.PromptSource promptSource,
+                                  com.zwx.zwxagent.agent.execution.store.AgentRunCheckpointStore checkpointStore,
+                                  com.zwx.zwxagent.agent.execution.store.RunEventLog runEventLog) {
         this.chatModel = dashscopeChatModel;
         this.workerExecutor = workerExecutor;
         this.agentRunService = agentRunService;
@@ -120,6 +132,8 @@ public class ManusGraphOrchestrator {
         this.modelIo = modelIo;
         this.metrics = metrics;
         this.promptSource = promptSource;
+        this.checkpointStore = checkpointStore;
+        this.runEventLog = runEventLog;
     }
 
     @PostConstruct
@@ -411,6 +425,19 @@ public class ManusGraphOrchestrator {
             }
             List<AgentRunView.PlanStepView> sentPlan = List.of();
             if (request.resumeCheckpoint() != null) {
+                // 恢复前修尾：日志里未闭合的工具调用合成 repair 事件（真相层），并对用户可见
+                if (runEventLog != null && !effectiveRunId.isBlank()) {
+                    try {
+                        List<String> repairs = runEventLog.repairUnclosedToolCalls(
+                                effectiveRunId, request.tenantId(), request.userId());
+                        for (String note : repairs) {
+                            stream.send("activity", objectMapper.writeValueAsString(
+                                    ActivityEvent.of("work", "系统", "恢复检查：" + note)));
+                        }
+                    } catch (Exception exception) {
+                        log.warn("恢复修尾失败（不影响续跑）；runId={}", effectiveRunId, exception);
+                    }
+                }
                 List<AgentRunView.PlanStepView> resumedPlan = AgentRunView.planView(request.resumeCheckpoint().plan());
                 if (!resumedPlan.isEmpty()) {
                     stream.send("plan", objectMapper.writeValueAsString(resumedPlan));
@@ -429,6 +456,17 @@ public class ManusGraphOrchestrator {
                     log.debug("实时活动事件推送失败；runId={}", request.runId(), exception);
                 }
             };
+            // worker 思考增量：合流后经 think-delta 事件实时可见（填平干活阶段的空白期）
+            Consumer<ThinkDeltaEvent> thinkDeltaSink = workerThinkStream ? event -> {
+                if (event == null || event.text() == null || event.text().isEmpty()) return;
+                try {
+                    log.debug("[think-delta] runId={}, worker={}, chars={}", request.runId(),
+                            event.workerKey(), event.text().length());
+                    stream.send("think-delta", objectMapper.writeValueAsString(event));
+                } catch (Exception exception) {
+                    log.debug("思考增量推送失败；runId={}", request.runId(), exception);
+                }
+            } : null;
             ToolCallback[] tools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(), toolCallLedger,
                     id -> stream.send("tool-call", String.valueOf(id)));
             java.util.function.BooleanSupplier safeStop = request.controlStopCheck() == null
@@ -449,6 +487,7 @@ public class ManusGraphOrchestrator {
                             stream.sendMessage(chunk);
                         }
                     }, activitySink, webSearchEnabled);
+            if (thinkDeltaSink != null) context = context.withThinkDeltaSink(thinkDeltaSink);
             if (tokenUsage != null) {
                 // 私有知识块规模：同一段会被每个 worker 与交付节点各带一份，是复制型成本的乘数
                 tokenUsage.bindContext(request.runId(),
@@ -662,6 +701,14 @@ public class ManusGraphOrchestrator {
                     state.value(GraphState.FINAL_ANSWER, ""),
                     streamedAnswer.toString(),
                     reviseSteps);
+            // v2 追加式快照（真相层）：先落权威，失败仅降级为行内列（日志可重建，不阻断主流程）
+            if (checkpointV2 && checkpointStore != null) {
+                long lastEventSeq = runEventLog == null ? 0 : runEventLog.lastSeq(
+                        request.runId(), request.tenantId(), request.userId());
+                checkpointStore.appendGraphCheckpoint(request.runId(), request.tenantId(), request.userId(),
+                        checkpoint, lastEventSeq, "AFTER_STEP");
+            }
+            // agent_run 行内列（展示缓存）：列表/详情页直读，避免每次恢复都重放快照
             agentRunService.checkpoint(request.runId(), checkpoint);
         } catch (Exception exception) {
             log.warn("persist manus checkpoint failed; runId={}, node={}", request.runId(), node, exception);

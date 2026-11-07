@@ -62,6 +62,25 @@
 - 本地 `application-local.yml`：`app.oss` 块已移除（用户明确不用阿里云存储），
   重打包重启后「主=S3 兜底=无」。本地与服务器现在都只读写服务器 MinIO。
 
+## 9443 公网入口修复（2026-11-07 续）
+
+- **事实更正**：创作素材播放/下载走**后端代理流**（`/content` 带令牌，后端从 MinIO 读后转发），
+  不依赖 9443；`presignedGetUrl` 仅知识库图片存储在用。此前「不放行素材就打不开」说法有误。
+- 排障链条：安全组（用户已在腾讯云放行）→ **nginx-proxy 容器从未发布 9443 端口**（手工
+  `docker run` 容器，compose 里没有该服务）→ reload 信号未生效 → 容器 restart 后 nginx
+  才真正监听 9443 → 重建容器补 `-p 9443:9443`。
+- **事故记录**：重建时发现原容器镜像 tag `aster-frontend:0.1.0` 已丢失（容器以无 tag 镜像
+  `d7796c95ec7c` 运行），`docker run` 按名找不到导致**站点中断约 1–2 分钟**；改用镜像 ID
+  重建恢复。已打固定 tag `aster-nginx-proxy:base`。重建命令（务必留档）：
+  `docker run -d --name aster-nginx-proxy --restart unless-stopped --network aster_default
+   -p 80:80 -p 443:443 -p 9443:9443
+   -v /opt/aster/nginx/certs:/etc/nginx/certs
+   -v /opt/aster/nginx/nginx.conf:/etc/nginx/nginx.conf
+   -v /var/www/certbot:/var/www/certbot aster-nginx-proxy:base`
+- 服务器 `.env` 已设 `MINIO_PUBLIC_ENDPOINT=https://www.zhuwenxuan.online:9443`
+  （compose 补了透传），本地 `application-local.yml` 同款 public-endpoint；公网
+  `GET /minio/health/live` 实测 200。本地端到端（上传→读回→DB 标记 S3）此前已验。
+
 ## 遗留
 
 - 用户今晚真实生成验收（Seedance 首条 ¥7–9 + 成片导出）后，蓝图里的镜头/成片节点

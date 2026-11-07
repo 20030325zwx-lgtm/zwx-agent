@@ -5,19 +5,19 @@
 
   /* Materials & fills */
   /* 基础色已中性化（UI 规范 §5）：旧页面仍消费 --sk-*，但不再带蓝色底调 */
-  --sk-bg: #f7f7f8;
-  --sk-surface: #ffffff;
-  --sk-material: rgba(255, 255, 255, 0.76);
-  --sk-material-strong: rgba(255, 255, 255, 0.94);
-  --sk-fill: #f0f1f3;
-  --sk-fill-strong: #e9ebef;
+  --sk-bg: var(--wb-bg, #f7f7f8);
+  --sk-surface: var(--wb-surface, #ffffff);
+  --sk-material: var(--wb-surface, rgba(255, 255, 255, 0.76));
+  --sk-material-strong: var(--wb-surface, rgba(255, 255, 255, 0.94));
+  --sk-fill: var(--wb-fill, #f0f1f3);
+  --sk-fill-strong: var(--wb-fill-hover, #e9ebef);
 
   /* Labels & separators */
-  --sk-label: #18191c;
-  --sk-label-2: #5e626b;
-  --sk-label-3: #8d919a;
-  --sk-separator: #e3e4e7;
-  --sk-separator-strong: #cdcfd4;
+  --sk-label: var(--wb-text, #18191c);
+  --sk-label-2: var(--wb-text-2, #5e626b);
+  --sk-label-3: var(--wb-muted, #8d919a);
+  --sk-separator: var(--wb-border, #e3e4e7);
+  --sk-separator-strong: var(--wb-border-strong, #cdcfd4);
 
   /* System colors */
   --sk-blue: #2563eb;

@@ -720,17 +720,30 @@ async function buildProductionBlueprint() {
     })
     const selectedCount = shotRows.filter(shot => shot.assetId).length
     const targetSeconds = shotRows.reduce((sum, shot) => sum + (shot.durationSeconds || 0), 0)
+    // 快照诚实性：蓝图是同步时刻的快照，所有节点带上同步时间；连线语义是「编排顺序」不是执行
+    const syncedAt = new Date().toTimeString().slice(0, 5)
+    const aspect = settings?.videoAspect || ''
+    const target = Number(settings?.videoTargetSeconds) || 0
+    // 缺片直接按「镜头无已选片段」计算：比成片草稿的 missing 更新、且无草稿时也可用
+    const missingCount = shotRows.filter(shot => !shot.assetId).length
     const stages = [
       { id: 'bp-style', kind: 'STYLE', label: style?.label || '未指定画风', accent: style?.accent,
-        text: style?.hint || '', footer: '项目默认画风 · 生成时自动注入' },
-      { id: 'bp-story', kind: 'STORY', label: episode?.title || '剧情故事', text: script,
-        footer: script ? `${script.length} 字剧本` : '还没有写故事' },
-      { id: 'bp-storyboard', kind: 'STORYBOARD', label: shotRows.length ? `${shotRows.length} 个镜头 · 已选 ${selectedCount}` : '还没有镜头',
-        shots: shotRows, footer: shotRows.length ? `目标合计 ${targetSeconds}s · 已选片段悬停可播放` : '在「制作 → 分镜」生成镜头' },
-      { id: 'bp-final', kind: 'FINAL_CUT', label: '成片',
+        text: style?.hint || '', edgeLabel: '编排顺序',
+        footer: ['项目默认画风', aspect && `画幅 ${aspect}`, target && `目标 ${target}s`, `同步于 ${syncedAt}`].filter(Boolean).join(' · ') },
+      { id: 'bp-story', kind: 'STORY', label: episode?.title || '剧情故事', text: script, edgeLabel: '编排顺序',
+        footer: [script ? `${script.length} 字剧本` : '还没有写故事', `同步于 ${syncedAt}`].join(' · ') },
+      { id: 'bp-storyboard', kind: 'STORYBOARD',
+        label: shotRows.length ? `${shotRows.length} 个镜头 · 已选 ${selectedCount}` : '还没有镜头',
+        shots: shotRows, edgeLabel: '编排顺序',
+        footer: [shotRows.length ? `合计 ${targetSeconds}s` : '在「制作 → 分镜」生成镜头',
+          shotRows.length && '悬停播放已选片段', `同步于 ${syncedAt}`].filter(Boolean).join(' · ') },
+      { id: 'bp-final', kind: 'FINAL_CUT',
+        label: `成片${missingCount ? ` · 缺 ${missingCount} 镜` : ''}`,
         assetId: exported?.outputAssetId || '', clipCount: cutItems.length,
         durationSeconds: exported ? Math.round((exported.outputDurationMs || 0) / 1000) : undefined,
-        footer: exported ? `已导出 · ${exported.outputSize || '1280x720'}` : cutItems.length ? `已选 ${cutItems.length} 段 · 未导出` : '尚未导出' }
+        edgeLabel: '编排顺序',
+        footer: [exported ? `已导出 · ${exported.outputSize || '1280x720'}` : cutItems.length ? `已选 ${cutItems.length} 段 · 未导出` : '尚未导出',
+          `同步于 ${syncedAt}`].join(' · ') }
     ]
     const created = applyBlueprint(stages)
     for (const shot of shotRows) if (shot.assetId) await loadAssetPreview(shot.assetId)
@@ -765,14 +778,14 @@ function applyBlueprint(stages) {
     cursorX += (widths[stage.kind] || 236) + 52
     return { id, type: 'pipeline_stage', position, data: { ...stage } }
   })
-  // 链式执行连线：开始 → 画风 → … → 成片；开始节点不存在时由 ensureStart 统一补齐
+  // 链式连线：开始 → 画风 → … → 成片，标签用「编排顺序」（蓝图只读展示，不参与执行）
   const chain = created.slice(1).map((node, index) => ({
     id: crypto.randomUUID(), source: created[index].id, target: node.id,
-    sourceHandle: 'flow-out', targetHandle: 'flow-in', label: '执行顺序'
+    sourceHandle: 'flow-out', targetHandle: 'flow-in', label: created[index].data.edgeLabel || '编排顺序'
   }))
   const start = keptNodes.find(node => node.type === 'start')
   if (start) chain.push({ id: crypto.randomUUID(), source: start.id, target: created[0].id,
-    sourceHandle: 'flow-out', targetHandle: 'flow-in', label: '执行顺序' })
+    sourceHandle: 'flow-out', targetHandle: 'flow-in', label: '编排顺序' })
   const graph = ensureStart({ nodes: [...keptNodes, ...created], edges: [...keptEdges, ...chain] })
   nodes.value = graph.nodes
   edges.value = graph.edges

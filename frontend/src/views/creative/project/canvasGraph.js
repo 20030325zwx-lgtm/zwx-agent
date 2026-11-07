@@ -18,7 +18,7 @@ export function effectivePrompt(id, nodes, edges, visited = new Set()) {
   return parts.join('\n\n')
 }
 export function normalizeConnection(edge, nodes) {
-  if (connectionKind(edge, nodes) === 'flow') return { ...edge, sourceHandle: 'flow-out', targetHandle: edge.targetHandle || 'flow-in', label: '执行顺序' }
+  if (connectionKind(edge, nodes) === 'flow') return { ...edge, sourceHandle: 'flow-out', targetHandle: edge.targetHandle || 'flow-in', label: edge.label || '执行顺序' }
   const text = connectionKind(edge, nodes) === 'text'
   return { ...edge, sourceHandle: edge.sourceHandle || (text ? 'text-out' : 'media-out'),
     targetHandle: edge.targetHandle || (text ? 'text-in' : 'image-in'),

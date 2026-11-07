@@ -27,7 +27,7 @@
             <span v-if="shot.durationSeconds" class="pl-shot-dur">{{ shot.durationSeconds }}s</span>
           </div>
           <p class="pl-shot-prompt">{{ shot.promptText || (shot.camera ? `运镜 · ${shot.camera}` : '还没有提示词') }}</p>
-          <video v-if="shot.assetId && shotUrl(shot)" :src="shotUrl(shot)" muted preload="metadata"
+          <video v-if="shot.assetId && shotUrl(shot)" :src="shotUrl(shot)" muted preload="none"
                  class="pl-shot-video nodrag nopan"
                  @mouseenter="$event.target.play().catch(() => {})" @mouseleave="$event.target.pause()"></video>
         </div>

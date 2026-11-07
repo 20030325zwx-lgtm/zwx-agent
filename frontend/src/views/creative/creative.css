@@ -216,6 +216,18 @@
   white-space: nowrap;
 }
 
+/* 类型徽标（图片/视频/小说）：此前无任何样式，是裸文本，补成与状态胶囊同族的低调 chip */
+.cr-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--wb-radius-sm);
+  border: 1px solid var(--wb-border);
+  color: var(--wb-text-2);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
 .cr-status::before {
   content: '';
   width: 6px;

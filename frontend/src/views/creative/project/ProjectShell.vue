@@ -557,6 +557,11 @@ onMounted(async () => {
 .canvas-mode .ps-rail { display: none; }
 .canvas-mode .ps-main { padding: 0; min-width: 0; min-height: 0; overflow: hidden; display: flex; }
 .canvas-mode .ps-name { font-size: 14px; max-width: 320px; }
+/* 画布模式顶栏融入画布：去通栏底色与分隔线，避免「左侧圆角浮层 vs 右侧直角通栏」的割裂；
+   控件圆角统一到 --wb-radius（8px 系），状态胶囊不再单独用 999px */
+.canvas-mode .ps-bar { background: transparent; border-bottom: 0; }
+.canvas-mode .ps-back { border-radius: var(--wb-radius); }
+.canvas-mode .ps-title .cr-status { border-radius: var(--wb-radius); }
 .ps-tabs { display: flex; align-items: center; gap: 2px; margin-left: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .ps-tabs::-webkit-scrollbar { display: none; }
 .ps-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--wb-radius); color: var(--wb-text-2); font-size: 12px; text-decoration: none; white-space: nowrap; }

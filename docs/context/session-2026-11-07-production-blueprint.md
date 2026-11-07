@@ -81,6 +81,20 @@
   （compose 补了透传），本地 `application-local.yml` 同款 public-endpoint；公网
   `GET /minio/health/live` 实测 200。本地端到端（上传→读回→DB 标记 S3）此前已验。
 
+## 接入 gpt-image-2.6（2026-11-07 傍晚，用户要求）
+
+- 中转站（KKAI，api.kkrich.ltd）已上架 `gpt-image-2.6`（另有 2.6-flare / 2.6-sunburst 变体），
+  定价 `$0.02/张`（quota_type=1 按次），与 2.5-sunburst 同价。
+- 接入：`model_provider_model` row 54（KKAI，capabilities=["image_generation"]）+
+  `media_model_profile`（镜像 row 25 的 openai-images 画像，operations 含 text_to_image/image_edit，
+  price_metadata `{"unit":"image","price":0.02,"currency":"USD"}`）。
+- **真实生成验证通过**（$0.02，job 017c8695…，1024×1024 扁平插画风橘猫，产物
+  fc9b965f…，895KB 落 MinIO）→ 画像已标 VERIFIED。
+- 注意：作业层 prompt 走 `effectivePrompt`，parameters 只带 size（schema 白名单）。
+- 默认图片绑定**未动**（仍 2.5-sunburst，row 25）；2.6 已出现在所有生图模型下拉。
+  变体 flare/sunburst 未启用，需要随时可加。
+- 未部署服务器（数据在共享库，两端即时生效；代码无变更）。
+
 ## 遗留
 
 - 用户今晚真实生成验收（Seedance 首条 ¥7–9 + 成片导出）后，蓝图里的镜头/成片节点

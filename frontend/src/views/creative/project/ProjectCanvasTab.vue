@@ -711,24 +711,29 @@ async function buildProductionBlueprint() {
     const script = episode?.script || ''
     const exported = (runs || []).find(run => run.status === 'COMPLETED') || null
     const cutItems = cut?.cut?.items || []
+    // 分镜 + 视频：全部镜头收进一个「分镜」大节点，列表内嵌展示，已选片段可播放
+    const shotRows = (workspace?.shots || []).map(shot => {
+      const selected = (workspace.candidatesByShot?.[shot.id] || []).find(item => item.status === 'SELECTED')
+      return { shotId: shot.id, shotNumber: shot.shotNumber, status: shot.status,
+        durationSeconds: shot.durationTargetSeconds, promptText: shot.promptText || shot.action || '',
+        camera: shot.camera || '', assetId: selected?.assetId || '' }
+    })
+    const selectedCount = shotRows.filter(shot => shot.assetId).length
+    const targetSeconds = shotRows.reduce((sum, shot) => sum + (shot.durationSeconds || 0), 0)
     const stages = [
       { id: 'bp-style', kind: 'STYLE', label: style?.label || '未指定画风', accent: style?.accent,
         text: style?.hint || '', footer: '项目默认画风 · 生成时自动注入' },
       { id: 'bp-story', kind: 'STORY', label: episode?.title || '剧情故事', text: script,
-        footer: script ? `${script.length} 字剧本` : '还没有写故事' }
+        footer: script ? `${script.length} 字剧本` : '还没有写故事' },
+      { id: 'bp-storyboard', kind: 'STORYBOARD', label: shotRows.length ? `${shotRows.length} 个镜头 · 已选 ${selectedCount}` : '还没有镜头',
+        shots: shotRows, footer: shotRows.length ? `目标合计 ${targetSeconds}s · 已选片段悬停可播放` : '在「制作 → 分镜」生成镜头' },
+      { id: 'bp-final', kind: 'FINAL_CUT', label: '成片',
+        assetId: exported?.outputAssetId || '', clipCount: cutItems.length,
+        durationSeconds: exported ? Math.round((exported.outputDurationMs || 0) / 1000) : undefined,
+        footer: exported ? `已导出 · ${exported.outputSize || '1280x720'}` : cutItems.length ? `已选 ${cutItems.length} 段 · 未导出` : '尚未导出' }
     ]
-    for (const shot of workspace?.shots || []) {
-      const selected = (workspace.candidatesByShot?.[shot.id] || []).find(item => item.status === 'SELECTED')
-      stages.push({ id: `bp-shot-${shot.id}`, kind: 'SHOT', label: `镜${String(shot.shotNumber).padStart(2, '0')}`,
-        shotStatus: shot.status, assetId: selected?.assetId || '', durationSeconds: shot.durationTargetSeconds,
-        text: shot.promptText || shot.action || '', footer: shot.camera ? `运镜 · ${shot.camera}` : '镜头' })
-    }
-    stages.push({ id: 'bp-final', kind: 'FINAL_CUT', label: '成片',
-      assetId: exported?.outputAssetId || '', clipCount: cutItems.length,
-      durationSeconds: exported ? Math.round((exported.outputDurationMs || 0) / 1000) : undefined,
-      footer: exported ? `已导出 · ${exported.outputSize || '1280x720'}` : cutItems.length ? `已选 ${cutItems.length} 段 · 未导出` : '尚未导出' })
     const created = applyBlueprint(stages)
-    for (const stage of stages) if (stage.assetId) await loadAssetPreview(stage.assetId)
+    for (const shot of shotRows) if (shot.assetId) await loadAssetPreview(shot.assetId)
     await nextTick()
     fitView()
     ctx.showToast?.(`制作蓝图已同步：${created.length} 个阶段节点`, 'success')
@@ -746,14 +751,19 @@ function applyBlueprint(stages) {
   const hasContent = keptNodes.length > 0
   const baseX = hasContent ? Math.min(...keptNodes.map(node => node.position?.x || 0)) : 40
   const baseY = hasContent ? Math.max(...keptNodes.map(node => (node.position?.y || 0) + 340)) + 150 : 90
+  // 全部阶段都有旧位置（且齐全）时沿用拖过的布局；否则按节点实际宽度横向重排
+  const complete = stages.every(stage => previous.has(stage.id))
+  const widths = { STORYBOARD: 330 }
+  let cursorX = baseX
   const takenIds = new Set(keptNodes.map(node => node.id))
   const created = stages.map((stage, index) => {
     let id = stage.id
     while (takenIds.has(id)) id = `${stage.id}-${Math.random().toString(36).slice(2, 6)}`
     takenIds.add(id)
-    return { id, type: 'pipeline_stage',
-      position: previous.get(stage.id)?.position || { x: baseX + (index % 5) * 296, y: baseY + Math.floor(index / 5) * 260 },
-      data: { ...stage } }
+    const position = complete ? previous.get(stage.id).position
+      : { x: cursorX, y: baseY + (index >= 5 ? 260 : 0) }
+    cursorX += (widths[stage.kind] || 236) + 52
+    return { id, type: 'pipeline_stage', position, data: { ...stage } }
   })
   // 链式执行连线：开始 → 画风 → … → 成片；开始节点不存在时由 ensureStart 统一补齐
   const chain = created.slice(1).map((node, index) => ({

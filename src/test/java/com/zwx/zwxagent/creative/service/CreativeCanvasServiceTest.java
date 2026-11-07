@@ -485,4 +485,33 @@ class CreativeCanvasServiceTest {
         Assertions.assertThrows(IllegalArgumentException.class, () -> CreativeCanvasService.validate(
                 new CreativeCanvasService.SaveRequest(badAsset, null, 0L), mapper));
     }
+
+    @Test
+    void acceptsStoryboardListNodeAndRejectsOversizedRows() throws Exception {
+        var storyboard = readGraph("""
+                {"nodes":[{"id":"bp-sb","type":"pipeline_stage","data":{"kind":"STORYBOARD","shots":[
+                  {"shotNumber":1,"status":"SELECTED","durationSeconds":5,"assetId":"00000000-0000-0000-0000-00000000000a"},
+                  {"shotNumber":2,"status":"DRAFT","durationSeconds":10}]},"position":{"x":0,"y":0}}],"edges":[]}
+                """);
+        Assertions.assertDoesNotThrow(() -> CreativeCanvasService.validate(
+                new CreativeCanvasService.SaveRequest(storyboard, null, 0L), mapper));
+
+        StringBuilder rows = new StringBuilder();
+        for (int i = 0; i < 41; i++) {
+            if (i > 0) rows.append(',');
+            rows.append("{\"shotNumber\":").append(i + 1).append("}");
+        }
+        var oversized = readGraph("{\"nodes\":[{\"id\":\"bp-sb\",\"type\":\"pipeline_stage\","
+                + "\"data\":{\"kind\":\"STORYBOARD\",\"shots\":[" + rows + "]}}],\"edges\":[]}");
+        var error = Assertions.assertThrows(IllegalArgumentException.class, () -> CreativeCanvasService.validate(
+                new CreativeCanvasService.SaveRequest(oversized, null, 0L), mapper));
+        Assertions.assertTrue(error.getMessage().contains("分镜列表无效"));
+
+        var badShotAsset = readGraph("""
+                {"nodes":[{"id":"bp-sb","type":"pipeline_stage","data":{"kind":"STORYBOARD","shots":[
+                  {"shotNumber":1,"assetId":"bad"}]}}],"edges":[]}
+                """);
+        Assertions.assertThrows(IllegalArgumentException.class, () -> CreativeCanvasService.validate(
+                new CreativeCanvasService.SaveRequest(badShotAsset, null, 0L), mapper));
+    }
 }

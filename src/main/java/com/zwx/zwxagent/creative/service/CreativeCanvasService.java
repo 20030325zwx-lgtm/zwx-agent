@@ -33,8 +33,9 @@ public class CreativeCanvasService {
             "pipeline_stage");
     private static final Set<String> GENERATION_TYPES = Set.of(
             "image_generate", "image_edit", "video_generate");
-    /** 制作蓝图节点形态（只读展示）：画风 / 故事 / 镜头 / 成片。 */
-    private static final Set<String> PIPELINE_KINDS = Set.of("STYLE", "STORY", "SHOT", "FINAL_CUT");
+    /** 制作蓝图节点形态（只读展示）：画风 / 故事 / 镜头(旧单镜) / 分镜列表 / 成片。 */
+    private static final Set<String> PIPELINE_KINDS = Set.of("STYLE", "STORY", "SHOT", "STORYBOARD", "FINAL_CUT");
+    private static final int MAX_STORYBOARD_ROWS = 40;
 
     public record CanvasView(UUID projectId, JsonNode graph, JsonNode viewport, long revision,
                              Instant updatedAt) {}
@@ -699,6 +700,21 @@ public class CreativeCanvasService {
         }
         String text = data.path("text").asText("");
         if (text.length() > 2000) throw new IllegalArgumentException("制作蓝图节点内容过长");
+        if ("STORYBOARD".equals(kind)) {
+            JsonNode shots = data.path("shots");
+            if (!shots.isArray() || shots.size() > MAX_STORYBOARD_ROWS) {
+                throw new IllegalArgumentException("制作蓝图分镜列表无效");
+            }
+            for (JsonNode shot : shots) {
+                String shotAssetId = shot.path("assetId").asText("");
+                if (!shotAssetId.isBlank()) {
+                    try { UUID.fromString(shotAssetId); }
+                    catch (IllegalArgumentException exception) {
+                        throw new IllegalArgumentException("制作蓝图分镜引用的素材 ID 无效");
+                    }
+                }
+            }
+        }
     }
 
     private static int jsonLength(JsonNode node, ObjectMapper mapper) {

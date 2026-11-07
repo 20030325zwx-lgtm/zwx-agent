@@ -130,7 +130,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog, LogOut,
-  PanelLeftClose, PanelLeftOpen, Workflow, Palette, FolderOpen, Images, Sparkles,
+  PanelLeftClose, PanelLeftOpen, Palette, FolderOpen, Images, Sparkles,
   Activity, Users
 } from 'lucide-vue-next'
 import AsterMark from '../AsterMark.vue'
@@ -182,7 +182,7 @@ const primaryItems = [
   { to: '/creative/skills', label: '技能', icon: Sparkles, match: ['/creative/skills'] }
 ]
 const secondaryItems = [
-  { to: '/workflows', label: '自动化', icon: Workflow, match: ['/workflows'] },
+  // 工作流「自动化」入口已撤下（2026-11-07，定义零使用）；/workflows 路由与画布运行引擎保留，仅深链接可达
   { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] },
   { to: '/super-agent', label: '智能体', icon: MessagesSquare, match: ['/super-agent'] },
   // 评测中台（/eval/）与数据中台（/data/）是独立服务页面，不进入主站菜单，仅支持路由直达

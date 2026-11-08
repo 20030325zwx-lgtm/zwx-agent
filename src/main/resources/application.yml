@@ -184,11 +184,9 @@ app:
       # 知识文档进入待审时推送 n8n 监听工作流（document-review-watch）；留空禁用事件推送
       review-webhook-url: ${APP_NOTIFY_N8N_REVIEW_WEBHOOK_URL:}
   intent:
-    # 路由器选型：none（默认禁用）/ jev（TypeSafe System One）/ qwen（DashScope 对照实现）
+    # 路由器选型：none（默认禁用）/ jev（TypeSafe System One）。2026-11-08 起 qwen（DashScope）已移除，
+    # 独立意图分类器不再参与聊天主链路——编排分档由 OrchestrationRouting 硬规则接管（见设计文档）。
     provider: ${APP_INTENT_PROVIDER:none}
-    # 闲聊短路：命中高置信纯闲聊且用户未勾选知识库/联网开关时单轮直达；
-    # provider=none 时无决策、本开关无效果。门禁：意图评测通过率达标（见 evaluation/eval-sets/README.md）
-    short-circuit-enabled: ${APP_INTENT_SHORT_CIRCUIT_ENABLED:true}
     jev:
       # 意图只分工作任务/闲聊问答；api-key 留空即禁用，路由失败/禁用均维持用户开关原行为
       enabled: ${APP_INTENT_JEV_ENABLED:true}

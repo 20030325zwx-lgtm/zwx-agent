@@ -20,7 +20,6 @@ import com.zwx.zwxagent.chat.conversation.ConversationLockManager;
 import com.zwx.zwxagent.knowledge.retrieval.AgentKnowledgeRagResult;
 import com.zwx.zwxagent.knowledge.retrieval.AgentKnowledgeRagService;
 import com.zwx.zwxagent.knowledge.storage.AgentImageStorageService;
-import com.zwx.zwxagent.platform.intent.IntentDecision;
 import com.zwx.zwxagent.platform.intent.IntentRouter;
 import com.zwx.zwxagent.platform.security.CurrentActor;
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
@@ -128,8 +127,9 @@ public class ManusAgentController {
     @Resource
     private ObjectMapper objectMapper;
 
-    @Resource
-    private IntentRouter intentRouter;
+    // 意图路由 v2（2026-11-08）：独立 LLM 意图分类器退出主链路（参考 dsh/ZCode：无前置分类器），
+    // 编排分档改为 OrchestrationRouting 的硬规则 + 确定性匹配；IntentRouter 接口保留为评测平台与
+    // 未来分档器复活的槽位（provider=none 时不装配）。
 
     @Resource
     private ConversationLockManager conversationLockManager;
@@ -167,16 +167,9 @@ public class ManusAgentController {
     @Resource
     private com.zwx.zwxagent.agent.execution.store.AgentRunCheckpointStore checkpointStore;
 
-    /** 单循环档（DirectNode）路由开关与复杂度阈值：低复杂度工作任务不再强制走四阶段图编排。 */
+    /** 单循环档（DirectNode）默认开关：关闭后全量回到图编排档（零代码回滚）。 */
     @org.springframework.beans.factory.annotation.Value("${app.agent.single-loop.enabled:true}")
     private boolean singleLoopEnabled = true;
-    @org.springframework.beans.factory.annotation.Value("${app.agent.single-loop.max-complexity:0.45}")
-    private double singleLoopMaxComplexity = 0.45;
-    /** 意图路由不可用（限流/未配置）时：短消息启发式直通单循环（短消息大概率单轮可答，误判代价可控）。 */
-    @org.springframework.beans.factory.annotation.Value("${app.agent.single-loop.fallback-short-message:true}")
-    private boolean singleLoopFallbackShortMessage = true;
-    @org.springframework.beans.factory.annotation.Value("${app.agent.single-loop.max-chars:80}")
-    private int singleLoopMaxChars = 80;
     @Resource
     private com.zwx.zwxagent.agent.execution.AgentExecutionTraceService agentExecutionTraceService;
 
@@ -291,45 +284,14 @@ public class ManusAgentController {
                 throw exception;
             }
         }
-        var intentDecision = intentRouter.classify(message);
-        if (intentDecision.isPresent()) {
-            IntentDecision decision = intentDecision.get();
-            var effect = decision.applyTo(effectiveKnowledgeSearch, effectiveWebSearch);
-            effectiveKnowledgeSearch = effect.knowledgeSearch();
-            effectiveWebSearch = effect.webSearch();
-            if (agentMetrics != null) agentMetrics.intentDecision(decision.recommend().name().toLowerCase());
-            prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "意图识别",
-                    "summary", decision.summary(effect.action())));
-            // 批 2 闲聊短路：高置信纯闲聊 + 用户未勾选任何开关 → 单轮直达回答，跳过 RAG/联网/图编排。
-            // 门禁：意图评测集 12/12（2026-10-26 r2）达标后启用；开关关闭或用户显式勾选时不短路。
-            if (shortCircuitEnabled && decision.recommend() == IntentDecision.Recommendation.SHORT_CIRCUIT_CANDIDATE
-                    && !workspaceRequest && !knowledgeSearch && !webSearch && imageObjectKeys.isEmpty()) {
-                runQuotaService.checkRunAllowed(actor.userId());
-                String summary = "闲聊直达：命中闲聊短路（置信 " + String.format("%.2f", decision.intentConfidence())
-                        + "），本轮跳过知识库检索、联网搜索与多智能体编排";
-                return casualChat(actor, conversationId, message, userMessageId, conversationLease,
-                        toJson(java.util.Map.of("phase", "plan", "agent", "意图识别", "summary", summary)),
-                        modelSelection);
-            }
-        }
-        // 编排分档：直答（闲聊短路，上方已返回）→ 单循环（低复杂度/短消息直通）→ 图编排（默认/工作区/带图/高复杂度）
-        String singleLoopReason = null;
-        if (singleLoopEnabled && !workspaceRequest && imageObjectKeys.isEmpty()) {
-            if (intentDecision.isPresent()
-                    && intentDecision.get().recommend() == com.zwx.zwxagent.platform.intent.IntentDecision.Recommendation.FALLBACK
-                    && intentDecision.get().complexity() <= singleLoopMaxComplexity) {
-                singleLoopReason = "复杂度 " + String.format("%.2f", intentDecision.get().complexity());
-            } else if (intentDecision.isEmpty() && singleLoopFallbackShortMessage
-                    && message != null && message.trim().length() <= singleLoopMaxChars) {
-                singleLoopReason = "短消息直通";
-            }
-        }
-        boolean singleLoop = singleLoopReason != null;
-        if (singleLoop) {
-            prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "意图识别",
-                    "summary", "编排：单循环（" + singleLoopReason + "），跳过多智能体规划与质检，直接执行"));
-            if (agentMetrics != null) agentMetrics.orchestrationSingleLoop();
-        }
+        // 编排路由 v2：无前置 LLM 分类。用户显式信号（工作区/带图）与确定性并行证据 → 图编排；
+        // 其余默认单循环（直答是单循环的自然结果，不再前置分类）。
+        var routing = com.zwx.zwxagent.platform.intent.OrchestrationRouting.decide(
+                workspaceRequest, !imageObjectKeys.isEmpty(), message, singleLoopEnabled);
+        boolean singleLoop = routing.singleLoop();
+        prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "编排路由",
+                "summary", routing.reason() + "（知识库/联网开关保持用户选择）"));
+        if (singleLoop && agentMetrics != null) agentMetrics.orchestrationSingleLoop();
         AgentKnowledgeRagResult knowledge;
         McpTools mcpTools = null;
         ToolCallback[] availableTools;
@@ -864,53 +826,6 @@ public class ManusAgentController {
      * 批 2 闲聊短路的单轮直达路径：不走图编排，不建 agent_run，
      * 直接流式回答并按既有链路持久化消息（runId 为空，token 台账不含闲聊轮）。
      */
-    private SseEmitter casualChat(CurrentActor actor, String conversationId, String message, long userMessageId,
-                                  AutoCloseable conversationLease, String prefaceActivity,
-                                  com.zwx.zwxagent.platform.settings.ModelCatalogService.ResolvedSelection modelSelection) {
-        SseEmitter emitter = new SseEmitter(java.util.concurrent.TimeUnit.MINUTES.toMillis(2));
-        agentExecutor.execute(() -> {
-            try {
-                emitter.send(SseEmitter.event().name("activity").data(prefaceActivity));
-                StringBuilder answer = new StringBuilder();
-                ChatClient.builder(dynamicChatModelFactory.model(modelSelection.config())).build()
-                        .prompt().user(message).stream().content()
-                        .toStream()
-                        .forEach(chunk -> {
-                            if (chunk == null || chunk.isEmpty()) return;
-                            answer.append(chunk);
-                            try {
-                                emitter.send(chunk);
-                            } catch (Exception sendError) {
-                                throw new IllegalStateException(sendError);
-                            }
-                        });
-                emitter.send(SseEmitter.event().data("[DONE]"));
-                emitter.complete();
-                completeManusRun(actor, conversationId, userMessageId, null, "{}", null,
-                        new ManusGraphOrchestrator.ManusRunResult(answer.toString(), List.of(), true, "COMPLETED", null));
-            } catch (Exception exception) {
-                try {
-                    emitter.send(SseEmitter.event().name("generation-error")
-                            .data(com.zwx.zwxagent.common.ErrorMessages.describe(exception)));
-                    emitter.send(SseEmitter.event().data("回答失败：" + com.zwx.zwxagent.common.ErrorMessages.describe(exception)));
-                    emitter.send(SseEmitter.event().data("[DONE]"));
-                    emitter.complete();
-                } catch (Exception ignored) {
-                    emitter.complete();
-                }
-                completeManusRun(actor, conversationId, userMessageId, null, "{}", null,
-                        new ManusGraphOrchestrator.ManusRunResult("", List.of(), false, "INTERRUPTED",
-                                exception.getMessage()));
-            } finally {
-                try {
-                    conversationLease.close();
-                } catch (Exception ignored) {
-                }
-            }
-        });
-        return emitter;
-    }
-
     private void manageManusEmitter(SseEmitter emitter, com.zwx.zwxagent.agent.graph.RunStream stream) {
         java.util.concurrent.ScheduledFuture<?>[] heartbeatHolder = new java.util.concurrent.ScheduledFuture<?>[1];
         heartbeatHolder[0] = HEARTBEAT_SCHEDULER.scheduleAtFixedRate(() -> {

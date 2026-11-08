@@ -1,0 +1,17 @@
+日期：2026-11-08
+问题现象：删除 QwenIntentRouter.java 源文件后重新打包启动，后端启动即失败——
+BeanDefinitionStoreException: I/O failure while processing configuration class
+[ZwxAgentApplication]，Caused by FileNotFoundException: class path resource
+[com/zwx/zwxagent/platform/intent/QwenIntentRouter.class] cannot be opened。
+影响范围：本地后端无法启动（线上未受影响，发布走 clean 构建）。
+原因：target/classes 里持续出现 macOS 风格复制副本（QwenIntentRouter 3.class、
+IntentRouterConfig 2~26.class 等带「空格+数字」后缀的文件，时间戳与文件编辑时刻吻合，
+系本机某个进程在编辑时生成），mvn 增量编译不清孤儿产物：源文件已删但同名 .class 仍在
+target（且副本更多），打包进 JAR 后 Spring 组件扫描到缺失/非法类名即崩溃。
+解决方式：mvn clean package（clean 只清 target/ 构建产物，安全，不涉及 git clean）。
+验证结果：clean 重建后 JAR 内垃圾副本 0 个，后端正常启动，/api/health ok。
+后续注意事项：
+1. 删除或重命名 Java 源文件后，打包一律 mvn clean package，不要增量 package。
+2. 若 target/classes 再次出现「名字 N.class」副本，直接清理；并留意本机是否有同步/备份
+   进程在编辑时刻复制工作区文件。
+3. 与 2026-11-07 清理过一次同类垃圾的记录呼应（当时未定位到再生机制，本轮证实会再生）。

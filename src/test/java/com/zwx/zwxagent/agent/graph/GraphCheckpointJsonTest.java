@@ -12,8 +12,8 @@ class GraphCheckpointJsonTest {
     private static GraphCheckpoint sample() {
         return new GraphCheckpoint(
                 "workers", "verifier",
-                List.of(new PlanStep("s1", "查询", WorkerRole.GENERAL, "查资料", List.of(), "有结论"),
-                        new PlanStep("s2", "整理", WorkerRole.AUTHOR, "整理产出", List.of("s1"), "文件生成")),
+                List.of(new PlanStep("s1", "查询", "general", "查资料", List.of(), "有结论"),
+                        new PlanStep("s2", "整理", "author", "整理产出", List.of("s1"), "文件生成")),
                 List.of("【查询】结论 A", "【整理】产出 B"),
                 List.of("第 1 步完成", "工具 web 执行完成"),
                 List.of(ActivityEvent.of("work", "通用助理", "开始执行（1/2）：查询", "worker-1-general"),

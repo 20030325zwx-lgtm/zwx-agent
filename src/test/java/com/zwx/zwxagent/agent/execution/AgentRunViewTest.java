@@ -3,7 +3,6 @@ package com.zwx.zwxagent.agent.execution;
 import com.zwx.zwxagent.agent.graph.ActivityEvent;
 import com.zwx.zwxagent.agent.graph.GraphCheckpoint;
 import com.zwx.zwxagent.agent.graph.PlanStep;
-import com.zwx.zwxagent.agent.graph.WorkerRole;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -23,8 +22,8 @@ class AgentRunViewTest {
     void mapsPlanEventsAndVerificationForWorkspace() {
         GraphCheckpoint checkpoint = new GraphCheckpoint(
                 "workers", "verifier",
-                List.of(new PlanStep("检索手册", WorkerRole.RESEARCHER, "找到迟到规则"),
-                        new PlanStep("汇总规则", WorkerRole.AUTHOR, "写成结论")),
+                List.of(new PlanStep("s1", "检索手册", "researcher", "找到迟到规则", List.of(), ""),
+                        new PlanStep("s2", "汇总规则", "author", "写成结论", List.of("s1"), "")),
                 List.of("结果一", "结果二"),
                 List.of("内部活动"),
                 List.of(ActivityEvent.of("work", "调研员", "开始执行（1/2）：检索手册")),
@@ -52,7 +51,7 @@ class AgentRunViewTest {
     void summaryAvoidsFullEventPayload() {
         GraphCheckpoint checkpoint = new GraphCheckpoint(
                 "verifier", "aggregator",
-                List.of(new PlanStep("检索手册", WorkerRole.RESEARCHER, "")),
+                List.of(new PlanStep("s1", "检索手册", "researcher", "", List.of(), "")),
                 List.of("结果一"),
                 List.of(), List.of(), 0, "unverified", "", "", "");
         AgentRun run = new AgentRun("run-1", "conv-1", "tenant-1", "user-1", "super", 10L, 11L,

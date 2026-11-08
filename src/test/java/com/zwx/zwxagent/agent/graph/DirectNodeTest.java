@@ -84,27 +84,16 @@ class DirectNodeTest {
     }
 
     @Test
-    void directRunsCheckpointAsDirectNodeAndResumeRerunsIt() {
-        // completedNode：单循环标记下无论推进到哪，检查点都归属 direct 节点
-        OverAllState state = new OverAllState();
-        state.registerKeyAndStrategy(GraphState.ORCHESTRATION, new ReplaceStrategy());
-        state.registerKeyAndStrategy(GraphState.FINAL_ANSWER, new ReplaceStrategy());
-        state.updateState(Map.of(GraphState.ORCHESTRATION, "single", GraphState.FINAL_ANSWER, "答案"));
-        Assertions.assertEquals(ManusGraphOrchestrator.NODE_DIRECT, ManusGraphOrchestrator.completedNode(state));
-
-        // nextNode / resumeNode：direct 自恢复（重跑本节点，工具副作用由幂等账本回放）
+    void resumeAlwaysRerunsMainLoopNode() {
+        // 主循环架构：恢复恒重跑 direct 节点（老 checkpoint 的编排节点名一并归入）
         Assertions.assertEquals(ManusGraphOrchestrator.NODE_DIRECT,
-                ManusGraphOrchestrator.nextNode(ManusGraphOrchestrator.NODE_DIRECT, "pass"));
-        GraphCheckpoint checkpoint = new GraphCheckpoint(ManusGraphOrchestrator.NODE_DIRECT, ManusGraphOrchestrator.NODE_DIRECT,
-                List.of(), List.of(), List.of(), List.of(), 0, "pass", "", "", "");
-        Assertions.assertEquals(ManusGraphOrchestrator.NODE_DIRECT, ManusGraphOrchestrator.resumeNode(checkpoint));
-
-        // 图编排档不受影响：finalAnswer 归 aggregator
-        OverAllState graphState = new OverAllState();
-        graphState.registerKeyAndStrategy(GraphState.ORCHESTRATION, new ReplaceStrategy());
-        graphState.registerKeyAndStrategy(GraphState.FINAL_ANSWER, new ReplaceStrategy());
-        graphState.updateState(Map.of(GraphState.ORCHESTRATION, "graph", GraphState.FINAL_ANSWER, "答案"));
-        Assertions.assertEquals(ManusGraphOrchestrator.NODE_AGGREGATOR, ManusGraphOrchestrator.completedNode(graphState));
+                ManusGraphOrchestrator.resumeNode(new GraphCheckpoint(
+                        ManusGraphOrchestrator.NODE_DIRECT, ManusGraphOrchestrator.NODE_DIRECT,
+                        List.of(), List.of(), List.of(), List.of(), 0, "pass", "", "", "")));
+        Assertions.assertEquals(ManusGraphOrchestrator.NODE_DIRECT,
+                ManusGraphOrchestrator.resumeNode(new GraphCheckpoint(
+                        "planner", "workers", List.of(), List.of(), List.of(), List.of(), 0, "", "", "", "")));
+        Assertions.assertEquals(ManusGraphOrchestrator.NODE_DIRECT, ManusGraphOrchestrator.resumeNode(null));
     }
 
     @Test

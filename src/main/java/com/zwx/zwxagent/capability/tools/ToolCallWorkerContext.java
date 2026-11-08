@@ -31,4 +31,19 @@ public final class ToolCallWorkerContext {
         WORKER.remove();
         CALL_ORDINAL.remove();
     }
+
+    /** 跨线程并行执行工具时的身份快照：workerKey + 主线程已预分配的调用序号。 */
+    public record WorkerSnapshot(String workerKey, int ordinal) {
+    }
+
+    /** 主线程捕获当前 worker 身份（子线程并行执行工具前调用）。 */
+    public static WorkerSnapshot capture() {
+        return new WorkerSnapshot(WORKER.get(), CALL_ORDINAL.get().get());
+    }
+
+    /** 子线程恢复身份并固定调用序号（并行场景下序号由主线程按调用顺序预分配，保证重放幂等）。 */
+    public static void restore(WorkerSnapshot snapshot, int ordinalForThisCall) {
+        WORKER.set(snapshot.workerKey());
+        CALL_ORDINAL.get().set(ordinalForThisCall);
+    }
 }

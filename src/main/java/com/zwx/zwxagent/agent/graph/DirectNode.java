@@ -36,12 +36,21 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public class DirectNode implements NodeAction {
 
+    /** 主循环步数上限：现在承担规划+执行+交付三职，比原 worker 的 8 步放宽。 */
+    static final int MAIN_LOOP_MAX_STEPS = 14;
+
     static final String SYSTEM_PROMPT = """
             你是 Aster 智能体，直接对用户负责，独立完成用户的请求。
             1. 需要工具时直接调用；调用前用一两句面向用户的话说明你要做什么，拿到结果后给出结论。
             2. 输出是对用户的回答：直接、自然、克制，禁止"团队/流程/步骤汇报"式的元话语，禁止复述内部活动记录。
             3. 有私有知识证据时保留对应的 [文件名#切片号] 引用；资料未支持的事实明确说无法确认，不得推断补充。
-            4. 用中文回答。
+            4. spawnSubagent 工具的使用纪律：
+               - 用于并行处理多个互不依赖的子任务（在一条回复里同时发多个调用），或某子任务会产生
+                 大量中间产物、只需结论回到对话时；
+               - 不要用于简单查找（自己直接做更快）和彼此依赖的线性步骤（自己按顺序做）；
+               - task 必须自包含（子代理看不到本对话），写清目标、材料与完成判据；
+               - 拿到各子代理结论后再综合，禁止把子代理的过程描述原样转述给用户。
+            5. 用中文回答。
             """;
 
     private final ChatClient chatClient;
@@ -65,6 +74,7 @@ public class DirectNode implements NodeAction {
         tokenUsageRunId.set(state.value(GraphState.RUN_ID, ""));
         RunContext context = state.value(GraphState.RUN_CONTEXT, RunContext.class).orElse(null);
         String input = state.value(GraphState.INPUT, "");
+        String historyContext = state.value(GraphState.HISTORY, "");
         String runId = state.value(GraphState.RUN_ID, "");
         String runKey = context == null || context.conversationId() == null
                 ? java.util.UUID.randomUUID().toString() : context.conversationId();
@@ -94,8 +104,9 @@ public class DirectNode implements NodeAction {
         worker.setName(workerKey);
         worker.setSystemPrompt(SYSTEM_PROMPT);
         worker.setNextStepPrompt("开始处理用户的请求，需要时调用工具。");
-        worker.setMaxSteps(WorkersNode.WORKER_MAX_STEPS);
+        worker.setMaxSteps(MAIN_LOOP_MAX_STEPS);
         worker.setChatClient(chatClient);
+        worker.setToolCallingManager(new com.zwx.zwxagent.capability.tools.ParallelizingToolCallingManager());
         if (context != null && context.tenantId() != null) {
             worker.setRunIdentity(new AgentRunIdentity(context.tenantId(), context.userId(),
                     "super", context.conversationId()));
@@ -103,16 +114,18 @@ public class DirectNode implements NodeAction {
         if (runId != null && !runId.isBlank()) {
             worker.setHookRunId(runId);
         }
-        WorkersNode.registerWorker(runKey, worker);
+        Workers.registerWorker(runKey, worker);
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             worker.stopForClientDisconnect();
         }
         List<String> activities = new ArrayList<>();
-        String taskPrompt = (knowledge.isBlank() ? "" : WorkersNode.knowledgePrompt(knowledge)) + input;
+        String taskPrompt = (historyContext == null || historyContext.isBlank() ? ""
+                : "【近期对话上下文】\n" + historyContext + "\n\n")
+                + (knowledge.isBlank() ? "" : Workers.knowledgePrompt(knowledge)) + input;
         try {
             ToolCallWorkerContext.set(workerKey);
             try {
-                log.info("direct 节点启动（单循环档）：{}", compact(input, 80));
+                log.info("主循环启动：{}", compact(input, 80));
                 worker.run(taskPrompt);
             } finally {
                 ToolCallWorkerContext.clear();
@@ -120,7 +133,7 @@ public class DirectNode implements NodeAction {
         } finally {
             // 思考增量的残余缓冲冲刷：保证流式文本完整送达
             worker.flushThinkBuffer();
-            WorkersNode.unregisterWorker(runKey, worker);
+            Workers.unregisterWorker(runKey, worker);
         }
         for (BaseAgent.ToolExecution execution : worker.lastToolExecutionsSnapshot()) {
             ActivityEvent event = ActivityEvent.of("work", "智能体",

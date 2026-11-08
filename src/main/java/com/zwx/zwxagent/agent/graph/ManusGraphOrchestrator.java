@@ -55,6 +55,9 @@ public class ManusGraphOrchestrator {
     /** 计划确认门：多步计划生成后暂停，等用户授权再执行（Plan 先对齐后执行）。 */
     static final String NODE_PLAN_GATE = "plan_gate";
     public static final String NODE_DIRECT = "direct";
+
+    /** 单 run 派生子代理总数上限（防失控闸之一；单 step 并行度由模型自决、执行池有界）。 */
+    static final int SPAWN_MAX_TOTAL_PER_RUN = 12;
     static final String NODE_RESUME_ROUTER = "resume_router";
 
     private static final long MAX_RUN_MILLIS = TimeUnit.MINUTES.toMillis(5);
@@ -105,7 +108,7 @@ public class ManusGraphOrchestrator {
     private CompiledGraph compiledGraph;
     private CompiledGraph compiledDirectGraph;
 
-    private record GraphInstance(CompiledGraph graph, WorkersNode workers) {
+    private record GraphInstance(CompiledGraph graph) {
     }
 
     public ManusGraphOrchestrator(ChatModel dashscopeChatModel,
@@ -145,10 +148,10 @@ public class ManusGraphOrchestrator {
     @PostConstruct
     void init() throws Exception {
         log.info("manus run checkpoint store: {}", agentRunService == null ? "disabled" : "enabled");
-        GraphInstance sample = buildGraph();
+        GraphInstance sample = buildGraph(chatModel);
         compiledGraph = sample.graph();
-        compiledDirectGraph = buildDirectGraph(sample.workers(), chatModel).graph();
-        log.info("manus 多智能体图编译完成：{}（单循环档：direct）",
+        compiledDirectGraph = compiledGraph;
+        log.info("manus 主循环图编译完成（main-loop + spawnSubagent）：{}",
                 compiledGraph.getGraph(GraphRepresentation.Type.MERMAID).content());
     }
 
@@ -156,56 +159,26 @@ public class ManusGraphOrchestrator {
         return buildGraph(chatModel);
     }
 
-    private GraphInstance buildGraph(ChatModel graphChatModel) throws Exception {
-        WorkersNode workersNode = new WorkersNode(graphChatModel, workerExecutor, tokenUsage,
-                toolConfirmationService, modelIo);
-        StateGraph graph = new StateGraph(this::newState);
-        graph.addNode(NODE_RESUME_ROUTER, AsyncNodeAction.node_async(state -> Map.of()));
-        graph.addNode(NODE_PLANNER, AsyncNodeAction.node_async(new PlannerNode(graphChatModel, tokenUsage, modelIo, promptSource)));
-        graph.addNode(NODE_WORKERS, AsyncNodeAction.node_async(workersNode));
-        graph.addNode(NODE_VERIFIER, AsyncNodeAction.node_async(new VerifierNode(graphChatModel, tokenUsage, modelIo, promptSource)));
-        graph.addNode(NODE_AGGREGATOR, AsyncNodeAction.node_async(new AggregatorNode(graphChatModel, tokenUsage, modelIo, promptSource)));
-        graph.addNode(NODE_PLAN_GATE, AsyncNodeAction.node_async(state -> Map.of()));
-        graph.addEdge(StateGraph.START, NODE_RESUME_ROUTER);
-        graph.addConditionalEdges(NODE_RESUME_ROUTER, AsyncEdgeAction.edge_async(this::routeResume),
-                java.util.Map.of(NODE_PLANNER, NODE_PLANNER, NODE_WORKERS, NODE_WORKERS,
-                        NODE_AGGREGATOR, NODE_AGGREGATOR, StateGraph.END, StateGraph.END));
-        graph.addConditionalEdges(NODE_PLANNER, AsyncEdgeAction.edge_async(this::routeAfterPlanner),
-                java.util.Map.of(NODE_WORKERS, NODE_WORKERS, NODE_PLAN_GATE, NODE_PLAN_GATE));
-        graph.addEdge(NODE_PLAN_GATE, StateGraph.END);
-        graph.addEdge(NODE_WORKERS, NODE_VERIFIER);
-        graph.addConditionalEdges(NODE_VERIFIER, AsyncEdgeAction.edge_async(this::routeAfterVerifier),
-                Map.of(NODE_WORKERS, NODE_WORKERS, NODE_AGGREGATOR, NODE_AGGREGATOR));
-        graph.addEdge(NODE_AGGREGATOR, StateGraph.END);
-        // 必须配置 saver（1.0.0.2 的 stream 路径会无条件读取）；
-        // MemorySaver 按引用保存状态（不序列化 RunContext），并按 threadId=conversationId 隔离，
-        // 为后续断线恢复（getStateHistory/resume）打底。
-        SaverConfig saverConfig = SaverConfig.builder()
-                .type(SaverConstant.MEMORY)
-                .register(SaverConstant.MEMORY, new MemorySaver())
-                .build();
-        CompiledGraph compiled = graph.compile(CompileConfig.builder().saverConfig(saverConfig).build());
-        compiled.setMaxIterations(16);
-        return new GraphInstance(compiled, workersNode);
-    }
-
     /**
-     * 单循环拓扑：START → direct → END。DirectNode 内部即完整 ReAct 主循环；
-     * 复用同一 WorkersNode 实例承载 worker 注册表/activeTasks，用户停止请求覆盖两种拓扑。
+     * 主循环拓扑（终态，2026-11-08）：START → direct → END。
+     * DirectNode 内部即完整 ReAct 主循环 + spawnSubagent 工具（子代理按需派生）；
+     * 编排层（planner/workers/verifier/aggregator/plan-gate）已退役删除。
      */
-    private GraphInstance buildDirectGraph(WorkersNode workersNode, ChatModel runChatModel) throws Exception {
+    private GraphInstance buildGraph(ChatModel graphChatModel) throws Exception {
         StateGraph graph = new StateGraph(this::newState);
-        graph.addNode(NODE_DIRECT, AsyncNodeAction.node_async(new DirectNode(runChatModel, tokenUsage,
+        graph.addNode(NODE_DIRECT, AsyncNodeAction.node_async(new DirectNode(graphChatModel, tokenUsage,
                 toolConfirmationService, modelIo)));
         graph.addEdge(StateGraph.START, NODE_DIRECT);
         graph.addEdge(NODE_DIRECT, StateGraph.END);
+        // 必须配置 saver（1.0.0.2 的 stream 路径会无条件读取）；
+        // MemorySaver 按引用保存状态（不序列化 RunContext），并按 threadId=conversationId 隔离。
         SaverConfig saverConfig = SaverConfig.builder()
                 .type(SaverConstant.MEMORY)
                 .register(SaverConstant.MEMORY, new MemorySaver())
                 .build();
         CompiledGraph compiled = graph.compile(CompileConfig.builder().saverConfig(saverConfig).build());
         compiled.setMaxIterations(16);
-        return new GraphInstance(compiled, workersNode);
+        return new GraphInstance(compiled);
     }
 
     private OverAllState newState() {
@@ -232,73 +205,13 @@ public class ManusGraphOrchestrator {
     }
 
     /** 质检后的路由：要求返工且回 workers，否则交付。 */
-    static String route(String verificationStatus) {
-        return "revise".equals(verificationStatus) ? NODE_WORKERS : NODE_AGGREGATOR;
-    }
-
-    private String routeAfterVerifier(OverAllState state) throws Exception {
-        return route(state.value(GraphState.VERIFICATION_STATUS, "unverified"));
-    }
-
-    private String routeResume(OverAllState state) {
-        return routeResumeFrom(state.value(GraphState.RESUME_FROM, NODE_PLANNER));
-    }
-
-    static String routeResumeFrom(String resumeFrom) {
-        return switch (resumeFrom == null ? "" : resumeFrom) {
-            case NODE_WORKERS -> NODE_WORKERS;
-            case NODE_VERIFIER -> NODE_VERIFIER;
-            case NODE_AGGREGATOR -> NODE_AGGREGATOR;
-            default -> NODE_PLANNER;
-        };
-    }
-
-    static String nextNode(String node, String verificationStatus) {
-        return switch (node == null ? "" : node) {
-            case NODE_PLANNER -> NODE_WORKERS;
-            case NODE_PLAN_GATE -> StateGraph.END;
-            case NODE_WORKERS -> NODE_VERIFIER;
-            case NODE_VERIFIER -> route(verificationStatus);
-            case NODE_AGGREGATOR -> StateGraph.END;
-            case NODE_DIRECT -> NODE_DIRECT;
-            default -> NODE_PLANNER;
-        };
-    }
-
-    /** 计划确认门：多步计划先挂起等待用户授权；单步任务直接执行。 */
-    static String planGateTarget(int planSize) {
-        return planSize > 1 ? NODE_PLAN_GATE : NODE_WORKERS;
-    }
-
-    private String routeAfterPlanner(OverAllState state) throws Exception {
-        List<PlanStep> plan = state.value(GraphState.PLAN)
-                .map(value -> (List<PlanStep>) value)
-                .orElse(List.of());
-        // YOLO 是无人值守/评测模式：计划直接执行，不停在确认门等待人工授权。
-        if (com.zwx.zwxagent.capability.tools.PermissionMode.parse(
-                state.value(GraphState.PERMISSION_MODE, "EDIT")) == com.zwx.zwxagent.capability.tools.PermissionMode.YOLO) {
-            return NODE_WORKERS;
-        }
-        return planGateTarget(plan.size());
-    }
-
-    /** 根据最后一个已完成节点计算恢复入口；没有检查点时从 planner 重新开始。 */
+    /** 恢复入口：主循环架构下恒为 direct 节点（老 checkpoint 的编排节点名一并归入 default）。 */
     public static String resumeNode(GraphCheckpoint checkpoint) {
-        if (checkpoint == null || checkpoint.lastNode() == null || checkpoint.lastNode().isBlank()) {
-            return NODE_PLANNER;
-        }
-        // aggregator 已完成但 run 尚未收尾时，重新执行 aggregator 生成最终答案，
-        // 而不是把 END 当成恢复入口重新规划。
-        if (NODE_AGGREGATOR.equals(checkpoint.lastNode())) return NODE_AGGREGATOR;
-        return nextNode(checkpoint.lastNode(), checkpoint.verificationStatus());
+        return NODE_DIRECT;
     }
 
-    /** 返工恢复时清空上一轮结果，避免 AppendStrategy 把旧结果和新结果拼在一起。 */
+    /** 兼容保留：返工清理语义已随编排层退役，原样返回。 */
     public static GraphCheckpoint prepareResumeCheckpoint(GraphCheckpoint checkpoint, String resumeFrom) {
-        if (checkpoint == null) return null;
-        if (NODE_WORKERS.equals(resumeFrom)) {
-            return checkpoint.withTaskResults(List.of());
-        }
         return checkpoint;
     }
 
@@ -319,20 +232,7 @@ public class ManusGraphOrchestrator {
                                   Runnable cleanup,
                                   Consumer<ManusRunResult> completionHandler,
                                   /** v2 派发路径：节点安全点轮询 control_state（暂停/取消），空则仅看本地 stopped。 */
-                                  java.util.function.BooleanSupplier controlStopCheck,
-                                  /** 编排模式："single"=单循环档（DirectNode），其余/空=图编排档。 */
-                                  String orchestration) {
-
-        public ManusRunRequest(String conversationId, String tenantId, String userId, ChatModel chatModel,
-                               String message, String historyContext, ToolCallback[] tools, String knowledgeContext,
-                               String ragTraceJson, String prefaceActivity, String runId, String permissionMode,
-                               GraphCheckpoint resumeCheckpoint, String resumeFrom, Runnable cleanup,
-                               Consumer<ManusRunResult> completionHandler,
-                               java.util.function.BooleanSupplier controlStopCheck) {
-            this(conversationId, tenantId, userId, chatModel, message, historyContext, tools, knowledgeContext,
-                    ragTraceJson, prefaceActivity, runId, permissionMode, resumeCheckpoint, resumeFrom, cleanup,
-                    completionHandler, controlStopCheck, null);
-        }
+                                  java.util.function.BooleanSupplier controlStopCheck) {
     }
 
     public record ManusRunResult(String answer, List<String> activities, boolean completed,
@@ -349,14 +249,9 @@ public class ManusGraphOrchestrator {
      * 与旧 BaseAgent.runStream 对齐：activity 事件承载过程，默认消息承载最终回答，[DONE] 收尾。
      */
     public ManusRunHandle runStream(ManusRunRequest request, Executor runExecutor) {
-        boolean singleLoop = "single".equals(request.orchestration());
         GraphInstance runGraph;
         try {
-            ChatModel runChatModel = request.chatModel() == null ? chatModel : request.chatModel();
-            runGraph = singleLoop
-                    ? buildDirectGraph(new WorkersNode(runChatModel, workerExecutor, tokenUsage,
-                            toolConfirmationService, modelIo), runChatModel)
-                    : buildGraph(runChatModel);
+            runGraph = buildGraph(request.chatModel() == null ? chatModel : request.chatModel());
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to build agent graph", exception);
         }
@@ -398,7 +293,7 @@ public class ManusGraphOrchestrator {
                         if (holder[0] != null) holder[0].cleanup();
                         scheduleStreamRemoval(runId, holder[0]);
                     }
-                    runGraph.workers().stopAll(request.conversationId());
+                    Workers.stopAll(request.conversationId());
                 },
                 request.cleanup());
         holder[0] = stream;
@@ -469,7 +364,6 @@ public class ManusGraphOrchestrator {
                 // 图启动前的附加事件（当前为意图识别观察结论）；随 run 事件一起先于图输出到达前端。
                 stream.send("activity", request.prefaceActivity());
             }
-            List<AgentRunView.PlanStepView> sentPlan = List.of();
             if (request.resumeCheckpoint() != null) {
                 // 恢复前修尾：日志里未闭合的工具调用合成 repair 事件（真相层），并对用户可见
                 if (runEventLog != null && !effectiveRunId.isBlank()) {
@@ -483,11 +377,6 @@ public class ManusGraphOrchestrator {
                     } catch (Exception exception) {
                         log.warn("恢复修尾失败（不影响续跑）；runId={}", effectiveRunId, exception);
                     }
-                }
-                List<AgentRunView.PlanStepView> resumedPlan = AgentRunView.planView(request.resumeCheckpoint().plan());
-                if (!resumedPlan.isEmpty()) {
-                    stream.send("plan", objectMapper.writeValueAsString(resumedPlan));
-                    sentPlan = resumedPlan;
                 }
             }
             long[] lastPartialFlush = {0};
@@ -513,11 +402,23 @@ public class ManusGraphOrchestrator {
                     log.debug("思考增量推送失败；runId={}", request.runId(), exception);
                 }
             } : null;
-            ToolCallback[] tools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(), toolCallLedger,
-                    id -> stream.send("tool-call", String.valueOf(id)));
+            ToolCallback[] wrappedTools = IdempotentToolCallback.wrapAll(request.runId(), request.tools(),
+                    toolCallLedger, id -> stream.send("tool-call", String.valueOf(id)));
             java.util.function.BooleanSupplier safeStop = request.controlStopCheck() == null
                     ? stopped::get
                     : () -> stopped.get() || request.controlStopCheck().getAsBoolean();
+            // 子代理工具（深度=1：内部工具集为 wrappedTools 去 spawn）；本工具再入账本包装
+            SpawnSubagentTool spawnRaw = new SpawnSubagentTool(
+                    request.chatModel() == null ? chatModel : request.chatModel(),
+                    wrappedTools, effectiveRunId, request.conversationId(),
+                    request.tenantId(), request.userId(), request.conversationId(),
+                    activitySink, safeStop, tokenUsage, modelIo, toolConfirmationService,
+                    SPAWN_MAX_TOTAL_PER_RUN);
+            ToolCallback[] tools = new ToolCallback[wrappedTools.length + 1];
+            System.arraycopy(wrappedTools, 0, tools, 0, wrappedTools.length);
+            tools[wrappedTools.length] = IdempotentToolCallback.wrapAll(request.runId(),
+                    new ToolCallback[]{spawnRaw}, toolCallLedger,
+                    id -> stream.send("tool-call", String.valueOf(id)))[0];
             RunContext context = RunContext.of(tools, request.knowledgeContext(), safeStop,
                     request.tenantId(), request.userId(), request.conversationId(), chunk -> {
                         // 先保留已生成内容，再尝试推送；客户端断开后仍能把草稿落库。
@@ -545,12 +446,9 @@ public class ManusGraphOrchestrator {
                     GraphState.RUN_CONTEXT, context,
                     GraphState.RUN_ID, request.runId() == null ? "" : request.runId(),
                     GraphState.PERMISSION_MODE,
-                    com.zwx.zwxagent.capability.tools.PermissionMode.parse(request.permissionMode()).name(),
-                    GraphState.ORCHESTRATION, "single".equals(request.orchestration()) ? "single" : "graph");
+                    com.zwx.zwxagent.capability.tools.PermissionMode.parse(request.permissionMode()).name());
             int sentActivities = 0;
             int sentEvents = request.resumeCheckpoint() == null ? 0 : request.resumeCheckpoint().events().size();
-            boolean planGated = false;
-            List<AgentRunView.PlanStepView> gatedPlan = List.of();
             RunnableConfig runnableConfig = RunnableConfig.builder()
                     .threadId(request.runId() == null || request.runId().isBlank()
                             ? java.util.UUID.randomUUID().toString()
@@ -562,15 +460,6 @@ public class ManusGraphOrchestrator {
             for (NodeOutput output : outputs) {
                 if (stopped.get()) break;
                 OverAllState state = output.state();
-                // 计划板：planner 产出后推送一次结构化计划，恢复时以 checkpoint 为准。
-                List<PlanStep> plan = state.value(GraphState.PLAN)
-                        .map(value -> (List<PlanStep>) value)
-                        .orElse(List.of());
-                List<AgentRunView.PlanStepView> planView = AgentRunView.planView(plan);
-                if (!planView.isEmpty() && !planView.equals(sentPlan)) {
-                    stream.send("plan", objectMapper.writeValueAsString(planView));
-                    sentPlan = planView;
-                }
                 // 面向用户的语义事件：差量推送 JSON（前端按 phase/agent/summary 渲染）
                 List<ActivityEvent> events = state.value(GraphState.SSE_EVENTS)
                         .map(value -> (List<ActivityEvent>) value)
@@ -587,12 +476,8 @@ public class ManusGraphOrchestrator {
                 while (sentActivities < latest.size()) {
                     activities.add(latest.get(sentActivities++));
                 }
-                if (NODE_AGGREGATOR.equals(output.node()) || NODE_DIRECT.equals(output.node())) {
+                if (NODE_DIRECT.equals(output.node())) {
                     finalAnswer = state.value(GraphState.FINAL_ANSWER, "");
-                }
-                if (NODE_PLAN_GATE.equals(output.node())) {
-                    planGated = true;
-                    gatedPlan = planView;
                 }
                 String completedNode = completedNode(state);
                 if (completedNode != null) {
@@ -600,13 +485,9 @@ public class ManusGraphOrchestrator {
                 }
             }
             boolean pendingConfirmation = pendingConfirmationOf(effectiveRunId);
-            boolean completed = !stopped.get() && !pendingConfirmation && !planGated
+            boolean completed = !stopped.get() && !pendingConfirmation
                     && finalAnswer != null && !finalAnswer.isBlank();
             String answer = completed ? finalAnswer : completedAnswer(finalAnswer, streamedAnswer, stopped.get());
-            if (planGated) {
-                answer = "已拆解出 " + gatedPlan.size() + " 步执行计划（含依赖顺序），请在工作区确认后开始执行；"
-                        + "直接回复修改意见也可以，我会重新规划。";
-            }
             String status = completed ? "COMPLETED" : "INTERRUPTED";
             if (pendingConfirmation) {
                 publishPendingConfirmation(stream, effectiveRunId);
@@ -614,7 +495,6 @@ public class ManusGraphOrchestrator {
             }
             if (metrics != null) metrics.runFinished(status);
             persist(request, answer, activities, completed, status, null, finalized);
-            if (planGated) publishPlanProposal(stream, effectiveRunId, gatedPlan);
             publishTokenUsage(stream, request.runId());
             sendDone(stream, completed);
         } catch (Exception exception) {
@@ -631,16 +511,6 @@ public class ManusGraphOrchestrator {
             if (toolConfirmationService != null) toolConfirmationService.releaseRun(effectiveRunId);
             if (permissionService != null) permissionService.releaseRun(effectiveRunId);
             if (modelIo != null) modelIo.releaseRun(effectiveRunId);
-        }
-    }
-
-    /** 计划确认挂起：推送 plan-proposed 事件并把 verification_status 标记为 plan_pending，授权后走既有 resume 链路。 */
-    private void publishPlanProposal(RunStream stream, String runId, List<AgentRunView.PlanStepView> plan) {
-        try {
-            stream.send("plan-proposed", objectMapper.writeValueAsString(plan));
-            if (agentRunService != null) agentRunService.markPlanPending(runId);
-        } catch (Exception exception) {
-            log.warn("计划确认事件发布失败；runId={}", runId, exception);
         }
     }
 
@@ -670,27 +540,13 @@ public class ManusGraphOrchestrator {
         Map<String, Object> saved = new java.util.HashMap<>();
         saved.put(GraphState.INPUT, request.message());
         saved.put(GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext());
-        saved.put(GraphState.PLAN, checkpoint.plan());
-        saved.put(GraphState.TASK_RESULTS, checkpoint.taskResults());
+        // 活动与事件差量续推：恢复从 checkpoint 记录的位置继续，不重复推历史事件
         saved.put(GraphState.ACTIVITIES, checkpoint.activities());
         saved.put(GraphState.SSE_EVENTS, checkpoint.events());
-        saved.put(GraphState.REVISION, checkpoint.revision());
-        if (!checkpoint.reviseSteps().isEmpty()) {
-            saved.put(GraphState.REVISE_STEPS, checkpoint.reviseSteps());
-        }
-        // plan_pending 只是计划确认门的挂起标记：授权续跑后不应再带入图状态
-        if (checkpoint.verificationStatus() != null && !checkpoint.verificationStatus().isBlank()
-                && !"plan_pending".equals(checkpoint.verificationStatus())) {
-            saved.put(GraphState.VERIFICATION_STATUS, checkpoint.verificationStatus());
-        }
-        if (checkpoint.verificationFeedback() != null && !checkpoint.verificationFeedback().isBlank()) {
-            saved.put(GraphState.VERIFICATION_FEEDBACK, checkpoint.verificationFeedback());
-        }
         if (checkpoint.finalAnswer() != null && !checkpoint.finalAnswer().isBlank()) {
             saved.put(GraphState.FINAL_ANSWER, checkpoint.finalAnswer());
         }
         saved.put(GraphState.RUN_CONTEXT, context);
-        saved.put(GraphState.RESUME_FROM, request.resumeFrom());
         saved.put(GraphState.RUN_ID, request.runId() == null ? "" : request.runId());
         saved.put(GraphState.PERMISSION_MODE,
                 com.zwx.zwxagent.capability.tools.PermissionMode.parse(request.permissionMode()).name());
@@ -702,54 +558,34 @@ public class ManusGraphOrchestrator {
      * 图库的 NodeOutput 使用共享状态引用，且输出标签与“刚完成的节点”并不总是一一对应。
      * 这里根据状态里已经出现的结果判断最后完成的真实节点，避免 checkpoint 落后一个节点。
      */
-    @SuppressWarnings("unchecked")
+    /** 检查点归属：主循环架构下唯一执行节点是 direct。 */
     static String completedNode(OverAllState state) {
-        String orchestration = state.value(GraphState.ORCHESTRATION, "");
-        if ("single".equals(orchestration)) return NODE_DIRECT;
-        String finalAnswer = state.value(GraphState.FINAL_ANSWER, "");
-        if (finalAnswer != null && !finalAnswer.isBlank()) return NODE_AGGREGATOR;
-        String verification = state.value(GraphState.VERIFICATION_STATUS, "");
-        if (verification != null && !verification.isBlank()) return NODE_VERIFIER;
-        List<String> results = state.value(GraphState.TASK_RESULTS)
-                .map(value -> (List<String>) value).orElse(List.of());
-        if (!results.isEmpty()) return NODE_WORKERS;
-        List<PlanStep> plan = state.value(GraphState.PLAN)
-                .map(value -> (List<PlanStep>) value).orElse(List.of());
-        return plan.isEmpty() ? null : NODE_PLANNER;
+        return NODE_DIRECT;
     }
 
-    @SuppressWarnings("unchecked")
     private void persistCheckpoint(ManusRunRequest request, String node, OverAllState state, StringBuilder streamedAnswer) {
         if (agentRunService == null || request.runId() == null || request.runId().isBlank()) return;
-        // 等待工具确认的 run 不落节点检查点：最后一个检查点保持在 planner，
-        // 这样确认后的 resume 会从 workers 重跑（已成功的工具调用由幂等账本回放，不会重复副作用）。
+        // 等待工具确认的 run 不落节点检查点：最后一个检查点保持在挂起前，
+        // 确认后的 resume 从主循环重跑（已成功的工具调用由幂等账本回放，不会重复副作用）。
         if (pendingConfirmationOf(request.runId())) return;
         try {
-            List<PlanStep> plan = state.value(GraphState.PLAN)
-                    .map(value -> (List<PlanStep>) value).orElse(List.of());
-            List<String> results = state.value(GraphState.TASK_RESULTS)
-                    .map(value -> (List<String>) value).orElse(List.of());
-            List<String> activities = state.value(GraphState.ACTIVITIES)
-                    .map(value -> (List<String>) value).orElse(List.of());
             List<ActivityEvent> events = state.value(GraphState.SSE_EVENTS)
                     .map(value -> (List<ActivityEvent>) value).orElse(List.of());
-            String verification = state.value(GraphState.VERIFICATION_STATUS, "");
-            List<Integer> reviseSteps = state.value(GraphState.REVISE_STEPS)
-                    .map(value -> (List<Integer>) value)
-                    .orElse(List.of());
+            List<String> activities = state.value(GraphState.ACTIVITIES)
+                    .map(value -> (List<String>) value).orElse(List.of());
             GraphCheckpoint checkpoint = new GraphCheckpoint(
                     node,
-                    nextNode(node, verification),
-                    plan,
-                    results,
+                    NODE_DIRECT,
+                    List.of(),
+                    List.of(),
                     activities,
                     events,
-                    state.value(GraphState.REVISION, 0),
-                    verification,
-                    state.value(GraphState.VERIFICATION_FEEDBACK, ""),
+                    0,
+                    "",
+                    "",
                     state.value(GraphState.FINAL_ANSWER, ""),
                     streamedAnswer.toString(),
-                    reviseSteps);
+                    List.of());
             // v2 追加式快照（真相层）：先落权威，失败仅降级为行内列（日志可重建，不阻断主流程）
             if (checkpointV2 && checkpointStore != null) {
                 long lastEventSeq = runEventLog == null ? 0 : runEventLog.lastSeq(

@@ -129,8 +129,9 @@ public record AgentRunView(String id,
         List<PlanStepView> result = new ArrayList<>(plan.size());
         for (int index = 0; index < plan.size(); index++) {
             PlanStep step = plan.get(index);
-            result.add(new PlanStepView(index, step.id(), step.title(), step.role().key(),
-                    step.role().displayName(), step.detail(), step.dependsOn(), step.acceptance()));
+            String role = step.role() == null ? "" : step.role();
+            result.add(new PlanStepView(index, step.id(), step.title(), role,
+                    role, step.detail(), step.dependsOn(), step.acceptance()));
         }
         return List.copyOf(result);
     }

@@ -167,9 +167,6 @@ public class ManusAgentController {
     @Resource
     private com.zwx.zwxagent.agent.execution.store.AgentRunCheckpointStore checkpointStore;
 
-    /** 单循环档（DirectNode）默认开关：关闭后全量回到图编排档（零代码回滚）。 */
-    @org.springframework.beans.factory.annotation.Value("${app.agent.single-loop.enabled:true}")
-    private boolean singleLoopEnabled = true;
     @Resource
     private com.zwx.zwxagent.agent.execution.AgentExecutionTraceService agentExecutionTraceService;
 
@@ -284,14 +281,8 @@ public class ManusAgentController {
                 throw exception;
             }
         }
-        // 编排路由 v2：无前置 LLM 分类。用户显式信号（工作区/带图）与确定性并行证据 → 图编排；
-        // 其余默认单循环（直答是单循环的自然结果，不再前置分类）。
-        var routing = com.zwx.zwxagent.platform.intent.OrchestrationRouting.decide(
-                workspaceRequest, !imageObjectKeys.isEmpty(), message, singleLoopEnabled);
-        boolean singleLoop = routing.singleLoop();
-        prefaceActivity = toJson(java.util.Map.of("phase", "plan", "agent", "编排路由",
-                "summary", routing.reason() + "（知识库/联网开关保持用户选择）"));
-        if (singleLoop && agentMetrics != null) agentMetrics.orchestrationSingleLoop();
+        // 编排形态（2026-11-08 终态）：主循环 + spawnSubagent，无分档无前置分类。
+        // 子代理派生与否由主循环模型在循环内通过工具调用决定。
         AgentKnowledgeRagResult knowledge;
         McpTools mcpTools = null;
         ToolCallback[] availableTools;
@@ -384,7 +375,7 @@ public class ManusAgentController {
                 conversationId, actor.tenantId(), actor.userId(), runChatModel, agentMessage, historyContext, availableTools, knowledgeContext,
                 knowledge.trace() == null ? null : ragTraceJson, prefaceActivity, runId, effectivePermissionMode.name(), null, null, cleanup,
                 result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result),
-                null, singleLoop ? "single" : null);
+                null);
         ManusGraphOrchestrator.ManusRunHandle handle;
         try {
             handle = manusGraphOrchestrator.runStream(runRequest, agentExecutor);
@@ -772,7 +763,6 @@ public class ManusAgentController {
                                 null, null, List.of(), List.of(), List.of(), List.of(), 0, null, null, null, null)
                         : run.checkpoint());
         String resumeFrom = com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.resumeNode(checkpoint);
-        boolean resumeSingleLoop = com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.NODE_DIRECT.equals(checkpoint.lastNode());
         org.slf4j.LoggerFactory.getLogger(ManusAgentController.class).debug(
                 "resume manus run; runId={}, lastNode={}, resumeFrom={}, planSize={}, resultSize={}",
                 runId, checkpoint.lastNode(), resumeFrom, checkpoint.plan().size(), checkpoint.taskResults().size());
@@ -795,8 +785,7 @@ public class ManusAgentController {
                         com.zwx.zwxagent.capability.tools.PermissionMode.parse(run.permissionMode()).name(),
                         resumeCheckpoint, resumeFrom, cleanup,
                         result -> completeManusRun(actor, conversationId, run.userMessageId(), runId,
-                                ragTraceJson, run.assistantMessageId(), result), null,
-                        resumeSingleLoop ? "single" : null);
+                                ragTraceJson, run.assistantMessageId(), result), null);
         com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunHandle handle;
         try {
             handle = manusGraphOrchestrator.runStream(runRequest, agentExecutor);

@@ -117,6 +117,8 @@ public class ToolGuardHook implements AgentHook {
             return isAllowedTool(context.tenantId(), call.name()) ? null : "工具未登记，默认拒绝";
         }
         return switch (call.name()) {
+            case "spawnSubagent" -> text(args, "task") == null || text(args, "task").isBlank()
+                    ? "task 不能为空" : null;
             case "executeTerminalCommand" -> ToolGuardPolicy.terminalViolation(text(args, "command"), terminalAllowlist);
             case "readFile", "writeFile", "generatePDF" -> ToolGuardPolicy.relativePathViolation(text(args, "fileName"));
             case "downloadResource" -> firstNonBlank(
@@ -167,7 +169,8 @@ public class ToolGuardHook implements AgentHook {
 
     private boolean isKnownTool(String toolName) {
         return switch (toolName) {
-            case "executeTerminalCommand", "readFile", "writeFile", "generatePDF",
+            case "spawnSubagent",
+                    "executeTerminalCommand", "readFile", "writeFile", "generatePDF",
                     "downloadResource", "scrapeWebPage", "searchWeb", "webSearch", "executeDatabaseQuery",
                     "queryExternalDatabase", "listProjectTree", "searchProjectCode", "readProjectFile",
                     "getProjectGitStatus", "getProjectDiff", "applyProjectPatch", "listProjectTasks",

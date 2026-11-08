@@ -360,7 +360,7 @@ public class InternalEvalRunService {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", step.id());
             item.put("title", step.title());
-            item.put("role", step.role() == null ? null : step.role().name());
+            item.put("role", step.role());
             item.put("detail", step.detail());
             item.put("dependsOn", step.dependsOn() == null ? List.of() : step.dependsOn());
             item.put("index", index++);

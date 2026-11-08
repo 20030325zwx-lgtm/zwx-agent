@@ -1,0 +1,17 @@
+日期：2026-11-08
+问题现象：新增 spawnSubagent 工具后，模型正确发出调用却被两道机制先后拦截——
+①ToolGuardHook「工具未登记，默认拒绝」（参数合法但 switch 无 case → isAllowedTool
+白名单不含）→ 模型自我纠正改为自己作答；②登记守卫后，GUARDED 权限模式下
+PermissionService 按默认风险级别判 ASK → run 挂起等确认，并行派生被确认打断。
+影响范围：子代理功能完全不可用（首次真实运行即暴露）。
+原因：新增工具时只实现了工具本身，没有同步登记三处配套——ToolGuardHook.violationOf
+的参数校验 switch、ToolGuardHook.isKnownTool、ToolRiskCatalog 风险条目。
+解决方式：三处全部登记；风险定为 READ_ONLY（spawn 自身无副作用，子代理内部工具
+各自走评级与确认，确认经共享 runId 冒泡）。
+验证结果：主循环一次 turn 发 3 个并行 spawn → 三个子代理并行执行（tool-parallel 线程
+实证）→ 结论回传汇总，COMPLETED。
+后续注意事项：
+1. 新增任何工具，检查清单：工具实现 → ToolGuardHook.violationOf case → isKnownTool →
+   ToolRiskCatalog 条目 → （如需确认语义）确认文案。
+2. 「工具未登记，默认拒绝」的失败模式是模型静默降级为自己作答（用户视角功能消失），
+   排查时先看 tool-guard 拦截日志。

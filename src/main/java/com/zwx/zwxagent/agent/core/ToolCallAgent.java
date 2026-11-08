@@ -40,8 +40,8 @@ public class ToolCallAgent extends ReActAgent {
     // 保存工具调用信息的响应结果（要调用那些工具）
     private ChatResponse toolCallChatResponse;
 
-    // 工具调用管理者
-    private final ToolCallingManager toolCallingManager;
+    // 工具调用管理者（默认框架串行实现；主循环/子代理可注入并行管理器）
+    private ToolCallingManager toolCallingManager;
 
     // 禁用 Spring AI 内置的工具调用机制，自己维护选项和消息上下文
     private final ChatOptions chatOptions;
@@ -69,6 +69,11 @@ public class ToolCallAgent extends ReActAgent {
         this.chatOptions = DashScopeChatOptions.builder()
                 .withInternalToolExecutionEnabled(false)
                 .build();
+    }
+
+    /** 注入自定义工具执行管理器（如并行执行器）；未注入时保持框架默认串行。 */
+    public void setToolCallingManager(ToolCallingManager manager) {
+        if (manager != null) this.toolCallingManager = manager;
     }
 
     @Override

@@ -15,6 +15,9 @@ public final class ToolRiskCatalog {
             Map.entry("webSearch", ToolRisk.READ_ONLY),
             Map.entry("scrapeWebPage", ToolRisk.READ_ONLY),
             Map.entry("getCurrentTime", ToolRisk.READ_ONLY),
+            // spawnSubagent 只是把执行单元派生出去，自身无副作用；
+            // 子代理内部的工具调用各自走风险评级与确认（确认经共享 runId 冒泡）
+            Map.entry("spawnSubagent", ToolRisk.READ_ONLY),
             Map.entry("listProjectTree", ToolRisk.READ_ONLY),
             Map.entry("readProjectFile", ToolRisk.READ_ONLY),
             Map.entry("searchProjectCode", ToolRisk.READ_ONLY),

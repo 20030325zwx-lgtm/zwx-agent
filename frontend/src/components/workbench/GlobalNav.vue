@@ -11,22 +11,6 @@
       <span class="wb-nav-label">收起导航</span>
     </button>
 
-    <!-- 生成活动（redesign §3.1）：全局顶部入口，执行中显示数量，异常显示可操作提示 -->
-    <button
-      type="button"
-      class="wb-activity"
-      :class="{ 'has-attention': attentionCount > 0 }"
-      :title="activityTitle"
-      @click="activityOpen = true"
-    >
-      <Activity :size="17" :stroke-width="1.9" />
-      <span class="wb-nav-label">生成活动</span>
-      <em v-if="activeCount > 0" class="wb-activity-count">{{ activeCount }}</em>
-      <em v-else-if="attentionCount > 0" class="wb-activity-dot" aria-label="有待处理事件" />
-    </button>
-
-    <ActivityDrawer v-if="activityOpen" @close="activityOpen = false" />
-
     <div class="wb-nav-items">
       <router-link
         v-for="item in primaryItems"
@@ -41,20 +25,35 @@
         <span class="wb-nav-label">{{ item.label }}</span>
       </router-link>
 
-      <p class="wb-nav-group-label">更多</p>
+      <p class="wb-nav-group-label">AI 创作</p>
       <router-link
         v-for="item in secondaryItems"
         :key="item.to"
         :to="item.to"
-        class="wb-nav-item wb-nav-item-quiet"
+        class="wb-nav-item"
         :class="{ active: isActive(item) }"
         :title="item.label"
         :aria-label="item.label"
       >
-        <component :is="item.icon" :size="18" :stroke-width="1.9" />
+        <component :is="item.icon" :size="19" :stroke-width="1.9" />
         <span class="wb-nav-label">{{ item.label }}</span>
       </router-link>
     </div>
+
+    <!-- 生成活动：全局底部入口，执行中显示数量，异常显示可操作提示 -->
+    <button
+      type="button"
+      class="wb-activity"
+      :class="{ 'has-attention': attentionCount > 0 }"
+      :title="activityTitle"
+      @click="activityOpen = true"
+    >
+      <Activity :size="17" :stroke-width="1.9" />
+      <span class="wb-nav-label">生成活动</span>
+      <em v-if="activeCount > 0" class="wb-activity-count">{{ activeCount }}</em>
+      <em v-else-if="attentionCount > 0" class="wb-activity-dot" aria-label="有待处理事件" />
+    </button>
+    <ActivityDrawer v-if="activityOpen" @close="activityOpen = false" />
 
     <div class="wb-nav-bottom">
       <button
@@ -129,7 +128,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Compass, MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog, LogOut,
+  MessagesSquare, LibraryBig, Settings, Sun, Moon, MonitorCog, LogOut,
   PanelLeftClose, PanelLeftOpen, Palette, FolderOpen, Images, Sparkles,
   Activity, Users, CalendarClock
 } from 'lucide-vue-next'
@@ -173,21 +172,19 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeydown)
 })
 
-// 一级导航（redesign §3.1）：创作 / 我的创作 / 素材库 / 技能 4 项；
-// 任务页退为「全部生成记录」深层入口（活动抽屉可直达），系统模块收进「更多」。
+// 一级导航：智能体主线上移置顶（智能体 / 知识库 / 定时任务）；AI 创作整组退到下方分组；
+// 「服务概览」不再占用菜单位（/workbench 路由保留深链接可达）；
+// 「生成活动」入口移至导航底部（活动抽屉直达）。
 const primaryItems = [
+  { to: '/super-agent', label: '智能体', icon: MessagesSquare, match: ['/super-agent'] },
+  { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] },
+  { to: '/schedules', label: '定时任务', icon: CalendarClock, match: ['/schedules'] }
+]
+const secondaryItems = [
   { to: '/creative', label: '创作', icon: Palette, match: ['/creative', '/creative/projects'] },
   { to: '/creative/library', label: '我的创作', icon: FolderOpen, match: ['/creative/library', '/creative/works'] },
   { to: '/creative/assets', label: '素材库', icon: Images, match: ['/creative/assets'] },
   { to: '/creative/skills', label: '技能', icon: Sparkles, match: ['/creative/skills'] }
-]
-const secondaryItems = [
-  // 「自动化」（工作流定义）入口已于同日撤下：定义零使用；路由保留深链接可达
-  { to: '/schedules', label: '定时任务', icon: CalendarClock, match: ['/schedules'] },
-  { to: '/knowledge-admin', label: '知识库', icon: LibraryBig, match: ['/knowledge-admin'] },
-  { to: '/super-agent', label: '智能体', icon: MessagesSquare, match: ['/super-agent'] },
-  // 评测中台（/eval/）与数据中台（/data/）是独立服务页面，不进入主站菜单，仅支持路由直达
-  { to: '/workbench', label: '服务概览', icon: Compass, match: ['/workbench'] }
 ]
 const items = [...primaryItems, ...secondaryItems]
 
@@ -384,6 +381,9 @@ function cycleTheme() {
 }
 
 .wb-activity:hover { background: var(--wb-fill); color: var(--wb-text); }
+
+/* 底部入口：与上方菜单做轻分隔 */
+.wb-activity { margin-top: 2px; border-top: 1px solid var(--wb-border); border-radius: 0; padding-top: 12px; }
 
 .wb-activity.has-attention { color: var(--wb-warning); }
 

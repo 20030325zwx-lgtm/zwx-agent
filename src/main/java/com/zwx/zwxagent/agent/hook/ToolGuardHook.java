@@ -93,12 +93,13 @@ public class ToolGuardHook implements AgentHook {
         }
         if (permissionService == null || !permissionService.isRegistered(runId)) return;
         com.zwx.zwxagent.capability.tools.PermissionService.Decision decision =
-                permissionService.decide(runId, toolName);
+                permissionService.decide(runId, toolName, call.arguments());
         if (decision == com.zwx.zwxagent.capability.tools.PermissionService.Decision.DENY) {
             log.warn("[tool-guard] 权限模式拒绝工具调用 runId={} tool={}", runId, toolName);
             if (metrics != null) metrics.toolDenied(toolName, "permission-mode");
             throw new HookAbortException("当前权限模式不允许执行工具 " + toolName
-                    + "；请切换到更高权限模式，或改用只读方式完成子任务并说明限制");
+                    + "；极高风险工具在任何模式下默认拒绝，需在权限设置中为其添加 ALLOW 规则解锁，"
+                    + "或改用只读方式完成子任务并说明限制");
         }
         if (decision == com.zwx.zwxagent.capability.tools.PermissionService.Decision.ASK) {
             confirmationService.markPending(runId, toolName, argumentSummary(call.arguments()));

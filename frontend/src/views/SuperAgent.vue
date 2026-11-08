@@ -178,7 +178,7 @@ const permissionModes = [
   { value: 'BUILD', label: '严格', hint: '文件写入与执行操作都需要确认' },
   { value: 'EDIT', label: '编辑', hint: '文件产出免确认，执行类工具需确认' },
   { value: 'GUARDED', label: '守护', hint: '常规操作免确认，高危操作需确认' },
-  { value: 'YOLO', label: '全自动', hint: '全部放行，仅建议在隔离环境使用' }
+  { value: 'YOLO', label: '全自动', hint: '除极高风险工具外全部放行，仅建议在隔离环境使用' }
 ]
 const defaultPermissionMode = ref('EDIT')
 const modelOptions = ref([])

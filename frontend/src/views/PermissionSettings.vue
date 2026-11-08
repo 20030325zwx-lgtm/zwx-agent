@@ -26,7 +26,8 @@
         <div class="rule-section">
           <div class="section-title">
             <h2>工具规则</h2>
-            <small>规则优先于模式：DENY 优先于 ALLOW；支持 <code>mcp:*</code> 前缀通配。</small>
+            <small>规则优先于模式：DENY 优先于 ALLOW；支持 <code>mcp:*</code> 前缀通配。
+              极高风险工具（如外部数据库）任何模式下默认拒绝，添加 ALLOW 规则即视为显式解锁。</small>
           </div>
           <div class="rule-add">
             <input v-model="newPattern" type="text" maxlength="128" placeholder="工具名或模式，如 executeTerminalCommand、mcp:*" @keydown.enter="addRule" />
@@ -62,8 +63,8 @@ const modeOptions = [
   { value: 'PLAN', label: '只读规划', hint: '仅允许只读工具，写操作直接拒绝，适合调研与分析。' },
   { value: 'BUILD', label: '严格', hint: '文件写入与执行操作都需要你确认。' },
   { value: 'EDIT', label: '编辑（默认）', hint: '文件产出免确认，执行类工具仍需确认，与原有行为一致。' },
-  { value: 'GUARDED', label: '守护', hint: '常规操作免确认，仅终端、Git 提交、外部库等高危操作逐次确认。' },
-  { value: 'YOLO', label: '全自动', hint: '全部放行，适合隔离环境下的无人值守与评测。' }
+  { value: 'GUARDED', label: '守护', hint: '常规操作免确认，仅终端、Git 提交等高危操作逐次确认。' },
+  { value: 'YOLO', label: '全自动', hint: '除极高风险工具外全部放行，仅建议在隔离环境使用。' }
 ]
 
 const loading = ref(true)

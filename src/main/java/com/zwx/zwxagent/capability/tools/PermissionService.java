@@ -15,7 +15,8 @@ import java.util.stream.Collectors;
 /**
  * 权限判定服务：把「用户规则 + 权限模式 + 工具风险」合成为三值判定 ALLOW / ASK / DENY。
  *
- * <p>判定顺序：DENY 规则 > ALLOW 规则 > 模式矩阵。规则按 run 发起时快照加载，
+ * <p>判定顺序：DENY 规则 > ALLOW 规则 > 极高风险默认拒绝（FORBIDDEN，含 YOLO）> 模式矩阵。
+ * 风险等级结合工具名与调用参数（参数感知动态分级）；规则按 run 发起时快照加载，
  * 同一 run 内判定稳定；未注册的 run（单智能体等旧路径）不受模式约束，保持原有行为。</p>
  */
 @Slf4j
@@ -54,6 +55,7 @@ public class PermissionService {
             JdbcTemplate jdbcTemplate,
             @Value("${app.tools.confirmation.required-tools:applyProjectPatch,runProjectTask,commitProjectChanges,executeTerminalCommand,executeDatabaseQuery,queryExternalDatabase,downloadResource,mcp:*}")
             String alwaysAskTools) {
+        // required-tools 仅抬升静态评级下限；参数感知动态规则命中时优先（见 riskOf(toolName, argumentsJson)）。
         this.jdbcTemplate = jdbcTemplate;
         this.alwaysAskTools = alwaysAskTools == null || alwaysAskTools.isBlank()
                 ? Set.of()
@@ -145,13 +147,26 @@ public class PermissionService {
 
     /** 未注册 run 返回 ALLOW，调用方（ToolGuardHook）只在 run 已注册时启用模式判定。 */
     public Decision decide(String runId, String toolName) {
+        return decide(runId, toolName, null);
+    }
+
+    /** 带参数的判定：参数感知动态风险（如终端纯环境查询命令降级）在注册 run 上生效。 */
+    public Decision decide(String runId, String toolName, String argumentsJson) {
         RunScope scope = runs.get(runId);
         if (scope == null) return Decision.ALLOW;
-        return decide(scope.mode(), scope.rules(), toolName);
+        return decide(scope.mode(), scope.rules(), toolName, argumentsJson);
     }
 
     /** 纯判定：便于单测覆盖完整矩阵。 */
     public Decision decide(PermissionMode mode, List<Rule> rules, String toolName) {
+        return decide(mode, rules, toolName, null);
+    }
+
+    /**
+     * 完整判定：用户 DENY 规则 > 用户 ALLOW 规则 > 极高风险默认拒绝 > 模式矩阵。
+     * FORBIDDEN（L4）在所有模式下（含 YOLO）一律 DENY，唯一解锁途径是显式 ALLOW 规则。
+     */
+    public Decision decide(PermissionMode mode, List<Rule> rules, String toolName, String argumentsJson) {
         if (rules != null) {
             for (Rule rule : rules) {
                 if (!rule.allow() && rule.matches(toolName)) return Decision.DENY;
@@ -160,7 +175,8 @@ public class PermissionService {
                 if (rule.allow() && rule.matches(toolName)) return Decision.ALLOW;
             }
         }
-        ToolRisk risk = riskOf(toolName);
+        ToolRisk risk = riskOf(toolName, argumentsJson);
+        if (risk == ToolRisk.FORBIDDEN) return Decision.DENY;
         return switch (mode == null ? PermissionMode.DEFAULT : mode) {
             case PLAN -> risk == ToolRisk.READ_ONLY ? Decision.ALLOW : Decision.DENY;
             case BUILD -> risk == ToolRisk.READ_ONLY ? Decision.ALLOW : Decision.ASK;
@@ -178,6 +194,15 @@ public class PermissionService {
                 || (toolName != null && toolName.startsWith("mcp:") && alwaysAskTools.contains("mcp:*"));
         if (forced && risk.ordinal() < ToolRisk.EXECUTE.ordinal()) return ToolRisk.EXECUTE;
         return risk;
+    }
+
+    /**
+     * 带参数的风险等级：参数感知动态规则（{@link ToolRiskCatalog#dynamicRisk}）命中时优先，
+     * 不再叠加 required-tools 抬升（动态规则只在确定无副作用时给更低等级，命中即代表拦截面
+     * 已被参数层复核）；未命中回落 {@link #riskOf(String)}（静态登记 + 抬升）。
+     */
+    public ToolRisk riskOf(String toolName, String argumentsJson) {
+        return ToolRiskCatalog.dynamicRisk(toolName, argumentsJson).orElseGet(() -> riskOf(toolName));
     }
 
     private List<Rule> loadRules(String tenantId, String userId) {

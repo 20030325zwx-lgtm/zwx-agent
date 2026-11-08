@@ -12,6 +12,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -156,8 +157,9 @@ class ToolGuardHookTest {
         permissions.registerRun("run-42", com.zwx.zwxagent.capability.tools.PermissionMode.EDIT,
                 "default", "user-1");
         ToolGuardHook hook = new ToolGuardHook(true, "", "", new UrlAccessPolicy(), service, permissions, null);
+        // cat 能读工作区外文件，维持 DESTRUCTIVE 走确认；ls 已被参数感知规则降为 READ_ONLY 不再弹确认
         List<PlannedToolCall> calls = List.of(
-                new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"ls\"}"));
+                new PlannedToolCall("id-1", "function", "executeTerminalCommand", "{\"command\": \"cat notes.txt\"}"));
         ToolConfirmationRequiredException exception = assertThrows(ToolConfirmationRequiredException.class,
                 () -> hook.beforeToolCalls(runContext, calls));
         assertTrue(exception.getMessage().contains("确认"));
@@ -168,7 +170,10 @@ class ToolGuardHookTest {
 
     @Test
     void approvedToolPassesAndDeniedToolAborts() throws Exception {
-        ToolConfirmationService service = confirmationService();
+        // A0 闭锁：决定必须先落库成功（update>0）才同步内存；不 stub 时 denied 永远不生效
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
+        ToolConfirmationService service = new ToolConfirmationService(true, jdbc);
         // mock URL 策略使 downloadResource 通过 SSRF 预检，聚焦确认门禁本身
         UrlAccessPolicy urlPolicy = mock(UrlAccessPolicy.class);
         when(urlPolicy.validateHttpUrl(anyString())).thenAnswer(invocation -> URI.create(invocation.getArgument(0)));

@@ -28,6 +28,7 @@ public class ToolConfirmationService {
     public static final String DECISION_DENIED = "DENIED";
 
     private final boolean enabled;
+    private final int pendingTimeoutMinutes;
     private final JdbcTemplate jdbcTemplate;
     private final com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
 
@@ -35,15 +36,27 @@ public class ToolConfirmationService {
 
     @org.springframework.beans.factory.annotation.Autowired
     public ToolConfirmationService(@Value("${app.tools.confirmation.enabled:true}") boolean enabled,
-                                   JdbcTemplate jdbcTemplate) {
-        this(enabled, jdbcTemplate, null);
+                                   JdbcTemplate jdbcTemplate,
+                                   @Value("${app.tools.confirmation.pending-timeout-minutes:60}") int pendingTimeoutMinutes) {
+        this(enabled, jdbcTemplate, null, pendingTimeoutMinutes);
+    }
+
+    public ToolConfirmationService(boolean enabled, JdbcTemplate jdbcTemplate) {
+        this(enabled, jdbcTemplate, null, 60);
     }
 
     public ToolConfirmationService(boolean enabled, JdbcTemplate jdbcTemplate,
                                    com.zwx.zwxagent.agent.observability.AgentMetrics metrics) {
+        this(enabled, jdbcTemplate, metrics, 60);
+    }
+
+    public ToolConfirmationService(boolean enabled, JdbcTemplate jdbcTemplate,
+                                   com.zwx.zwxagent.agent.observability.AgentMetrics metrics,
+                                   int pendingTimeoutMinutes) {
         this.enabled = enabled;
         this.jdbcTemplate = jdbcTemplate;
         this.metrics = metrics;
+        this.pendingTimeoutMinutes = pendingTimeoutMinutes;
     }
 
     public boolean isEnabled() {
@@ -151,6 +164,56 @@ public class ToolConfirmationService {
         log.info("工具确认决定已记录；runId={}, tool={}, decision={}, updated={}", runId, toolName, decision, updated);
         if (metrics != null && updated > 0) metrics.toolConfirmationDecided(decision);
         return updated;
+    }
+
+    /**
+     * 审批超时：把挂起超过 {@code app.tools.confirmation.pending-timeout-minutes} 的待确认请求
+     * 落库为 DENIED（超时按拒绝处理，宁可让模型改道/说明限制，也不让 run 无限期悬挂），
+     * 并同步内存状态。落库失败时整体放弃本轮清理（A0 闭锁同语义：决定必须先落库才生效）。
+     *
+     * @return 有确认被超时拒绝的 runId 集合（供调度层判断是否自动恢复 run）
+     */
+    public Set<String> expireStalePending() {
+        if (!enabled || pendingTimeoutMinutes <= 0) return Set.of();
+        List<Map<String, Object>> rows;
+        try {
+            rows = jdbcTemplate.queryForList("""
+                    UPDATE agent_tool_confirmation SET decision = ?, decided_at = CURRENT_TIMESTAMP
+                    WHERE decision = 'PENDING' AND created_at < NOW() - (?::int * INTERVAL '1' minute)
+                    RETURNING run_id, tool_name
+                    """, DECISION_DENIED, pendingTimeoutMinutes);
+        } catch (Exception exception) {
+            log.warn("超时确认清理失败，本轮跳过；timeoutMinutes={}", pendingTimeoutMinutes, exception);
+            return Set.of();
+        }
+        if (rows.isEmpty()) return Set.of();
+        Set<String> affectedRuns = new java.util.LinkedHashSet<>();
+        for (Map<String, Object> row : rows) {
+            String runId = String.valueOf(row.get("run_id"));
+            String toolName = String.valueOf(row.get("tool_name"));
+            affectedRuns.add(runId);
+            RunScope scope = scopes.get(runId);
+            if (scope == null) continue;
+            scope.pending.removeIf(pending -> pending.toolName().equals(toolName));
+            scope.denied.add(toolName);
+        }
+        log.info("超时工具确认已自动拒绝；count={}, runs={}, timeoutMinutes={}",
+                rows.size(), affectedRuns, pendingTimeoutMinutes);
+        if (metrics != null) metrics.toolConfirmationDecided(DECISION_DENIED);
+        return affectedRuns;
+    }
+
+    /** 该 run 是否仍有待确认请求（以库为准；查询失败按“仍有”处理，宁可不自动恢复）。 */
+    public boolean hasPending(String runId) {
+        try {
+            List<Integer> counts = jdbcTemplate.queryForList(
+                    "SELECT COUNT(*) FROM agent_tool_confirmation WHERE run_id = ? AND decision = 'PENDING'",
+                    Integer.class, runId);
+            return !counts.isEmpty() && counts.get(0) != null && counts.get(0) > 0;
+        } catch (Exception exception) {
+            log.warn("查询待确认状态失败，按仍有待确认处理；runId={}", runId, exception);
+            return true;
+        }
     }
 
     public record PendingConfirmation(String toolName, String argumentsSummary, Instant requestedAt) {

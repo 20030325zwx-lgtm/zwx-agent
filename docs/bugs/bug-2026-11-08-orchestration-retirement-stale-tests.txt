@@ -1,0 +1,18 @@
+日期：2026-11-08
+问题现象：全量回归发现 3 个滞后测试在 HEAD（705b645）上即失败（git worktree 实证，与本批改动无关）：
+1. ManusGraphOrchestratorTest.graphCompilesAndMermaidContainsAllNodes——仍断言 planner/workers/
+   verifier/aggregator 四阶段节点，而编排层已在 fd77267 退役为 START→direct→END。
+2. AgentRunViewTest.mapsPlanEventsAndVerificationForWorkspace——仍断言 roleLabel=「调研员」，
+   而 WorkerRole 的中文标签映射已随退役删除，roleLabel 现为原始角色透传。
+3. ToolGuardHookTest.approvedToolPassesAndDeniedToolAborts——见
+   bug-2026-11-08-confirmation-a0-test-stale.txt（A0 闭锁落地后未同步 stub）。
+影响范围：仅测试基线；生产主链路行为正确。fd77267 批次的全量回归报告记「失败 3 个均为既有」，
+实际漏计了这些，导致滞后测试被当成正常基线遗留至今。
+原因：大规模退役改动（删 2200 行、删 9 个测试文件）后，存活下来的相关测试没有被完整清点更新；
+回归报告只记录失败数量未逐个核对根因。
+解决方式：①graphCompilesAndMermaidContainsAllNodes 改为断言 direct 唯一拓扑且旧节点不得回流
+（graphCompilesWithDirectOnlyTopology）；②roleLabel 断言改为透传语义；③A0 测试补 stub。
+验证结果：三类测试全绿（随本批权限硬化一起验证）。
+后续注意事项：
+1. 退役/删除类改动的收尾清单必须包含「全仓 grep 旧符号的测试引用」。
+2. 回归报告的既有失败清单逐个点开确认根因并归类，不能只记数量。

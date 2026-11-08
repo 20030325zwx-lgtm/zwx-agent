@@ -6,8 +6,9 @@ package com.zwx.zwxagent.capability.tools;
  *   <li>PLAN：只读分析，写类工具直接拒绝；</li>
  *   <li>BUILD：常规写入（文件产出）需要确认，偏严格；</li>
  *   <li>EDIT：文件产出免确认，执行/修改类工具仍需确认（与引入模式前的行为一致，默认值）；</li>
- *   <li>GUARDED：常规操作免确认，仅高危操作（终端、Git 提交、外部库）逐次确认；</li>
- *   <li>YOLO：全部放行，仅用于隔离环境下的无人值守与评测。</li>
+ *   <li>GUARDED：常规操作免确认，仅高危操作（终端、Git 提交）逐次确认；</li>
+ *   <li>YOLO：全部放行，仅用于隔离环境下的无人值守与评测；极高风险（FORBIDDEN）工具例外，
+ *       任何模式下默认拒绝，需用户显式 ALLOW 规则解锁。</li>
  * </ul>
  */
 public enum PermissionMode {

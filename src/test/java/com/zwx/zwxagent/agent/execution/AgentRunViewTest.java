@@ -37,7 +37,8 @@ class AgentRunViewTest {
         Assertions.assertEquals(2, view.taskResultCount());
         Assertions.assertEquals(2, view.plan().size());
         Assertions.assertEquals("researcher", view.plan().get(0).role());
-        Assertions.assertEquals("调研员", view.plan().get(0).roleLabel());
+        // WorkerRole 退役后 roleLabel 为原始角色透传，不再映射中文标签
+        Assertions.assertEquals("researcher", view.plan().get(0).roleLabel());
         Assertions.assertEquals("开始执行（1/2）：检索手册", view.events().getFirst().summary());
         Assertions.assertEquals("pass", view.verification().status());
         Assertions.assertTrue(view.canResume());

@@ -16,14 +16,16 @@ class ManusGraphOrchestratorTest {
         return orchestrator;
     }
 
+    /** 编排层退役后的终态图：START → direct → END，旧四阶段节点不得回流。 */
     @Test
-    void graphCompilesAndMermaidContainsAllNodes() throws Exception {
+    void graphCompilesWithDirectOnlyTopology() throws Exception {
         ManusGraphOrchestrator orchestrator = newOrchestrator();
         String mermaid = orchestrator.mermaidDiagram();
-        Assertions.assertTrue(mermaid.contains(ManusGraphOrchestrator.NODE_PLANNER), mermaid);
-        Assertions.assertTrue(mermaid.contains(ManusGraphOrchestrator.NODE_WORKERS), mermaid);
-        Assertions.assertTrue(mermaid.contains(ManusGraphOrchestrator.NODE_VERIFIER), mermaid);
-        Assertions.assertTrue(mermaid.contains(ManusGraphOrchestrator.NODE_AGGREGATOR), mermaid);
+        Assertions.assertTrue(mermaid.contains(ManusGraphOrchestrator.NODE_DIRECT), mermaid);
+        Assertions.assertFalse(mermaid.contains(ManusGraphOrchestrator.NODE_PLANNER), mermaid);
+        Assertions.assertFalse(mermaid.contains(ManusGraphOrchestrator.NODE_WORKERS), mermaid);
+        Assertions.assertFalse(mermaid.contains(ManusGraphOrchestrator.NODE_VERIFIER), mermaid);
+        Assertions.assertFalse(mermaid.contains(ManusGraphOrchestrator.NODE_AGGREGATOR), mermaid);
     }
 
     @Test

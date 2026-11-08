@@ -51,7 +51,8 @@ class PermissionServiceTest {
         assertEquals(PermissionService.Decision.ALLOW, decide(PermissionMode.GUARDED, "mcp:filesystem"));
         assertEquals(PermissionService.Decision.ASK, decide(PermissionMode.GUARDED, "executeTerminalCommand"));
         assertEquals(PermissionService.Decision.ASK, decide(PermissionMode.GUARDED, "commitProjectChanges"));
-        assertEquals(PermissionService.Decision.ASK, decide(PermissionMode.GUARDED, "queryExternalDatabase"));
+        // queryExternalDatabase 已升为 FORBIDDEN（L4）：GUARDED 下默认拒绝而非确认
+        assertEquals(PermissionService.Decision.DENY, decide(PermissionMode.GUARDED, "queryExternalDatabase"));
     }
 
     @Test
@@ -59,6 +60,60 @@ class PermissionServiceTest {
         assertEquals(PermissionService.Decision.ALLOW, decide(PermissionMode.YOLO, "executeTerminalCommand"));
         assertEquals(PermissionService.Decision.ALLOW, decide(PermissionMode.YOLO, "mcp:filesystem"));
         assertEquals(PermissionService.Decision.ALLOW, decide(PermissionMode.YOLO, "unknownTool"));
+    }
+
+    @Test
+    void forbiddenToolsDenyInEveryModeIncludingYolo() {
+        for (PermissionMode mode : PermissionMode.values()) {
+            assertEquals(PermissionService.Decision.DENY,
+                    decide(mode, "queryExternalDatabase"), "FORBIDDEN 在 " + mode + " 下应默认拒绝");
+        }
+        assertEquals(ToolRisk.FORBIDDEN, service.riskOf("queryExternalDatabase"));
+    }
+
+    @Test
+    void allowRuleIsTheOnlyUnlockForForbiddenTools() {
+        List<PermissionService.Rule> rules = List.of(
+                new PermissionService.Rule("queryExternalDatabase", true));
+        assertEquals(PermissionService.Decision.ALLOW,
+                service.decide(PermissionMode.YOLO, rules, "queryExternalDatabase"));
+        assertEquals(PermissionService.Decision.ALLOW,
+                service.decide(PermissionMode.EDIT, rules, "queryExternalDatabase"));
+        // DENY 规则仍优先于 ALLOW 规则
+        List<PermissionService.Rule> contradicting = List.of(
+                new PermissionService.Rule("queryExternalDatabase", true),
+                new PermissionService.Rule("queryExternalDatabase", false));
+        assertEquals(PermissionService.Decision.DENY,
+                service.decide(PermissionMode.YOLO, contradicting, "queryExternalDatabase"));
+    }
+
+    @Test
+    void dynamicRiskDowngradesInertTerminalCommands() {
+        // ls 命中参数感知规则 → READ_ONLY：EDIT 下免确认（不再受 required-tools 抬升）
+        assertEquals(PermissionService.Decision.ALLOW, service.decide(
+                PermissionMode.EDIT, List.of(), "executeTerminalCommand", "{\"command\": \"ls -la\"}"));
+        assertEquals(PermissionService.Decision.ALLOW, service.decide(
+                PermissionMode.GUARDED, List.of(), "executeTerminalCommand", "{\"command\": \"pwd\"}"));
+        // cat/grep 能读工作区外宿主文件：不降级，EDIT 下仍需确认
+        assertEquals(PermissionService.Decision.ASK, service.decide(
+                PermissionMode.EDIT, List.of(), "executeTerminalCommand", "{\"command\": \"cat notes.txt\"}"));
+        assertEquals(PermissionService.Decision.ASK, service.decide(
+                PermissionMode.EDIT, List.of(), "executeTerminalCommand", "{\"command\": \"grep -rn TODO .\"}"));
+        // 元字符命令会被守卫拒绝，动态规则不命中，维持静态评级
+        assertEquals(PermissionService.Decision.ASK, service.decide(
+                PermissionMode.EDIT, List.of(), "executeTerminalCommand", "{\"command\": \"ls; echo x\"}"));
+    }
+
+    @Test
+    void riskOfWithArgumentsPrefersDynamicRulesOverStaticFloor() {
+        assertEquals(ToolRisk.READ_ONLY,
+                service.riskOf("executeTerminalCommand", "{\"command\": \"date\"}"));
+        assertEquals(ToolRisk.DESTRUCTIVE,
+                service.riskOf("executeTerminalCommand", "{\"command\": \"python3 x.py\"}"));
+        // 动态规则未命中（含解析失败）回落静态登记：终端为 DESTRUCTIVE（required-tools 只抬升不降低）
+        assertEquals(ToolRisk.DESTRUCTIVE,
+                service.riskOf("executeTerminalCommand", "not-json"));
+        assertEquals(ToolRisk.DESTRUCTIVE, service.riskOf("executeTerminalCommand", null));
     }
 
     @Test

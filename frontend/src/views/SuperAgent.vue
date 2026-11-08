@@ -990,7 +990,10 @@ const attachManusStream = (stream, answerIndex) => {
   })
   stream.addEventListener('usage', event => {
     try {
-      if (activeRun.value) activeRun.value.tokenUsage = parseTokenUsage(event.data)
+      const usage = parseTokenUsage(event.data)
+      if (activeRun.value) activeRun.value.tokenUsage = usage
+      const answer = messages.value[answerIndex]
+      if (answer) answer.tokenUsage = usage
     } catch (error) {
       console.error('Unable to parse run token usage:', error)
     }

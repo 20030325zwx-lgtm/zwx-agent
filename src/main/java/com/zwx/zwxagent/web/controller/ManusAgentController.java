@@ -286,7 +286,7 @@ public class ManusAgentController {
         AgentKnowledgeRagResult knowledge;
         McpTools mcpTools = null;
         ToolCallback[] availableTools;
-        String historyContext;
+        List<org.springframework.ai.chat.messages.Message> historyTurns = List.of();
         ChatModel runChatModel;
         String imageContext = "";
         String retrievalQuery = message;
@@ -320,15 +320,18 @@ public class ManusAgentController {
                     ? agentKnowledgeRagService.retrieveWithContext(actor.tenantId(), SUPER_AGENT_KEY, retrievalQuery)
                     : new AgentKnowledgeRagResult("", List.of());
             mcpTools = mcpServerConfigurationService.toolsFor(actor.tenantId());
-            historyContext = agentConversationService
+            // 历史以结构化消息列表传入主循环（而非拼文本）：跨轮 prompt 前缀 append-only，
+            // 是供应商 prompt cache 命中的前提（拼文本每轮整体变化，命中率恒为 0）
+            historyTurns = agentConversationService
                     .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
                     .filter(historyMessage -> historyMessage.id() != userMessageId)
-                    .map(historyMessage -> {
-                        String role = "USER".equals(historyMessage.role()) ? "用户" : "助手";
-                        String status = "INTERRUPTED".equals(historyMessage.status()) ? "（上一轮未完成，仅保留部分内容）" : "";
-                        return role + status + ": " + historyMessage.content();
-                    })
-                    .collect(java.util.stream.Collectors.joining("\n"));
+                    .filter(historyMessage -> historyMessage.content() != null
+                            && !historyMessage.content().isBlank())
+                    .map(historyMessage -> (org.springframework.ai.chat.messages.Message) (
+                            "USER".equals(historyMessage.role())
+                                    ? new org.springframework.ai.chat.messages.UserMessage(historyMessage.content())
+                                    : new org.springframework.ai.chat.messages.AssistantMessage(historyMessage.content())))
+                    .toList();
             runChatModel = dynamicChatModelFactory.model(modelSelection.config());
         } catch (RuntimeException exception) {
             agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
@@ -343,7 +346,7 @@ public class ManusAgentController {
         String runId;
         try {
             runId = agentRunService.start(conversationId, actor.tenantId(), actor.userId(), SUPER_AGENT_KEY,
-                    userMessageId, agentMessage, historyContext, knowledgeContext, ragTraceJson,
+                    userMessageId, agentMessage, "", knowledgeContext, ragTraceJson,
                     effectivePermissionMode.name());
         } catch (RuntimeException exception) {
             agentConversationService.markUserTurnInterrupted(actor.tenantId(), actor.userId(), userMessageId);
@@ -372,7 +375,7 @@ public class ManusAgentController {
             conversationLease.close();
         };
         ManusGraphOrchestrator.ManusRunRequest runRequest = new ManusGraphOrchestrator.ManusRunRequest(
-                conversationId, actor.tenantId(), actor.userId(), runChatModel, agentMessage, historyContext, availableTools, knowledgeContext,
+                conversationId, actor.tenantId(), actor.userId(), runChatModel, agentMessage, historyTurns, availableTools, knowledgeContext,
                 knowledge.trace() == null ? null : ragTraceJson, prefaceActivity, runId, effectivePermissionMode.name(), null, null, cleanup,
                 result -> completeManusRun(actor, conversationId, userMessageId, runId, ragTraceJson, null, result),
                 null);
@@ -584,12 +587,15 @@ public class ManusAgentController {
                 conversationId, SUPER_DEFAULT_TITLE, body.message());
         long userMessageId = agentConversationService.startUserTurn(actor.tenantId(), actor.userId(),
                 SUPER_AGENT_KEY, conversationId, body.message(), List.of(), body.clientRequestId());
-        String historyContext = agentConversationService
+        List<org.springframework.ai.chat.messages.Message> historyTurns = agentConversationService
                 .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
                 .filter(historyMessage -> historyMessage.id() != userMessageId)
-                .map(historyMessage -> ("USER".equals(historyMessage.role()) ? "用户" : "助手")
-                        + ": " + historyMessage.content())
-                .collect(java.util.stream.Collectors.joining("\n"));
+                .filter(historyMessage -> historyMessage.content() != null && !historyMessage.content().isBlank())
+                .map(historyMessage -> (org.springframework.ai.chat.messages.Message) (
+                        "USER".equals(historyMessage.role())
+                                ? new org.springframework.ai.chat.messages.UserMessage(historyMessage.content())
+                                : new org.springframework.ai.chat.messages.AssistantMessage(historyMessage.content())))
+                .toList();
         String knowledgeContext = "";
         if (Boolean.TRUE.equals(body.knowledgeSearch())) {
             knowledgeContext = agentKnowledgeRagService
@@ -599,7 +605,7 @@ public class ManusAgentController {
                 ? com.zwx.zwxagent.capability.tools.PermissionMode.DEFAULT.name() : body.permissionMode();
         var command = new com.zwx.zwxagent.agent.execution.AgentRunStateService.StartCommand(
                 conversationId, actor.tenantId(), actor.userId(), userMessageId, body.message(),
-                historyContext, knowledgeContext, permissionMode, "INTERACTIVE", body.clientRequestId());
+                "", knowledgeContext, permissionMode, "INTERACTIVE", body.clientRequestId());
         var startResult = agentRunStateService.start(command, null);
         long assistantMessageId = agentConversationService.appendAssistantReply(actor.tenantId(), actor.userId(),
                 SUPER_AGENT_KEY, conversationId, userMessageId, "", "IN_PROGRESS", startResult.runId(), null, null);
@@ -771,6 +777,16 @@ public class ManusAgentController {
         if (resumeCheckpoint == null) resumeCheckpoint = checkpoint;
         agentRunService.restart(runId);
         String ragTraceJson = run.ragTraceJson() == null ? "{}" : run.ragTraceJson();
+        // 恢复同样以结构化历史预填（append-only 前缀），保持与首发一致
+        List<org.springframework.ai.chat.messages.Message> resumeHistoryTurns = agentConversationService
+                .getRecentMessages(actor.tenantId(), actor.userId(), SUPER_AGENT_KEY, conversationId, 21).stream()
+                .filter(historyMessage -> historyMessage.id() != run.userMessageId())
+                .filter(historyMessage -> historyMessage.content() != null && !historyMessage.content().isBlank())
+                .map(historyMessage -> (org.springframework.ai.chat.messages.Message) (
+                        "USER".equals(historyMessage.role())
+                                ? new org.springframework.ai.chat.messages.UserMessage(historyMessage.content())
+                                : new org.springframework.ai.chat.messages.AssistantMessage(historyMessage.content())))
+                .toList();
         Runnable cleanup = () -> {
             projectExecutionLockService.release(runId);
             activeMcpTools.close();
@@ -779,7 +795,7 @@ public class ManusAgentController {
         com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest runRequest =
                 new com.zwx.zwxagent.agent.graph.ManusGraphOrchestrator.ManusRunRequest(
                         conversationId, actor.tenantId(), actor.userId(), runChatModel, run.input(),
-                        run.historyContext() == null ? "" : run.historyContext(),
+                        resumeHistoryTurns,
                         availableTools, run.knowledgeContext() == null ? "" : run.knowledgeContext(),
                         run.ragTraceJson(), null, runId,
                         com.zwx.zwxagent.capability.tools.PermissionMode.parse(run.permissionMode()).name(),

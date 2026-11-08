@@ -220,7 +220,8 @@ public class ManusGraphOrchestrator {
                                   String userId,
                                   ChatModel chatModel,
                                   String message,
-                                  String historyContext,
+                                  /** 结构化历史消息（append-only 前缀，prompt cache 命中的前提）。 */
+                                  java.util.List<org.springframework.ai.chat.messages.Message> historyTurns,
                                   ToolCallback[] tools,
                                   String knowledgeContext,
                                   String ragTraceJson,
@@ -442,7 +443,7 @@ public class ManusGraphOrchestrator {
             }
             Map<String, Object> inputs = Map.of(
                     GraphState.INPUT, request.message(),
-                    GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext(),
+                    GraphState.HISTORY, request.historyTurns() == null ? List.of() : request.historyTurns(),
                     GraphState.RUN_CONTEXT, context,
                     GraphState.RUN_ID, request.runId() == null ? "" : request.runId(),
                     GraphState.PERMISSION_MODE,
@@ -539,7 +540,7 @@ public class ManusGraphOrchestrator {
         GraphCheckpoint checkpoint = request.resumeCheckpoint();
         Map<String, Object> saved = new java.util.HashMap<>();
         saved.put(GraphState.INPUT, request.message());
-        saved.put(GraphState.HISTORY, request.historyContext() == null ? "" : request.historyContext());
+        saved.put(GraphState.HISTORY, request.historyTurns() == null ? List.of() : request.historyTurns());
         // 活动与事件差量续推：恢复从 checkpoint 记录的位置继续，不重复推历史事件
         saved.put(GraphState.ACTIVITIES, checkpoint.activities());
         saved.put(GraphState.SSE_EVENTS, checkpoint.events());

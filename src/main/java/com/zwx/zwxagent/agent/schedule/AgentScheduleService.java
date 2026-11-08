@@ -207,13 +207,8 @@ public class AgentScheduleService {
             String clientRequestId = "sched-" + fireId;
             long userMessageId = conversations.startUserTurn(tenantId, userId, SUPER_AGENT_KEY,
                     conversationId, instruction, clientRequestId);
-            String historyContext = conversations
-                    .getRecentMessages(tenantId, userId, SUPER_AGENT_KEY, conversationId, 21).stream()
-                    .filter(message -> message.id() != userMessageId)
-                    .map(message -> ("USER".equals(message.role()) ? "用户" : "助手") + ": " + message.content())
-                    .collect(java.util.stream.Collectors.joining("\n"));
             var command = new AgentRunStateService.StartCommand(conversationId, tenantId, userId,
-                    userMessageId, instruction, historyContext, "", task.permissionMode(),
+                    userMessageId, instruction, "", "", task.permissionMode(),
                     "SCHEDULED", clientRequestId);
             var startResult = runState.start(command, null);
             conversations.appendAssistantReply(tenantId, userId, SUPER_AGENT_KEY, conversationId,

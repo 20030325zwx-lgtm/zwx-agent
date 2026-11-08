@@ -20,6 +20,7 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -92,6 +93,7 @@ public class TokenUsageAdvisor implements CallAdvisor, StreamAdvisor {
             ChatResponse chatResponse = response == null ? null : response.chatResponse();
             if (chatResponse == null || chatResponse.getResults().isEmpty()) return;
             Usage usage = chatResponse.getMetadata().getUsage();
+            int cachedTokens = cachedTokensOf(usage);
             List<Message> messages = request.prompt().getInstructions();
             int systemChars = 0;
             int messageChars = 0;
@@ -130,9 +132,38 @@ public class TokenUsageAdvisor implements CallAdvisor, StreamAdvisor {
             tokenUsage.record(runIdSupplier.get(), phase, new TokenUsageService.CallSample(
                     usage == null ? 0 : nullToZero(usage.getPromptTokens()),
                     usage == null ? 0 : nullToZero(usage.getCompletionTokens()),
+                    cachedTokens,
                     systemChars, toolSchemaChars, toolCount, messageChars, messageCount, toolResultChars));
         } catch (Exception exception) {
             // 计量失败不影响生成
+        }
+    }
+
+    /** 从供应商 native usage 提取缓存命中 token（OpenAI 兼容：prompt_tokens_details.cached_tokens）。 */
+    @SuppressWarnings("unchecked")
+    private static int cachedTokensOf(Usage usage) {
+        if (usage == null) return 0;
+        try {
+            Object nativeUsage = usage.getNativeUsage();
+            if (!(nativeUsage instanceof Map)) return 0;
+            Map<String, Object> root = (Map<String, Object>) nativeUsage;
+            Object details = root.get("prompt_tokens_details");
+            if (details instanceof Map<?, ?> detailMap) {
+                Object cached = detailMap.get("cached_tokens");
+                return cached instanceof Number number ? number.intValue() : 0;
+            }
+            // DashScope 形态：input_tokens_details.cached_tokens
+            Object dashDetails = root.get("input_tokens_details");
+            if (dashDetails instanceof Map<?, ?> detailMap) {
+                Object cached = detailMap.get("cached_tokens");
+                if (cached instanceof Number number) return number.intValue();
+            }
+            // DeepSeek 形态：顶层 prompt_cache_hit_tokens
+            Object deepSeekHit = root.get("prompt_cache_hit_tokens");
+            if (deepSeekHit instanceof Number number) return number.intValue();
+            return 0;
+        } catch (Exception exception) {
+            return 0;
         }
     }
 

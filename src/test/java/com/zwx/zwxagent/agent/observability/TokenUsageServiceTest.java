@@ -14,7 +14,7 @@ class TokenUsageServiceTest {
     private final TokenUsageService service = new TokenUsageService(new ObjectMapper());
 
     private static TokenUsageService.CallSample sample(int prompt, int completion) {
-        return new TokenUsageService.CallSample(prompt, completion, 1000, 200, 3, 500, 4, 9000);
+        return new TokenUsageService.CallSample(prompt, completion, 0, 1000, 200, 3, 500, 4, 9000);
     }
 
     @Test

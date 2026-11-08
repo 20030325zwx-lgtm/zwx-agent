@@ -86,6 +86,7 @@
         <dl class="usage-total">
           <div><dt>输入</dt><dd>{{ formatNumber(usage.promptTokens) }}</dd></div>
           <div><dt>输出</dt><dd>{{ formatNumber(usage.completionTokens) }}</dd></div>
+          <div><dt>缓存命中</dt><dd>{{ usage.cachedTokens ? formatNumber(usage.cachedTokens) : '—' }}</dd></div>
           <div><dt>调用</dt><dd>{{ usage.calls || 0 }} 次</dd></div>
           <div><dt>知识上下文</dt><dd>{{ formatNumber(usage.ragContextChars) }} 字</dd></div>
         </dl>

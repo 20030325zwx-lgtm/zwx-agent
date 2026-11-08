@@ -30,7 +30,7 @@ public class TokenUsageService {
      * toolResultChars 单独计量：工具调用的入参与返回都放在消息的结构字段里，getText() 读不到，
      * 而多轮工具循环每轮都会把历史结果整段重发，是提示词膨胀的真正来源。
      */
-    public record CallSample(int promptTokens, int completionTokens, int systemChars,
+    public record CallSample(int promptTokens, int completionTokens, int cachedTokens, int systemChars,
                              int toolSchemaChars, int toolCount, int messageChars, int messageCount,
                              int toolResultChars) {
     }
@@ -52,6 +52,7 @@ public class TokenUsageService {
         private int calls;
         private int promptTokens;
         private int completionTokens;
+        private int cachedTokens;
         private long systemChars;
         private long toolSchemaChars;
         private int maxToolCount;
@@ -65,6 +66,7 @@ public class TokenUsageService {
             calls++;
             promptTokens += sample.promptTokens();
             completionTokens += sample.completionTokens();
+            cachedTokens += sample.cachedTokens;
             systemChars += sample.systemChars();
             toolSchemaChars += sample.toolSchemaChars();
             maxToolCount = Math.max(maxToolCount, sample.toolCount());
@@ -81,6 +83,7 @@ public class TokenUsageService {
             node.put("calls", calls);
             node.put("promptTokens", promptTokens);
             node.put("completionTokens", completionTokens);
+            node.put("cachedTokens", cachedTokens);
             node.put("avgSystemChars", avg(systemChars));
             node.put("avgToolSchemaChars", avg(toolSchemaChars));
             node.put("maxToolCount", maxToolCount);
@@ -119,6 +122,15 @@ public class TokenUsageService {
         return sum(runId, false);
     }
 
+    /** 本 run 的缓存命中 token 总量（供应商未返回时为 0）。 */
+    public int cachedTokens(String runId) {
+        Ledger ledger = runId == null ? null : ledgers.get(runId);
+        if (ledger == null) return 0;
+        synchronized (ledger) {
+            return ledger.phases.values().stream().mapToInt(phase -> phase.cachedTokens).sum();
+        }
+    }
+
     public int calls(String runId) {
         Ledger ledger = runId == null ? null : ledgers.get(runId);
         if (ledger == null) return 0;
@@ -143,6 +155,7 @@ public class TokenUsageService {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("promptTokens", sum(runId, true));
         root.put("completionTokens", sum(runId, false));
+        root.put("cachedTokens", cachedTokens(runId));
         root.put("calls", calls(runId));
         root.put("ragContextChars", ragChars);
         root.put("phases", phases);

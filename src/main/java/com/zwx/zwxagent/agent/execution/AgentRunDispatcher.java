@@ -134,7 +134,7 @@ public class AgentRunDispatcher {
             };
             ManusGraphOrchestrator.ManusRunRequest request = new ManusGraphOrchestrator.ManusRunRequest(
                     claimed.conversationId(), claimed.tenantId(), claimed.userId(), chatModel,
-                    claimed.input(), claimed.historyContext(), tools, claimed.knowledgeContext(), null,
+                    claimed.input(), java.util.List.of(), tools, claimed.knowledgeContext(), null,
                     null, runId, claimed.permissionMode(), resumeCheckpoint, resumeFrom, cleanup,
                     result -> completeRun(claimed, ownerInstance, result),
                     () -> stateService.shouldStopAtSafePoint(runId, ownerInstance, claimed.fencingToken()));

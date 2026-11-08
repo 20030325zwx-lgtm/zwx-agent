@@ -74,7 +74,8 @@ public class DirectNode implements NodeAction {
         tokenUsageRunId.set(state.value(GraphState.RUN_ID, ""));
         RunContext context = state.value(GraphState.RUN_CONTEXT, RunContext.class).orElse(null);
         String input = state.value(GraphState.INPUT, "");
-        String historyContext = state.value(GraphState.HISTORY, "");
+        List<org.springframework.ai.chat.messages.Message> historyTurns = state.value(GraphState.HISTORY)
+                .map(value -> (List<org.springframework.ai.chat.messages.Message>) value).orElse(List.of());
         String runId = state.value(GraphState.RUN_ID, "");
         String runKey = context == null || context.conversationId() == null
                 ? java.util.UUID.randomUUID().toString() : context.conversationId();
@@ -119,9 +120,11 @@ public class DirectNode implements NodeAction {
             worker.stopForClientDisconnect();
         }
         List<String> activities = new ArrayList<>();
-        String taskPrompt = (historyContext == null || historyContext.isBlank() ? ""
-                : "【近期对话上下文】\n" + historyContext + "\n\n")
-                + (knowledge.isBlank() ? "" : Workers.knowledgePrompt(knowledge)) + input;
+        // 历史以真实消息列表预填（append-only 前缀，prompt cache 命中的前提），新输入是最后一条 user
+        if (!historyTurns.isEmpty()) {
+            worker.getMessageList().addAll(historyTurns);
+        }
+        String taskPrompt = (knowledge.isBlank() ? "" : Workers.knowledgePrompt(knowledge)) + input;
         try {
             ToolCallWorkerContext.set(workerKey);
             try {

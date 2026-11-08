@@ -166,17 +166,21 @@ public class InternalEvalRunService {
                     ? agentKnowledgeRagService.retrieveWithContext(evalUser.tenantId(), SUPER_AGENT_KEY, task)
                     : new AgentKnowledgeRagResult("", List.of(), null, null);
             mcpTools = mcpServerConfigurationService.toolsFor(evalUser.tenantId());
-            String historyContext = agentConversationService
+            java.util.List<org.springframework.ai.chat.messages.Message> historyTurns = agentConversationService
                     .getRecentMessages(evalUser.tenantId(), evalUser.id(), SUPER_AGENT_KEY, conversationId, 21).stream()
                     .filter(message -> message.id() != userMessageId)
-                    .map(message -> ("USER".equals(message.role()) ? "用户" : "助手") + ": " + message.content())
-                    .reduce((a, b) -> a + "\n" + b).orElse("");
+                    .filter(message -> message.content() != null && !message.content().isBlank())
+                    .map(message -> (org.springframework.ai.chat.messages.Message) (
+                            "USER".equals(message.role())
+                                    ? new org.springframework.ai.chat.messages.UserMessage(message.content())
+                                    : new org.springframework.ai.chat.messages.AssistantMessage(message.content())))
+                    .toList();
             var modelSelection = resolveForAgent(evalUser.id());
             ChatModel runChatModel = dynamicChatModelFactory.model(modelSelection.config());
             String knowledgeContext = knowledge.context() == null ? "" : knowledge.context();
             String ragTraceJson = knowledge.trace() == null ? "{}" : toJson(knowledge.trace());
             runId = agentRunService.start(conversationId, evalUser.tenantId(), evalUser.id(), SUPER_AGENT_KEY,
-                    userMessageId, task, historyContext, knowledgeContext, ragTraceJson, "YOLO");
+                    userMessageId, task, "", knowledgeContext, ragTraceJson, "YOLO");
             final String startedRunId = runId;
             final String finalRagTraceJson = ragTraceJson;
             modelCatalogService.attachToRun(runId, modelSelection);
@@ -199,7 +203,7 @@ public class InternalEvalRunService {
             List<Boolean> planGated = new ArrayList<>(List.of(false));
             CountDownLatch latch = new CountDownLatch(1);
             ManusGraphOrchestrator.ManusRunRequest request = new ManusGraphOrchestrator.ManusRunRequest(
-                    conversationId, evalUser.tenantId(), evalUser.id(), runChatModel, task, historyContext,
+                    conversationId, evalUser.tenantId(), evalUser.id(), runChatModel, task, historyTurns,
                     availableTools, knowledgeContext, knowledge.trace() == null ? null : finalRagTraceJson,
                     prefaceActivity, startedRunId, "YOLO", null, null, cleanup,
                     result -> {

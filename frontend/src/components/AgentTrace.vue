@@ -5,6 +5,7 @@
         @click="expanded = !expanded">
         <span v-if="working" class="status-live" aria-hidden="true"></span>
         <span>{{ statusLabel || (toolCalls.length ? `执行了 ${toolCalls.length} 次操作` : `执行了 ${steps.length} 步`) }}</span>
+        <span v-if="tokenBadge" class="trace-tokens" :title="tokenBadge.title">{{ tokenBadge.label }}</span>
         <span v-if="working && !entries.length" class="trace-count">· 正在思考…</span>
         <span v-else-if="toolCalls.length && statusLabel" class="trace-count">{{ toolCalls.length }} 次操作</span>
         <span v-else-if="steps.length && statusLabel" class="trace-count">{{ steps.length }} 步</span>
@@ -128,6 +129,20 @@ const statusLabel = computed(() => {
   return `已完成 · 用时 ${duration}`
 })
 
+const tokenBadge = computed(() => {
+  const usage = props.message.tokenUsage
+  if (!usage || !(usage.promptTokens || usage.completionTokens)) return null
+  const fmt = n => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n || 0))
+  const label = `↑${fmt(usage.promptTokens)} ↓${fmt(usage.completionTokens)} tokens`
+  const hit = usage.promptTokens
+    ? Math.round(((usage.cachedTokens || 0) / usage.promptTokens) * 100)
+    : 0
+  return usage.cachedTokens
+    ? { label: `${label} · 缓存 ${fmt(usage.cachedTokens)}（${hit}%）`,
+        title: '本任务模型 token 用量；缓存为供应商 prompt cache 命中部分' }
+    : { label, title: '本任务模型 token 用量（↑提示 ↓生成）' }
+})
+
 const tone = computed(() => {
   if (props.working) return 'working'
   if (props.message.status === 'INTERRUPTED') return 'warn'
@@ -163,6 +178,7 @@ const tone = computed(() => {
 
 .trace-toggle:hover { background: var(--wb-fill); }
 .trace-count { color: var(--wb-muted); font-weight: 450; }
+.trace-tokens { color: var(--wb-muted); font-weight: 450; font-variant-numeric: tabular-nums; }
 .trace-toggle.working { color: var(--wb-brand); }
 .trace-toggle.warn { color: #b45309; }
 .trace-toggle.error { color: #b91c1c; }

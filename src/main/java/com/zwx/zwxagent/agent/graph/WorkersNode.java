@@ -37,7 +37,7 @@ import java.util.function.Consumer;
 @Slf4j
 public class WorkersNode implements NodeAction {
 
-    private static final int WORKER_MAX_STEPS = 8;
+    static final int WORKER_MAX_STEPS = 8;
     private static final int MAX_ACTIVITY_CHARS = 4_000;
     private static final int MAX_EVENT_SUMMARY_CHARS = 120;
 
@@ -49,7 +49,11 @@ public class WorkersNode implements NodeAction {
     private final com.zwx.zwxagent.agent.observability.ModelIoService modelIo;
 
     /** 当前运行中尚未结束的子 agent，供客户端断开时联动停止。 */
-    private final Map<String, List<ToolCallAgent>> activeWorkers = new ConcurrentHashMap<>();
+    /**
+     * 活跃 worker 注册表（进程级，按 runKey=conversationId 隔离）：DirectNode（单循环档）与
+     * WorkersNode（图编排档）共享，用户的停止请求经 stopAll 同时覆盖两种拓扑。
+     */
+    private static final Map<String, List<ToolCallAgent>> ACTIVE_WORKERS = new ConcurrentHashMap<>();
     private final Map<String, List<FutureTask<WorkerOutcome>>> activeTasks = new ConcurrentHashMap<>();
 
     /** 逐步采集工具调用的子 agent：每次 step 后把工具执行转成语义事件；思考文本增量实时外送。 */
@@ -417,7 +421,7 @@ public class WorkersNode implements NodeAction {
             // hook 上下文携带真实 runId：工具确认/账本等 run 级状态据此关联
             worker.setHookRunId(runId);
         }
-        activeWorkers.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(worker);
+        ACTIVE_WORKERS.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(worker);
         if (stopCheck.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             worker.stopForClientDisconnect();
         }
@@ -447,10 +451,10 @@ public class WorkersNode implements NodeAction {
             streamEvent(activitySink, doneEvent);
             return new WorkerOutcome(activities, events, "【" + step.title() + "】" + summary);
         } finally {
-            List<ToolCallAgent> workers = activeWorkers.get(runKey);
+            List<ToolCallAgent> workers = ACTIVE_WORKERS.get(runKey);
             if (workers != null) {
                 workers.remove(worker);
-                if (workers.isEmpty()) activeWorkers.remove(runKey, workers);
+                if (workers.isEmpty()) ACTIVE_WORKERS.remove(runKey, workers);
             }
         }
     }
@@ -484,10 +488,23 @@ public class WorkersNode implements NodeAction {
                 .toArray(ToolCallback[]::new);
     }
 
+    /** DirectNode（单循环档）注册/注销：与图编排档共享取消通道。 */
+    static void registerWorker(String runKey, ToolCallAgent worker) {
+        ACTIVE_WORKERS.computeIfAbsent(runKey, ignored -> new CopyOnWriteArrayList<>()).add(worker);
+    }
+
+    static void unregisterWorker(String runKey, ToolCallAgent worker) {
+        List<ToolCallAgent> workers = ACTIVE_WORKERS.get(runKey);
+        if (workers != null) {
+            workers.remove(worker);
+            if (workers.isEmpty()) ACTIVE_WORKERS.remove(runKey, workers);
+        }
+    }
+
     void stopAll(String conversationId) {
         List<FutureTask<WorkerOutcome>> tasks = activeTasks.get(conversationId);
         if (tasks != null) tasks.forEach(task -> task.cancel(true));
-        List<ToolCallAgent> workers = activeWorkers.get(conversationId);
+        List<ToolCallAgent> workers = ACTIVE_WORKERS.get(conversationId);
         if (workers != null) workers.forEach(ToolCallAgent::stopForClientDisconnect);
     }
 

@@ -54,6 +54,7 @@ public class ManusGraphOrchestrator {
     static final String NODE_AGGREGATOR = "aggregator";
     /** 计划确认门：多步计划生成后暂停，等用户授权再执行（Plan 先对齐后执行）。 */
     static final String NODE_PLAN_GATE = "plan_gate";
+    public static final String NODE_DIRECT = "direct";
     static final String NODE_RESUME_ROUTER = "resume_router";
 
     private static final long MAX_RUN_MILLIS = TimeUnit.MINUTES.toMillis(5);
@@ -97,7 +98,12 @@ public class ManusGraphOrchestrator {
     @org.springframework.beans.factory.annotation.Value("${app.agent.checkpoint.v2:true}")
     private boolean checkpointV2 = true;
 
+    /** 单循环档开关（DirectNode）：关闭后所有工作任务回到固定图编排。 */
+    @org.springframework.beans.factory.annotation.Value("${app.agent.single-loop.enabled:true}")
+    private boolean singleLoopEnabled = true;
+
     private CompiledGraph compiledGraph;
+    private CompiledGraph compiledDirectGraph;
 
     private record GraphInstance(CompiledGraph graph, WorkersNode workers) {
     }
@@ -141,7 +147,8 @@ public class ManusGraphOrchestrator {
         log.info("manus run checkpoint store: {}", agentRunService == null ? "disabled" : "enabled");
         GraphInstance sample = buildGraph();
         compiledGraph = sample.graph();
-        log.info("manus 多智能体图编译完成：{}",
+        compiledDirectGraph = buildDirectGraph(sample.workers(), chatModel).graph();
+        log.info("manus 多智能体图编译完成：{}（单循环档：direct）",
                 compiledGraph.getGraph(GraphRepresentation.Type.MERMAID).content());
     }
 
@@ -182,6 +189,25 @@ public class ManusGraphOrchestrator {
         return new GraphInstance(compiled, workersNode);
     }
 
+    /**
+     * 单循环拓扑：START → direct → END。DirectNode 内部即完整 ReAct 主循环；
+     * 复用同一 WorkersNode 实例承载 worker 注册表/activeTasks，用户停止请求覆盖两种拓扑。
+     */
+    private GraphInstance buildDirectGraph(WorkersNode workersNode, ChatModel runChatModel) throws Exception {
+        StateGraph graph = new StateGraph(this::newState);
+        graph.addNode(NODE_DIRECT, AsyncNodeAction.node_async(new DirectNode(runChatModel, tokenUsage,
+                toolConfirmationService, modelIo)));
+        graph.addEdge(StateGraph.START, NODE_DIRECT);
+        graph.addEdge(NODE_DIRECT, StateGraph.END);
+        SaverConfig saverConfig = SaverConfig.builder()
+                .type(SaverConstant.MEMORY)
+                .register(SaverConstant.MEMORY, new MemorySaver())
+                .build();
+        CompiledGraph compiled = graph.compile(CompileConfig.builder().saverConfig(saverConfig).build());
+        compiled.setMaxIterations(16);
+        return new GraphInstance(compiled, workersNode);
+    }
+
     private OverAllState newState() {
         OverAllState state = new OverAllState();
         state.registerKeyAndStrategy(Map.ofEntries(
@@ -200,7 +226,8 @@ public class ManusGraphOrchestrator {
                 Map.entry(GraphState.RESUME_FROM, new ReplaceStrategy()),
                 Map.entry(GraphState.RUN_ID, new ReplaceStrategy()),
                 Map.entry(GraphState.PENDING_CONFIRMATION, new ReplaceStrategy()),
-                Map.entry(GraphState.PERMISSION_MODE, new ReplaceStrategy())));
+                Map.entry(GraphState.PERMISSION_MODE, new ReplaceStrategy()),
+                Map.entry(GraphState.ORCHESTRATION, new ReplaceStrategy())));
         return state;
     }
 
@@ -233,6 +260,7 @@ public class ManusGraphOrchestrator {
             case NODE_WORKERS -> NODE_VERIFIER;
             case NODE_VERIFIER -> route(verificationStatus);
             case NODE_AGGREGATOR -> StateGraph.END;
+            case NODE_DIRECT -> NODE_DIRECT;
             default -> NODE_PLANNER;
         };
     }
@@ -291,7 +319,20 @@ public class ManusGraphOrchestrator {
                                   Runnable cleanup,
                                   Consumer<ManusRunResult> completionHandler,
                                   /** v2 派发路径：节点安全点轮询 control_state（暂停/取消），空则仅看本地 stopped。 */
-                                  java.util.function.BooleanSupplier controlStopCheck) {
+                                  java.util.function.BooleanSupplier controlStopCheck,
+                                  /** 编排模式："single"=单循环档（DirectNode），其余/空=图编排档。 */
+                                  String orchestration) {
+
+        public ManusRunRequest(String conversationId, String tenantId, String userId, ChatModel chatModel,
+                               String message, String historyContext, ToolCallback[] tools, String knowledgeContext,
+                               String ragTraceJson, String prefaceActivity, String runId, String permissionMode,
+                               GraphCheckpoint resumeCheckpoint, String resumeFrom, Runnable cleanup,
+                               Consumer<ManusRunResult> completionHandler,
+                               java.util.function.BooleanSupplier controlStopCheck) {
+            this(conversationId, tenantId, userId, chatModel, message, historyContext, tools, knowledgeContext,
+                    ragTraceJson, prefaceActivity, runId, permissionMode, resumeCheckpoint, resumeFrom, cleanup,
+                    completionHandler, controlStopCheck, null);
+        }
     }
 
     public record ManusRunResult(String answer, List<String> activities, boolean completed,
@@ -308,9 +349,14 @@ public class ManusGraphOrchestrator {
      * 与旧 BaseAgent.runStream 对齐：activity 事件承载过程，默认消息承载最终回答，[DONE] 收尾。
      */
     public ManusRunHandle runStream(ManusRunRequest request, Executor runExecutor) {
+        boolean singleLoop = "single".equals(request.orchestration());
         GraphInstance runGraph;
         try {
-            runGraph = buildGraph(request.chatModel() == null ? chatModel : request.chatModel());
+            ChatModel runChatModel = request.chatModel() == null ? chatModel : request.chatModel();
+            runGraph = singleLoop
+                    ? buildDirectGraph(new WorkersNode(runChatModel, workerExecutor, tokenUsage,
+                            toolConfirmationService, modelIo), runChatModel)
+                    : buildGraph(runChatModel);
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to build agent graph", exception);
         }
@@ -499,7 +545,8 @@ public class ManusGraphOrchestrator {
                     GraphState.RUN_CONTEXT, context,
                     GraphState.RUN_ID, request.runId() == null ? "" : request.runId(),
                     GraphState.PERMISSION_MODE,
-                    com.zwx.zwxagent.capability.tools.PermissionMode.parse(request.permissionMode()).name());
+                    com.zwx.zwxagent.capability.tools.PermissionMode.parse(request.permissionMode()).name(),
+                    GraphState.ORCHESTRATION, "single".equals(request.orchestration()) ? "single" : "graph");
             int sentActivities = 0;
             int sentEvents = request.resumeCheckpoint() == null ? 0 : request.resumeCheckpoint().events().size();
             boolean planGated = false;
@@ -540,7 +587,7 @@ public class ManusGraphOrchestrator {
                 while (sentActivities < latest.size()) {
                     activities.add(latest.get(sentActivities++));
                 }
-                if (NODE_AGGREGATOR.equals(output.node())) {
+                if (NODE_AGGREGATOR.equals(output.node()) || NODE_DIRECT.equals(output.node())) {
                     finalAnswer = state.value(GraphState.FINAL_ANSWER, "");
                 }
                 if (NODE_PLAN_GATE.equals(output.node())) {
@@ -657,6 +704,8 @@ public class ManusGraphOrchestrator {
      */
     @SuppressWarnings("unchecked")
     static String completedNode(OverAllState state) {
+        String orchestration = state.value(GraphState.ORCHESTRATION, "");
+        if ("single".equals(orchestration)) return NODE_DIRECT;
         String finalAnswer = state.value(GraphState.FINAL_ANSWER, "");
         if (finalAnswer != null && !finalAnswer.isBlank()) return NODE_AGGREGATOR;
         String verification = state.value(GraphState.VERIFICATION_STATUS, "");

@@ -52,6 +52,11 @@ public class AgentMetrics {
         registry.counter("agent.intent.decision", "action", safe(action)).increment();
     }
 
+    /** 编排分档命中：单循环档（DirectNode）计数，用于观测分档比例。 */
+    public void orchestrationSingleLoop() {
+        registry.counter("agent.orchestration", "mode", "single").increment();
+    }
+
     /** 配额/限流拒绝：concurrent / hourly / token-budget。 */
     public void quotaRejected(String kind) {
         registry.counter("agent.quota.rejected", "kind", safe(kind)).increment();

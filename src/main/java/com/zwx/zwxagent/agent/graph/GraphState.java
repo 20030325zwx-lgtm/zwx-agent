@@ -37,6 +37,7 @@ final class GraphState {
     static final String PENDING_CONFIRMATION = "pending_confirmation";
     /** 本次 run 的权限模式（PLAN/BUILD/EDIT/GUARDED/YOLO）；YOLO 跳过计划确认门（replace） */
     static final String PERMISSION_MODE = "permission_mode";
+    static final String ORCHESTRATION = "orchestration";
 
     private GraphState() {
     }

@@ -31,6 +31,22 @@
 - **不变式**（借 dsh"model-visible means logged"）：凡进模型上下文的事件必须先在日志里；
   快照只打在闭合边界，永不存"跑了一半"的状态。
 
+## 介质决策：为什么是数据库表而不是 dsh 的 JSONL 文件
+
+dsh 用 JSONL 是因为它是**单机 CLI**：单进程、单写者、session 就在本机磁盘，文件是零依赖的正确选择。
+
+Aster 的两种部署形态**都已有 PostgreSQL**：
+
+| 形态 | 持久化设施 | 事件日志落点 |
+|---|---|---|
+| 服务器端（多实例 + 共享库） | 共享 PostgreSQL | `agent_run_event` 表（行锁分配 seq，双实例安全） |
+| 桌面端（Electron，`desktop/`） | **捆绑的本地 PostgreSQL**（prepare-pgserver：initdb→建库→pg_ctl，main.cjs 全生命周期管理） | 同一张表，落在本机 PG（数据目录即本地文件，单写者语义等价） |
+
+- 一套 `RunEventLog`（JdbcTemplate 实现）覆盖两种形态；若按形态分介质（DB + JSONL），修尾/投影/审计逻辑要写两遍，且跨介质无法保证快照 `last_event_seq` 与日志的事务一致性——违背"单一真相"原则。
+- JSONL 实现是**接口已抽象好的备用项**：若未来桌面端去 PG 化，新增 `RunEventLogJsonl` 实现类即可，hook/修尾/恢复代码零改动。
+- 排查体验：`SELECT * FROM agent_run_event WHERE run_id='...' ORDER BY seq;` 等价于 `tail -f`；需要文件形态时一条查询即可导出 JSONL。
+- **教训**：介质选择跟随部署形态里已有的持久化设施，而不是照抄参考项目的介质——参考的是语义（append-only、seq、成对闭合、投影重建），不是文件。
+
 ## P1 落地（快照派做对）
 
 - `GraphCheckpointJson`：GraphCheckpoint ↔ state_json 编解码（schema_version=1，读端容忍缺字段）。

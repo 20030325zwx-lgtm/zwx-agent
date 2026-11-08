@@ -113,3 +113,27 @@ worker `think()` 从阻塞 `.call()` 换为 `.stream()`，文本增量实时经 
 - P1-b 模型 failover：`DynamicChatModelFactory` 配置备选链，think 连续失败降级备用模型。
 - P2 编排模式化：意图路由已有（Qwen/Jev + 闲聊短路），扩展为「直答 / 单循环 / 图编排」三档；
   verifier 与 aggregator 变为图编排档位的可选项。
+
+## P2 落地记录（2026-11-08）：编排模式化三档
+
+**直答（已有闲聊短路）→ 单循环（新增 DirectNode，低复杂度默认）→ 图编排（保留）**：
+
+- `DirectNode`（graph 包）：单拓扑图 `START → direct → END`。一个主循环 ReActAgent
+  （复用 ToolCallAgent + hook 管线 + 确认挂起 + 幂等账本）直接对用户负责；思考文本
+  （含工具调用前的叙述）经 thinkTextSink → answerChunkSink 实时流式——叙述即回答
+  （Claude Code 式）；worker 注册表与 WorkersNode 共享（`ACTIVE_WORKERS` 静态化），
+  停止请求覆盖两种拓扑。
+- 路由（ManusAgentController.chat）：意图路由命中且 `complexity ≤ 0.45`（0-2 语义）
+  → 单循环；**意图路由不可用（DashScope 限流为常态）时短消息（≤80 字）启发式直通**；
+  工作区请求/带图/高复杂度 → 图编排。开关 `app.agent.single-loop.enabled` +
+  `max-complexity` + `fallback-short-message` + `max-chars`。
+- 恢复：checkpoint.lastNode=NODE_DIRECT 的 run 按 `resumeNode → NODE_DIRECT` 自恢复
+  （重跑本节点，副作用由幂等账本回放）；无需新增 DB 列。
+- 观测：`agent.orchestration{mode=single}` 计数器 + prefaceActivity 向用户透明标注分档原因。
+- 实测（本地，同档任务对照）：**llm_calls 3-4 → 1，延迟 18-32s → 5.6-7s**。
+- 过程中修的两个真 bug：① buildDirectGraph 漏传 per-run 模型（用户选的 GPT-5.6 被替换成
+  DashScope qwen 直报 400——图节点必须逐 run 构建的原因所在）；② execute() 只在 aggregator
+  节点读 FINAL_ANSWER，direct 节点回答捕获不到导致 status 恒 INTERRUPTED。
+- 已知边界：意图路由的 complexity 是 0-2 语义（0=单轮可答），阈值 0.45 只放行单轮任务——
+  多步骤但线性的任务仍走图编排；若要进一步扩单循环覆盖面，调高
+  `app.agent.single-loop.max-complexity` 即可（配合评测观察）。

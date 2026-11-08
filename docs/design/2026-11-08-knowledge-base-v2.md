@@ -117,7 +117,27 @@ P2 的视觉轨先建评测集再决定：caption+VLM 描述轨（P1）通常已
   管线拉长 → 状态机逐阶段恢复，单图失败不阻塞整文档（降级为仅图注 chunk + 标记）。
 - 知识库当前 0 文档：直接建 v2 表切换，无迁移；旧表整体退役。
 
-## 9. 明确不做
+## 9. P1 落地记录（2026-11-08）
+
+P1 核心已实现并上线，范围与本档 §5/§6 对应，实现细节与设计有两处务实调整：
+
+- **图纸增强**：`FigureEnrichmentService`（一图组一次视觉调用，固定模板 + 强制 JSON +
+  失败重试 1 次 + 单文档预算上限 30）+ `VisionAnalysisService.describeImages`（多图单调用，
+  字节直传）。图注提示仅作为定位 hint 附加，正文/其他块不进视觉输入（输入隔离）。
+- **防碎**：`FigureGrouper` 几何合并（同页相邻 + 一轴重叠 ≥50% + 间隔 <15pt / 图注相同 /
+  「(续)」跨页信号，组上限 4）。设计档 §5 的「PDFBox 回源重裁」**未实现**——v1 用
+  「碎片多图同调用整体描述」替代，规避 bbox 坐标系换算风险；回源重裁列入 P2 观察项。
+- **多表示**：figure_description chunk（图纸线性化文本）+ figure_question chunk（≤4 假设
+  问题）；无图注的图由描述兜底，图注与描述皆无才跳过。metadata 带 sectionPath /
+  figureImages / figureFragments / figureType / figureTruncated / chunkRole。
+- **父子分块（轻量）**：不建 kb_* 新表——检索侧 `expandSiblings`：命中文本/表格块后按
+  「同文档同章节」(documentId+sectionPath 过滤) 拉兄弟块拼进上下文（默认开，前 2 命中、
+  每节补 ≤4 条），`app.agent.rag.sibling-expansion-*` 可关。
+- **正文块 contextual retrieval（LLM 语义前缀）与文本块假设问题**：涉及每 chunk 一次 LLM
+  调用，成本未批，留在 P2 评测后决定。
+- 视觉向量轨（ColQwen/multimodal-embedding）仍为 P2。
+
+## 10. 明确不做
 
 - 本地 GPU 部署 ColQwen（无 GPU；用 API 多模态 embedding 替代并先评测）
 - OCR 自研替代 MinerU

@@ -55,6 +55,19 @@ public class AgentKnowledgeRagService {
     @Value("${app.agent.rag.timeout-ms:3000}")
     private long timeoutMs;
 
+    /** 父子分块的检索侧实现：命中后按「同文档同章节」扩展兄弟块，回答上下文从单块扩到整节。 */
+    @Value("${app.agent.rag.sibling-expansion-enabled:true}")
+    private boolean siblingExpansionEnabled;
+
+    @Value("${app.agent.rag.sibling-expansion-max-hits:2}")
+    private int siblingExpansionMaxHits;
+
+    @Value("${app.agent.rag.sibling-expansion-extra:4}")
+    private int siblingExpansionExtra;
+
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(AgentKnowledgeRagService.class);
+
     public AgentKnowledgeRagService(@Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore,
                                     DashScopeRerankService rerankService) {
         this.vectorStore = vectorStore;
@@ -210,6 +223,7 @@ public class AgentKnowledgeRagService {
                     .limit(topK).toList();
         }
         java.util.Set<String> selectedIds = selected.stream().map(this::documentKey).collect(java.util.stream.Collectors.toSet());
+        selected = expandSiblings(tenantId, agentKey, selected, selectedIds);
         List<RagTraceCandidate> traceCandidates = pool.stream().limit(Math.max(recallTopK, topK) * 2L)
                 .map(document -> toTraceCandidate(document, vectorRanks, vectorScores, lexicalRanks, lexicalScores, fusedRanks,
                         fusionScores, rerankRanks, rerankScores, selectedIds.contains(documentKey(document))))
@@ -222,6 +236,60 @@ public class AgentKnowledgeRagService {
      * A lightweight lexical channel complements embeddings for policy numbers, product codes and exact terms.
      * It intentionally fetches only scoped active chunks; RRF prevents either channel from dominating alone.
      */
+    /**
+     * 父子分块的检索侧实现（轻量）：命中文本/表格块后按「同文档同章节」拉取兄弟块拼进结果，
+     * 回答上下文从单块扩展到整节。只扩展前 N 个命中、每节最多补 extra 条；图纸块不扩展
+     * （其上下文由描述 chunk 自带）。失败静默跳过，不影响主召回。
+     */
+    private List<Document> expandSiblings(String tenantId, String agentKey, List<Document> selected,
+                                          java.util.Set<String> selectedIds) {
+        if (!siblingExpansionEnabled || selected.isEmpty()) return selected;
+        List<Document> expanded = new ArrayList<>(selected);
+        java.util.Set<String> known = new java.util.HashSet<>(selectedIds);
+        int sectionsExpanded = 0;
+        for (Document hit : selected) {
+            if (sectionsExpanded >= Math.max(0, siblingExpansionMaxHits)) break;
+            Map<String, Object> metadata = hit.getMetadata();
+            String sourceType = String.valueOf(metadata.getOrDefault("sourceType", ""));
+            if (!"TEXT".equals(sourceType) && !"TABLE".equals(sourceType)) continue;
+            String documentId = text(metadata, "documentId");
+            String sectionPath = text(metadata, "sectionPath");
+            if (documentId.isBlank() || sectionPath.isBlank()) continue;
+            try {
+                SearchRequest request = SearchRequest.builder()
+                        .query(hit.getText() == null || hit.getText().isBlank() ? sectionPath : hit.getText())
+                        .topK(6).similarityThreshold(0.0)
+                        .filterExpression("tenantId == '" + escape(tenantId) + "' && agentKey == '" + escape(agentKey)
+                                + "' && documentId == '" + escape(documentId)
+                                + "' && sectionPath == '" + escape(sectionPath) + "'").build();
+                List<Document> siblings = vectorStore.similaritySearch(request);
+                int added = 0;
+                for (Document sibling : siblings) {
+                    if (added >= Math.max(0, siblingExpansionExtra)) break;
+                    String key = documentKey(sibling);
+                    if (known.contains(key)) continue;
+                    known.add(key);
+                    expanded.add(sibling);
+                    added++;
+                }
+                if (added > 0) sectionsExpanded++;
+            } catch (RuntimeException exception) {
+                log.warn("兄弟块扩展失败，跳过该节；documentId={}, section={}, reason={}",
+                        documentId, sectionPath, exception.getMessage());
+            }
+        }
+        return expanded;
+    }
+
+    private static String text(Map<String, Object> metadata, String key) {
+        Object value = metadata.get(key);
+        return value == null || "null".equals(String.valueOf(value)) ? "" : String.valueOf(value).trim();
+    }
+
+    private static String escape(String value) {
+        return value == null ? "" : value.replace("'", "''");
+    }
+
     private List<Document> lexicalRecall(String tenantId, String agentKey, String query, int limit) {
         if (jdbcTemplate == null || objectMapper == null || query == null || query.isBlank()) return List.of();
         List<String> terms = lexicalTerms(query);

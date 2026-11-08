@@ -23,6 +23,12 @@ public class StructuredKnowledgeChunker {
     static final int TABLE_ROWS_PER_CHUNK = 1;
 
     public List<Document> chunks(List<MineruBlockParser.MineruBlock> blocks, Map<String, Object> baseMetadata) {
+        return chunks(blocks, baseMetadata, FigureSupport.NONE);
+    }
+
+    /** 带图纸上下文的完整切分：figures 含逻辑图分组与视觉增强描述（NONE = 增强不可用，按图注降级）。 */
+    public List<Document> chunks(List<MineruBlockParser.MineruBlock> blocks, Map<String, Object> baseMetadata,
+                                 FigureSupport figures) {
         List<Document> chunks = new ArrayList<>();
         if (blocks == null || blocks.isEmpty()) return chunks;
         List<String> headings = new ArrayList<>();
@@ -54,7 +60,13 @@ public class StructuredKnowledgeChunker {
                 textPage = null;
                 textBlockId = null;
                 textBbox = null;
-                addFigureChunk(chunks, baseMetadata, headings, block);
+                // 同一逻辑图的成员块只在组头处理一次，其余成员跳过
+                FigureGrouper.FigureGroup group = figures.groupOf(block);
+                if (group == null) {
+                    addFigureChunks(chunks, baseMetadata, headings, List.of(block), figures.descriptionOf(block));
+                } else if (group.blocks().getFirst() == block) {
+                    addFigureChunks(chunks, baseMetadata, headings, group.blocks(), figures.descriptions().get(group.id()));
+                }
                 continue;
             }
             String value = block.text();
@@ -116,16 +128,59 @@ public class StructuredKnowledgeChunker {
         }
     }
 
-    private void addFigureChunk(List<Document> chunks, Map<String, Object> baseMetadata, List<String> headings,
-                                MineruBlockParser.MineruBlock block) {
-        String caption = firstNonBlank(block.caption(), block.text());
-        if (caption == null) return;
-        Map<String, Object> metadata = baseMetadata(chunks, baseMetadata, headings, block);
+    /**
+     * 图纸 chunk：优先使用视觉增强描述（一图一组 chunk：1 描述 + N 假设问题），
+     * 描述不可用时降级为仅图注；图注与描述皆无则不产出（无任何可检索语义）。
+     */
+    private void addFigureChunks(List<Document> chunks, Map<String, Object> baseMetadata, List<String> headings,
+                                 List<MineruBlockParser.MineruBlock> members, FigureDescription description) {
+        MineruBlockParser.MineruBlock representative = members.getFirst();
+        String caption = members.stream().map(MineruBlockParser.MineruBlock::caption)
+                .filter(value -> value != null && !value.isBlank()).findFirst().orElse("");
+        Map<String, Object> metadata = baseMetadata(chunks, baseMetadata, headings, representative);
+        if (members.size() > 1) metadata.put("figureFragments", members.size());
+        String images = members.stream().map(MineruBlockParser.MineruBlock::imagePath)
+                .filter(value -> value != null && !value.isBlank())
+                .reduce((left, right) -> left + "|" + right).orElse("");
+        if (!images.isBlank()) metadata.put("figureImages", images);
         metadata.put("sourceType", AgentKnowledgeBlock.FIGURE);
         metadata.put("chunking", "structured-block");
+        metadata.put("regionLabel", figureLabel(caption, representative.pageNumber()));
+        if (description == null || !description.hasContent()) {
+            if (caption.isBlank()) return;
+            metadata.put("chunkRole", "figure_caption");
+            metadata.put("figureCaption", caption);
+            chunks.add(Document.builder().text(withSection(headings, "[图片] " + caption)).metadata(metadata).build());
+            return;
+        }
+        metadata.put("chunkRole", "figure_description");
         metadata.put("figureCaption", caption);
-        metadata.put("regionLabel", figureLabel(caption, block.pageNumber()));
-        chunks.add(Document.builder().text(withSection(headings, "[图片] " + caption)).metadata(metadata).build());
+        if (!description.type().isBlank()) metadata.put("figureType", description.type());
+        metadata.put("figureTruncated", description.truncated());
+        StringBuilder text = new StringBuilder("[图纸");
+        if (!description.type().isBlank()) text.append("|").append(description.type());
+        text.append("] ");
+        if (!caption.isBlank()) text.append(caption).append('\n');
+        if (!description.summary().isBlank()) text.append("摘要：").append(description.summary()).append('\n');
+        if (!description.nodes().isEmpty()) {
+            text.append("组成要素：").append(String.join("、", description.nodes())).append('\n');
+        }
+        if (!description.flows().isEmpty()) {
+            text.append("流向：").append(String.join("；", description.flows())).append('\n');
+        }
+        if (!description.visibleText().isEmpty()) {
+            text.append("图内文字：").append(String.join("、", description.visibleText())).append('\n');
+        }
+        if (!description.inferred().isEmpty()) {
+            text.append("推断（未核实）：").append(String.join("；", description.inferred())).append('\n');
+        }
+        chunks.add(Document.builder().text(withSection(headings, text.toString().trim())).metadata(metadata).build());
+        // 假设问题单独成 chunk：用户以自然语言提问时命中问题向量（上限 4，成本约束）
+        for (String question : description.questions().stream().limit(4).toList()) {
+            Map<String, Object> questionMetadata = new HashMap<>(metadata);
+            questionMetadata.put("chunkRole", "figure_question");
+            chunks.add(Document.builder().text(withSection(headings, question)).metadata(questionMetadata).build());
+        }
     }
 
     private void flushText(List<Document> chunks, Map<String, Object> baseMetadata, List<String> headings,

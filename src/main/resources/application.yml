@@ -132,6 +132,15 @@ app:
       timeout-ms: 3000
       recall-top-k: 15
       recall-similarity-threshold: 0.4
+      # 父子分块的检索侧实现：命中文本/表格块后按「同文档同章节」拉兄弟块拼进上下文
+      sibling-expansion-enabled: ${APP_RAG_SIBLING_EXPANSION:true}
+      sibling-expansion-max-hits: 2
+      sibling-expansion-extra: 4
+    knowledge:
+      # 图纸视觉增强（入库侧）：figure 块交视觉模型生成结构化描述+假设问题，无图注的图不再丢失
+      figure-enrichment-enabled: ${APP_KNOWLEDGE_FIGURE_ENRICHMENT:true}
+      # 单文档最多增强的图纸数（预算上限），超出的图按仅图注降级
+      figure-enrichment-max-per-document: 30
     hook:
       # 工具结果截断阈值（字符）
       tool-result-max-chars: 8000

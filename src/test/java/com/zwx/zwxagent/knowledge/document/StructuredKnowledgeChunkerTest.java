@@ -66,4 +66,62 @@ class StructuredKnowledgeChunkerTest {
         assertTrue(chunks.stream().anyMatch(chunk -> AgentKnowledgeBlock.TEXT.equals(chunk.getMetadata().get("sourceType"))
                 && chunk.getText().contains("普通正文")));
     }
+
+    @Test
+    void enrichedFigureProducesDescriptionAndQuestionChunks() {
+        // 有描述：图纸语义整体可检索；无图注也由描述兜底
+        MineruBlockParser.MineruBlock figure = block("f1", AgentKnowledgeBlock.FIGURE, 5, "", null, null, false, 0);
+        FigureDescription description = new FigureDescription("流程图", "报销审批流程：提交→主管审批→财务",
+                List.of("提交", "主管审批", "财务"), List.of("提交→主管审批"), List.of("审批"),
+                List.of("月度报销场景"), List.of("报销流程有哪些环节", "审批入口是什么"), false);
+        List<FigureGrouper.FigureGroup> groups = FigureGrouper.group(List.of(figure));
+        FigureSupport support = FigureSupport.of(groups, Map.of(groups.getFirst().id(), description));
+
+        List<Document> chunks = new StructuredKnowledgeChunker().chunks(List.of(figure), Map.of(), support);
+
+        Document desc = chunks.stream().filter(chunk -> "figure_description".equals(chunk.getMetadata().get("chunkRole")))
+                .findFirst().orElseThrow();
+        assertTrue(desc.getText().contains("[图纸|流程图]"));
+        assertTrue(desc.getText().contains("摘要：报销审批流程"));
+        assertTrue(desc.getText().contains("流向：提交→主管审批"));
+        assertTrue(desc.getText().contains("推断（未核实）"));
+        assertEquals("流程图", desc.getMetadata().get("figureType"));
+        assertEquals(Boolean.FALSE, desc.getMetadata().get("figureTruncated"));
+
+        List<Document> questions = chunks.stream()
+                .filter(chunk -> "figure_question".equals(chunk.getMetadata().get("chunkRole"))).toList();
+        assertEquals(2, questions.size());
+        assertTrue(questions.get(0).getText().contains("报销流程有哪些环节"));
+    }
+
+    @Test
+    void figureWithoutCaptionAndDescriptionIsSkipped() {
+        // 增强不可用（NONE）且无图注：无任何可检索语义，不再产出空壳 chunk
+        MineruBlockParser.MineruBlock figure = block("f1", AgentKnowledgeBlock.FIGURE, 5, "", null, null, false, 0);
+        List<Document> chunks = new StructuredKnowledgeChunker().chunks(List.of(figure), Map.of(), FigureSupport.NONE);
+        assertTrue(chunks.isEmpty());
+    }
+
+    @Test
+    void mergedFragmentsEmitSingleDescriptionChunk() {
+        // 大图防碎：合并组只产出一组 chunk，metadata 记录碎片数与图片清单
+        List<MineruBlockParser.MineruBlock> fragments = List.of(
+                new MineruBlockParser.MineruBlock("f1", AgentKnowledgeBlock.FIGURE, 5, "[0,0,100,100]", "",
+                        "图 3 部署流程", null, null, "f1.png", false, 0, "{}"),
+                new MineruBlockParser.MineruBlock("f2", AgentKnowledgeBlock.FIGURE, 5, "[0,0,100,100]", "",
+                        null, null, null, "f2.png", false, 0, "{}"));
+        FigureDescription description = new FigureDescription("流程图", "部署全流程", List.of(), List.of("构建→灰度→全量"),
+                List.of(), List.of(), List.of(), false);
+        List<FigureGrouper.FigureGroup> groups = FigureGrouper.group(fragments);
+        FigureSupport support = FigureSupport.of(groups, Map.of(groups.getFirst().id(), description));
+
+        List<Document> chunks = new StructuredKnowledgeChunker().chunks(fragments, Map.of(), support);
+
+        long descCount = chunks.stream().filter(chunk -> "figure_description".equals(chunk.getMetadata().get("chunkRole"))).count();
+        assertEquals(1, descCount, "合并后的逻辑图只产出一个描述 chunk");
+        Document desc = chunks.stream().filter(chunk -> "figure_description".equals(chunk.getMetadata().get("chunkRole")))
+                .findFirst().orElseThrow();
+        assertEquals(2, desc.getMetadata().get("figureFragments"));
+        assertEquals("f1.png|f2.png", desc.getMetadata().get("figureImages"));
+    }
 }

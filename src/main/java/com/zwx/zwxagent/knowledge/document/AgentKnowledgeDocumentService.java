@@ -49,6 +49,9 @@ public class AgentKnowledgeDocumentService {
     private final AgentKnowledgeReviewLogService reviewLogService;
     private final N8nResumeNotifier resumeNotifier;
     private final N8nReviewEventNotifier reviewEventNotifier;
+    /** 图纸视觉增强：字段注入（无增强时为 null，切片层按仅图注降级），避免改动既有测试构造。 */
+    @jakarta.annotation.Resource
+    private FigureEnrichmentService figureEnrichmentService;
 
     // 向量批间并行度：默认 1（串行）。DashScope embedding 配额（TPM）是真实瓶颈，
     // 并行只会提前触发 429 Throttling.AllocationQuota 反而更慢（2026-10-25 实测：4 路并行 125s vs 串行 ~80s）；
@@ -405,12 +408,45 @@ public class AgentKnowledgeDocumentService {
         if (!blocks.isEmpty()) {
             Map<String, String> objectKeys = persistMineruFiles(stored, result, documentId);
             persistBlocks(stored, documentId, blocks, objectKeys);
-            List<Document> structured = structuredKnowledgeChunker.chunks(blocks, sourceMetadata);
+            FigureSupport figures = figureSupport(stored, objectKeys, blocks);
+            List<Document> structured = structuredKnowledgeChunker.chunks(blocks, sourceMetadata, figures);
             if (!structured.isEmpty()) return structured;
             log.warn("MinerU content_list produced no usable chunks, falling back to markdown; filename={}", stored.filename());
         }
         return textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(markdown)
                 .metadata(sourceMetadata).build()));
+    }
+
+    /**
+     * 图纸分组 + 视觉增强。增强关闭/失败/无图时返回 NONE，切片层降级为仅图注，不阻塞文档索引。
+     * 视觉模型按上传者（created_by）解析；图片字节从对象存储按 MinerU 相对路径映射读取。
+     */
+    private FigureSupport figureSupport(StoredDocument stored, Map<String, String> objectKeys,
+                                        List<MineruBlockParser.MineruBlock> blocks) {
+        if (figureEnrichmentService == null) return FigureSupport.NONE;
+        try {
+            List<FigureGrouper.FigureGroup> groups = FigureGrouper.group(blocks);
+            if (groups.isEmpty()) return FigureSupport.NONE;
+            Map<String, FigureDescription> descriptions = figureEnrichmentService.enrich(
+                    stored.createdBy(), groups, block -> loadFigureBytes(objectKeys, block));
+            return descriptions.isEmpty() ? FigureSupport.NONE : FigureSupport.of(groups, descriptions);
+        } catch (RuntimeException exception) {
+            log.warn("图纸视觉增强整体失败，本次索引按仅图注降级；documentId={}, reason={}",
+                    stored.documentId(), exception.getMessage());
+            return FigureSupport.NONE;
+        }
+    }
+
+    private byte[] loadFigureBytes(Map<String, String> objectKeys, MineruBlockParser.MineruBlock block) {
+        if (block.imagePath() == null || block.imagePath().isBlank()) return null;
+        String objectKey = objectKeys.get(block.imagePath());
+        if (objectKey == null) return null;
+        try (var input = storage.open(objectKey)) {
+            return input.readAllBytes();
+        } catch (Exception exception) {
+            log.warn("读取图纸文件失败，跳过该块增强；objectKey={}, reason={}", objectKey, exception.getMessage());
+            return null;
+        }
     }
 
     /** 完整结果包落 OSS，图片块可以直接按相对路径找到对象。失败不阻断 Markdown 索引。 */
@@ -908,12 +944,12 @@ public class AgentKnowledgeDocumentService {
 
     private StoredDocument queryStoredDocument(String documentId, boolean strictScope) {
         return jdbcTemplate.queryForObject("""
-                SELECT id, tenant_id, agent_key, object_key, filename, logical_key, version_no, lifecycle_status
+                SELECT id, tenant_id, agent_key, object_key, filename, logical_key, version_no, lifecycle_status, created_by
                 FROM agent_knowledge_document WHERE id = ?
                 """, (rs, rowNum) -> {
             StoredDocument stored = new StoredDocument(rs.getString("id"), rs.getString("tenant_id"), rs.getString("agent_key"),
                     rs.getString("object_key"), rs.getString("filename"), rs.getString("logical_key"),
-                    (Integer) rs.getObject("version_no"), rs.getString("lifecycle_status"));
+                    (Integer) rs.getObject("version_no"), rs.getString("lifecycle_status"), rs.getString("created_by"));
             if (strictScope) return stored;
             validateScope(stored.tenantId(), stored.agentKey());
             return stored;
@@ -972,5 +1008,5 @@ public class AgentKnowledgeDocumentService {
     public record DocumentFile(byte[] bytes, String filename, String contentType) { }
 
     private record StoredDocument(String documentId, String tenantId, String agentKey, String objectKey, String filename,
-                                  String logicalKey, Integer versionNo, String lifecycleStatus) { }
+                                  String logicalKey, Integer versionNo, String lifecycleStatus, String createdBy) { }
 }

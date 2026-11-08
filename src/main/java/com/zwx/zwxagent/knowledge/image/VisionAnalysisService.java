@@ -2,6 +2,7 @@ package com.zwx.zwxagent.knowledge.image;
 
 import com.zwx.zwxagent.platform.settings.DynamicChatModelFactory;
 import com.zwx.zwxagent.platform.settings.ModelCatalogService;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -62,6 +63,31 @@ public class VisionAnalysisService {
             } catch (RuntimeException fallbackUnavailable) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * 知识入库侧的多图结构化描述：同一逻辑图的多个碎片在一次调用里整体理解，
+     * 返回模型的原始文本（结构化解析由调用方负责）。失败返回 null，调用方降级为仅图注。
+     * 输入隔离约定：只允许传入该图自身的裁剪件与一行图注提示，禁止携带文档正文。
+     */
+    public String describeImages(String userId, List<Media> media, String instruction) {
+        if (media == null || media.isEmpty()) return null;
+        try {
+            var selection = resolveVision(userId);
+            if (selection == null) return null;
+            ChatClient client = ChatClient.builder(chatModelFactory.multimodalModel(selection.config())).build();
+            String answer = client.prompt()
+                    .user(spec -> {
+                        spec.text(instruction);
+                        media.forEach(spec::media);
+                    })
+                    .call()
+                    .content();
+            return answer == null || answer.isBlank() ? null : answer;
+        } catch (RuntimeException exception) {
+            log.warn("视觉模型图纸描述失败：{}", exception.getMessage());
+            return null;
         }
     }
 }

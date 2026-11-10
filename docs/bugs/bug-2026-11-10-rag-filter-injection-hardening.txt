@@ -1,0 +1,36 @@
+日期：2026-11-10
+
+问题现象（定性：防御纵深加固，非可直接利用漏洞）：
+AgentKnowledgeRagService 三处用字符串拼接构造 Spring AI filterExpression
+（searchRequest、verifyDocument、expandSiblings）。tenantId/agentKey/documentId
+等值直接嵌入 '...' 字面量，含单引号或过滤语法（||、==）的值可改写过滤语义：
+解析失败（接口报错）或越权读到其他租户/其他 lifecycleStatus 的切片。
+expandSiblings 原有 escape()（单引号翻倍）防护，另两处完全没有。
+
+影响范围：
+- verifyDocument：KnowledgeAdminController /verify-retrieval（documentId 来自
+  路径变量）与 InternalEvalController /internal/eval/verify-retrieval（body 直传）。
+- searchRequest：所有向量召回入口。
+- 实际可利用性低：admin 路径 documentId 前有 getDocumentRecordForScope 存在性校验
+  （服务端生成的 ID 难以同时携带语法）；internal 路径 tenantId 本就 body 可控，
+  internal token 才是边界；且 filter 表达式由 store 层转绑定参数，不构成 SQL 注入。
+  但旧写法把"值"当"语法"解析，属于设计错误，一旦某处调用点失去前置校验即成真漏洞。
+
+原因：
+filterExpression(String) 重载会经过表达式解析器；用拼接构造，等于让用户数据参与语法。
+
+解决方式：
+三个拼接点统一迁移到 FilterExpressionBuilder（值恒为字面量 EQ 节点，store 层转
+绑定参数），新增私有 andAll() 助手与 FILTER 常量；删除已无引用的 escape()。
+
+验证结果：
+新增 AgentKnowledgeRagServiceFilterSafetyTest（恶意 agentKey / documentId 作为
+字面量进入 EQ 节点、表达式树只含 AND/EQ）；定向 4 个测试类 9/9 通过
+（FilterSafety 2 + VersionFilter 3 + SiblingExpansion 2 + LexicalTerms 2）；
+mvn -DskipTests package 全量编译通过。
+
+后续注意事项：
+- 新增过滤条件一律走 andAll(FILTER.eq(...))，禁止再拼接 filterExpression(String)。
+- lexicalRecall 的 SQL 本就是参数化（?），无需处理。
+- 知识库后续优化计划（golden set 基线 → 词法通道重做 → 兄弟扩展元数据查询 →
+  图纸引用回图 → contextual retrieval 实验）见 2026-11-10 会话摘要。

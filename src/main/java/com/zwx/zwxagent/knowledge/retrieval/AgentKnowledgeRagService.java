@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -81,8 +83,8 @@ public class AgentKnowledgeRagService {
 
     public List<Document> verifyDocument(String tenantId, String agentKey, String documentId, String query) {
         SearchRequest request = SearchRequest.builder().query(query).topK(5).similarityThreshold(0.0)
-                .filterExpression("tenantId == '" + tenantId + "' && agentKey == '" + agentKey
-                        + "' && documentId == '" + documentId + "'").build();
+                .filterExpression(andAll(FILTER.eq("tenantId", tenantId), FILTER.eq("agentKey", agentKey),
+                        FILTER.eq("documentId", documentId))).build();
         return vectorStore.similaritySearch(request);
     }
 
@@ -259,9 +261,8 @@ public class AgentKnowledgeRagService {
                 SearchRequest request = SearchRequest.builder()
                         .query(hit.getText() == null || hit.getText().isBlank() ? sectionPath : hit.getText())
                         .topK(6).similarityThreshold(0.0)
-                        .filterExpression("tenantId == '" + escape(tenantId) + "' && agentKey == '" + escape(agentKey)
-                                + "' && documentId == '" + escape(documentId)
-                                + "' && sectionPath == '" + escape(sectionPath) + "'").build();
+                        .filterExpression(andAll(FILTER.eq("tenantId", tenantId), FILTER.eq("agentKey", agentKey),
+                                FILTER.eq("documentId", documentId), FILTER.eq("sectionPath", sectionPath))).build();
                 List<Document> siblings = vectorStore.similaritySearch(request);
                 int added = 0;
                 for (Document sibling : siblings) {
@@ -286,8 +287,19 @@ public class AgentKnowledgeRagService {
         return value == null || "null".equals(String.valueOf(value)) ? "" : String.valueOf(value).trim();
     }
 
-    private static String escape(String value) {
-        return value == null ? "" : value.replace("'", "''");
+    private static final FilterExpressionBuilder FILTER = new FilterExpressionBuilder();
+
+    /**
+     * 元数据过滤统一走表达式树构建：值恒为字面量节点，由 store 层转绑定参数。
+     * 旧实现用字符串拼接 filterExpression，含引号的租户/agentKey/documentId 可改写过滤语义
+     * （解析失败或越权读到其他租户/生命周期的切片），此处收口。
+     */
+    private static Filter.Expression andAll(FilterExpressionBuilder.Op first, FilterExpressionBuilder.Op... rest) {
+        FilterExpressionBuilder.Op combined = first;
+        for (FilterExpressionBuilder.Op condition : rest) {
+            combined = FILTER.and(combined, condition);
+        }
+        return combined.build();
     }
 
     private List<Document> lexicalRecall(String tenantId, String agentKey, String query, int limit) {
@@ -445,8 +457,8 @@ public class AgentKnowledgeRagService {
     private SearchRequest searchRequest(String tenantId, String agentKey, String query, int topK, double similarityThreshold) {
         return SearchRequest.builder().query(query).topK(topK)
                 .similarityThreshold(similarityThreshold)
-                .filterExpression("tenantId == '" + tenantId + "' && agentKey == '" + agentKey
-                        + "' && lifecycleStatus == 'ACTIVE'").build();
+                .filterExpression(andAll(FILTER.eq("tenantId", tenantId), FILTER.eq("agentKey", agentKey),
+                        FILTER.eq("lifecycleStatus", "ACTIVE"))).build();
     }
 
     private double score(Document document) {

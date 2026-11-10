@@ -64,6 +64,9 @@ public class KnowledgeVectorSchemaInitializer implements ApplicationRunner {
                 + "((metadata ->> 'tenantId'), (metadata ->> 'agentKey'), (metadata ->> 'lifecycleStatus'))");
         create("CREATE INDEX IF NOT EXISTS idx_kv_document ON agent_knowledge_vector "
                 + "((metadata ->> 'documentId'))");
+        // 兄弟扩展按「同文档同章节」直查：复合表达式索引避免 JSONB 逐行过滤
+        create("CREATE INDEX IF NOT EXISTS idx_kv_document_section ON agent_knowledge_vector "
+                + "((metadata ->> 'documentId'), (metadata ->> 'sectionPath'))");
         // 词法通道按关键词匹配正文；pg_trgm 由 V42 迁移安装
         create("CREATE INDEX IF NOT EXISTS idx_kv_content_trgm ON agent_knowledge_vector "
                 + "USING gin (content gin_trgm_ops)");

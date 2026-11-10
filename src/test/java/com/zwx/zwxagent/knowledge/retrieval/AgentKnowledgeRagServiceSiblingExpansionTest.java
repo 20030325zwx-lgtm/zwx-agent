@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -13,11 +15,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 父子分块的检索侧实现：命中文本块后按「同文档同章节」拉兄弟块进上下文；
- * 开关关闭时行为与旧版一致。
+ * 父子分块的检索侧实现：命中文本块后按「同文档同章节」元数据直查兄弟块进上下文；
+ * 开关关闭时行为与旧版一致。兄弟查询已 SQL 化（不漏块、chunkIndex 阅读序、不花 embedding）。
  */
 class AgentKnowledgeRagServiceSiblingExpansionTest {
 
@@ -27,48 +28,62 @@ class AgentKnowledgeRagServiceSiblingExpansionTest {
     @Test
     void hitExpandsWithSectionSiblings() throws Exception {
         Document hit = chunk("hit-1", "审批流程的总则说明", "ACTIVE", Map.of(
-                "sourceType", "TEXT", "documentId", "doc-1", "sectionPath", "第三章 > 审批流程"));
+                "sourceType", "TEXT", "documentId", "doc-1", "sectionPath", "第三章 > 审批流程", "chunkIndex", 3));
         Document sibling = chunk("sib-1", "审批流程的详细步骤说明", "ACTIVE", Map.of(
-                "sourceType", "TEXT", "documentId", "doc-1", "sectionPath", "第三章 > 审批流程"));
-        AtomicInteger siblingSearches = new AtomicInteger();
-        // 主召回返回命中；兄弟查询（带 sectionPath 过滤）返回同章节兄弟块（过滤由向量库承担）
-        AgentKnowledgeRagService service2 = service(List.of(hit), Optional.empty(), request -> {
-            if (String.valueOf(request.getFilterExpression()).contains("sectionPath")) {
-                siblingSearches.incrementAndGet();
+                "sourceType", "TEXT", "documentId", "doc-1", "sectionPath", "第三章 > 审批流程", "chunkIndex", 4));
+        List<String> sectionQueries = new ArrayList<>();
+        AgentKnowledgeRagService service2 = service(List.of(hit), Optional.empty(), (sql, args) -> {
+            if (sql.contains("sectionPath")) {
+                sectionQueries.add(sql);
                 return List.of(hit, sibling);
             }
             return List.of();
         });
         set(service2, "siblingExpansionEnabled", true);
         AgentKnowledgeRagResult result = service2.retrieveWithContext(TENANT, AGENT, "审批流程");
-        System.out.println("DEBUG_CONTEXT=" + result.context().replace("\n","|"));
         Assertions.assertTrue(result.context().contains("审批流程的详细步骤说明"), "兄弟块应进入回答上下文");
-        Assertions.assertTrue(siblingSearches.get() >= 1);
+        Assertions.assertEquals(1, sectionQueries.size(), "兄弟块应通过一次元数据 SQL 直查获得");
+        Assertions.assertTrue(sectionQueries.getFirst().contains("ORDER BY"), "同节直查必须按 chunkIndex 阅读序");
     }
 
     @Test
     void figureChunksAreNotExpanded() throws Exception {
         Document figureHit = chunk("fig-1", "[图纸|流程图] 审批流程图", "ACTIVE", Map.of(
                 "sourceType", "FIGURE", "documentId", "doc-1", "sectionPath", "第三章 > 审批流程"));
-        AtomicInteger siblingSearches = new AtomicInteger();
-        AgentKnowledgeRagService service = service(List.of(figureHit), Optional.empty(), request -> {
-            if (String.valueOf(request.getFilterExpression()).contains("sectionPath")) {
-                siblingSearches.incrementAndGet();
-                return List.of();
-            }
+        List<String> sectionQueries = new ArrayList<>();
+        AgentKnowledgeRagService service = service(List.of(figureHit), Optional.empty(), (sql, args) -> {
+            if (sql.contains("sectionPath")) sectionQueries.add(sql);
             return List.of();
         });
         set(service, "siblingExpansionEnabled", true);
         service.retrieveWithContext(TENANT, AGENT, "审批流程图");
-        Assertions.assertEquals(0, siblingSearches.get(), "图纸块由描述 chunk 自带上下文，不做兄弟扩展");
+        Assertions.assertEquals(0, sectionQueries.size(), "图纸块由描述 chunk 自带上下文，不做兄弟扩展");
     }
 
-    private interface StubSearch {
-        List<Document> search(SearchRequest request);
+    @Test
+    void longSectionQueriesWithExtraPlusOneLimit() throws Exception {
+        // 同节块数超过 extra：直查 LIMIT = extra + 1（含命中自身），长节不漏由 DB 按阅读序保证
+        Document hit = chunk("hit-1", "总则", "ACTIVE", Map.of(
+                "sourceType", "TEXT", "documentId", "doc-1", "sectionPath", "第一章", "chunkIndex", 1));
+        List<Object[]> capturedArgs = new ArrayList<>();
+        AgentKnowledgeRagService service = service(List.of(hit), Optional.empty(), (sql, args) -> {
+            if (sql.contains("sectionPath")) capturedArgs.add(args);
+            return List.of();
+        });
+        set(service, "siblingExpansionEnabled", true);
+        set(service, "siblingExpansionExtra", 4);
+        service.retrieveWithContext(TENANT, AGENT, "总则");
+        Assertions.assertEquals(1, capturedArgs.size());
+        Assertions.assertEquals(5, capturedArgs.getFirst()[4], "LIMIT 应为 extra+1（含命中自身）");
+        Assertions.assertTrue(capturedArgs.getFirst()[2].equals("doc-1"), "documentId 作为过滤参数");
+    }
+
+    private interface JdbcStub {
+        List<Document> onQuery(String sql, Object[] args);
     }
 
     private AgentKnowledgeRagService service(List<Document> pool, Optional<List<DashScopeRerankService.RerankHit>> rerankHits,
-                                             StubSearch siblingSearch) {
+                                             JdbcStub jdbcStub) {
         VectorStore stubStore = new VectorStore() {
             @Override
             public void add(List<Document> documents) { }
@@ -81,9 +96,8 @@ class AgentKnowledgeRagServiceSiblingExpansionTest {
 
             @Override
             public List<Document> similaritySearch(SearchRequest request) {
-                String expression = String.valueOf(request.getFilterExpression());
-                if (expression.contains("sectionPath")) return siblingSearch.search(request);
-                Assertions.assertTrue(expression.contains("lifecycleStatus"), "主召回必须约束 lifecycleStatus");
+                Assertions.assertTrue(String.valueOf(request.getFilterExpression()).contains("lifecycleStatus"),
+                        "主召回必须约束 lifecycleStatus");
                 return pool;
             }
         };
@@ -91,6 +105,14 @@ class AgentKnowledgeRagServiceSiblingExpansionTest {
             @Override
             public Optional<List<DashScopeRerankService.RerankHit>> rerank(String query, List<String> documents) {
                 return Optional.empty();
+            }
+        };
+        JdbcTemplate jdbc = new JdbcTemplate() {
+            @Override
+            public <T> List<T> query(String sql, RowMapper<T> rowMapper, Object... args) {
+                @SuppressWarnings("unchecked")
+                List<T> result = (List<T>) jdbcStub.onQuery(sql, args);
+                return result;
             }
         };
         AgentKnowledgeRagService service = new AgentKnowledgeRagService(stubStore, rerankStub);
@@ -103,6 +125,9 @@ class AgentKnowledgeRagServiceSiblingExpansionTest {
             set(service, "timeoutMs", 3000L);
             set(service, "siblingExpansionMaxHits", 2);
             set(service, "siblingExpansionExtra", 4);
+            set(service, "siblingExpansionBudgetMs", 1800L);
+            set(service, "jdbcTemplate", jdbc);
+            set(service, "objectMapper", new com.fasterxml.jackson.databind.ObjectMapper());
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }

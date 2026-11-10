@@ -5,5 +5,6 @@ public record RagTraceCandidate(String documentId, String filename, String logic
                                 Integer lexicalRank, Integer lexicalScore, Integer fusedRank, Double fusionScore,
                                 Integer rerankRank, Double rerankScore, boolean selected,
                                 String chunkId, String sourceDocumentId, String blockId, String sourceType,
-                                Integer rowStart, Integer rowEnd, String regionLabel) {
+                                Integer rowStart, Integer rowEnd, String regionLabel,
+                                String sectionPath, String figureImages) {
 }

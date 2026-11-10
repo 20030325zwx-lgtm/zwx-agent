@@ -28,6 +28,11 @@ public class DashScopeRerankService {
     public record RerankHit(int index, double score) {
     }
 
+    /** 重排单次调用文档上限；调用方应按融合序先截到该长度，避免服务内静默截断。 */
+    public int maxDocuments() {
+        return MAX_DOCUMENTS;
+    }
+
     private static final String DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank";
     private static final int MAX_DOCUMENTS = 20;
     private static final int MAX_DOCUMENT_CHARS = 1200;

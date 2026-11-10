@@ -786,10 +786,11 @@ public class AgentKnowledgeDocumentService {
         }
         TableRegion table = tableRegion(sourceType, block, rowStart, rowEnd, tableCaption);
         boolean legacy = sourceType == null || sourceType.isBlank();
+        List<String> figureImages = block == null ? List.of() : splitImageKeys(block.imageObjectKey());
         return new AgentKnowledgeChunkPreview(chunkId, documentId, filename, chunkIndex, content,
                 plainText(content), pageNumber, sectionPath, sourceType, blockId,
                 regionLabel == null || regionLabel.isBlank() ? legacyLabel(filename, pageNumber) : regionLabel,
-                legacy, table);
+                legacy, table, figureImages);
     }
 
     private AgentKnowledgeChunkPreview blockPreview(String tenantId, String agentKey, String documentId,
@@ -803,7 +804,13 @@ public class AgentKnowledgeDocumentService {
         return new AgentKnowledgeChunkPreview(null, documentId, filename, null, content,
                 plainText(content == null ? "" : content), pageNumber, null, sourceType, blockId,
                 caption == null || caption.isBlank() ? legacyLabel(filename, pageNumber) : caption,
-                false, table);
+                false, table, splitImageKeys(imageObjectKey));
+    }
+
+    /** figureImages metadata 以 | 连接多张碎片图；预览与原图端点共用拆分。 */
+    private static List<String> splitImageKeys(String joined) {
+        if (joined == null || joined.isBlank()) return List.of();
+        return java.util.Arrays.stream(joined.split("\\|")).map(String::trim).filter(s -> !s.isEmpty()).toList();
     }
 
     private AgentKnowledgeBlock findBlock(String tenantId, String agentKey, String documentId, String blockId) {
@@ -880,6 +887,38 @@ public class AgentKnowledgeDocumentService {
         }
     }
 
+    /** 读取图纸块原图（引用回图）；块必须属于当前租户/agent。index 对应 figureImages 的多碎片序号。 */
+    public DocumentFile readBlockImage(String tenantId, String agentKey, String documentId, String blockId, int index) {
+        validateScope(tenantId, agentKey);
+        AgentKnowledgeBlock block = findBlock(tenantId, agentKey, documentId, blockId);
+        if (block == null || block.imageObjectKey() == null || block.imageObjectKey().isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Figure image not found");
+        }
+        List<String> keys = splitImageKeys(block.imageObjectKey());
+        if (index < 0 || index >= keys.size()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Figure image index out of range");
+        }
+        String objectKey = keys.get(index);
+        try (var input = storage.open(objectKey)) {
+            return new DocumentFile(input.readAllBytes(), objectKey.substring(objectKey.lastIndexOf('/') + 1),
+                    imageContentType(objectKey));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to read knowledge figure image", exception);
+        }
+    }
+
+    private static String imageContentType(String objectKey) {
+        String lower = objectKey.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        return "application/octet-stream";
+    }
+
     private static String contentType(String filename) {
         String extension = filename == null || !filename.contains(".")
                 ? "" : filename.substring(filename.lastIndexOf('.') + 1).toLowerCase(java.util.Locale.ROOT);
@@ -937,6 +976,11 @@ public class AgentKnowledgeDocumentService {
         metadata.put("chunkIndex", chunkIndex);
         metadata.put("parentDocumentId", stored.documentId());
         metadata.put("parentLogicalKey", stored.logicalKey());
+        Object parser = metadata.get("parser");
+        if (parser != null && !"mineru".equals(String.valueOf(parser))) {
+            // 降级解析（Docling/Tika 兜底）产物结构质量断崖，检索与回答侧据此提示（评审 #8）
+            metadata.put("parseQuality", "degraded");
+        }
         if (chunkIndex > 1) metadata.put("previousChunkIndex", chunkIndex - 1);
         return Document.builder().id(UUID.nameUUIDFromBytes((stored.documentId() + "|chunk|" + chunkIndex).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString())
                 .text(document.getText()).metadata(metadata).build();

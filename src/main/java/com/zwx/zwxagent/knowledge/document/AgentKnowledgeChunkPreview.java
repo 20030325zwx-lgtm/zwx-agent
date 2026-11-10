@@ -17,7 +17,8 @@ public record AgentKnowledgeChunkPreview(String chunkId,
                                          String blockId,
                                          String regionLabel,
                                          boolean legacy,
-                                         TableRegion table) {
+                                         TableRegion table,
+                                         List<String> figureImages) {
 
     public record TableRegion(String caption,
                               List<String> headers,

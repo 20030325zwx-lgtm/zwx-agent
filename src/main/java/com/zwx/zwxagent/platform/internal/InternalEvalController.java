@@ -93,6 +93,24 @@ public class InternalEvalController {
         return response;
     }
 
+    public record RetrievalEvalRequest(String tenantId, String agentKey, String query) {
+    }
+
+    /** 离线评测入口：返回完整检索 trace（块级候选/各通道排名/分段耗时），供 golden set runner 算 recall@k/MRR。 */
+    @PostMapping("/retrieval")
+    public Map<String, Object> retrievalEval(@RequestBody RetrievalEvalRequest request) {
+        if (request.tenantId() == null || request.agentKey() == null
+                || request.query() == null || request.query().isBlank()) {
+            throw new IllegalArgumentException("tenantId/agentKey/query 均为必填");
+        }
+        var result = agentKnowledgeRagService.retrieveWithContext(request.tenantId(), request.agentKey(), request.query());
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status", String.valueOf(result.outcome().status()));
+        response.put("context", result.context());
+        response.put("trace", result.trace());
+        return response;
+    }
+
     public record TaskRunRequest(String tenantId, String task, Boolean webSearch, Boolean knowledge,
                                  Integer timeoutMinutes) {
     }

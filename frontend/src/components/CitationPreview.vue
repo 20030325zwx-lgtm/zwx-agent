@@ -47,6 +47,15 @@
 
             <pre v-else class="citation-text">{{ displayText }}</pre>
 
+            <div v-if="figureImages.length" class="figure-gallery" aria-label="引用图纸原图">
+              <div class="figure-heading"><strong>原始图纸</strong><span v-if="figureImages.length > 1">{{ figureImages.length }} 张碎片图</span></div>
+              <figure v-for="(image, index) in figureImages" :key="image.key" class="figure-item">
+                <img v-if="image.url" :src="image.url" :alt="`引用图纸原图 ${index + 1}`" loading="lazy" />
+                <span v-else class="figure-state">图片加载失败</span>
+                <figcaption>图 {{ index + 1 }}</figcaption>
+              </figure>
+            </div>
+
             <div v-if="preview.sectionPath || preview.pageNumber" class="region-meta">
               <span v-if="preview.sectionPath">章节：{{ preview.sectionPath }}</span>
               <span v-if="preview.pageNumber">页码：第 {{ preview.pageNumber }} 页</span>
@@ -68,13 +77,15 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
+import { getAgentKnowledgeBlockImage } from '../api'
 
 const props = defineProps({
   preview: { type: Object, required: true },
   loading: { type: Boolean, default: false },
-  error: { type: String, default: '' }
+  error: { type: String, default: '' },
+  agentKey: { type: String, default: '' }
 })
 const emit = defineEmits(['close'])
 
@@ -86,6 +97,32 @@ const highlightRows = computed(() => new Set(
 ))
 const regionLabel = computed(() => props.preview?.regionLabel || '')
 const displayText = computed(() => props.preview?.displayText || props.preview?.content || '')
+
+// 引用回图：命中的图纸切片按 blockId 回看原始裁剪图（需认证，走 blob URL）
+const figureImages = ref([])
+let lastObjectUrls = []
+const releaseObjectUrls = () => {
+  lastObjectUrls.forEach(url => URL.revokeObjectURL(url))
+  lastObjectUrls = []
+}
+watch(() => [props.preview?.documentId, props.preview?.blockId, props.agentKey], async () => {
+  releaseObjectUrls()
+  figureImages.value = []
+  const keys = Array.isArray(props.preview?.figureImages) ? props.preview.figureImages : []
+  if (!keys.length || !props.preview?.documentId || !props.preview?.blockId || !props.agentKey) return
+  figureImages.value = keys.map(() => ({ url: null }))
+  await Promise.all(keys.map(async (objectKey, index) => {
+    try {
+      const blob = await getAgentKnowledgeBlockImage(props.preview.documentId, props.preview.blockId, props.agentKey, index)
+      const url = URL.createObjectURL(blob)
+      lastObjectUrls.push(url)
+      if (figureImages.value[index]) figureImages.value[index] = { url, objectKey }
+    } catch (exception) {
+      console.warn('图纸原图加载失败', exception)
+    }
+  }))
+}, { immediate: true })
+onBeforeUnmount(releaseObjectUrls)
 </script>
 
 <style scoped>
@@ -181,6 +218,24 @@ const displayText = computed(() => props.preview?.displayText || props.preview?.
 }
 
 .region-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; color: var(--sk-label-3); font-size: 11px; }
+
+.figure-gallery { display: grid; gap: 9px; margin-top: 12px; }
+.figure-heading { display: flex; align-items: baseline; gap: 10px; }
+.figure-heading strong { color: var(--sk-label); font-size: 13.5px; }
+.figure-heading span { color: var(--sk-label-3); font-size: 11px; }
+.figure-item { margin: 0; display: grid; gap: 5px; }
+.figure-item img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin: 0 auto;
+  border: 1px solid var(--sk-separator);
+  border-radius: 12px;
+  background: #fff;
+  object-fit: contain;
+}
+.figure-item figcaption { color: var(--sk-label-3); font-size: 11px; text-align: center; }
+.figure-state { color: var(--sk-label-3); font-size: 12px; text-align: center; }
 
 .citation-foot {
   display: flex;

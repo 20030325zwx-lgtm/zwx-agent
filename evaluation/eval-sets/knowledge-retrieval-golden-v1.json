@@ -1,0 +1,9 @@
+{
+  "comment": "知识库检索 golden set v1（阶段 1）。cases 当前为空：先选 2-3 份真实 PDF（必含宽表格 + 无图注图纸）入库，再按下方字段说明补题。每题标注期望命中的 blockId（精确）与 sectionPath（宽判口径，见 runner 头注释）。负例题 category=negative、expected=null。",
+  "corpus": {
+    "status": "PENDING_USER",
+    "note": "待用户挑定语料后回填：每份文档的 documentId、filename、含表格/图纸情况",
+    "documents": []
+  },
+  "cases": []
+}

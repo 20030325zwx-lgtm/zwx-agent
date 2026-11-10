@@ -161,6 +161,7 @@ export const getAgentKnowledgeChunk = (chunkId, agentKey, scope = {}) => request
 export const listAgentKnowledgeDocuments = agentKey => request.get('/ai/agent-knowledge/documents', { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocument = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}`, { params: { agentKey } }).then(response => response.data)
 export const getAgentKnowledgeDocumentFile = (agentKey, documentId) => request.get(`/ai/agent-knowledge/documents/${documentId}/content`, { params: { agentKey }, responseType: 'blob' }).then(response => response.data)
+export const getAgentKnowledgeBlockImage = (documentId, blockId, agentKey, index = 0) => request.get(`/ai/agent-knowledge/documents/${encodeURIComponent(documentId)}/blocks/${encodeURIComponent(blockId)}/image`, { params: { agentKey, index }, responseType: 'blob' }).then(response => response.data)
 export const getSkillCatalog = agentKey => request.get('/ai/skills/catalog', { params: { agentKey } }).then(response => response.data)
 export const saveSkillConfiguration = (agentKey, enabledSkillIds) => request.post('/ai/skills/config', { agentKey, enabledSkillIds }).then(response => response.data)
 export const judgeRagCandidate = (messageId, agentKey, candidateId, judgment) => request.post(`/ai/rag-evaluations/${messageId}/judgments`, { agentKey, candidateId, judgment })

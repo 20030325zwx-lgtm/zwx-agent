@@ -166,7 +166,7 @@
     </footer>
 
     <CitationPreview v-if="citationPreview" :preview="citationPreview" :loading="citationLoading"
-      :error="citationError" @close="closeCitation" />
+      :error="citationError" :agent-key="aiType" @close="closeCitation" />
   </div>
 </template>
 

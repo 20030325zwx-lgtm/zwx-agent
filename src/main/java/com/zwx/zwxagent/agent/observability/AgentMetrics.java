@@ -47,6 +47,25 @@ public class AgentMetrics {
         registry.counter("agent.rag.degraded", "reason", safe(reason)).increment();
     }
 
+    /** 检索分段耗时（毫秒）：vector / lexical / rerank，P95 看板数据源。 */
+    public void ragStageMillis(String stage, long millis) {
+        io.micrometer.core.instrument.Timer.builder("agent.rag.stage")
+                .tags("stage", safe(stage)).publishPercentiles(0.95).register(registry)
+                .record(Math.max(0, millis), java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
+    /** rerank 降级：候选池非空但重排不可用/失败，回退向量序。 */
+    public void ragRerankDegraded() {
+        registry.counter("agent.rag.rerank.degraded").increment();
+    }
+
+    /** 向量召回池不足：HNSW 先取邻居后过滤，过滤选择性强时可能取不满 topK（评审 #2 的观测面）。 */
+    public void ragVectorPoolUnderfilled(int expected, int actual) {
+        if (actual < expected) {
+            registry.counter("agent.rag.vector.pool.underfilled").increment();
+        }
+    }
+
     /** 意图分流动作：auto-knowledge / auto-web / short-circuit / fallback。 */
     public void intentDecision(String action) {
         registry.counter("agent.intent.decision", "action", safe(action)).increment();

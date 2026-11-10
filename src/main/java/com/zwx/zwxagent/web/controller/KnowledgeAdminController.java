@@ -165,6 +165,21 @@ public class KnowledgeAdminController {
                 .body(content.bytes());
     }
 
+    /** 图纸块原图（引用回图）：命中的 figure_description 切片可通过 blockId 回看原始裁剪图。 */
+    @GetMapping("/agent-knowledge/documents/{documentId}/blocks/{blockId}/image")
+    public ResponseEntity<byte[]> getAgentKnowledgeBlockImage(CurrentActor actor, @PathVariable String documentId,
+                                                              @PathVariable String blockId,
+                                                              @RequestParam String agentKey,
+                                                              @RequestParam(defaultValue = "0") int index) {
+        actor.requireKnowledgeWorkflowAccess(agentKey);
+        var content = agentKnowledgeDocumentService.readBlockImage(actor.tenantId(), agentKey, documentId, blockId, index);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(content.contentType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.inline().filename(content.filename(), StandardCharsets.UTF_8).build().toString())
+                .body(content.bytes());
+    }
+
     @PostMapping("/agent-knowledge/documents/{documentId}/publish")
     public AgentKnowledgeDocument publishAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId,
                                                                  @RequestParam String agentKey) {

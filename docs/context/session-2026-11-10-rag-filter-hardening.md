@@ -26,6 +26,7 @@ ILIKE 无法走 pg_trgm 的真实原因是 CASE 在 SELECT 里无法下推 + 中
 
 ## 遗留事项（知识库六阶段计划，已与用户对齐）
 
+- **2026-11-10 深夜更新**：项目方向收敛为专攻知识库。模块全景图 + 外部评审逐条判定 + 修订六阶段计划已落 `docs/design/2026-11-10-knowledge-module-flow-map.md`（阶段 3 合并 rerank 显式化/兄弟扩展 SQL 化/预算分段/parseQuality，新增在线看板、查询理解实验等），**后续以该文档为准**；另有 4 项待用户拍板（README 意图分流、阶段 2 镜像决策、引用权威表示、语料选择）。
 - 阶段 1（下一步）：golden set 基线。30-50 题分四类（文本/表格行/图纸含无图注/精确术语），
   块级 recall@k + MRR + 各通道贡献（RagTraceCandidate 已带全部字段可直接算）；
   沿用 evaluation/eval-sets/run_baseline.py 惯例；加「期望块是否存在」入库/检索失败归因、

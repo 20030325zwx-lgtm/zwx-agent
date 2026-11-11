@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>zhuwenxuan.online</title>
+  <meta name="description" content="个人站点：Aster 星枢 AI 工作区、评测中台与数据中台入口。" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <style>
+    :root {
+      --ink: #101828;
+      --muted: #667085;
+      --line: #e4e7ec;
+      --card: #ffffff;
+      --accent: #2563eb;
+      --bg: #f6f8fb;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 32px 20px;
+      background:
+        radial-gradient(900px 480px at 18% 0%, #e8efff 0%, transparent 60%),
+        radial-gradient(720px 420px at 100% 18%, #eef7f2 0%, transparent 55%),
+        var(--bg);
+      color: var(--ink);
+      font: 15px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    main { width: min(760px, 100%); }
+    .kicker {
+      display: block;
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 5vw, 40px);
+      font-weight: 680;
+      letter-spacing: -.02em;
+    }
+    .lead { margin: 0 0 34px; max-width: 52ch; color: var(--muted); }
+    .entries { display: grid; gap: 12px; }
+    .entry {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--card);
+      color: inherit;
+      text-decoration: none;
+      transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+    }
+    .entry:hover, .entry:focus-visible {
+      border-color: #b8c4d8;
+      transform: translateY(-1px);
+      box-shadow: 0 10px 28px rgba(16, 24, 40, .07);
+      outline: none;
+    }
+    .entry strong { display: block; font-size: 15.5px; font-weight: 640; }
+    .entry small { display: block; margin-top: 3px; color: var(--muted); font-size: 12.5px; }
+    .arrow { flex: 0 0 auto; color: var(--accent); font-weight: 600; }
+    footer { margin-top: 34px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 520px) {
+      .entry { flex-direction: column; align-items: flex-start; gap: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="kicker">zhuwenxuan.online</span>
+    <h1>一个站点，几个在做的东西。</h1>
+    <p class="lead">这里不自动进入任何应用。按需选择入口，各服务独立访问。</p>
+
+    <div class="entries">
+      <a class="entry" href="/super-agent">
+        <span>
+          <strong>Aster 星枢 · 智能体工作区</strong>
+          <small>长任务编排、私有知识库、多智能体协作</small>
+        </span>
+        <span class="arrow">→</span>
+      </a>
+      <a class="entry" href="/knowledge-admin">
+        <span>
+          <strong>Aster 星枢 · 知识库</strong>
+          <small>文档入库、切片检查与检索调试</small>
+        </span>
+        <span class="arrow">→</span>
+      </a>
+      <a class="entry" href="/eval/">
+        <span>
+          <strong>评测中台</strong>
+          <small>意图分流与任务评测</small>
+        </span>
+        <span class="arrow">→</span>
+      </a>
+      <a class="entry" href="/data/">
+        <span>
+          <strong>数据中台</strong>
+          <small>轨迹回流与运行数据</small>
+        </span>
+        <span class="arrow">→</span>
+      </a>
+    </div>
+
+    <footer>© <span id="year">2026</span> zhuwenxuan.online</footer>
+  </main>
+  <script>document.getElementById('year').textContent = String(new Date().getFullYear());</script>
+</body>
+</html>

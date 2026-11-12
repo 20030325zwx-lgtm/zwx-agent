@@ -14,19 +14,35 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/root/.cache/huggingface \
     HF_HUB_DISABLE_XET=1
 
-# Docling 依赖的系统库 + Tesseract 中文 OCR
+# Docling 依赖的系统库 + Tesseract 中文 OCR + 下载工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates \
       libgl1 libglib2.0-0 libgomp1 libsm6 libxext6 libxrender1 \
       tesseract-ocr tesseract-ocr-chi-sim \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# CPU 版 torch/torchvision：PyPI 的 linux wheel 自带 CUDA（镜像大 ~2GB），
-# +cpu 本地版本只存在于 PyTorch 官方 CPU 索引；其余依赖仍从 PIP_INDEX_URL 解析。
-RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
-      --extra-index-url "${TORCH_INDEX_URL}" \
-      "torch==2.9.1+cpu" "torchvision==0.24.1+cpu"
+# CPU 版 torch/torchvision：
+# - PyPI 的 linux wheel 自带 CUDA（镜像大 ~2GB）；
+# - amd64（服务器）走阿里云 wheel 直链，避免国际带宽；
+# - arm64（本地开发）走 PyTorch 官方 CPU 索引（+cpu 版本只存在于该索引）。
+ARG TARGETARCH
+RUN case "${TARGETARCH:-amd64}" in \
+      amd64) \
+        curl -fsSL -o /tmp/torch.whl \
+          "https://mirrors.aliyun.com/pytorch-wheels/cpu/torch-2.9.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
+        && curl -fsSL -o /tmp/torchvision.whl \
+          "https://mirrors.aliyun.com/pytorch-wheels/cpu/torchvision-0.24.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
+        && pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+             /tmp/torch.whl /tmp/torchvision.whl \
+        && rm -f /tmp/torch.whl /tmp/torchvision.whl ;; \
+      arm64) \
+        pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+          --extra-index-url "${TORCH_INDEX_URL}" \
+          "torch==2.9.1+cpu" "torchvision==0.24.1+cpu" ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r requirements.txt

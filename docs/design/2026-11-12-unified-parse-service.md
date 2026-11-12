@@ -106,6 +106,8 @@ images/p{page}_{n}.png   # 图纸/图片裁剪
    图纸分组/引用定位。已用假对象单测锁换算，但真实文档需冒烟（`PARSE_SMOKE_PDF`）。
 2. **首次解析下载模型**：Docling 模型权重下载到 `HF_HOME`，需联网；`parse-cache` 卷复用。
 3. **服务器构建耗时**：torch CPU 体积大，首次 `docker build` 可能 10-20 分钟；后续层缓存。
+   服务器无法访问 Docker Hub（实测超时），发布脚本通过 build-arg 走 daoCloud 基础镜像与
+   清华 PyPI 源；torch/torchvision 固定 `+cpu` 本地版本（PyPI 默认 wheel 自带 CUDA，体积翻倍）。
 4. **并发内存**：Docling 单文档峰值数百 MB；`mem_limit: 3g` + 并发 2 为稳态假设，压测后调整。
 5. **表格结构**：Docling `export_to_html` 覆盖多数表格；无结构时降级为文本（与 MinerU 行为一致）。
 

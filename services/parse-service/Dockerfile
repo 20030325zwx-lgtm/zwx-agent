@@ -1,4 +1,12 @@
-FROM python:3.11-slim
+# 基础镜像与包源可通过 build-arg 覆盖：
+# 服务器（国内）无法访问 Docker Hub 时，用
+#   --build-arg BASE_IMAGE=docker.m.daocloud.io/library/python:3.11-slim
+#   --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
+
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -13,8 +21,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# CPU 版 torch/torchvision：PyPI 的 linux wheel 自带 CUDA（镜像大 ~2GB），
+# +cpu 本地版本只存在于 PyTorch 官方 CPU 索引；其余依赖仍从 PIP_INDEX_URL 解析。
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+      --extra-index-url "${TORCH_INDEX_URL}" \
+      "torch==2.9.1+cpu" "torchvision==0.24.1+cpu"
+
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r requirements.txt
+
 COPY app ./app
 
 EXPOSE 8131

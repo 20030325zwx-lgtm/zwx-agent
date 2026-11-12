@@ -7,6 +7,8 @@ FROM ${BASE_IMAGE}
 
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+# Debian 官方源在国内可能极慢；默认切阿里云镜像（可用 build-arg 覆盖）
+ARG APT_MIRROR=mirrors.aliyun.com
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -15,7 +17,12 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HUB_DISABLE_XET=1
 
 # Docling 依赖的系统库 + Tesseract 中文 OCR + 下载工具
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN if [ -n "${APT_MIRROR}" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends \
       curl ca-certificates \
       libgl1 libglib2.0-0 libgomp1 libsm6 libxext6 libxrender1 \
       tesseract-ocr tesseract-ocr-chi-sim \

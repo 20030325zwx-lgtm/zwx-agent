@@ -53,6 +53,10 @@ public class AgentKnowledgeDocumentService {
     @jakarta.annotation.Resource
     private FigureEnrichmentService figureEnrichmentService;
 
+    /** 统一解析服务（Python sidecar）：字段注入，未启用时为 null，provider=python 分支自动跳过。 */
+    @jakarta.annotation.Resource
+    private PythonParseClient pythonParseClient;
+
     // 向量批间并行度：默认 1（串行）。DashScope embedding 配额（TPM）是真实瓶颈，
     // 并行只会提前触发 429 Throttling.AllocationQuota 反而更慢（2026-10-25 实测：4 路并行 125s vs 串行 ~80s）；
     // 配额充足的账号可调大。字段注入避免构造器继续加长，手工构造的单测取初始值。
@@ -261,9 +265,18 @@ public class AgentKnowledgeDocumentService {
                     log.warn("MinerU knowledge parsing failed, falling back; filename={}, reason={}",
                             stored.filename(), safeMessage(exception));
                 }
+            } else if ("python".equals(documentParserProvider) && pythonParseClient != null
+                    && pythonParseClient.isConfigured() && pythonParseClient.supports(stored.filename())) {
+                try {
+                    splitChunks = pythonChunks(bytes, stored, sourceMetadata, documentId);
+                } catch (Exception exception) {
+                    log.warn("Parse service knowledge parsing failed, falling back; filename={}, reason={}",
+                            stored.filename(), safeMessage(exception));
+                }
             }
             boolean useDocling = "docling".equals(documentParserProvider)
-                    || ("mineru".equals(documentParserProvider) && splitChunks == null);
+                    || (("mineru".equals(documentParserProvider) || "python".equals(documentParserProvider))
+                            && splitChunks == null);
             if (splitChunks == null && useDocling && doclingChunkingService.shouldUse(stored.filename())) {
                 try {
                     splitChunks = doclingChunkingService.chunk(bytes, stored.filename(), sourceMetadata);
@@ -395,15 +408,37 @@ public class AgentKnowledgeDocumentService {
     private List<Document> mineruChunks(byte[] bytes, StoredDocument stored,
                                         Map<String, Object> sourceMetadata, String documentId) {
         MineruParseResult result = mineruDocumentParser.parse(bytes, stored.filename());
-        String markdown = result.markdown();
-        if (markdown == null || markdown.isBlank()) {
-            throw new IllegalStateException("MinerU returned no extractable content");
-        }
+        requireMarkdown(result, "MinerU");
         sourceMetadata.put("parser", "mineru");
         sourceMetadata.put("mineruResultFileCount", result.fileNames().size());
         sourceMetadata.put("mineruJsonFileCount", result.countFiles(".json"));
         sourceMetadata.put("mineruHtmlFileCount", result.countFiles(".html"));
+        return structuredChunks(result, stored, sourceMetadata, documentId, "MinerU");
+    }
 
+    /** 统一解析服务（Python sidecar）：返回 MinerU 等价结果包，后续管线完全复用。 */
+    private List<Document> pythonChunks(byte[] bytes, StoredDocument stored,
+                                        Map<String, Object> sourceMetadata, String documentId) {
+        MineruParseResult result = pythonParseClient.parse(bytes, stored.filename());
+        requireMarkdown(result, "Parse service");
+        sourceMetadata.put("parser", "python");
+        sourceMetadata.put("pythonResultFileCount", result.fileNames().size());
+        sourceMetadata.put("pythonJsonFileCount", result.countFiles(".json"));
+        sourceMetadata.put("pythonHtmlFileCount", result.countFiles(".html"));
+        return structuredChunks(result, stored, sourceMetadata, documentId, "Parse service");
+    }
+
+    private static void requireMarkdown(MineruParseResult result, String parserLabel) {
+        String markdown = result.markdown();
+        if (markdown == null || markdown.isBlank()) {
+            throw new IllegalStateException(parserLabel + " returned no extractable content");
+        }
+    }
+
+    /** provider 无关的结构化切片：块解析 → 原图落库 → 来源块落库 → 图纸增强 → 结构化分块。 */
+    private List<Document> structuredChunks(MineruParseResult result, StoredDocument stored,
+                                            Map<String, Object> sourceMetadata, String documentId,
+                                            String parserLabel) {
         List<MineruBlockParser.MineruBlock> blocks = mineruBlockParser.parse(result);
         if (!blocks.isEmpty()) {
             Map<String, String> objectKeys = persistMineruFiles(stored, result, documentId);
@@ -411,9 +446,10 @@ public class AgentKnowledgeDocumentService {
             FigureSupport figures = figureSupport(stored, objectKeys, blocks);
             List<Document> structured = structuredKnowledgeChunker.chunks(blocks, sourceMetadata, figures);
             if (!structured.isEmpty()) return structured;
-            log.warn("MinerU content_list produced no usable chunks, falling back to markdown; filename={}", stored.filename());
+            log.warn("{} content_list produced no usable chunks, falling back to markdown; filename={}",
+                    parserLabel, stored.filename());
         }
-        return textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(markdown)
+        return textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(result.markdown())
                 .metadata(sourceMetadata).build()));
     }
 
@@ -977,7 +1013,8 @@ public class AgentKnowledgeDocumentService {
         metadata.put("parentDocumentId", stored.documentId());
         metadata.put("parentLogicalKey", stored.logicalKey());
         Object parser = metadata.get("parser");
-        if (parser != null && !"mineru".equals(String.valueOf(parser))) {
+        if (parser != null && !"mineru".equals(String.valueOf(parser))
+                && !"python".equals(String.valueOf(parser))) {
             // 降级解析（Docling/Tika 兜底）产物结构质量断崖，检索与回答侧据此提示（评审 #8）
             metadata.put("parseQuality", "degraded");
         }

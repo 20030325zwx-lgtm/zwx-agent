@@ -187,6 +187,14 @@ public class MineruDocumentParser {
     }
 
     MineruParseResult extractResult(byte[] zip) throws Exception {
+        return extractResult(zip, maxZipBytes);
+    }
+
+    /**
+     * 与解析器实例解耦的 zip 解包入口：Python 解析服务等外部来源复用同一套
+     * 「full.md + content_list.json + images」约定与解压限额。
+     */
+    static MineruParseResult extractResult(byte[] zip, long maxZipLimit) throws Exception {
         Map<String, byte[]> files = new LinkedHashMap<>();
         String fallbackMarkdown = null;
         long expandedBytes = 0;
@@ -201,7 +209,7 @@ public class MineruDocumentParser {
                 while ((read = input.read(buffer)) != -1) {
                     output.write(buffer, 0, read);
                     expandedBytes += read;
-                    if (expandedBytes > maxZipBytes) throw new MineruException("MinerU expanded result is too large");
+                    if (expandedBytes > maxZipLimit) throw new MineruException("MinerU expanded result is too large");
                 }
                 byte[] contents = output.toByteArray();
                 files.put(name, contents);

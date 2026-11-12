@@ -1,0 +1,16 @@
+name: aster-parse
+
+services:
+  parse-service:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8131:8131"
+    environment:
+      PARSE_MAX_BYTES: "52428800"
+      PARSE_MAX_CONCURRENT: "2"
+    volumes:
+      - parse-cache:/root/.cache/huggingface
+
+volumes:
+  parse-cache:

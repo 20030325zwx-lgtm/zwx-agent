@@ -274,6 +274,12 @@ app:
       # 目录切片后处理：merge（合并清洗）、drop（丢弃）、keep（保留 Docling 原样）
       toc-handling: ${APP_DOCUMENT_PARSER_DOCLING_TOC_HANDLING:merge}
       table-mode: ${APP_DOCUMENT_PARSER_DOCLING_TABLE_MODE:accurate}
+    python:
+      # 统一解析服务（Python sidecar）：输出 MinerU 等价结果包，失败自动回退 docling/local
+      enabled: ${APP_DOCUMENT_PARSER_PYTHON_ENABLED:false}
+      base-url: ${APP_DOCUMENT_PARSER_PYTHON_BASE_URL:http://127.0.0.1:8131}
+      timeout-seconds: ${APP_DOCUMENT_PARSER_PYTHON_TIMEOUT_SECONDS:300}
+      max-zip-bytes: ${APP_DOCUMENT_PARSER_PYTHON_MAX_ZIP_BYTES:104857600}
 # springdoc-openapi config
 springdoc:
   swagger-ui:

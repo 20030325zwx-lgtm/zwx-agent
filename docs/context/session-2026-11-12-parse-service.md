@@ -69,4 +69,12 @@ Java 适配：
 - 后端 actuator 已注册 `parseService` 组件（未启用 → UNKNOWN，符合预期）。
 - 容器内 DOCX 冒烟：8.3s 返回 741B zip，5 个块（4 text + 1 table，表格 HTML 正常），
   DOCX 无 provenance 时 bbox 按契约省略（未写出 "null"）。
-- PDF 冒烟：见下方结果（首次会下载 Docling layout 模型）。
+- PDF 冒烟：首次 181.2s（含 Docling layout 模型下载，之后模型走 parse-cache 卷），
+  再次 15.4s；content_list 2 个 text 块，bbox 正确（top < bottom，如 `[72, 80.51, 370.8, 123.31]`）。
+- 冒烟发现并修复一个真实 bug：bbox 上下边写反（左下原点转换公式错误），已补断言并发布 0.7.39。
+
+## 最终线上状态（0.7.39）
+
+- parse-service：healthy，镜像 2.83GB，`profiles: ["parse"]` + `COMPOSE_PROFILES=parse` 已写入服务器 .env。
+- backend：0.7.38 healthy；`parseService` 健康组件为 UNKNOWN（`APP_DOCUMENT_PARSER_PYTHON_ENABLED=false`）。
+- **生产解析仍未切换**：`APP_DOCUMENT_PARSER_PROVIDER` 保持 `mineru`；切换只需服务器 .env 一行。

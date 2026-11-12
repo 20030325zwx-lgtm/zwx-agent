@@ -35,21 +35,24 @@ WORKDIR /app
 # - amd64（服务器）走阿里云 wheel 直链，避免国际带宽；
 # - arm64（本地开发）走 PyTorch 官方 CPU 索引（+cpu 版本只存在于该索引）。
 ARG TARGETARCH
-RUN case "${TARGETARCH:-amd64}" in \
-      amd64) \
-        curl -fsSL -o /tmp/torch.whl \
-          "https://mirrors.aliyun.com/pytorch-wheels/cpu/torch-2.9.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
-        && curl -fsSL -o /tmp/torchvision.whl \
-          "https://mirrors.aliyun.com/pytorch-wheels/cpu/torchvision-0.24.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
-        && pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
-             /tmp/torch.whl /tmp/torchvision.whl \
-        && rm -f /tmp/torch.whl /tmp/torchvision.whl ;; \
-      arm64) \
-        pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
-          --extra-index-url "${TORCH_INDEX_URL}" \
-          "torch==2.9.1+cpu" "torchvision==0.24.1+cpu" ;; \
-      *) echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac
+RUN set -e; \
+    if [ "${TARGETARCH:-amd64}" = "amd64" ]; then \
+      TORCH_WHEEL="torch-2.9.1+cpu-cp311-cp311-manylinux_2_28_x86_64.whl"; \
+      TV_WHEEL="torchvision-0.24.1+cpu-cp311-cp311-manylinux_2_28_x86_64.whl"; \
+      curl -fsSL -o "/tmp/${TORCH_WHEEL}" \
+        "https://mirrors.aliyun.com/pytorch-wheels/cpu/torch-2.9.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl"; \
+      curl -fsSL -o "/tmp/${TV_WHEEL}" \
+        "https://mirrors.aliyun.com/pytorch-wheels/cpu/torchvision-0.24.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl"; \
+      pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+        "/tmp/${TORCH_WHEEL}" "/tmp/${TV_WHEEL}"; \
+      rm -f "/tmp/${TORCH_WHEEL}" "/tmp/${TV_WHEEL}"; \
+    elif [ "${TARGETARCH}" = "arm64" ]; then \
+      pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+        --extra-index-url "${TORCH_INDEX_URL}" \
+        "torch==2.9.1+cpu" "torchvision==0.24.1+cpu"; \
+    else \
+      echo "unsupported architecture: ${TARGETARCH}" >&2; exit 1; \
+    fi
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r requirements.txt

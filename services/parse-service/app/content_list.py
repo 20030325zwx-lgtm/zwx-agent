@@ -46,14 +46,20 @@ def _page_height(doc, page_no) -> float | None:
 
 
 def to_top_left_bbox(bbox, page_height: float | None):
-    """把 Docling bbox（默认左下原点）转成左上原点；已是左上原点则原样保留数值。"""
+    """把 Docling bbox（默认左下原点）转成左上原点；已是左上原点则原样保留数值。
+
+    左下原点下 ``t`` 是上边（y 较大）、``b`` 是下边（y 较小），因此：
+        top' = page_height - t
+        bottom' = page_height - b
+    结果必须满足 top' < bottom'（左上原点 y 向下增长）。
+    """
     left = float(getattr(bbox, "l"))
     top = float(getattr(bbox, "t"))
     right = float(getattr(bbox, "r"))
     bottom = float(getattr(bbox, "b"))
     origin = str(getattr(bbox, "coord_origin", "")).upper()
     if "BOTTOM" in origin and page_height is not None:
-        top, bottom = page_height - bottom, page_height - top
+        top, bottom = page_height - top, page_height - bottom
     return [round(left, 2), round(top, 2), round(right, 2), round(bottom, 2)]
 
 

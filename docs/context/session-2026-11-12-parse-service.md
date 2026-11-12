@@ -52,9 +52,21 @@ Java 适配：
 - document-mcp 的解析路径（`DOCLING_ENABLED` 硬编码 false）未收口。
 - 后续引擎（PyMuPDF 快速文本、本地 MinerU）未实现，服务已留 `engine` 参数。
 
-## 环境注意事项
+## 部署（已完成，0.7.38）
 
-- 服务器首次构建 parse-service 需联网装 torch/docling，耗时可能 10-20 分钟；模型权重首次
-  `/parse` 才下载（parse-cache 卷复用）。
-- 服务器 amd64，本地 arm64：采用服务器端构建，不做交叉编译。
-- 发布脚本新增的 compose 同步会先备份服务器 `docker-compose.yml`（`.bak-时间戳`）。
+- parse-service 镜像在**服务器端构建**（2.83GB，含 CPU torch/docling），发布脚本已支持
+  parse-service 变更检测、构建上下文上传、compose 同步（带备份）、profile 启动、容器健康轮询。
+- 服务器网络实测：**Docker Hub 不可达**、Debian 官方源极慢、PyPI/PyTorch/阿里云/清华镜像可达。
+  因此：基础镜像走 `docker.m.daocloud.io`；apt 源默认切阿里云（`APT_MIRROR` 可覆盖）；
+  torch/torchvision 用阿里云 `+cpu` wheel 直链（amd64）/官方 CPU 索引（arm64）；
+  pip 依赖用 uv 解析（pip 在 transformers 多版本间回溯极慢）。
+- 发布脚本修复：远端命令幂等（不再在构建命令里删上传包，重试可重入）、上传后 md5 校验+重试、
+  SSH 长连接保活、独立构建脚本 `deploy/scripts/parse-service-build.sh`（镜像存在即跳过）。
+
+## 验证（线上）
+
+- parse-service 容器 healthy；backend 0.7.38 healthy；公网 200。
+- 后端 actuator 已注册 `parseService` 组件（未启用 → UNKNOWN，符合预期）。
+- 容器内 DOCX 冒烟：8.3s 返回 741B zip，5 个块（4 text + 1 table，表格 HTML 正常），
+  DOCX 无 provenance 时 bbox 按契约省略（未写出 "null"）。
+- PDF 冒烟：见下方结果（首次会下载 Docling layout 模型）。

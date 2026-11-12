@@ -48,20 +48,25 @@ def paragraph(text, bbox=None, page_no=1):
 
 
 def test_bbox_converts_bottom_left_to_top_left():
-    assert to_top_left_bbox(FakeBBox(10, 700, 110, 750), 800) == [10, 50, 110, 100]
+    # 左下原点：t 为上边（y 较大）、b 为下边（y 较小）；高 800 的页面中 700..750 的框
+    # 转成左上原点应为 y 50..100，且 top < bottom。
+    result = to_top_left_bbox(FakeBBox(10, 750, 110, 700), 800)
+    assert result == [10, 50, 110, 100]
+    assert result[1] < result[3]
 
 
 def test_text_and_heading_fields():
     doc = fake_document([
-        (paragraph("正文段落", FakeBBox(10, 700, 110, 750)), 0),
+        (paragraph("正文段落", FakeBBox(10, 750, 110, 700)), 0),
         (FakeItem("section_header", text="第三章 审批流程",
-                  prov=[SimpleNamespace(page_no=1, bbox=FakeBBox(10, 600, 300, 640))]), 2),
+                  prov=[SimpleNamespace(page_no=1, bbox=FakeBBox(10, 640, 300, 600))]), 2),
     ])
     items, images = build_content_list(doc)
     assert images == {}
     assert items[0] == {"type": "text", "page_idx": 0, "bbox": [10, 50, 110, 100], "text": "正文段落"}
     assert items[1]["text_level"] == 2
     assert items[1]["bbox"] == [10, 160, 300, 200]
+    assert items[1]["bbox"][1] < items[1]["bbox"][3]
 
 
 def test_missing_bbox_is_omitted_not_null():
@@ -74,7 +79,7 @@ def test_table_keeps_html_and_captions():
     table = FakeItem(
         "table",
         text="",
-        prov=[SimpleNamespace(page_no=1, bbox=FakeBBox(0, 100, 500, 300))],
+        prov=[SimpleNamespace(page_no=1, bbox=FakeBBox(0, 300, 500, 100))],
         captions=[FakeRef("表 1 付款条款")],
         export_to_html=lambda doc=None: "<table><tr><td>付款</td></tr></table>",
     )
@@ -89,7 +94,7 @@ def test_table_keeps_html_and_captions():
 def test_picture_exports_png_and_caption():
     picture = FakeItem(
         "picture",
-        prov=[SimpleNamespace(page_no=1, bbox=FakeBBox(0, 400, 300, 700))],
+        prov=[SimpleNamespace(page_no=1, bbox=FakeBBox(0, 700, 300, 400))],
         captions=[FakeRef("图 3 审批流程图")],
         get_image=lambda doc=None: FakeImage(),
     )

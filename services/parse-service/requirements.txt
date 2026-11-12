@@ -1,5 +1,7 @@
 fastapi==0.115.12
 uvicorn[standard]==0.32.1
 python-multipart==0.0.20
-docling==2.28.4
-pillow==10.4.0
+# 不锁死 docling 小版本：ML 依赖树（transformers/torch）版本耦合紧，
+# 精确 pin 会触发 pip 回溯；用 uv 解析器快速收敛到兼容组合。
+docling>=2.28,<3
+pillow>=10,<12

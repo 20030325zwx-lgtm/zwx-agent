@@ -55,7 +55,9 @@ RUN set -e; \
     fi
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r requirements.txt
+# uv 解析 ML 依赖树比 pip 快一个数量级（pip 在 transformers 多版本间回溯极慢）
+RUN pip install --no-cache-dir uv \
+    && uv pip install --system --default-index "${PIP_INDEX_URL}" -r requirements.txt
 
 COPY app ./app
 

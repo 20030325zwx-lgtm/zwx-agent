@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
 
 import java.util.ArrayList;
@@ -68,7 +68,7 @@ class AgentKnowledgeRagServiceFilterSafetyTest {
     }
 
     private AgentKnowledgeRagService service(List<SearchRequest> captured) {
-        VectorStore stubStore = new VectorStore() {
+        KnowledgeVectorStore stubStore = new KnowledgeVectorStore() {
             @Override
             public void add(List<Document> documents) { }
 

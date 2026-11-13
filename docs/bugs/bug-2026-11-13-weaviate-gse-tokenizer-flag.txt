@@ -1,0 +1,26 @@
+日期：2026-11-13
+主题：Weaviate 建 Collection 报 422「the GSE tokenizer is not enabled」
+
+问题现象：
+backend 启动时 WeaviateSchemaInitializer / SchemaManager 建集合（text 属性 tokenization=gse）
+失败：HTTP 422 POST /v1/schema/: the GSE tokenizer is not enabled; set 'ENABLE_TOKENIZER_GSE' to 'true'。
+
+影响范围：
+provider=weaviate 的所有环境（本地/生产），首次建集合或新集合创建均失败；检索/入库全不可用。
+被全量测试（PgVectorVectorStoreConfigTest @SpringBootTest）在真实容器上抓到。
+
+原因：
+Weaviate 1.32+ 将中文 gse 分词器改为可选编译，默认不启用；schema 里引用 tokenization=gse
+时服务端直接拒绝建集合。
+
+解决方式：
+容器环境变量加 ENABLE_TOKENIZER_GSE=true（deploy/docker-compose/docker-compose.yml weaviate
+服务 + 本地 aster-weaviate 容器）。trigram 为内置分词器，无需开关。
+
+验证结果：
+本地容器带 ENABLE_TOKENIZER_GSE=true 重建后，WeaviateKnowledgeVectorStoreIntegrationTest
+（gse BM25 中文命中断言）全绿。
+
+后续注意事项：
+- 更换 Weaviate 镜像版本时确认该开关仍然存在；换 trigram 兜底时无需此开关。
+- 离线安装包（package.sh）与服务器 compose 同步后，需确认服务器容器带该环境变量。

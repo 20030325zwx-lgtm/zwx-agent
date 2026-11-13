@@ -2,7 +2,7 @@ package com.zwx.zwxagent.knowledge.document;
 
 import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -20,11 +20,9 @@ class AgentKnowledgeDocumentDeleteTest {
     void removesVectorsBlocksDocumentAndMineruObjects() {
         ObjectStorage storage = mock(ObjectStorage.class);
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        VectorStore vectorStore = mock(VectorStore.class);
+        KnowledgeVectorStore vectorStore = mock(KnowledgeVectorStore.class);
         when(jdbcTemplate.queryForList(contains("SELECT object_key"), eq(String.class), eq("doc-1")))
                 .thenReturn(List.of("knowledge/default/super/doc-1-file.pdf"));
-        when(jdbcTemplate.queryForList(contains("FROM agent_knowledge_vector"), eq(String.class), eq("doc-1")))
-                .thenReturn(List.of("chunk-1"));
         when(storage.listKeys("knowledge/default/super/doc-1/"))
                 .thenReturn(List.of("knowledge/default/super/doc-1/mineru/full.md"));
 
@@ -38,7 +36,8 @@ class AgentKnowledgeDocumentDeleteTest {
 
         service.removeDocumentCompletely("doc-1", "default", "super");
 
-        verify(vectorStore).delete(List.of("chunk-1"));
+        // 2026-11-13 迁移 Weaviate：按文档删除由端口方法完成（where 过滤批量删），不再先 SQL 收集 chunkIds
+        verify(vectorStore).deleteByDocumentId("doc-1");
         verify(jdbcTemplate).update(contains("DELETE FROM agent_knowledge_block"), eq("doc-1"));
         verify(jdbcTemplate).update(contains("DELETE FROM agent_knowledge_document"), eq("doc-1"));
         verify(storage).delete("knowledge/default/super/doc-1-file.pdf");

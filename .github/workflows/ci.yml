@@ -28,6 +28,8 @@ jobs:
       SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/zwx_agent
       SPRING_DATASOURCE_USERNAME: zwx_agent
       SPRING_DATASOURCE_PASSWORD: zwx_agent_password
+      # CI 无 Weaviate 容器：单元测试统一走 pgvector 路径（与桌面端一致）
+      APP_VECTOR_STORE: pgvector
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

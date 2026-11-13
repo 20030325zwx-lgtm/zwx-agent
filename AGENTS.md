@@ -32,6 +32,7 @@
 - Frontend: Vite at `http://127.0.0.1:3000/`; it defaults to the local backend API.
 - PostgreSQL + pgvector: production database reached through the SSH tunnel (`127.0.0.1:15432` -> server 5432); a local Docker container (`aster-postgres`) may exist but is not the datasource in `application-local.yml`.
 - Object storage: local backend shares the SERVER's MinIO (bucket `aster-media`) through the same SSH tunnel (`127.0.0.1:19000` -> server 9000), configured in `application-local.yml` under `app.storage.s3`. Do not point local media storage at a separate local MinIO/directory.
+- Weaviate + Ollama (2026-11-13 起): 只部署在服务器（compose 内网 + loopback 端口）；本地不再运行这两个容器/镜像。本地后端经同一个 SSH 隧道（launchctl job `com.aster.ssh-tunnel`）访问：`127.0.0.1:18080` -> server weaviate HTTP、`127.0.0.1:50061` -> weaviate gRPC、`127.0.0.1:11434` -> server ollama。本地启动需带环境变量：`APP_EMBEDDING_PROVIDER=ollama`、`APP_OLLAMA_BASE_URL=http://127.0.0.1:11434`、`APP_WEAVIATE_HTTP_PORT=18080`、`APP_WEAVIATE_GRPC_PORT=50061`。隧道未起时知识检索会 TIMEOUT/FAILED，属预期。
 
 ## Start and Restart
 
@@ -39,6 +40,8 @@
 2. Build the backend with `mvn -DskipTests package` from the repository root. Do not use the repository's `mvnw`; it is not executable in this checkout. After any backend source change, rebuild the JAR before restarting; `compile` alone does not update `target/aster-agent-0.0.1-SNAPSHOT.jar`.
 3. Start the backend with:
    ```sh
+   APP_EMBEDDING_PROVIDER=ollama APP_OLLAMA_BASE_URL=http://127.0.0.1:11434 \
+   APP_WEAVIATE_HTTP_PORT=18080 APP_WEAVIATE_GRPC_PORT=50061 \
    java -jar target/aster-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
    ```
 4. Start the frontend from `frontend` with:
@@ -54,7 +57,7 @@ Use the local service log monitor when starting long-running processes if it is 
 When a shell-launched background process does not survive after the terminal command exits, use user-level `launchctl` jobs instead. Run these commands from any shell (replace an existing job with `launchctl remove` first if needed):
 
 ```sh
-launchctl submit -l com.zwx.aster.backend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/aster && exec /usr/bin/java -jar target/aster-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local > /tmp/aster-backend.log 2>&1'
+launchctl submit -l com.zwx.aster.backend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/aster && APP_EMBEDDING_PROVIDER=ollama APP_OLLAMA_BASE_URL=http://127.0.0.1:11434 APP_WEAVIATE_HTTP_PORT=18080 APP_WEAVIATE_GRPC_PORT=50061 exec /usr/bin/java -jar target/aster-agent-0.0.1-SNAPSHOT.jar --spring.profiles.active=local > /tmp/aster-backend.log 2>&1'
 launchctl submit -l com.zwx.aster.frontend -- /bin/zsh -lc 'cd /Users/zhuwenxuan/Desktop/agent/aster/frontend && exec /usr/local/bin/node node_modules/vite/bin/vite.js --host 127.0.0.1 > /tmp/aster-frontend.log 2>&1'
 ```
 

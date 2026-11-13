@@ -16,8 +16,10 @@ frontend (Nginx, 8080/80)
   |
   +-- backend
         |-- postgres:5432
+        |-- weaviate:8080/50051（向量检索，2026-11-13 起，见 docs/design/2026-11-12-weaviate-vector-store.md）
         |-- image-mcp:8127
         |-- document-mcp:8128
+        |-- parse-service:8131（可选，compose `parse` profile）
         |-- MinerU 在线 API（知识库入库、parse_document）
         |-- DashScope / 阿里云 OSS
 
@@ -278,6 +280,40 @@ Flyway 会在后端启动时自动执行数据库迁移。
 ```bash
 docker compose exec -T postgres pg_dump -U zwx_agent -d zwx_agent > backup-$(date +%F-%H%M).sql
 ```
+
+### 本地嵌入（Ollama，2026-11-13 起）
+
+- compose 内置 `ollama` 服务（`ollama-data` 卷，仅 compose 网络可达）；backend 默认
+  `APP_EMBEDDING_PROVIDER=ollama` + `qwen3-embedding:0.6b`（1024 维，免费、数据不出服务器）。
+- 首次部署/换模型后需要预热模型：
+
+```bash
+docker compose up -d ollama
+docker exec aster-ollama-1 ollama pull qwen3-embedding:0.6b   # 服务器可直连 ollama registry
+docker exec aster-ollama-1 ollama list                        # 确认模型存在
+```
+
+- **换嵌入模型 = 换向量空间**：删除集合 → 重启 backend（按新维度重建）→ 全量 reindex：
+
+```bash
+# 删除空集合（或用 weaviate REST DELETE /v1/schema/AgentKnowledgeChunk）
+docker compose restart backend
+# 管理员调用全量回填
+curl -X POST "http://127.0.0.1:8080/api/ai/agent-knowledge/documents/reindex-all?agentKey=super" -H "Authorization: Bearer <admin-jwt>"
+```
+
+- 回退到云端嵌入：`.env` 改 `APP_EMBEDDING_PROVIDER=dashscope` 并重启 backend
+  （注意 DashScope 为 1536 维，必须同步重建集合 + 回填）。
+
+### 向量库（Weaviate）备份与回滚（2026-11-13 起）
+
+- 知识库向量在 weaviate 容器的 `weaviate-data` 卷（collection `AgentKnowledgeChunk`）；
+  备份直接打包该卷（停容器后 tar），与 pg_dump 独立。
+- 首次部署/切换后需要**回填一次向量**（旧的 pgvector 表不会自动同步）：
+  管理员登录后 `POST /api/ai/agent-knowledge/documents/reindex-all?agentKey=<key>`，
+  按文档逐个异步重建（生命周期不变，失败由恢复任务重试）。
+- 回滚：`.env` 改 `APP_VECTOR_STORE=pgvector` 并重启 backend——旧向量表
+  `agent_knowledge_vector` 保留未删，检索回到切换时点快照。
 
 ## 8. 从本地迁移数据（可选）
 

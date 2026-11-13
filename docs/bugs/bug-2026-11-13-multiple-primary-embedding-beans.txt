@@ -1,0 +1,34 @@
+日期：2026-11-13
+主题：Spring AI DashScope 与 Ollama 的 EmbeddingModel bean 均为 @Primary，按类型注入报歧义
+
+问题现象：
+为知识库接入 Ollama 嵌入（qwen3-embedding:0.6b）时，backend 启动失败：
+NoUniqueBeanDefinitionException: more than one 'primary' bean found among candidates:
+[knowledgeEmbeddingModel, dashscopeEmbeddingModel, ollamaEmbeddingModel]。
+
+影响范围：
+app.embedding.provider=ollama 时应用无法启动；dashscope 默认路径不受影响
+（此前仅 DashScope 一个 @Primary 时按类型注入可解析）。
+
+原因：
+- spring-ai-alibaba DashScope 的 embedding bean：@Bean @ConditionalOnMissingBean @Primary；
+- Spring AI Ollama 自动配置的 embedding bean：@ConditionalOnProperty(spring.ai.model.embedding=ollama,
+  matchIfMissing=true) 且同样带 @Primary；
+- 自建一个 @Primary 的 knowledgeEmbeddingModel 后出现多个 primary，按类型注入无法判定。
+
+解决方式：
+不注册自建 bean。改为在 AgentKnowledgeVectorStoreConfig 按 app.embedding.provider 显式按 bean 名解析：
+dashscope → dashscopeEmbeddingModel；ollama → ollamaEmbeddingModel；
+Ollama 模型名统一由 spring.ai.ollama.embedding.model 配置（application.yml，env 可覆盖）。
+同时把知识库 add() 的向量化从 embed(List<Document>) 改为 embed(List<String> 纯正文)，
+确保任意 provider 都不会把 metadata 拼进 embedding（对齐原 DashScope metadata-mode=NONE 语义）。
+
+验证结果：
+本地 backend 以 APP_EMBEDDING_PROVIDER=ollama 启动成功，日志
+「知识向量嵌入模型：provider=ollamaEmbeddingModel, bean=OllamaEmbeddingModel」；
+OllamaEmbeddingVectorStoreIntegrationTest（真实 Ollama + Weaviate）全绿；
+端到端检索（语义改写查询命中）通过。
+
+后续注意事项：
+- 升级 Spring AI / spring-ai-alibaba 后复核这两个自动配置的 bean 名与 @Primary 状态；
+- 新增第三方 embedding provider 时同样按名解析，不要参与 @Primary 竞争。

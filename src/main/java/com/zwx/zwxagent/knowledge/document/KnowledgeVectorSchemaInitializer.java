@@ -18,6 +18,8 @@ import org.springframework.stereotype.Component;
  * 不使用 Flyway，是因为新库首次部署时该表还不存在。</p>
  */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "app.vector-store.provider", havingValue = "pgvector")
 public class KnowledgeVectorSchemaInitializer implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(KnowledgeVectorSchemaInitializer.class);

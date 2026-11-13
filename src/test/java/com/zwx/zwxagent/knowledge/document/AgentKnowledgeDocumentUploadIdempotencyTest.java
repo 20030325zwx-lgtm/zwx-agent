@@ -2,7 +2,7 @@ package com.zwx.zwxagent.knowledge.document;
 
 import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -26,7 +26,7 @@ class AgentKnowledgeDocumentUploadIdempotencyTest {
 
     private AgentKnowledgeDocumentService service(ObjectStorage storage, JdbcTemplate jdbcTemplate) {
         return new AgentKnowledgeDocumentService(
-                storage, jdbcTemplate, mock(VectorStore.class), new MyTokenTextSplitter(),
+                storage, jdbcTemplate, mock(KnowledgeVectorStore.class), new MyTokenTextSplitter(),
                 mock(DocumentParsingModule.class), mock(DoclingServeChunkingService.class), mock(MineruDocumentParser.class),
                 mock(MineruBlockParser.class), mock(StructuredKnowledgeChunker.class),
                 new com.fasterxml.jackson.databind.ObjectMapper(), "mineru", mock(PlatformTransactionManager.class),

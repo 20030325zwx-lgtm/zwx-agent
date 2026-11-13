@@ -27,9 +27,12 @@ spring:
         # 只嵌入正文，避免把 bbox/文件名等 metadata 拼进 embedding 导致超 token 上限。
         metadata-mode: NONE
     ollama:
-      base-url: http://localhost:11434
+      base-url: ${APP_OLLAMA_BASE_URL:http://localhost:11434}
       chat:
         model: gemma3:1b
+      embedding:
+        # app.embedding.provider=ollama 时生效（AgentKnowledgeVectorStoreConfig 按 provider 取 ollamaEmbeddingModel）
+        model: ${APP_OLLAMA_EMBEDDING_MODEL:qwen3-embedding:0.6b}
 # 临时注释掉，便于大家开发调试和部署（实际需要启动 MCP 服务）
 #    mcp:
 #      client:
@@ -46,6 +49,7 @@ spring:
 #        dimensions: 1536
 #        distance-type: COSINE_DISTANCE
 #        max-document-batch-size: 10000 # Optional: Maximum number of documents per batch
+#  向量存储 provider 见 app.vector-store；pgvector 走手动装配（AgentKnowledgeVectorStoreConfig），不走 starter 配置
 server:
   port: 8123
   servlet:
@@ -71,6 +75,29 @@ spring.servlet.multipart:
   max-file-size: 100MB
   max-request-size: 100MB
 app:
+  # 向量存储：weaviate（服务端/本地开发，默认）| pgvector（桌面端内置 pgserver / CI / 回滚）。
+  # 设计与迁移说明见 docs/design/2026-11-12-weaviate-vector-store.md
+  vector-store:
+    provider: ${APP_VECTOR_STORE:weaviate}
+  # 文本嵌入模型：dashscope（默认，text-embedding-v3 1536 维）| ollama（本地免费，qwen3-embedding:0.6b 1024 维）。
+  # 连接与模型名在 spring.ai.ollama.*；换模型=换向量空间：必须重建 Weaviate 集合（或 pgvector 表）后全量 reindex。
+  embedding:
+    provider: ${APP_EMBEDDING_PROVIDER:dashscope}
+  # Weaviate 连接与 Collection 配置：本地默认指向 docker 运行的 aster-weaviate（127.0.0.1），
+  # 生产由 compose 环境变量覆盖（服务内网 weaviate:8080）；application-local.yml 无需新增键。
+  weaviate:
+    scheme: ${APP_WEAVIATE_SCHEME:http}
+    host: ${APP_WEAVIATE_HOST:127.0.0.1}
+    http-port: ${APP_WEAVIATE_HTTP_PORT:8080}
+    grpc-port: ${APP_WEAVIATE_GRPC_PORT:50051}
+    timeout-seconds: ${APP_WEAVIATE_TIMEOUT_SECONDS:15}
+    collection: ${APP_WEAVIATE_COLLECTION:AgentKnowledgeChunk}
+    # BM25 词法通道分词器：gse（中文词典分词）；召回不佳可试 trigram（字符三元组，索引更大）
+    bm25-tokenization: ${APP_WEAVIATE_BM25_TOKENIZATION:gse}
+    # 原生 Hybrid Search 向量/BM25 权重：0.5 等权（对应迁移前 Java RRF 双通道等贡献），评测后可调
+    hybrid-alpha: ${APP_WEAVIATE_HYBRID_ALPHA:0.5}
+    # 纯取回类操作（切片清单/生命周期翻转）的单次对象上限
+    list-limit: ${APP_WEAVIATE_LIST_LIMIT:10000}
   # artifact 排版引擎（services/artifact-mcp）：docx / pptx / Markdown-PDF 与格式转换。
   # 留空 = 不注册对应工具；容器部署时指向 http://artifact-mcp:8130。
   artifact:
@@ -141,6 +168,23 @@ app:
       figure-enrichment-enabled: ${APP_KNOWLEDGE_FIGURE_ENRICHMENT:true}
       # 单文档最多增强的图纸数（预算上限），超出的图按仅图注降级
       figure-enrichment-max-per-document: 30
+      # 文档清洗（规则层）：解析结果 → 切片之间做格式修复/噪声剔除/同页段落合并/完全重复去除。
+      # 关闭后行为与清洗前完全一致（可回退）；清洗记录见 agent_knowledge_block.cleaning_json。
+      cleaning:
+        enabled: ${APP_KNOWLEDGE_CLEANING:true}
+        # 切片最小字符数（表格行、图注、图纸问题豁免）
+        min-chunk-chars: ${APP_KNOWLEDGE_CLEANING_MIN_CHUNK_CHARS:12}
+        # 块级字符删除率超过该比例整体回滚（防止规则误杀整篇文档）
+        max-deletion-ratio: ${APP_KNOWLEDGE_CLEANING_MAX_DELETION_RATIO:0.15}
+        # 页眉页脚识别：跨页重复 + 短文本 + 非标题
+        furniture-enabled: ${APP_KNOWLEDGE_CLEANING_FURNITURE:true}
+        furniture-max-chars: 60
+        furniture-page-ratio: 0.3
+        # 完全重复文本块去除（仅长文本；表格与短块不参与）
+        dedupe-enabled: ${APP_KNOWLEDGE_CLEANING_DEDUPE:true}
+        dedupe-min-chars: 40
+        # 同页段落合并后的单块上限（与结构化切片 1200 字符对齐）
+        max-paragraph-merge-chars: 1200
     hook:
       # 工具结果截断阈值（字符）
       tool-result-max-chars: 8000

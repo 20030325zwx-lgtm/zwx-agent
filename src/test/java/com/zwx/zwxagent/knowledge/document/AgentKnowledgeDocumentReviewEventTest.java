@@ -24,7 +24,7 @@ class AgentKnowledgeDocumentReviewEventTest {
                                                   N8nResumeNotifier resumeNotifier) {
         return new AgentKnowledgeDocumentService(
                 mock(com.zwx.zwxagent.platform.storage.ObjectStorage.class), jdbcTemplate,
-                mock(org.springframework.ai.vectorstore.VectorStore.class), new MyTokenTextSplitter(),
+                mock(com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore.class), new MyTokenTextSplitter(),
                 mock(DocumentParsingModule.class), mock(DoclingServeChunkingService.class), mock(MineruDocumentParser.class),
                 mock(MineruBlockParser.class), mock(StructuredKnowledgeChunker.class),
                 new com.fasterxml.jackson.databind.ObjectMapper(), "mineru",

@@ -19,6 +19,10 @@ app:
   config:
     # 桌面允许用户显式配置回环/内网模型地址（如本机 Ollama/LM Studio）
     allow-local-model-endpoints: true
+  # 桌面端内置 pgserver（PostgreSQL + pgvector，desktop/scripts/prepare-pgserver.sh），
+  # 不随服务端切 Weaviate；见 docs/design/2026-11-12-weaviate-vector-store.md
+  vector-store:
+    provider: pgvector
   document-parser:
     # 首版桌面不依赖外部解析服务：PDF 走内置 iText，其余按纯文本处理
     docling:

@@ -277,6 +277,18 @@ public class KnowledgeAdminController {
         return document;
     }
 
+    /**
+     * 全量重建 scope 内文档向量（切换向量库后的数据回填）：逐文档异步触发，
+     * 立即返回触发数量；进度/失败通过 workflow-status 与恢复任务观察。
+     */
+    @PostMapping("/agent-knowledge/documents/reindex-all")
+    public java.util.Map<String, Object> reindexAllAgentKnowledgeDocuments(CurrentActor actor, @RequestParam String agentKey) {
+        actor.requireAdmin();
+        java.util.List<String> ids = agentKnowledgeDocumentService.listDocumentIds(actor.tenantId(), agentKey);
+        ids.forEach(agentKnowledgeDocumentService::indexDocument);
+        return java.util.Map.of("agentKey", agentKey, "triggered", ids.size());
+    }
+
     @DeleteMapping("/agent-knowledge/documents/{documentId}")
     public void deleteAgentKnowledgeDocument(CurrentActor actor, @PathVariable String documentId, @RequestParam String agentKey) {
         actor.requireAdmin();

@@ -3,7 +3,7 @@ package com.zwx.zwxagent.knowledge.document;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +18,7 @@ import static org.mockito.Mockito.verify;
 /** 大文档向量写入：批大小 25 保持不变，批间并行不得丢失或重排任何切片。 */
 class AgentKnowledgeDocumentVectorBatchTest {
 
-    private AgentKnowledgeDocumentService service(VectorStore vectorStore) {
+    private AgentKnowledgeDocumentService service(KnowledgeVectorStore vectorStore) {
         AgentKnowledgeDocumentService documentService = new AgentKnowledgeDocumentService(
                 mock(com.zwx.zwxagent.platform.storage.ObjectStorage.class),
                 mock(org.springframework.jdbc.core.JdbcTemplate.class), vectorStore, new MyTokenTextSplitter(),
@@ -39,7 +39,7 @@ class AgentKnowledgeDocumentVectorBatchTest {
 
     @Test
     void largeDocumentSplitsIntoBatchesAndStoresEveryChunk() {
-        VectorStore vectorStore = mock(VectorStore.class);
+        KnowledgeVectorStore vectorStore = mock(KnowledgeVectorStore.class);
         AgentKnowledgeDocumentService documentService = service(vectorStore);
         documentService.embeddingParallelism = 4;
 
@@ -58,7 +58,7 @@ class AgentKnowledgeDocumentVectorBatchTest {
 
     @Test
     void smallDocumentUsesSingleBatch() {
-        VectorStore vectorStore = mock(VectorStore.class);
+        KnowledgeVectorStore vectorStore = mock(KnowledgeVectorStore.class);
 
         service(vectorStore).storeVectors(chunks(10));
 

@@ -2,7 +2,13 @@ package com.zwx.zwxagent.knowledge.document;
 
 import com.zwx.zwxagent.platform.storage.ObjectStorage;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.zwx.zwxagent.knowledge.cleaning.BlockCleaningResult;
+import com.zwx.zwxagent.knowledge.cleaning.ChunkGateResult;
+import com.zwx.zwxagent.knowledge.cleaning.ChunkQualityGate;
+import com.zwx.zwxagent.knowledge.cleaning.CleanedBlock;
+import com.zwx.zwxagent.knowledge.cleaning.CleaningSettings;
+import com.zwx.zwxagent.knowledge.cleaning.KnowledgeDocumentCleaner;
+import com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
@@ -18,6 +24,7 @@ import java.io.ByteArrayInputStream;
 import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -36,7 +43,7 @@ public class AgentKnowledgeDocumentService {
     private static final String DEFAULT_CATEGORY_NAME = "默认分类";
     private final ObjectStorage storage;
     private final JdbcTemplate jdbcTemplate;
-    private final VectorStore vectorStore;
+    private final KnowledgeVectorStore vectorStore;
     private final MyTokenTextSplitter textSplitter;
     private final DocumentParsingModule documentParsingModule;
     private final DoclingServeChunkingService doclingChunkingService;
@@ -57,6 +64,14 @@ public class AgentKnowledgeDocumentService {
     @jakarta.annotation.Resource
     private PythonParseClient pythonParseClient;
 
+    /** 文档清洗（规则层）：字段注入与既有写法一致，为空时链路退化为清洗前行为。 */
+    @jakarta.annotation.Resource
+    private KnowledgeDocumentCleaner documentCleaner;
+
+    /** 切片质量门禁：所有解析 provider 的汇聚点，覆盖 Docling 直切与 markdown 兜底路径。 */
+    @jakarta.annotation.Resource
+    private ChunkQualityGate chunkQualityGate;
+
     // 向量批间并行度：默认 1（串行）。DashScope embedding 配额（TPM）是真实瓶颈，
     // 并行只会提前触发 429 Throttling.AllocationQuota 反而更慢（2026-10-25 实测：4 路并行 125s vs 串行 ~80s）；
     // 配额充足的账号可调大。字段注入避免构造器继续加长，手工构造的单测取初始值。
@@ -64,7 +79,7 @@ public class AgentKnowledgeDocumentService {
     int embeddingParallelism = 1;
 
     public AgentKnowledgeDocumentService(ObjectStorage storage, JdbcTemplate jdbcTemplate,
-                                         @Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore,
+                                         @Qualifier("agentKnowledgeVectorStore") KnowledgeVectorStore vectorStore,
                                          MyTokenTextSplitter textSplitter, DocumentParsingModule documentParsingModule,
                                          DoclingServeChunkingService doclingChunkingService,
                                          MineruDocumentParser mineruDocumentParser,
@@ -201,11 +216,7 @@ public class AgentKnowledgeDocumentService {
     void removeDocumentCompletely(String documentId, String tenantId, String agentKey) {
         List<String> objectKeys = jdbcTemplate.queryForList(
                 "SELECT object_key FROM agent_knowledge_document WHERE id = ?", String.class, documentId);
-        List<String> chunkIds = jdbcTemplate.queryForList("""
-                SELECT id::text FROM agent_knowledge_vector
-                WHERE metadata ->> 'documentId' = ?
-                """, String.class, documentId);
-        if (!chunkIds.isEmpty()) vectorStore.delete(chunkIds);
+        vectorStore.deleteByDocumentId(documentId);
         jdbcTemplate.update("DELETE FROM agent_knowledge_block WHERE document_id = ?", documentId);
         jdbcTemplate.update("DELETE FROM agent_knowledge_document WHERE id = ?", documentId);
         for (String objectKey : objectKeys) {
@@ -257,10 +268,12 @@ public class AgentKnowledgeDocumentService {
             sourceMetadata.put("objectKey", stored.objectKey());
             sourceMetadata.put("filename", stored.filename());
             List<Document> splitChunks = null;
+            Map<String, Object> cleaningStats = new LinkedHashMap<>();
+            cleaningStats.put("version", CleaningSettings.CLEANING_VERSION);
             if ("mineru".equals(documentParserProvider) && mineruDocumentParser.isConfigured()
                     && mineruDocumentParser.supports(stored.filename())) {
                 try {
-                    splitChunks = mineruChunks(bytes, stored, sourceMetadata, documentId);
+                    splitChunks = mineruChunks(bytes, stored, sourceMetadata, documentId, cleaningStats);
                 } catch (Exception exception) {
                     log.warn("MinerU knowledge parsing failed, falling back; filename={}, reason={}",
                             stored.filename(), safeMessage(exception));
@@ -268,7 +281,7 @@ public class AgentKnowledgeDocumentService {
             } else if ("python".equals(documentParserProvider) && pythonParseClient != null
                     && pythonParseClient.isConfigured() && pythonParseClient.supports(stored.filename())) {
                 try {
-                    splitChunks = pythonChunks(bytes, stored, sourceMetadata, documentId);
+                    splitChunks = pythonChunks(bytes, stored, sourceMetadata, documentId, cleaningStats);
                 } catch (Exception exception) {
                     log.warn("Parse service knowledge parsing failed, falling back; filename={}, reason={}",
                             stored.filename(), safeMessage(exception));
@@ -290,17 +303,18 @@ public class AgentKnowledgeDocumentService {
                 splitChunks = localChunks(bytes, stored, sourceMetadata, documentId);
             }
             final List<Document> resolvedChunks = splitChunks;
-            List<Document> chunks = java.util.stream.IntStream.range(0, resolvedChunks.size())
-                    .mapToObj(index -> toScopedChunk(resolvedChunks.get(index), stored, index + 1)).toList();
+            // 切片质量门禁：所有 provider（MinerU / 统一解析服务 / Docling 直切 / 本地兜底）的汇聚点。
+            ChunkGateResult gated = chunkQualityGate == null
+                    ? ChunkGateResult.passthrough(resolvedChunks)
+                    : chunkQualityGate.filter(resolvedChunks);
+            cleaningStats.put("chunk", gated.stats());
+            List<Document> chunks = java.util.stream.IntStream.range(0, gated.chunks().size())
+                    .mapToObj(index -> toScopedChunk(gated.chunks().get(index), stored, index + 1)).toList();
             // 扫描件可能只有页码占位而没有可索引文本；不能把 0 切片当成成功版本发布。
             if (chunks.isEmpty()) {
                 throw new IllegalStateException("No extractable text after parsing; OCR may have timed out or the document is image-only");
             }
-            List<String> existingChunkIds = jdbcTemplate.queryForList("""
-                    SELECT id::text FROM agent_knowledge_vector
-                    WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                    """, String.class, documentId, stored.tenantId(), stored.agentKey());
-            if (!existingChunkIds.isEmpty()) vectorStore.delete(existingChunkIds);
+            vectorStore.deleteByDocumentId(documentId, stored.tenantId(), stored.agentKey());
             long parseMs = System.currentTimeMillis() - indexStartedAt;
             log.info("knowledge index parse phase done: documentId={}, chunks={}, parser={}, took={}ms",
                     documentId, chunks.size(), sourceMetadata.get("parser"), parseMs);
@@ -310,8 +324,9 @@ public class AgentKnowledgeDocumentService {
                         lifecycle_status = CASE WHEN ? IN ('INDEXING', 'FAILED') THEN 'READY' ELSE ? END,
                         error_message = NULL, next_retry_at = NULL,
                         chunk_count = ?, parse_duration_ms = ?, vector_duration_ms = ?,
-                        completed_at = CURRENT_TIMESTAMP WHERE id = ?
-                    """, originalLifecycle, originalLifecycle, chunks.size(), (int) parseMs, (int) vectorMs, documentId);
+                        cleaning_stats = CAST(? AS jsonb), completed_at = CURRENT_TIMESTAMP WHERE id = ?
+                    """, originalLifecycle, originalLifecycle, chunks.size(), (int) parseMs, (int) vectorMs,
+                    cleaningJson(cleaningStats), documentId);
         } catch (Exception exception) {
             // 新版本索引失败标记 FAILED；已发布版本（ACTIVE/ARCHIVED）重建索引失败保持原状态，避免误下线
             jdbcTemplate.update("""
@@ -364,6 +379,19 @@ public class AgentKnowledgeDocumentService {
     }
 
     /**
+     * 全量回填入口（切换向量库后使用）：列出 scope 内全部文档 ID，由控制器逐个异步重建
+     * （{@code indexDocument} 经代理调用保持 @Async，删除旧向量后重新解析/嵌入/写入）。
+     * 各文档生命周期在重建中保持不变，失败文档由 {@code AgentKnowledgeIndexRecoveryJob} 重试。
+     */
+    public List<String> listDocumentIds(String tenantId, String agentKey) {
+        validateScope(tenantId, agentKey);
+        return jdbcTemplate.queryForList("""
+                SELECT id FROM agent_knowledge_document WHERE tenant_id = ? AND agent_key = ?
+                ORDER BY logical_key, version_no
+                """, String.class, tenantId, agentKey);
+    }
+
+    /**
      * 向量写入：embedding 按批调用远端 API，批间并行压缩大文档的索引墙钟时间；任一批失败即整体失败（与原串行语义一致）。
      *
      * @return 向量阶段耗时（毫秒），随 READY 一并持久化供 n8n 案件回显
@@ -406,26 +434,28 @@ public class AgentKnowledgeDocumentService {
     }
 
     private List<Document> mineruChunks(byte[] bytes, StoredDocument stored,
-                                        Map<String, Object> sourceMetadata, String documentId) {
+                                        Map<String, Object> sourceMetadata, String documentId,
+                                        Map<String, Object> cleaningStats) {
         MineruParseResult result = mineruDocumentParser.parse(bytes, stored.filename());
         requireMarkdown(result, "MinerU");
         sourceMetadata.put("parser", "mineru");
         sourceMetadata.put("mineruResultFileCount", result.fileNames().size());
         sourceMetadata.put("mineruJsonFileCount", result.countFiles(".json"));
         sourceMetadata.put("mineruHtmlFileCount", result.countFiles(".html"));
-        return structuredChunks(result, stored, sourceMetadata, documentId, "MinerU");
+        return structuredChunks(result, stored, sourceMetadata, documentId, "MinerU", cleaningStats);
     }
 
     /** 统一解析服务（Python sidecar）：返回 MinerU 等价结果包，后续管线完全复用。 */
     private List<Document> pythonChunks(byte[] bytes, StoredDocument stored,
-                                        Map<String, Object> sourceMetadata, String documentId) {
+                                        Map<String, Object> sourceMetadata, String documentId,
+                                        Map<String, Object> cleaningStats) {
         MineruParseResult result = pythonParseClient.parse(bytes, stored.filename());
         requireMarkdown(result, "Parse service");
         sourceMetadata.put("parser", "python");
         sourceMetadata.put("pythonResultFileCount", result.fileNames().size());
         sourceMetadata.put("pythonJsonFileCount", result.countFiles(".json"));
         sourceMetadata.put("pythonHtmlFileCount", result.countFiles(".html"));
-        return structuredChunks(result, stored, sourceMetadata, documentId, "Parse service");
+        return structuredChunks(result, stored, sourceMetadata, documentId, "Parse service", cleaningStats);
     }
 
     private static void requireMarkdown(MineruParseResult result, String parserLabel) {
@@ -435,22 +465,37 @@ public class AgentKnowledgeDocumentService {
         }
     }
 
-    /** provider 无关的结构化切片：块解析 → 原图落库 → 来源块落库 → 图纸增强 → 结构化分块。 */
+    /** provider 无关的结构化切片：块解析 → 规则清洗 → 原图落库 → 来源块落库 → 图纸增强 → 结构化分块。 */
     private List<Document> structuredChunks(MineruParseResult result, StoredDocument stored,
                                             Map<String, Object> sourceMetadata, String documentId,
-                                            String parserLabel) {
+                                            String parserLabel, Map<String, Object> cleaningStats) {
         List<MineruBlockParser.MineruBlock> blocks = mineruBlockParser.parse(result);
         if (!blocks.isEmpty()) {
+            BlockCleaningResult cleaning = cleanBlocks(blocks);
             Map<String, String> objectKeys = persistMineruFiles(stored, result, documentId);
-            persistBlocks(stored, documentId, blocks, objectKeys);
-            FigureSupport figures = figureSupport(stored, objectKeys, blocks);
-            List<Document> structured = structuredKnowledgeChunker.chunks(blocks, sourceMetadata, figures);
-            if (!structured.isEmpty()) return structured;
+            persistBlocks(stored, documentId, blocks, objectKeys, cleaning.records());
+            FigureSupport figures = figureSupport(stored, objectKeys, cleaning.blocks());
+            List<Document> structured = structuredKnowledgeChunker.chunks(cleaning.blocks(), sourceMetadata, figures);
+            if (!structured.isEmpty()) {
+                cleaningStats.put("block", cleaning.stats());
+                return structured;
+            }
             log.warn("{} content_list produced no usable chunks, falling back to markdown; filename={}",
                     parserLabel, stored.filename());
         }
         return textSplitter.splitStructuredMarkdown(List.of(Document.builder().id(documentId).text(result.markdown())
                 .metadata(sourceMetadata).build()));
+    }
+
+    /** 清洗失败不阻断索引：回落到原始块，行为与清洗前一致。 */
+    private BlockCleaningResult cleanBlocks(List<MineruBlockParser.MineruBlock> blocks) {
+        if (documentCleaner == null) return BlockCleaningResult.passthrough(blocks);
+        try {
+            return documentCleaner.clean(blocks);
+        } catch (RuntimeException exception) {
+            log.warn("文档清洗失败，本次按原始块索引；reason={}", safeMessage(exception));
+            return BlockCleaningResult.passthrough(blocks);
+        }
     }
 
     /**
@@ -516,7 +561,8 @@ public class AgentKnowledgeDocumentService {
     }
 
     private void persistBlocks(StoredDocument stored, String documentId,
-                               List<MineruBlockParser.MineruBlock> blocks, Map<String, String> objectKeys) {
+                               List<MineruBlockParser.MineruBlock> blocks, Map<String, String> objectKeys,
+                               Map<String, CleanedBlock> cleaningRecords) {
         jdbcTemplate.update("DELETE FROM agent_knowledge_block WHERE document_id = ?", documentId);
         for (MineruBlockParser.MineruBlock block : blocks) {
             String json = null;
@@ -530,15 +576,41 @@ public class AgentKnowledgeDocumentService {
                     log.warn("Unable to serialize knowledge table block; documentId={}, blockId={}", documentId, block.blockId());
                 }
             }
+            CleanedBlock cleaning = cleaningRecords == null ? null : cleaningRecords.get(block.blockId());
+            String cleaningJson = cleaning == null ? null : cleaningJson(cleaning);
             String imageObjectKey = block.imagePath() == null ? null : resolveObjectKey(objectKeys, block.imagePath());
             jdbcTemplate.update("""
                     INSERT INTO agent_knowledge_block
                         (id, document_id, tenant_id, agent_key, block_id, source_type, page_number, bbox, caption,
-                         text_content, html_content, json_content, image_object_key)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, CAST(? AS jsonb), ?)
+                         text_content, html_content, json_content, image_object_key, cleaned_text, cleaning_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, CAST(? AS jsonb), ?, ?, CAST(? AS jsonb))
                     """, UUID.randomUUID().toString(), documentId, stored.tenantId(), stored.agentKey(),
                     block.blockId(), block.type(), block.pageNumber(), block.bbox(), block.caption(),
-                    block.text(), block.html(), json, imageObjectKey);
+                    block.text(), block.html(), json, imageObjectKey,
+                    cleaning == null ? null : cleaning.cleanedText(), cleaningJson);
+        }
+    }
+
+    /** 块级清洗记录序列化：动作以名字落库，后续换规则仍可读懂历史记录。 */
+    private String cleaningJson(CleanedBlock cleaning) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "version", CleaningSettings.CLEANING_VERSION,
+                    "actions", cleaning.actions().stream().map(Enum::name).toList(),
+                    "dropped", cleaning.dropped(),
+                    "reviewRequired", cleaning.reviewRequired()));
+        } catch (Exception exception) {
+            log.warn("Unable to serialize knowledge block cleaning record; blockId={}", cleaning.blockId());
+            return null;
+        }
+    }
+
+    private String cleaningJson(Map<String, Object> stats) {
+        try {
+            return objectMapper.writeValueAsString(stats);
+        } catch (Exception exception) {
+            log.warn("Unable to serialize knowledge cleaning stats", exception);
+            return null;
         }
     }
 
@@ -611,14 +683,14 @@ public class AgentKnowledgeDocumentService {
                             archived_at = CURRENT_TIMESTAMP, effective_to = CURRENT_TIMESTAMP
                         WHERE id = ?
                         """, activeId);
-                flipChunkLifecycle(activeId, "ARCHIVED");
+                vectorStore.updateLifecycleStatus(activeId, "ARCHIVED");
             }
             jdbcTemplate.update("""
                     UPDATE agent_knowledge_document SET lifecycle_status = 'ACTIVE',
                         published_at = CURRENT_TIMESTAMP, effective_from = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """, documentId);
-            flipChunkLifecycle(documentId, "ACTIVE");
+            vectorStore.updateLifecycleStatus(documentId, "ACTIVE");
             reviewLogService.record(stored.tenantId(), stored.agentKey(), documentId, "PUBLISH",
                     actor, channel, null, null);
         });
@@ -639,7 +711,7 @@ public class AgentKnowledgeDocumentService {
                     WHERE id = ? AND lifecycle_status = 'READY'
                     """, reviewNote == null ? "" : reviewNote.trim(), documentId);
             if (updated == 0) throw new IllegalStateException("Only READY versions can be rejected");
-            flipChunkLifecycle(documentId, "REJECTED");
+            vectorStore.updateLifecycleStatus(documentId, "REJECTED");
             reviewLogService.record(stored.tenantId(), stored.agentKey(), documentId, "REJECT",
                     actor, channel, reviewNote == null ? "" : reviewNote.trim(), null);
         });
@@ -665,15 +737,6 @@ public class AgentKnowledgeDocumentService {
                                   String note, String n8nExecutionId) {
         getDocumentRecordForScope(tenantId, agentKey, documentId);
         reviewLogService.record(tenantId, agentKey, documentId, action, actor, channel, note, n8nExecutionId);
-    }
-
-    private void flipChunkLifecycle(String documentId, String lifecycleStatus) {
-        jdbcTemplate.update("""
-                UPDATE agent_knowledge_vector
-                SET metadata = (metadata::jsonb || jsonb_build_object('lifecycleStatus', ?))::json
-                WHERE metadata ->> 'documentId' = ?
-                  AND metadata ->> 'lifecycleStatus' IS DISTINCT FROM ?
-                """, lifecycleStatus, documentId, lifecycleStatus);
     }
 
     public List<AgentKnowledgeDocument> listDocuments(String tenantId, String agentKey) {
@@ -742,14 +805,14 @@ public class AgentKnowledgeDocumentService {
                             stored.filename(), doclingChunkingService.shouldUse(stored.filename()) ? "docling-serve" : "local",
                             exception.getMessage());
         }
-        List<AgentKnowledgeChunk> chunks = jdbcTemplate.query("""
-                SELECT id::text, content, NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index
-                FROM agent_knowledge_vector
-                WHERE metadata ->> 'documentId' = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                ORDER BY chunk_index NULLS LAST, id
-                """, (rs, rowNum) -> new AgentKnowledgeChunk(rs.getString("id"),
-                rs.getObject("chunk_index", Integer.class) == null ? rowNum + 1 : rs.getInt("chunk_index"), rs.getString("content")),
-                documentId, tenantId, agentKey);
+        List<AgentKnowledgeChunk> chunks = new ArrayList<>();
+        List<org.springframework.ai.document.Document> storedChunks = vectorStore.listByDocument(tenantId, agentKey, documentId);
+        for (int i = 0; i < storedChunks.size(); i++) {
+            org.springframework.ai.document.Document chunk = storedChunks.get(i);
+            Object index = chunk.getMetadata().get("chunkIndex");
+            int chunkIndex = index instanceof Number number ? number.intValue() : i + 1;
+            chunks.add(new AgentKnowledgeChunk(chunk.getId(), chunkIndex, chunk.getText()));
+        }
         if (sourceContent.isBlank() && !chunks.isEmpty()) {
             sourceContent = chunks.stream().map(AgentKnowledgeChunk::content)
                     .collect(java.util.stream.Collectors.joining("\n\n"));
@@ -771,29 +834,17 @@ public class AgentKnowledgeDocumentService {
     public java.util.Optional<AgentKnowledgeChunkPreview> getChunk(String tenantId, String agentKey, String chunkId,
                                                                     String documentId, String blockId) {
         validateScope(tenantId, agentKey);
-        java.util.Optional<AgentKnowledgeChunkPreview> chunk = jdbcTemplate.query("""
-                SELECT id::text AS chunk_id, content,
-                       metadata ->> 'documentId' AS document_id,
-                       metadata ->> 'filename' AS filename,
-                       NULLIF(metadata ->> 'chunkIndex', '')::integer AS chunk_index,
-                       NULLIF(metadata ->> 'pageNumber', '')::integer AS page_number,
-                       metadata ->> 'sectionPath' AS section_path,
-                       metadata ->> 'sourceType' AS source_type,
-                       metadata ->> 'blockId' AS block_id,
-                       NULLIF(metadata ->> 'rowStart', '')::integer AS row_start,
-                       NULLIF(metadata ->> 'rowEnd', '')::integer AS row_end,
-                       metadata ->> 'regionLabel' AS region_label,
-                       metadata ->> 'tableCaption' AS table_caption
-                FROM agent_knowledge_vector
-                WHERE id::text = ? AND metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                """, (rs, rowNum) -> chunkPreview(tenantId, agentKey,
-                        rs.getString("chunk_id"), rs.getString("document_id"), rs.getString("filename"),
-                        rs.getObject("chunk_index", Integer.class), rs.getString("content"),
-                        rs.getObject("page_number", Integer.class), rs.getString("section_path"),
-                        rs.getString("source_type"), rs.getString("block_id"),
-                        rs.getObject("row_start", Integer.class), rs.getObject("row_end", Integer.class),
-                        rs.getString("region_label"), rs.getString("table_caption")),
-                chunkId, tenantId, agentKey).stream().findFirst();
+        java.util.Optional<AgentKnowledgeChunkPreview> chunk = vectorStore.findById(tenantId, agentKey, chunkId)
+                .map(document -> {
+                    Map<String, Object> metadata = document.getMetadata();
+                    return chunkPreview(tenantId, agentKey,
+                            document.getId(), text(metadata, "documentId"), text(metadata, "filename"),
+                            intValue(metadata.get("chunkIndex")), document.getText(),
+                            intValue(metadata.get("pageNumber")), text(metadata, "sectionPath"),
+                            text(metadata, "sourceType"), text(metadata, "blockId"),
+                            intValue(metadata.get("rowStart")), intValue(metadata.get("rowEnd")),
+                            text(metadata, "regionLabel"), text(metadata, "tableCaption"));
+                });
         if (chunk.isPresent()) return chunk;
         if (documentId == null || documentId.isBlank() || blockId == null || blockId.isBlank()) {
             return java.util.Optional.empty();
@@ -841,6 +892,23 @@ public class AgentKnowledgeDocumentService {
                 plainText(content == null ? "" : content), pageNumber, null, sourceType, blockId,
                 caption == null || caption.isBlank() ? legacyLabel(filename, pageNumber) : caption,
                 false, table, splitImageKeys(imageObjectKey));
+    }
+
+    private static String text(Map<String, Object> metadata, String key) {
+        Object value = metadata.get(key);
+        return value == null || "null".equals(String.valueOf(value)) ? null : String.valueOf(value);
+    }
+
+    private static Integer intValue(Object value) {
+        if (value instanceof Number number) return number.intValue();
+        if (value instanceof String string && !string.isBlank()) {
+            try {
+                return Integer.parseInt(string.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /** figureImages metadata 以 | 连接多张碎片图；预览与原图端点共用拆分。 */

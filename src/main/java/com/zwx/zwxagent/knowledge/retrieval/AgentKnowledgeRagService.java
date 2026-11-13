@@ -1,10 +1,10 @@
 package com.zwx.zwxagent.knowledge.retrieval;
 
 import jakarta.annotation.Resource;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore;
+import com.zwx.zwxagent.knowledge.vector.LexicalTerms;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -26,18 +26,12 @@ import java.util.concurrent.TimeoutException;
 @Service
 public class AgentKnowledgeRagService {
 
-    private final VectorStore vectorStore;
+    private final KnowledgeVectorStore vectorStore;
 
     private final DashScopeRerankService rerankService;
 
     @Resource(name = "ragExecutor")
     private java.util.concurrent.Executor ragExecutor;
-
-    @Resource
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
-
-    @Resource
-    private ObjectMapper objectMapper;
 
     @Resource
     private com.zwx.zwxagent.agent.observability.AgentMetrics metrics;
@@ -74,7 +68,7 @@ public class AgentKnowledgeRagService {
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(AgentKnowledgeRagService.class);
 
-    public AgentKnowledgeRagService(@Qualifier("agentKnowledgeVectorStore") VectorStore vectorStore,
+    public AgentKnowledgeRagService(@Qualifier("agentKnowledgeVectorStore") KnowledgeVectorStore vectorStore,
                                     DashScopeRerankService rerankService) {
         this.vectorStore = vectorStore;
         this.rerankService = rerankService;
@@ -179,14 +173,18 @@ public class AgentKnowledgeRagService {
                 .sorted(java.util.Comparator.comparingDouble(this::score).reversed()).toList();
         long vectorMillis = elapsedMillis(vectorStarted);
         long lexicalStarted = System.nanoTime();
-        List<Document> lexicalPool = lexicalRecall(tenantId, agentKey, query, Math.max(recallTopK, topK));
+        List<Document> lexicalPool = vectorStore.bm25Search(tenantId, agentKey, query, Math.max(recallTopK, topK));
         long lexicalMillis = elapsedMillis(lexicalStarted);
         java.util.Set<String> vectorQualifiedIds = vectorPool.stream()
                 .filter(document -> score(document) >= similarityThreshold).map(this::documentKey)
                 .collect(java.util.stream.Collectors.toSet());
         java.util.Set<String> lexicalIds = lexicalPool.stream().map(this::documentKey)
                 .collect(java.util.stream.Collectors.toSet());
-        List<Document> pool = reciprocalRankFusion(vectorPool, lexicalPool);
+        // 混合召回：Weaviate 原生 Hybrid Search（服务端 RRF，alpha 可调）；pg 路径为同公式本地融合
+        long fusionStarted = System.nanoTime();
+        List<Document> pool = vectorStore.hybridSearch(tenantId, agentKey, query,
+                Math.max(recallTopK, topK) * 2, Math.min(recallSimilarityThreshold, similarityThreshold));
+        if (metrics != null) metrics.ragStageMillis("fusion", elapsedMillis(fusionStarted));
         // 防御过滤：发布切换期间可能存在脏向量，metadata 非 ACTIVE 的切片直接排除
         pool = pool.stream()
                 .filter(document -> "ACTIVE".equals(String.valueOf(document.getMetadata().get("lifecycleStatus"))))
@@ -235,7 +233,8 @@ public class AgentKnowledgeRagService {
                 rerankScores.put(id, hit.score());
             }
         });
-        Map<String, Double> fusionScores = fusionScores(vectorPool, lexicalPool);
+        Map<String, Double> fusionScores = new java.util.HashMap<>();
+        pool.forEach(document -> fusionScores.put(documentKey(document), score(document)));
         List<Document> selected;
         if (rerankHits.isPresent()) {
             selected = rerankHits.get().stream().filter(hit -> hit.index() >= 0 && hit.index() < rerankPool.size())
@@ -273,7 +272,6 @@ public class AgentKnowledgeRagService {
     private List<Document> expandSiblings(String tenantId, String agentKey, List<Document> selected,
                                           java.util.Set<String> selectedIds) {
         if (!siblingExpansionEnabled || selected.isEmpty()) return selected;
-        if (jdbcTemplate == null || objectMapper == null) return selected;
         List<Document> expanded = new ArrayList<>(selected);
         java.util.Set<String> known = new java.util.HashSet<>(selectedIds);
         int sectionsExpanded = 0;
@@ -286,17 +284,9 @@ public class AgentKnowledgeRagService {
             String sectionPath = text(metadata, "sectionPath");
             if (documentId.isBlank() || sectionPath.isBlank()) continue;
             try {
-                // 元数据直查替代旧的「拿命中块文本再向量检索」：不花 embedding、同节不漏块、按 chunkIndex 阅读序（评审 #4）。
-                List<Object> args = new ArrayList<>(List.of(tenantId, agentKey, documentId, sectionPath,
-                        Math.max(0, siblingExpansionExtra) + 1));
-                List<Document> siblings = jdbcTemplate.query("""
-                        SELECT id::text, content, metadata FROM agent_knowledge_vector
-                        WHERE metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                          AND metadata ->> 'lifecycleStatus' = 'ACTIVE'
-                          AND metadata ->> 'documentId' = ? AND metadata ->> 'sectionPath' = ?
-                        ORDER BY NULLIF(metadata ->> 'chunkIndex', '')::integer NULLS LAST, id
-                        LIMIT ?
-                        """, vectorRowMapper(), args.toArray()).stream().filter(java.util.Objects::nonNull).toList();
+                // 元数据直查（端口）：不花 embedding、同节不漏块、按 chunkIndex 阅读序（评审 #4）。
+                List<Document> siblings = vectorStore.fetchSiblings(tenantId, agentKey, documentId, sectionPath,
+                        Math.max(0, siblingExpansionExtra) + 1).stream().filter(java.util.Objects::nonNull).toList();
                 int added = 0;
                 for (Document sibling : siblings) {
                     if (added >= Math.max(0, siblingExpansionExtra)) break;
@@ -335,75 +325,9 @@ public class AgentKnowledgeRagService {
         return combined.build();
     }
 
-    private List<Document> lexicalRecall(String tenantId, String agentKey, String query, int limit) {
-        if (jdbcTemplate == null || objectMapper == null || query == null || query.isBlank()) return List.of();
-        List<String> terms = lexicalTerms(query);
-        if (terms.isEmpty()) return List.of();
-        StringBuilder scoreExpression = new StringBuilder();
-        StringBuilder likePredicate = new StringBuilder();
-        List<Object> arguments = new ArrayList<>();
-        for (String term : terms) {
-            if (!scoreExpression.isEmpty()) scoreExpression.append(" + ");
-            scoreExpression.append("(CASE WHEN content ILIKE ? THEN 1 ELSE 0 END)");
-            if (!likePredicate.isEmpty()) likePredicate.append(" OR ");
-            likePredicate.append("content ILIKE ?");
-            arguments.add("%" + term + "%");
-        }
-        // ILIKE 必须出现在内层 WHERE：content 上的 trgm GIN 才能作为索引条件参与规划；
-        // 旧写法把 ILIKE 藏在 SELECT 的 CASE 里、外层过滤 lexical_score > 0，任何索引都够不着（评审 #1）。
-        for (String term : terms) arguments.add("%" + term + "%");
-        arguments.add(tenantId);
-        arguments.add(agentKey);
-        arguments.add(limit);
-        // 平局按短内容优先：命中词数打分对长切片天然占优，短文更可能是聚焦答案。
-        String sql = """
-                SELECT id::text, content, metadata, %s AS lexical_score
-                FROM agent_knowledge_vector
-                WHERE metadata ->> 'tenantId' = ? AND metadata ->> 'agentKey' = ?
-                  AND metadata ->> 'lifecycleStatus' = 'ACTIVE'
-                  AND (%s)
-                ORDER BY lexical_score DESC, length(content), id
-                LIMIT ?
-                """.formatted(scoreExpression, likePredicate);
-        return jdbcTemplate.query(sql, vectorRowMapper(), arguments.toArray())
-                .stream().filter(java.util.Objects::nonNull).toList();
-    }
-
-    private org.springframework.jdbc.core.RowMapper<Document> vectorRowMapper() {
-        return (rs, row) -> {
-            try {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> metadata = objectMapper.readValue(rs.getString("metadata"), Map.class);
-                return Document.builder().id(rs.getString("id")).text(rs.getString("content")).metadata(metadata).build();
-            } catch (Exception exception) {
-                return null;
-            }
-        };
-    }
-
-    /** 高频虚词 2-gram 与英文短词：不剔除会贡献大量假命中（评审 #1）。 */
-    private static final java.util.Set<String> LEXICAL_STOPWORDS = java.util.Set.of(
-            "的是", "一个", "什么", "怎么", "怎样", "如何", "可以", "可能", "我们", "你们", "他们",
-            "这个", "那个", "哪些", "多少", "没有", "不是", "就是", "还是", "以及", "或者", "并且",
-            "关于", "对于", "通过", "如果", "因为", "所以", "但是", "然后", "进行", "使用",
-            "相关", "内容", "信息", "时候", "出现", "之后", "以后",
-            "of", "to", "in", "on", "or", "is", "it", "an", "as", "at", "by", "if", "no", "do", "so", "up");
-
+    /** 词法通道查询词提取（trace 打分共用）：见 {@link LexicalTerms}。 */
     static List<String> lexicalTerms(String query) {
-        String normalized = query.toLowerCase(Locale.ROOT).replaceAll("[^\\p{IsHan}a-z0-9]+", " ").trim();
-        java.util.LinkedHashSet<String> terms = new java.util.LinkedHashSet<>();
-        for (String word : normalized.split("\\s+")) {
-            if (word.isBlank()) continue;
-            boolean han = word.codePoints().anyMatch(code -> Character.UnicodeScript.of(code) == Character.UnicodeScript.HAN);
-            if (!han && word.length() >= 2 && !LEXICAL_STOPWORDS.contains(word)) terms.add(word);
-        }
-        String han = normalized.replaceAll("[^\\p{IsHan}]", "");
-        for (int i = 0; i + 1 < han.length(); i++) {
-            String gram = han.substring(i, i + 2);
-            if (!LEXICAL_STOPWORDS.contains(gram)) terms.add(gram);
-        }
-        // 32 而非 20：整句滑窗下 20 会把长问题后半句整体丢弃；32 覆盖约 60 字问题的全部 2-gram
-        return terms.stream().limit(32).toList();
+        return LexicalTerms.extract(query);
     }
 
     private int lexicalScore(String content, List<String> terms) {
@@ -411,32 +335,10 @@ public class AgentKnowledgeRagService {
         return (int) terms.stream().filter(normalized::contains).count();
     }
 
-    private List<Document> reciprocalRankFusion(List<Document> vector, List<Document> lexical) {
-        Map<String, FusionHit> fused = new java.util.LinkedHashMap<>();
-        addRanked(fused, vector);
-        addRanked(fused, lexical);
-        return fused.values().stream().sorted(java.util.Comparator.comparingDouble(FusionHit::score).reversed())
-                .map(hit -> Document.builder().id(hit.document().getId()).text(hit.document().getText())
-                        .metadata(hit.document().getMetadata()).score(hit.score()).build()).toList();
-    }
-
     private Map<String, Integer> ranks(List<Document> documents) {
         Map<String, Integer> ranks = new java.util.HashMap<>();
         for (int index = 0; index < documents.size(); index++) ranks.putIfAbsent(documentKey(documents.get(index)), index + 1);
         return ranks;
-    }
-
-    private Map<String, Double> fusionScores(List<Document> vector, List<Document> lexical) {
-        Map<String, Double> scores = new java.util.HashMap<>();
-        addFusionScores(scores, vector);
-        addFusionScores(scores, lexical);
-        return scores;
-    }
-
-    private void addFusionScores(Map<String, Double> scores, List<Document> documents) {
-        for (int index = 0; index < documents.size(); index++) {
-            scores.merge(documentKey(documents.get(index)), 1.0 / (60 + index + 1), Double::sum);
-        }
     }
 
     private RagTraceCandidate toTraceCandidate(Document document, Map<String, Integer> vectorRanks, Map<String, Double> vectorScores,
@@ -495,21 +397,9 @@ public class AgentKnowledgeRagService {
         return null;
     }
 
-    private void addRanked(Map<String, FusionHit> fused, List<Document> documents) {
-        for (int index = 0; index < documents.size(); index++) {
-            Document document = documents.get(index);
-            String id = documentKey(document);
-            FusionHit existing = fused.get(id);
-            double score = 1.0 / (60 + index + 1);
-            fused.put(id, existing == null ? new FusionHit(document, score) : new FusionHit(existing.document(), existing.score() + score));
-        }
-    }
-
     private String documentKey(Document document) {
         return document.getId() == null ? document.getText() : document.getId();
     }
-
-    private record FusionHit(Document document, double score) { }
 
     private SearchRequest searchRequest(String tenantId, String agentKey, String query, int topK, double similarityThreshold) {
         return SearchRequest.builder().query(query).topK(topK)

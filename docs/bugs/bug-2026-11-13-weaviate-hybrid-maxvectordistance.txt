@@ -1,0 +1,28 @@
+日期：2026-11-13
+主题：Weaviate hybrid search 设置 maxVectorDistance 后结果被清空
+
+问题现象：
+WeaviateKnowledgeVectorStore.hybridSearch 在 rankedFusion + nearVector + filters 的组合上
+加 maxVectorDistance（由 similarityThreshold 换算的向量距离上限）后，GraphQL/gRPC 查询
+正常返回但结果恒为空集合；同参数去掉 maxVectorDistance 立即恢复。
+
+影响范围：
+混合召回池（检索链路第一步融合）为空 → rerank 池为空 → 知识检索全部 NO_HIT。
+
+原因：
+weaviate 1.39 上 maxVectorDistance 与 fusionType=rankedFusion 组合的实际行为与预期不符
+（curl 分层探测复现：相同 hybrid 查询带 maxVectorDistance:0.6 → []，去掉 → 2 条）。
+官方文档未明确该字段与 ranked fusion 的组合语义。
+
+解决方式：
+hybridSearch 不再设置 maxVectorDistance；向量相似度阈值仅由 pgvector 实现生效
+（KnowledgeVectorStore#hybridSearch javadoc 已注明语义不对称）。混合池不带阈值是
+原生 hybrid 的固有语义，效果由 golden set 评测观察。
+
+验证结果：
+WeaviateKnowledgeVectorStoreIntegrationTest（hybrid 返回融合候选断言）全绿。
+
+后续注意事项：
+- 若日后需要给混合池加阈值，先在目标 Weaviate 版本上用 curl 分层复现验证
+  maxVectorDistance 行为，不能假设其等价于 nearVector 的 distance 参数。
+- 评测指标若出现混合通道召回骤降，优先复查此参数。

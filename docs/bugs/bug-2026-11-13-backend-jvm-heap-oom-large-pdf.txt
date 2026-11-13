@@ -1,0 +1,28 @@
+日期：2026-11-13
+主题：后端 JVM 默认堆过小，90MB/254 页 PDF 入库 OOM
+
+问题现象：
+上传 90MB、254 页 PDF 后，索引任务反复抛 java.lang.OutOfMemoryError: Java heap space
+（iText 读 PDF、parse-service 响应缓冲时均触发），文档永久停在 INDEXING。
+容器 RSS 836MB/1.5G，但堆只有默认 MaxRAMPercentage=25% ≈ 375MB。
+
+影响范围：
+大文件（几十 MB/数百页）知识库入库全部失败；小文件不受影响。
+OOM 属 Error，indexDocument 的 catch(Exception) 不捕获 → 文档不落 FAILED，恢复任务也不会重试。
+
+原因：
+backend 服务在 compose 中未设置 JAVA_TOOL_OPTIONS，JVM 使用默认 25% 容器内存作为堆上限；
+1.5G 内存上限下堆仅约 375MB，90MB PDF 的字节数组 + multipart 编码 + 解析中间对象远超该值。
+
+解决方式：
+deploy/docker-compose/docker-compose.yml backend 服务：
+- mem_limit 1536m → 2560m；
+- 增加 JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75（堆约 1.9G）。
+
+验证结果：
+同一 90MB PDF 重传后 iText/parse-service 路径均不再 OOM，可正常进入向量化。
+
+后续注意事项：
+- 大于 ~100MB 或超长文档建议拆分后入库（模型服务也有单文件限制）；
+- 建议后续把 indexDocument 的异常捕获从 Exception 扩到 Throwable（或对 OOM 单独兜底置 FAILED），
+  避免任务线程死亡后文档永久卡在 INDEXING（本次未改代码，留作改进项）。

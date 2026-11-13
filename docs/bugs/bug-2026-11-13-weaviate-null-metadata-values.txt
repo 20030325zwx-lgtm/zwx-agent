@@ -1,0 +1,23 @@
+日期：2026-11-13
+主题：Weaviate 返回对象属性含 null 值导致 Spring AI Document 构建失败
+
+问题现象：
+WeaviateKnowledgeVectorStore 读取路径（similaritySearch/toDocument）构建 Spring AI Document
+时抛 IllegalArgumentException: metadata cannot have null values。
+
+影响范围：
+所有 Weaviate 检索路径（向量/词法/混合/清单）在返回对象带 null 属性时整体失败。
+
+原因：
+client6 对未设置的属性（如 int 属性未写入时）可能在 properties map 里返回 null 值；
+Spring AI Document 构造器显式断言 metadata 不含 null。
+
+解决方式：
+toMetadata 里跳过 null 值属性（缺失键不进入 metadata），与 pg 路径「键缺失即无该键」语义一致。
+
+验证结果：
+WeaviateKnowledgeVectorStoreIntegrationTest 全绿（add → similaritySearch 元数据往返断言通过）。
+
+后续注意事项：
+若元数据消费方依赖「键存在但值为空」与「键不存在」的区分，需在读取侧显式处理，
+当前统一按键缺失处理。

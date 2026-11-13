@@ -41,6 +41,64 @@ services:
       timeout: 5s
       retries: 20
 
+  # 向量检索库（2026-11-13 迁移自 pgvector，见 docs/design/2026-11-12-weaviate-vector-store.md）：
+  # 应用侧 DashScope 向量化（无 vectorizer 模块），原生 BM25（gse 中文分词）+ Hybrid Search。
+  # 仅 compose 网络内可达（匿名鉴权依赖不发布端口到宿主机）；数据卷纳入例行备份。
+  weaviate:
+    image: ${WEAVIATE_IMAGE:-docker.m.daocloud.io/semitechnologies/weaviate:1.39.16}
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      QUERY_DEFAULTS_LIMIT: 100
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      ENABLE_MODULES: ""
+      # BM25 中文分词器 gse 在 1.32+ 为可选编译，必须显式开启（否则建 Collection 报 422）
+      ENABLE_TOKENIZER_GSE: "true"
+      CLUSTER_HOSTNAME: node1
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      GOMAXPROCS: "2"
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    expose:
+      - "8080"
+      - "50051"
+    # 仅绑定回环：本地开发经 SSH 隧道访问（18080/50061 -> 容器 8080/50051）
+    ports:
+      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:50061:50051"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/v1/.well-known/ready >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # 本地免费嵌入模型（2026-11-13 起，DashScope 欠费兜底）：qwen3-embedding:0.6b（1024 维）。
+  # 首次启动需拉模型：见 .env 的 APP_OLLAMA_EMBEDDING_MODEL 与 deploy 脚本/部署文档的预热步骤。
+  # 仅 compose 网络内可达；OLLAMA_KEEP_ALIVE 让模型常驻，避免每次检索冷加载。
+  ollama:
+    image: ${OLLAMA_IMAGE:-docker.m.daocloud.io/ollama/ollama:latest}
+    restart: unless-stopped
+    mem_limit: 2g
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ollama-data:/root/.ollama
+    expose:
+      - "11434"
+    # 仅绑定回环：本地开发经 SSH 隧道访问（11434 直通）
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   image-mcp:
     image: aster-image-mcp:${IMAGE_TAG}
     restart: unless-stopped
@@ -129,16 +187,35 @@ services:
   backend:
     image: aster-backend:${IMAGE_TAG}
     restart: unless-stopped
-    mem_limit: 1536m
+    # 大文档解析（90MB/250+ 页）需要更大堆：默认 JVM 25% RAM 在 1.5G 上限下只有 ~375MB（2026-11-13 OOM 实测）
+    mem_limit: 2560m
     depends_on:
       postgres:
         condition: service_healthy
+      weaviate:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: prod
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       SPRING_SQL_INIT_MODE: always
+      # 向量存储（2026-11-13 起 Weaviate；回滚改 APP_VECTOR_STORE=pgvector + 重启即可，旧表数据未删）
+      APP_VECTOR_STORE: ${APP_VECTOR_STORE:-weaviate}
+      # 文本嵌入：ollama（本地免费，qwen3-embedding:0.6b 1024 维）| dashscope（欠费兜底时可切回）
+      APP_EMBEDDING_PROVIDER: ${APP_EMBEDDING_PROVIDER:-ollama}
+      APP_OLLAMA_BASE_URL: ${APP_OLLAMA_BASE_URL:-http://ollama:11434}
+      APP_OLLAMA_EMBEDDING_MODEL: ${APP_OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}
+      APP_WEAVIATE_SCHEME: ${APP_WEAVIATE_SCHEME:-http}
+      APP_WEAVIATE_HOST: ${APP_WEAVIATE_HOST:-weaviate}
+      APP_WEAVIATE_HTTP_PORT: ${APP_WEAVIATE_HTTP_PORT:-8080}
+      APP_WEAVIATE_GRPC_PORT: ${APP_WEAVIATE_GRPC_PORT:-50051}
+      APP_WEAVIATE_COLLECTION: ${APP_WEAVIATE_COLLECTION:-AgentKnowledgeChunk}
+      APP_WEAVIATE_BM25_TOKENIZATION: ${APP_WEAVIATE_BM25_TOKENIZATION:-gse}
+      APP_WEAVIATE_HYBRID_ALPHA: ${APP_WEAVIATE_HYBRID_ALPHA:-0.5}
       SPRING_AI_DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
       SEARCH_API_API_KEY: ${SEARCH_API_API_KEY:-}
       ALIYUN_OSS_ENDPOINT: ${ALIYUN_OSS_ENDPOINT:-}
@@ -311,6 +388,8 @@ services:
 
 volumes:
   postgres-data:
+  weaviate-data:
+  ollama-data:
   screenshots:
   prometheus-data:
   grafana-data:

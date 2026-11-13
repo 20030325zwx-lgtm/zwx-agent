@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -37,7 +37,7 @@ class AgentKnowledgeRagServiceRerankPoolTest {
     }
 
     private AgentKnowledgeRagService service(List<Document> pool, List<Integer> rerankSizes) {
-        VectorStore stubStore = new VectorStore() {
+        KnowledgeVectorStore stubStore = new KnowledgeVectorStore() {
             @Override
             public void add(List<Document> documents) { }
 
@@ -49,6 +49,13 @@ class AgentKnowledgeRagServiceRerankPoolTest {
 
             @Override
             public List<Document> similaritySearch(SearchRequest request) {
+                return pool;
+            }
+
+            @Override
+            public List<Document> hybridSearch(String tenantId, String agentKey, String query,
+                                               int limit, double vectorSimilarityThreshold) {
+                // stub：融合池即向量池
                 return pool;
             }
         };

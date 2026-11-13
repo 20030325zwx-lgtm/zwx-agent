@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.zwx.zwxagent.knowledge.vector.KnowledgeVectorStore;
 
 import java.lang.reflect.Field;
 import java.util.HashMap;
@@ -66,7 +66,7 @@ class AgentKnowledgeRagServiceVersionFilterTest {
 
     private AgentKnowledgeRagService service(List<Document> pool, Optional<List<DashScopeRerankService.RerankHit>> rerankHits,
                                              List<List<String>> rerankInputs) {
-        VectorStore stubStore = new VectorStore() {
+        KnowledgeVectorStore stubStore = new KnowledgeVectorStore() {
             @Override
             public void add(List<Document> documents) { }
 
@@ -80,6 +80,13 @@ class AgentKnowledgeRagServiceVersionFilterTest {
             public List<Document> similaritySearch(SearchRequest request) {
                 Assertions.assertTrue(request.getFilterExpression().toString().contains("lifecycleStatus"),
                         "filterExpression must constrain lifecycleStatus");
+                return pool;
+            }
+
+            @Override
+            public List<Document> hybridSearch(String tenantId, String agentKey, String query,
+                                               int limit, double vectorSimilarityThreshold) {
+                // stub：融合池即向量池
                 return pool;
             }
         };
